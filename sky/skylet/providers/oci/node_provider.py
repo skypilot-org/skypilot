@@ -10,24 +10,22 @@ History:
 
 """
 
-import logging
-import time
-import threading
 import copy
-
 from datetime import datetime
-from sky.skylet.providers.oci.config import oci_conf
-from sky.skylet.providers.oci import utils
-from sky.skylet.providers.oci.query_helper import oci_query_helper
-from sky.adaptors import oci as oci_adaptor
+import logging
+import threading
+import time
 
 from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_NODE_KIND,
-    TAG_RAY_USER_NODE_TYPE,
-    TAG_RAY_LAUNCH_CONFIG,
-)
+from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+from ray.autoscaler.tags import TAG_RAY_LAUNCH_CONFIG
+from ray.autoscaler.tags import TAG_RAY_NODE_KIND
+from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
+
+from sky.adaptors import oci as oci_adaptor
+from sky.skylet.providers.oci import utils
+from sky.skylet.providers.oci.config import oci_conf
+from sky.skylet.providers.oci.query_helper import oci_query_helper
 
 logger = logging.getLogger(__name__)
 

@@ -47,6 +47,10 @@ SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 # Port on the remote spot controller that the dashboard is running on.
 SPOT_DASHBOARD_REMOTE_PORT = 5000
 
+# Docker default options
+DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
+DEFAULT_DOCKER_PORT = 10022
+
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not
 # officially supported it yet.

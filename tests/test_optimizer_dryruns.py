@@ -76,6 +76,10 @@ def _make_resources(
         config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
 
+    monkeypatch.setattr(
+        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+        lambda *_args, **_kwargs: [])
+
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
 

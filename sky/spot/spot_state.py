@@ -6,7 +6,7 @@ import pathlib
 import sqlite3
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 

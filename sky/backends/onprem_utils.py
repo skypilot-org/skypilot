@@ -140,8 +140,10 @@ def get_python_executable(cluster_name: str) -> str:
     return config['python']
 
 
-def get_job_owner(cluster_yaml: str) -> str:
+def get_job_owner(cluster_yaml: str, docker_user: Optional[str] = None) -> str:
     """Get the owner of the job."""
+    if docker_user is not None:
+        return docker_user
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
     return cluster_config['auth']['ssh_user']
@@ -546,7 +548,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, **ssh_credentials)
+        worker_ips, port_list=None, **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:

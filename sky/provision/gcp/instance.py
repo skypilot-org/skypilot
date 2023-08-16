@@ -1,10 +1,13 @@
 """GCP instance provisioning."""
 import collections
+import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
+from sky.adaptors import gcp
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -16,6 +19,9 @@ POLL_INTERVAL = 5
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+_INSTANCE_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/zones/.*/instances/.*\' was not found')
 
 
 def _filter_instances(
@@ -144,10 +150,39 @@ def terminate_instances(
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)
+    errs = []
     for handler, instances in handler_to_instances.items():
         for instance in instances:
-            operations[handler].append(
-                handler.terminate(project_id, zone, instance))
+            try:
+                operations[handler].append(
+                    handler.terminate(project_id, zone, instance))
+            except gcp.http_error_exception() as e:
+                if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(
+                        e.reason) is None:
+                    errs.append(e)
+                else:
+                    logger.warning(f'Instance {instance} does not exist. '
+                                   'Skip terminating it.')
     _wait_for_operations(operations, project_id, zone)
+    if errs:
+        raise RuntimeError(f'Failed to terminate instances: {errs}')
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
+
+
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name
+    if 'ports' not in provider_config:
+        # No new ports were opened, so there is nothing to clean up.
+        return
+    project_id = provider_config['project_id']
+    cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+        cluster_name)
+    for port in provider_config['ports']:
+        rule_name = f'user-ports-{cluster_name_hash}-{port}'
+        instance_utils.GCPComputeInstance.delete_firewall_rule(
+            project_id, rule_name)

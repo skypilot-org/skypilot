@@ -10,9 +10,11 @@ TODO:
 import subprocess
 import urllib.parse
 
+from sky.adaptors import aws
+from sky.adaptors import cloudflare
+from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.adaptors import aws, cloudflare, ibm
 from sky.data.data_utils import Rclone
 
 
@@ -203,9 +205,11 @@ class R2CloudStorage(CloudStorage):
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
         endpoint_url = cloudflare.create_endpoint()
+        if 'r2://' in source:
+            source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'aws s3 cp s3://{source} {destination} '
+                               f'aws s3 cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
 

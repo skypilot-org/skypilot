@@ -1,10 +1,11 @@
 """AWS instance provisioning."""
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from botocore import config
 
-from sky.adaptors import aws
 from sky import status_lib
+from sky.adaptors import aws
+from sky.utils import common_utils
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
@@ -134,9 +135,40 @@ def terminate_instances(
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
     instances = _filter_instances(ec2, filters, None, None)
     instances.terminate()
+    if 'ports' not in provider_config:
+        return
+    # If ports are specified, we need to delete the newly created Security
+    # Group. Here we wait for all instances to be terminated, since the
+    # Security Group dependent on them.
+    for instance in instances:
+        instance.wait_until_terminated()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
     #  trigger the termination process (via http call) and then return.
     #  It's not clear that which behavior should be expected. We will not
     #  wait for the termination for now, since this is the default behavior
     #  of most cloud implementations (including AWS).
+
+
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name, provider_config)
+    if 'ports' not in provider_config:
+        return
+    region = provider_config['region']
+    ec2 = aws.resource(
+        'ec2',
+        region_name=region,
+        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    # TODO(tian): Add a function to generate SG name for AWS, then replace here
+    # and backend_utils::write_cluster_config
+    sg_name = (f'sky-sg-{common_utils.user_and_hostname_hash()}'
+               f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}')
+    sgs = ec2.security_groups.filter(GroupNames=[sg_name])
+    if len(list(sgs)) != 1:
+        raise ValueError(f'Expected security group {sg_name} not found. '
+                         'Cannot cleanup ports.')
+    list(sgs)[0].delete()

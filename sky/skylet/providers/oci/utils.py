@@ -1,6 +1,6 @@
-from logging import Logger
 from datetime import datetime
 import functools
+from logging import Logger
 
 
 def debug_enabled(logger: Logger):

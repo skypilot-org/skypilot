@@ -117,6 +117,12 @@
             "metadata": {
                 "description": "OS disk tier."
             }
+        },
+        "cloudInitSetupCommands": {
+            "type": "string",
+            "metadata": {
+                "description": "Base64 encoded cloud-init setup commands."
+            }
         }
     },
     "variables": {
@@ -260,7 +266,8 @@
                                 }
                             ]
                         }
-                    }
+                    },
+                    "customData": "[parameters('cloudInitSetupCommands')]"
                 },
                 "priority": "[parameters('priority')]",
                 "billingProfile": "[parameters('billingProfile')]"
