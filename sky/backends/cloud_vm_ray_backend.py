@@ -2342,9 +2342,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 internal_ips, it is an optimization to avoid retrieving the
                 external IPs from the cloud provider.
         """
+
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
             return (ips is not None and len(ips) == self.num_node_ips and
-                all(ip is not None for ip in ips))
+                    all(ip is not None for ip in ips))
+
         if is_provided_ips_valid(external_ips):
             logger.debug(f'Using provided external IPs: {external_ips}')
             cluster_external_ips = typing.cast(List[str], external_ips)
