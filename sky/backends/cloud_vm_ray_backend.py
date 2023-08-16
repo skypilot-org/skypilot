@@ -2355,7 +2355,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return
         logger.debug(
             'Cached external IPs do not match with the newly fetched ones: '
-            f'cached ({self.cached_external_ips}), new ({cluster_external_ips}')
+            f'cached ({self.cached_external_ips}), new ({cluster_external_ips})')
 
         is_cluster_aws = (self.launched_resources is not None and
                           isinstance(self.launched_resources.cloud, clouds.AWS))
