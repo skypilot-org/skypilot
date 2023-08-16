@@ -1585,8 +1585,7 @@ class RetryingVmProvisioner(object):
                 # Optimize the case where the cluster's head IPs can be parsed
                 # from the output of 'ray up'.
                 kwargs = {}
-                if (handle.launched_nodes == 1 and
-                        not tpu_utils.is_tpu_vm_pod(to_provision)):
+                if handle.launched_nodes == 1:
                     kwargs = {
                         'internal_ips': [head_internal_ip],
                         'external_ips': [head_external_ip]
@@ -2312,7 +2311,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     if retry_cnt >= max_attempts:
                         raise
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
-                                 (self.launched_nodes - 1))
+                                 (self.num_node_ips - 1))
 
     def update_cluster_ips(
             self,
@@ -2343,8 +2342,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 internal_ips, it is an optimization to avoid retrieving the
                 external IPs from the cloud provider.
         """
-        if (external_ips is not None and
-                all(ip is not None for ip in external_ips)):
+        def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
+            return (ips is not None and len(ips) == self.num_node_ips and
+                all(ip is not None for ip in ips))
+        if is_provided_ips_valid(external_ips):
             logger.debug(f'Using provided external IPs: {external_ips}')
             cluster_external_ips = typing.cast(List[str], external_ips)
         else:
@@ -2378,8 +2379,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # thus the first list of IPs returned above are already private
             # IPs. So skip the second query.
             cluster_internal_ips = list(cluster_external_ips)
-        elif (internal_ips is not None and
-              all(ip is not None for ip in internal_ips)):
+        elif is_provided_ips_valid(internal_ips):
             logger.debug(f'Using provided internal IPs: {internal_ips}')
             cluster_internal_ips = typing.cast(List[str], internal_ips)
         else:
