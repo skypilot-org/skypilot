@@ -3,12 +3,11 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 120
-  replicas: 2
+  replicas: 1
   controller_resources:
-    cloud: gcp
+    cpus: 2+
 
 resources:
-  cloud: gcp
   cpus: 2+
 
 workdir: sky/serve/examples/misc/cancel
