@@ -1,5 +1,6 @@
 from typing import Tuple, Optional
 
+from urllib.parse import urlparse
 from sky.utils import common_utils
 from sky.adaptors import kubernetes
 
@@ -23,6 +24,20 @@ def get_port(svc_name: str, namespace: str) -> int:
     head_service = kubernetes.core_api().read_namespaced_service(
         svc_name, namespace)
     return head_service.spec.ports[0].node_port
+
+
+def get_external_ip():
+    # Return the IP address of the first node with an external IP
+    nodes = kubernetes.core_api().list_node().items
+    for node in nodes:
+        if node.status.addresses:
+            for address in node.status.addresses:
+                if address.type == 'ExternalIP':
+                    return address.address
+    # If no external IP is found, use the API server IP
+    api_host = kubernetes.core_api().api_client.configuration.host
+    parsed_url = urlparse(api_host)
+    return parsed_url.hostname
 
 
 def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
