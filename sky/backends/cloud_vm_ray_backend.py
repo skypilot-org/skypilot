@@ -2313,6 +2313,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     retry_cnt += 1
                     if retry_cnt >= max_attempts:
                         raise
+            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))
 
