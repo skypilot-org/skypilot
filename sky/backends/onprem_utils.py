@@ -548,7 +548,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, port_list=None, **ssh_credentials)
+        worker_ips, port_list=None, run_on_k8s=False, **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:

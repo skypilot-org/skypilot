@@ -1216,7 +1216,9 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(ip,
+                                             run_on_k8s=False,
+                                             **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1265,7 +1267,9 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip,
+                                             run_on_k8s=False,
+                                             **ssh_credentials)
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
@@ -1368,7 +1372,6 @@ def parallel_data_transfer_to_nodes(
     # Advanced options.
     log_path: str = os.devnull,
     stream_logs: bool = False,
-    run_on_k8s: Optional[bool] = False,
 ):
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
@@ -1391,8 +1394,7 @@ def parallel_data_transfer_to_nodes(
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
                                             stream_logs=stream_logs,
-                                            require_outputs=True,
-                                            run_on_k8s=run_on_k8s)
+                                            require_outputs=True)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')
@@ -1413,7 +1415,6 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
-                run_on_k8s=run_on_k8s
             )
 
     num_nodes = len(runners)
@@ -2024,6 +2025,7 @@ def _update_cluster_status_no_lock(
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
             runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     run_on_k8s=False,
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
             rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
