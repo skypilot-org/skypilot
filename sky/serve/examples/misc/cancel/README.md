@@ -29,3 +29,11 @@ Computing... step 0
 Computing... step 1
 Client disconnected, stopping computation.
 ```
+
+You can also run
+
+```bash
+curl -L http://<endpoint>/
+```
+
+and manually Ctrl + C to cancel the request and see logs.
