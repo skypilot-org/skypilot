@@ -150,7 +150,7 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sshjump-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = f'sky-sshjump-{common_utils.get_user_hash()}'
 
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.

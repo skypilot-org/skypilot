@@ -1,10 +1,19 @@
 """Kubernetes utilities for SkyPilot."""
+import os
 from typing import Optional, Set, Tuple
+from urllib.parse import urlparse
 
+import jinja2
+import yaml
+
+import sky
+from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'
+
+logger = sky_logging.init_logger(__name__)
 
 
 class GPULabelFormatter:
@@ -203,3 +212,100 @@ def get_current_kube_config_context_namespace() -> str:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
         return DEFAULT_NAMESPACE
+
+
+def setup_sshjump(sshjump_name: str,
+                  sshjump_image: str,
+                  ssh_key_secret: str,
+                  namespace: str):
+    """
+    Sets up Kubernetes resources (RBAC and pod) for SSH jump host.
+
+    Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
+    running inside a cluster. This function sets up the resources needed for
+    the SSH jump pod. This includes a service account which grants the jump pod
+    permission to watch for other SkyPilot pods and terminate itself if there
+    are no SkyPilot pods running.
+
+    Args:
+        sshjump_image: Container image to use for the SSH jump pod
+        sshjump_name: Name to use for the SSH jump pod
+        ssh_key_secret: Secret name for the SSH key stored in the cluster
+        namespace: Namespace to create the SSH jump pod in
+    """
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 'kubernetes-sshjump.yml.j2')
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(
+            'Template "kubernetes-sshjump.j2" does not exist.')
+    with open(template_path) as fin:
+        template = fin.read()
+    j2_template = jinja2.Template(template)
+    cont = j2_template.render(name=sshjump_name,
+                              image=sshjump_image,
+                              secret=ssh_key_secret)
+    content = yaml.safe_load(cont)
+    # ServiceAccount
+    try:
+        kubernetes.core_api().create_namespaced_service_account(
+            namespace, content['service_account'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump ServiceAcount already exists in the cluster, using '
+                'it.')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump ServiceAcount in the cluster.')
+    # Role
+    try:
+        kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump Role already exists in the cluster, using it.')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump Role in the cluster.')
+    # RoleBinding
+    try:
+        kubernetes.auth_api().create_namespaced_role_binding(
+            namespace, content['role_binding'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump RoleBinding already exists in the cluster, using '
+                'it.')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump RoleBinding in the cluster.')
+    # Pod
+    try:
+        kubernetes.core_api().create_namespaced_pod(namespace,
+                                                    content['pod_spec'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Host {sshjump_name} already exists in the cluster, '
+                'using it.')
+        else:
+            raise
+    else:
+        logger.info(f'Creating SSH Jump Host {sshjump_name} in the cluster.')
+    # Service
+    try:
+        kubernetes.core_api().create_namespaced_service(namespace,
+                                                        content['service_spec'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Service {sshjump_name} already exists in the '
+                'cluster, using it.')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump Service {sshjump_name} in the cluster.')

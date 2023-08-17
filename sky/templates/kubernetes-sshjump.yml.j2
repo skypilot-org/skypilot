@@ -5,15 +5,16 @@ pod_spec:
         name: {{ name }}
         labels:
             component: {{ name }}
+            app: skypilot
     spec:
-        serviceAccountName: sshjump
+        serviceAccountName: sky-sshjump-sa
         volumes:
           - name: secret-volume
             secret:
                 secretName: {{ secret }}
         containers:
           - name: {{ name }}
-            imagePullPolicy: IfNotPresent
+            imagePullPolicy: Always
             image: {{ image }}
             command: ["python3", "-u", "/skypilot/sky/utils/kubernetes/sshjump_lcm.py"]
             ports:
@@ -47,6 +48,7 @@ service_spec:
     kind: Service
     metadata:
         name: {{ name }}
+        app: skypilot
     spec:
         type: NodePort
         selector:
@@ -62,12 +64,13 @@ service_account:
     apiVersion: v1
     kind: ServiceAccount
     metadata:
-        name: sshjump
+        name: sky-sshjump-sa
+        app: skypilot
 role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
-        name: sshjump
+        name: sky-sshjump-role
     rules:
       - apiGroups: [""]
         resources: ["pods", "pods/status", "pods/exec", "services"]
@@ -76,11 +79,12 @@ role_binding:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
-        name: sshjump
+        name: sky-sshjump-rb
+        app: skypilot
     subjects:
     - kind: ServiceAccount
-      name: sshjump
+      name: sky-sshjump-sa
     roleRef:
         kind: Role
-        name: sshjump
+        name: sky-sshjump-role
         apiGroup: rbac.authorization.k8s.io
