@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import time
 from typing import Callable, List, Optional
 
 import pytest
@@ -75,6 +76,10 @@ def _make_resources(
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
         config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+
+    monkeypatch.setattr(
+        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+        lambda *_args, **_kwargs: [])
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
@@ -649,3 +654,29 @@ def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
     with pytest.raises(exceptions.ResourcesUnavailableError) as e:
         sky.launch(task, cluster_name='should-fail', dryrun=True)
         assert 'No launchable resource found for' in str(e.value), str(e.value)
+
+
+def _test_optimize_speed(resources: sky.Resources):
+    with sky.Dag() as dag:
+        task = sky.Task(run='echo hi')
+        task.set_resources(resources)
+    start = time.time()
+    sky.optimize(dag)
+    end = time.time()
+    assert end - start < 5.0, (f'optimize took too long for {resources}, '
+                               f'{end - start} seconds')
+
+
+def test_optimize_speed(enable_all_clouds, monkeypatch):
+    _test_optimize_speed(sky.Resources(cpus=4))
+    for cloud in clouds.CLOUD_REGISTRY.values():
+        if cloud.is_same_cloud(sky.Local()):
+            continue
+        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))

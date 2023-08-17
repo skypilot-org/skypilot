@@ -1,0 +1,8 @@
+question_mark/excluded?.txt
+square_bracket/excluded[0-9].txt
+square_bracket_single/excluded[01].txt
+square_bracket_excla/excluded[!01].txt
+square_bracket_alpha/excluded[a-z].txt
+excluded_dir/
+nested_double_asterisk/**/also_exclude.txt
+nested_wildcard_dir/*day/also_exclude.txt

@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-import colorama
 import glob
 import hashlib
 import os
@@ -11,6 +10,7 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import pandas as pd
 
 from sky import exceptions
@@ -159,9 +159,12 @@ def _get_df() -> pd.DataFrame:
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
-    # Get the quota code from the accelerator instance type
-    # This will be used in the botocore command to check for
-    # a non-zero quota
+    """Get the quota code based on `instance_type` and `use_spot`.
+
+    The quota code is fetched from `_quotas_df` based on the instance type
+    specified, and will then be utilized in a botocore API command in order
+    to check its quota.
+    """
 
     if use_spot:
         spot_header = 'SpotInstanceCode'
@@ -242,7 +245,8 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """

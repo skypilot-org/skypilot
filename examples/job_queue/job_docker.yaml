@@ -1,0 +1,24 @@
+# A task submitted to an existing cluster.
+#
+# Runs a task on a existing cluster with docker.
+#
+# Usage:
+#   sky launch -c djq cluster_docker.yaml
+#   sky exec djq job_docker.yaml
+
+name: job_docker
+
+resources:
+  accelerators: T4:0.5
+  image_id: docker:ubuntu:20.04
+
+setup: |
+  echo "running setup"
+
+run: |
+  timestamp=$(date +%s)
+  conda env list
+  for i in {1..120}; do
+    echo "$timestamp $i"
+    sleep 1
+  done

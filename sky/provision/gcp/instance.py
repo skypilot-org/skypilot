@@ -1,10 +1,13 @@
 """GCP instance provisioning."""
 import collections
+import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
+from sky.adaptors import gcp
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -15,6 +18,10 @@ POLL_INTERVAL = 5
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
+TAG_RAY_NODE_KIND = 'ray-node-type'
+
+_INSTANCE_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/zones/.*/instances/.*\' was not found')
 
 
 def _filter_instances(
@@ -65,13 +72,14 @@ def _wait_for_operations(
 def stop_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     assert provider_config is not None, cluster_name
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    if worker_only:
+        label_filters[TAG_RAY_NODE_KIND] = 'worker'
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
@@ -84,10 +92,8 @@ def stop_instances(
         handlers,
         project_id,
         zone,
-        name_filter,
+        label_filters,
         lambda handler: handler.NEED_TO_STOP_STATES,
-        included_instances,
-        excluded_instances,
     )
     all_instances = [
         i for instances in handler_to_instances.values() for i in instances
@@ -106,7 +112,7 @@ def stop_instances(
             handler_to_instances.keys(),
             project_id,
             zone,
-            name_filter,
+            label_filters,
             lambda handler: handler.NON_STOPPED_STATES,
             included_instances=all_instances,
         )
@@ -123,8 +129,7 @@ def stop_instances(
 def terminate_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name
@@ -132,7 +137,10 @@ def terminate_instances(
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
 
-    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    if worker_only:
+        label_filters[TAG_RAY_NODE_KIND] = 'worker'
+
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance
     ]
@@ -140,14 +148,41 @@ def terminate_instances(
         handlers.append(instance_utils.GCPTPUVMInstance)
 
     handler_to_instances = _filter_instances(handlers, project_id, zone,
-                                             name_filter, lambda _: None,
-                                             included_instances,
-                                             excluded_instances)
+                                             label_filters, lambda _: None)
     operations = collections.defaultdict(list)
+    errs = []
     for handler, instances in handler_to_instances.items():
         for instance in instances:
-            operations[handler].append(
-                handler.terminate(project_id, zone, instance))
+            try:
+                operations[handler].append(
+                    handler.terminate(project_id, zone, instance))
+            except gcp.http_error_exception() as e:
+                if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(
+                        e.reason) is None:
+                    errs.append(e)
+                else:
+                    logger.warning(f'Instance {instance} does not exist. '
+                                   'Skip terminating it.')
     _wait_for_operations(operations, project_id, zone)
+    if errs:
+        raise RuntimeError(f'Failed to terminate instances: {errs}')
     # We don't wait for the instances to be terminated, as it can take a long
     # time (same as what we did in ray's node_provider).
+
+
+def cleanup_ports(
+    cluster_name: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name
+    if 'ports' not in provider_config:
+        # No new ports were opened, so there is nothing to clean up.
+        return
+    project_id = provider_config['project_id']
+    cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+        cluster_name)
+    for port in provider_config['ports']:
+        rule_name = f'user-ports-{cluster_name_hash}-{port}'
+        instance_utils.GCPComputeInstance.delete_firewall_rule(
+            project_id, rule_name)
