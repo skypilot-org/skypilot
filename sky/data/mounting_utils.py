@@ -12,11 +12,11 @@ def get_mounting_command(
     mount_cmd: str,
     version_check_cmd: Optional[str] = None,
 ) -> str:
-    """
-    Generates the mounting command for a given bucket. Generated script first
-    unmounts any existing mount at the mount path, checks and installs the
-    mounting utility if required, creates the mount path and finally mounts
-    the bucket.
+    """Generates the mounting command for a given bucket.
+
+    Generated script first unmounts any existing mount at the mount path, checks
+    and installs the mounting utility if required, creates the mount path and
+    finally mounts the bucket.
 
     Args:
         mount_path: Path to mount the bucket at.

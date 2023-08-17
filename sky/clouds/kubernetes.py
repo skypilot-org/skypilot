@@ -23,8 +23,7 @@ _CREDENTIAL_PATH = '~/.kube/config'
 
 
 class KubernetesInstanceType:
-    """
-    Class to represent the "Instance Type" in a Kubernetes.
+    """Class to represent the "Instance Type" in a Kubernetes.
 
     Since Kubernetes does not have a notion of instances, we generate
     virtual instance types that represent the resources requested by a
