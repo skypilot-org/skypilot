@@ -214,9 +214,7 @@ def get_current_kube_config_context_namespace() -> str:
         return DEFAULT_NAMESPACE
 
 
-def setup_sshjump(sshjump_name: str,
-                  sshjump_image: str,
-                  ssh_key_secret: str,
+def setup_sshjump(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
                   namespace: str):
     """
     Sets up Kubernetes resources (RBAC and pod) for SSH jump host.
@@ -307,5 +305,4 @@ def setup_sshjump(sshjump_name: str,
         else:
             raise
     else:
-        logger.info(
-            f'Creating SSH Jump Service {sshjump_name} in the cluster.')
+        logger.info(f'Creating SSH Jump Service {sshjump_name} in the cluster.')

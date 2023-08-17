@@ -13,7 +13,8 @@ import os
 import sys
 import time
 
-from kubernetes import client, config
+from kubernetes import client
+from kubernetes import config
 
 # Load kube config
 config.load_incluster_config()
@@ -35,7 +36,7 @@ label_selector = f'skypilot-sshjump={current_name}'
 
 
 def poll():
-    logging.info('enter poll()\n')
+    sys.stdout.write('enter poll()\n')
 
     alert_delta = datetime.timedelta(seconds=alert_threshold)
 

@@ -67,7 +67,7 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption()).decode(
-        'utf-8').strip()
+            'utf-8').strip()
 
     public_key = key.public_key().public_bytes(
         serialization.Encoding.OpenSSH,
@@ -408,9 +408,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     sshjump_image = clouds.Kubernetes.IMAGE_CPU
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
-    kubernetes_utils.setup_sshjump(sshjump_name,
-                                   sshjump_image,
-                                   key_label,
+    kubernetes_utils.setup_sshjump(sshjump_name, sshjump_image, key_label,
                                    namespace)
 
     ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
