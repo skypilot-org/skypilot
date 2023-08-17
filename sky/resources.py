@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import schemas
@@ -171,6 +172,7 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
+    @service_catalog.use_default_catalog_if_failed
     def __repr__(self) -> str:
         """Returns a string representation for display.
 

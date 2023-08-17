@@ -3096,7 +3096,7 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
-@service_catalog.use_default_catalog
+@service_catalog.use_default_catalog_if_failed
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],

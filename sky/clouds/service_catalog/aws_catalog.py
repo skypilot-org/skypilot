@@ -149,14 +149,19 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_df() -> pd.DataFrame:
-    if config.get_use_default_catalog():
-        return _default_df
-    else:
-        global _user_df
-        with _apply_az_mapping_lock:
-            if _user_df is None:
+    global _user_df
+    with _apply_az_mapping_lock:
+        if _user_df is None:
+            try:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
-        return _user_df
+            except RuntimeError as e:
+                if config.get_use_default_catalog_if_failed():
+                    logger.warning('Failed to fetch availability zone mapping. '
+                                   f'{common_utils.format_exception(e)}')
+                    return _default_df
+                else:
+                    raise
+    return _user_df
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
@@ -243,9 +248,11 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
-    accelerators with sorted prices and a list of candidates with fuzzy search.
+    accelerators/cpus/memory with sorted prices and a list of candidates with
+    fuzzy search.
     """
     return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,

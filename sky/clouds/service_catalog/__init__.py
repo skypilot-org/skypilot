@@ -4,7 +4,7 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.config import use_default_catalog
+from sky.clouds.service_catalog.config import use_default_catalog_if_failed
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
 from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
@@ -45,7 +45,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
-@use_default_catalog
+@use_default_catalog_if_failed
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
@@ -330,7 +330,7 @@ __all__ = [
     'get_image_id_from_tag',
     'is_image_tag_valid',
     # Configuration
-    'use_default_catalog',
+    'use_default_catalog_if_failed',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
