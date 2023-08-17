@@ -42,14 +42,16 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     ssh_proxy_command: Optional[str] = None,
-                     docker_ssh_proxy_command: Optional[str] = None,
-                     timeout: int = 30,
-                     port: int = 22,
-                     run_on_k8s: Optional[bool] = False) -> List[str]:
+def ssh_options_list(
+    ssh_private_key: Optional[str],
+    ssh_control_name: Optional[str],
+    run_on_k8s: Optional[bool] = False,
+    *,
+    ssh_proxy_command: Optional[str] = None,
+    docker_ssh_proxy_command: Optional[str] = None,
+    timeout: int = 30,
+    port: int = 22,
+) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -141,6 +143,7 @@ class SSHCommandRunner:
         ssh_proxy_command: Optional[str] = None,
         port: int = 22,
         docker_user: Optional[str] = None,
+        run_on_k8s: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -170,6 +173,7 @@ class SSHCommandRunner:
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self.run_on_k8s = run_on_k8s
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -197,21 +201,19 @@ class SSHCommandRunner:
         ssh_proxy_command: Optional[str] = None,
         port_list: Optional[List[int]] = None,
         docker_user: Optional[str] = None,
+        run_on_k8s: Optional[bool] = False,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         if not port_list:
             port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port, docker_user)
+                             ssh_proxy_command, port, docker_user, run_on_k8s)
             for ip, port in zip(ip_list, port_list)
         ]
 
-    def _ssh_base_command(self,
-                          *,
-                          ssh_mode: SshMode,
-                          port_forward: Optional[List[int]],
-                          run_on_k8s: Optional[bool] = False) -> List[str]:
+    def _ssh_base_command(self, *, ssh_mode: SshMode,
+                          port_forward: Optional[List[int]]) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -236,7 +238,7 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
-            run_on_k8s=run_on_k8s) + [f'{self.ssh_user}@{self.ip}']
+            run_on_k8s=self.run_on_k8s) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
             self,
@@ -251,7 +253,6 @@ class SSHCommandRunner:
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
             separate_stderr: bool = False,
-            run_on_k8s: Optional[bool] = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -278,8 +279,7 @@ class SSHCommandRunner:
             A tuple of (returncode, stdout, stderr).
         """
         base_ssh_command = self._ssh_base_command(ssh_mode=ssh_mode,
-                                                  port_forward=port_forward,
-                                                  run_on_k8s=run_on_k8s)
+                                                  port_forward=port_forward)
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
@@ -351,7 +351,6 @@ class SSHCommandRunner:
         log_path: str = os.devnull,
         stream_logs: bool = True,
         max_retry: int = 1,
-        run_on_k8s: Optional[bool] = False,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -393,14 +392,12 @@ class SSHCommandRunner:
         else:
             docker_ssh_proxy_command = None
         ssh_options = ' '.join(
-            ssh_options_list(
-                self.ssh_private_key,
-                self.ssh_control_name,
-                ssh_proxy_command=self._ssh_proxy_command,
-                docker_ssh_proxy_command=docker_ssh_proxy_command,
-                port=self.port,
-                run_on_k8s=run_on_k8s
-            ))
+            ssh_options_list(self.ssh_private_key,
+                             self.ssh_control_name,
+                             ssh_proxy_command=self._ssh_proxy_command,
+                             docker_ssh_proxy_command=docker_ssh_proxy_command,
+                             port=self.port,
+                             run_on_k8s=self.run_on_k8s))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to
