@@ -408,7 +408,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image = clouds.Kubernetes.IMAGE
+    sshjump_image = clouds.Kubernetes.IMAGE_CPU
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     template_path = os.path.join(sky.__root_dir__, 'templates',
