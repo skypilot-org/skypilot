@@ -33,14 +33,18 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+import jinja2
 import yaml
 
+import sky
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import kubernetes
 from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
+from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -402,5 +406,99 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             logger.error(suffix)
             raise
+
+    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    sshjump_image = clouds.Kubernetes.IMAGE
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 'kubernetes-sshjump.yml.j2')
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(
+            'Template "kubernetes-sshjump.j2" does not exist.')
+    with open(template_path) as fin:
+        template = fin.read()
+    j2_template = jinja2.Template(template)
+    cont = j2_template.render(name=sshjump_name,
+                              image=sshjump_image,
+                              secret=key_label)
+
+    content = yaml.safe_load(cont)
+
+    # ServiceAccount
+    try:
+        kubernetes.core_api().create_namespaced_service_account(
+            namespace, content['service_account'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump ServiceAcount already exists in the cluster, using '
+                'it...')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump ServiceAcount in the cluster...')
+    # Role
+    try:
+        kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump Role already exists in the cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump Role in the cluster...')
+    # RoleBinding
+    try:
+        kubernetes.auth_api().create_namespaced_role_binding(
+            namespace, content['role_binding'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                'SSH Jump RoleBinding already exists in the cluster, using '
+                'it...')
+        else:
+            raise
+    else:
+        logger.info('Creating SSH Jump RoleBinding in the cluster...')
+
+    # Pod
+    try:
+        kubernetes.core_api().create_namespaced_pod(namespace,
+                                                    content['pod_spec'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Host {sshjump_name} already exists in the cluster, '
+                'using it...')
+        else:
+            raise
+    else:
+        logger.info(f'Creating SSH Jump Host {sshjump_name} in the cluster...')
+    # Service
+    try:
+        kubernetes.core_api().create_namespaced_service(namespace,
+                                                        content['service_spec'])
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            logger.warning(
+                f'SSH Jump Service {sshjump_name} already exists in the '
+                'cluster, using it...')
+        else:
+            raise
+    else:
+        logger.info(
+            f'Creating SSH Jump Service {sshjump_name} in the cluster...')
+
+    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
+    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
+
+    ssh_jump_proxy_command = f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} ' + \
+        '-o StrictHostKeyChecking=no ' + \
+        '-o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes ' + \
+        f'-p {ssh_jump_port} -W %h:%p sky@{ssh_jump_ip}'
+
+    config['auth']['ssh_proxy_command'] = ssh_jump_proxy_command
 
     return config
