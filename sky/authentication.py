@@ -33,7 +33,6 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-import jinja2
 import yaml
 
 from sky import clouds
@@ -43,7 +42,6 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.backends import backend_utils
-from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils

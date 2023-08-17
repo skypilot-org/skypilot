@@ -113,8 +113,7 @@ def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
 
 
 def get_port(svc_name: str, namespace: str) -> int:
-    """
-    Gets the nodeport of the specified service.
+    """ Gets the nodeport of the specified service.
 
     Args:
         svc_name (str): Name of the kubernetes service. Note that this may be
@@ -142,8 +141,7 @@ def get_external_ip():
 
 def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
-    """
-    Check if the credentials in kubeconfig file are valid
+    """ Check if the credentials in kubeconfig file are valid
 
     Args:
         timeout (int): Timeout in seconds for the test API call
@@ -181,8 +179,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
 
 
 def get_current_kube_config_context_name() -> Optional[str]:
-    """
-    Get the current kubernetes context from the kubeconfig file
+    """ Get the current kubernetes context from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context if it exists, None otherwise
@@ -196,8 +193,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
 
 
 def get_current_kube_config_context_namespace() -> str:
-    """
-    Get the current kubernetes context namespace from the kubeconfig file
+    """ Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context namespace if it exists, else
@@ -215,9 +211,8 @@ def get_current_kube_config_context_namespace() -> str:
 
 
 def setup_sshjump(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
-                  namespace: str):
-    """
-    Sets up Kubernetes resources (RBAC and pod) for SSH jump host.
+                  namespace: str, service_type: str):
+    """ Sets up Kubernetes resources (RBAC and pod) for SSH jump host.
 
     Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
     running inside a cluster. This function sets up the resources needed for
@@ -230,6 +225,8 @@ def setup_sshjump(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
         sshjump_name: Name to use for the SSH jump pod
         ssh_key_secret: Secret name for the SSH key stored in the cluster
         namespace: Namespace to create the SSH jump pod in
+        service_type: Networking configuration on either to use NodePort
+            or ClusterIP service to ssh in
     """
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  'kubernetes-sshjump.yml.j2')
@@ -241,7 +238,8 @@ def setup_sshjump(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
     j2_template = jinja2.Template(template)
     cont = j2_template.render(name=sshjump_name,
                               image=sshjump_image,
-                              secret=ssh_key_secret)
+                              secret=ssh_key_secret,
+                              service_type=service_type)
     content = yaml.safe_load(cont)
     # ServiceAccount
     try:
