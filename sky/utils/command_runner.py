@@ -86,7 +86,8 @@ def ssh_options_list(
     # process running Proxycommand is kept running as long as the ssh session
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
-    if ssh_control_name is not None and docker_ssh_proxy_command is None and not run_on_k8s:
+    if ssh_control_name is not None and docker_ssh_proxy_command is None \
+        and not run_on_k8s:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().

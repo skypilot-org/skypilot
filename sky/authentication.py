@@ -33,7 +33,6 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import jinja2
 import yaml
 
@@ -41,14 +40,15 @@ import sky
 from sky import clouds
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import gcp, ibm, kubernetes
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
 
 logger = sky_logging.init_logger(__name__)
 
@@ -384,8 +384,11 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
     if ssh_setup_mode == 'nodeport':
-        proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)
+        proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
+                         '-o StrictHostKeyChecking=no '
+                         '-o UserKnownHostsFile=/dev/null '
+                         f'-o IdentitiesOnly=yes -p {ingress} '
+                         f'-W %h:%p sky@{ipaddress}')
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service
     else:
@@ -402,11 +405,12 @@ def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
                                     output_path=port_forward_proxy_cmd_path)
         os.chmod(port_forward_proxy_cmd_path,
                  os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
-        proxy_command = 'ssh -tt -i {privkey} -o ProxyCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH,
-            ingress=ingress,
-            ipaddress=ipaddress,
-            port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
+        proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
+                         f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
+                         '-o StrictHostKeyChecking=no '
+                         '-o UserKnownHostsFile=/dev/null '
+                         f'-o IdentitiesOnly=yes -p {ingress} '
+                         f'-W %h:%p sky@{ipaddress}')
     return proxy_command
 
 
@@ -460,12 +464,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(template_path) as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
-    _content = j2_template.render(name=sshjump_name,
-                                  image=sshjump_image,
-                                  secret=key_label,
-                                  service_type=service_type)
-    content = yaml.safe_load(_content)
-
+    rendered_content = j2_template.render(name=sshjump_name,
+                                          image=sshjump_image,
+                                          secret=key_label,
+                                          service_type=service_type)
+    content = yaml.safe_load(rendered_content)
 
     # ServiceAccount
     try:

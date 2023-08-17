@@ -13,7 +13,8 @@ import os
 import sys
 import time
 
-from kubernetes import client, config
+from kubernetes import client
+from kubernetes import config
 
 # Load kube config
 config.load_incluster_config()
