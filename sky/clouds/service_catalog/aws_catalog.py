@@ -19,6 +19,7 @@ from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -159,12 +160,9 @@ def _get_df() -> pd.DataFrame:
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
-    """Get the quota code based on `instance_type` and `use_spot`.
-
-    The quota code is fetched from `_quotas_df` based on the instance type
-    specified, and will then be utilized in a botocore API command in order
-    to check its quota.
-    """
+    # Get the quota code from the accelerator instance type
+    # This will be used in the botocore command to check for
+    # a non-zero quota
 
     if use_spot:
         spot_header = 'SpotInstanceCode'
@@ -245,8 +243,7 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """Filter the instance types based on resource requirements.
-
+    """
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
