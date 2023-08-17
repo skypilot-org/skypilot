@@ -46,12 +46,13 @@ class RunPodNodeProvider(NodeProvider):
         ssh_key_name | The name of the SSH key to use for the pods.
         """
         NodeProvider.__init__(self, provider_config, cluster_name)
+
         self.lock = RLock()
         self.cached_nodes: Dict[str, Dict[str, Any]] = {}
 
         # Load credentials
-        self.api_key =  runpod.get_credentials()['api_key']
-        self.ssh_key_name =  runpod.get_credentials()['ssh_key_name']
+        self.api_key = runpod.get_credentials()['api_key']
+        self.ssh_key_name = runpod.get_credentials()['ssh_key_name']
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters):
@@ -64,7 +65,7 @@ class RunPodNodeProvider(NodeProvider):
 
         return self.cached_nodes
 
-    def non_terminated_nodes(self, tag_filters):
+    def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
         """Return a list of node ids filtered by the specified tags dict.
 
         This list must not include terminated nodes. For performance reasons,
