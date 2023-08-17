@@ -4,7 +4,7 @@ set -uo pipefail
 
 # Ignore this function and `e home` if you use something like `kubectx` to manage your kubectl contexts and environments
 e(){
-    export KUBECONFIG="/home/gcpuser/.kube/config"
+    export KUBECONFIG="/home/`whoami`/.kube/config"
 }
 
 e home
@@ -16,6 +16,10 @@ if [ $? -eq 0 ]; then
     pkill -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22"
 fi
 
+POD_NAME=$(kubectl get pods --selector=skypilot-cluster={{ cluster_name }},ray-node-type=head -o jsonpath='{.items[0].metadata.name}' 2> /dev/null)
+if ! [ -z "$POD_NAME" ]; then
+    kubectl exec $POD_NAME -- bash -c "printenv > /home/sky/.k8s_env" 2> /dev/null
+fi
 kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22 &
 K8S_PID=$!
 trap "kill -9 $K8S_PID" EXIT

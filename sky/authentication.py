@@ -382,7 +382,8 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
+def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode,
+                                  cluster_name: str):
     if ssh_setup_mode == 'nodeport':
         proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
             privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)
@@ -391,11 +392,13 @@ def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
     else:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
         port_forward_proxy_cmd_path = os.path.expanduser(
-            kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
+            kubernetes.PORT_FORWARD_PROXY_CMD_PATH.format(
+                cluster_name=cluster_name))
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
             'ipaddress': ipaddress,
             'local_port': ingress,
+            'cluster_name': cluster_name,
         }
         backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
                                     vars_to_fill,
@@ -538,6 +541,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     else:
         ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
     config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(
-        ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
+        ssh_jump_port, ssh_jump_ip, ssh_setup_mode, config['cluster_name'])
 
     return config

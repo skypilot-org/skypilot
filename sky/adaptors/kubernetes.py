@@ -13,7 +13,7 @@ urllib3 = None
 
 LOCAL_PORT_FOR_PORT_FORWARD = 23100
 PORT_FORWARD_PROXY_CMD_TEMPLATE = 'kubernetes-port-forward-proxy-command.yaml.j2'
-PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
+PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd-{cluster_name}.sh'
 
 _configured = False
 _core_api = None
