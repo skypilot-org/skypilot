@@ -26,6 +26,13 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/serviceusage.serviceUsageConsumer
   roles/storage.admin
 
+If there is no :ref:`SkyPilot Service Account <gcp-service-account-creation>` in the GCP project, at least one user may need to run ``sky launch --cloud gcp`` once, with the following permission enabled to create the service account for all the users in the GCP project:
+
+.. code-block:: yaml
+
+  roles/iam.securityAdmin
+
+
 Optionally, to use TPUs, add the following role:
 
 .. code-block:: yaml
