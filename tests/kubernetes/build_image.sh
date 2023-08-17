@@ -10,6 +10,9 @@
 
 TAG=us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot
 
+push=false
+gpu=false
+
 # Parse command line arguments
 while getopts ":pg" opt; do
   case ${opt} in
@@ -28,6 +31,9 @@ while getopts ":pg" opt; do
   esac
 done
 
+# Shift off the options
+shift $((OPTIND-1))
+
 # Add -gpu to the tag if the GPU image is being built
 if [[ $gpu ]]; then
   TAG=$TAG-gpu:latest
@@ -38,14 +44,15 @@ fi
 # Navigate to the root of the project (inferred from git)
 cd "$(git rev-parse --show-toplevel)"
 
+echo $push
+echo $gpu
+
 # If push is used, build the image for both amd64 and arm64
-if [[ $push ]]; then
+if [[ $push == "true" ]]; then
   # If gpu is used, build the GPU image
-  if [[ $gpu ]]; then
+  if [[ $gpu == "true" ]]; then
     echo "Building and pushing GPU image for amd64"
     docker buildx build --push --platform linux/amd64 -t $TAG -f Dockerfile_k8s_gpu ./sky
-  fi
-  # Else, build the CPU image
   else
     echo "Building and pushing CPU image for amd64 and arm64"
     docker buildx build --push --platform linux/arm64,linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
