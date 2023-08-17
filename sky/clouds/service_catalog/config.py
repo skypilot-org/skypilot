@@ -22,10 +22,10 @@ def get_use_default_catalog_if_failed() -> bool:
 
     Whether the caller requires the catalog to be narrowed down to the account-
     specific catalog (e.g., removing regions not enabled for the current account
-    or use region name for the AWS account).
+    or use zone name assigned to the AWS account).
 
     When set to True, the caller allows to use the default service catalog,
-    which may have staled information, e.g. region names, but it is ok for the
+    which may have stale information, e.g. zone names, but it is ok for the
     read-only operators, such as `show-gpus` or `sky status`.
     """
     if not hasattr(_thread_local_config, 'use_default_catalog'):
@@ -37,7 +37,7 @@ def get_use_default_catalog_if_failed() -> bool:
     return _thread_local_config.use_default_catalog
 
 
-def use_default_catalog_if_failed(func):
+def fallback_to_default_catalog(func):
     """Decorator: allow failure for fetching account-specific catalog.
 
     The account-specific catalog requires the credentials of the

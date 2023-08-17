@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import functools
 from typing import Dict, List, Optional, Set, Union
 
 import colorama
@@ -24,6 +25,10 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 class Resources:
     """Resources: compute requirements of Tasks.
+
+    This class is immutable once created to make sure the checks is applied
+    whenever the properties change. To update the property of an instance of
+    Resources, use `resources.copy(**new_properties)`.
 
     Used:
 
@@ -172,7 +177,11 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
-    @service_catalog.use_default_catalog_if_failed
+    # When querying the accelerators for the instance type, we will check the
+    # cloud's catalog, whcih can cause error when it fails to fetch some account
+    # specific catalog information. It is fine to use the default catalog as the
+    # this function is only for display purpose.
+    @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -305,6 +314,7 @@ class Resources:
         return self._memory
 
     @property
+    @functools.lru_cache()
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
