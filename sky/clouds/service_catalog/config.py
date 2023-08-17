@@ -25,8 +25,9 @@ def get_use_default_catalog_if_failed() -> bool:
     or use zone name assigned to the AWS account).
 
     When set to True, the caller allows to use the default service catalog,
-    which may have inaccurate information (e.g., AWS's zone names are account-specific), but it is ok for the
-    read-only operators, such as `show-gpus` or `sky status`.
+    which may have inaccurate information (e.g., AWS's zone names are account-
+    specific), but it is ok for the read-only operators, such as `show-gpus` or
+    `sky status`.
     """
     if not hasattr(_thread_local_config, 'use_default_catalog'):
         # Should not set it globally, as the global assignment
