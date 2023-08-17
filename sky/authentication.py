@@ -33,6 +33,7 @@ import colorama
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
 import jinja2
 import yaml
 
@@ -40,15 +41,14 @@ import sky
 from sky import clouds
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import gcp
-from sky.adaptors import ibm
-from sky.adaptors import kubernetes
+from sky.adaptors import gcp, ibm, kubernetes
 from sky.backends import backend_utils
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
 
 logger = sky_logging.init_logger(__name__)
 
@@ -466,6 +466,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                                   service_type=service_type)
     content = yaml.safe_load(_content)
 
+
     # ServiceAccount
     try:
         kubernetes.core_api().create_namespaced_service_account(
@@ -473,23 +474,23 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump ServiceAcount already exists in the cluster, using it...'
-            )
+                'SSH Jump ServiceAcount already exists in the cluster, using '
+                'it...')
         else:
             raise
     else:
-        logger.info(f'Creating SSH Jump ServiceAcount in the cluster...')
+        logger.info('Creating SSH Jump ServiceAcount in the cluster...')
     # Role
     try:
         kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Role already exists in the cluster, using it...')
+                'SSH Jump Role already exists in the cluster, using it...')
         else:
             raise
     else:
-        logger.info(f'Creating SSH Jump Role in the cluster...')
+        logger.info('Creating SSH Jump Role in the cluster...')
     # RoleBinding
     try:
         kubernetes.auth_api().create_namespaced_role_binding(
@@ -497,13 +498,12 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump RoleBinding already exists in the cluster, using it...'
-            )
+                'SSH Jump RoleBinding already exists in the cluster, using '
+                'it...')
         else:
             raise
     else:
-        logger.info(f'Creating SSH Jump RoleBinding in the cluster...')
-
+        logger.info('Creating SSH Jump RoleBinding in the cluster...')
     # Pod
     try:
         kubernetes.core_api().create_namespaced_pod(namespace,
@@ -511,8 +511,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Host {sshjump_name} already exists in the cluster, using it...'
-            )
+                f'SSH Jump Host {sshjump_name} already exists in the cluster, '
+                'using it...')
         else:
             raise
     else:
@@ -524,8 +524,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.warning(
-                f'SSH Jump Service {sshjump_name} already exists in the cluster, using it...'
-            )
+                f'SSH Jump Service {sshjump_name} already exists in the '
+                'cluster, using it...')
         else:
             raise
     else:

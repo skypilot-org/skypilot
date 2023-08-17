@@ -2875,7 +2875,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
                              task: task_lib.Task) -> None:
-        """Update envs for a task with Kubernetes specific env vars if cloud is Kubernetes."""
+        """Update envs for a task with Kubernetes specific env vars if cloud is
+           Kubernetes."""
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             temp_envs = copy.deepcopy(task.envs)
             cloud_env_vars = handle.launched_resources.cloud.query_env_vars(

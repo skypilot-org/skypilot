@@ -125,6 +125,7 @@ available_node_types:
             parent: skypilot
             component: {{cluster_name}}-ray-head
             skypilot-cluster: {{cluster_name}}
+            # This label is being used by the life cycle management of the ssh jump pod
             skypilot-sshjump: {{sshjump}}
       spec:
         # Change this if you altered the autoscaler_service_account above
