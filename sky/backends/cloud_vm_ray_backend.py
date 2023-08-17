@@ -1504,9 +1504,10 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
-                # Failed due to catalog issue, e.g. image not found.
-                logger.info(
-                    f'Failed to find catalog in region {region.name}: {e}')
+                # Failed due to catalog issue, e.g. image not found, or
+                # GPUs are requested in a Kubernetes cluster but the cluster
+                # does not have nodes labeled with GPU types.
+                logger.info(f'{e}')
                 continue
             if dryrun:
                 return config_dict
@@ -2875,8 +2876,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
                              task: task_lib.Task) -> None:
-        """Update envs for a task with Kubernetes specific env vars if cloud is
-           Kubernetes."""
+        """Update envs with env vars from Kubernetes if cloud is Kubernetes.
+
+        Kubernetes automatically populates containers with critical environment
+        variables, such as those for discovering services running in the
+        cluster and CUDA/nvidia environment variables. We need to update task
+        environment variables with these env vars. This is needed for GPU
+        support and service discovery.
+
+        See https://github.com/skypilot-org/skypilot/issues/2287 for
+        more details.
+        """
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             temp_envs = copy.deepcopy(task.envs)
             cloud_env_vars = handle.launched_resources.cloud.query_env_vars(

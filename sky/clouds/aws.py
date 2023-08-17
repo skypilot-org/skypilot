@@ -223,7 +223,8 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)

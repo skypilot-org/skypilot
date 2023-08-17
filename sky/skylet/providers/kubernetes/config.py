@@ -4,7 +4,7 @@ import math
 import re
 
 from sky.adaptors import kubernetes
-from sky.skylet.providers.kubernetes import utils
+from sky.utils import kubernetes_utils
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def not_provided_msg(resource_type):
 
 
 def bootstrap_kubernetes(config):
-    namespace = utils.get_current_kube_config_context_namespace()
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     _configure_services(namespace, config['provider'])
 
@@ -115,19 +115,28 @@ def get_autodetected_resources(container_data):
         for resource_name in ['cpu', 'gpu']
     }
 
-    # TODO(romilb): Update this to allow fractional resources.
     memory_limits = get_resource(container_resources, 'memory')
-    node_type_resources['memory'] = int(memory_limits)
+    node_type_resources['memory'] = memory_limits
 
     return node_type_resources
 
 
 def get_resource(container_resources, resource_name):
+    request = _get_resource(container_resources,
+                            resource_name,
+                            field_name='requests')
     limit = _get_resource(container_resources,
                           resource_name,
                           field_name='limits')
+    # Use request if limit is not set, else use limit.
     # float('inf') means there's no limit set
-    return 0 if limit == float('inf') else int(limit)
+    res_count = request if limit == float('inf') else limit
+    # Convert to int since Ray autoscaler expects int.
+    # Cap the minimum resource to 1 because if resource count is set to 0,
+    # (e.g., when request=0.5), ray will not be able to schedule any tasks.
+    # We also round up the resource count to the nearest integer to provide the
+    # user at least the amount of resource they requested.
+    return max(1, math.ceil(res_count))
 
 
 def _get_resource(container_resources, resource_name, field_name):

@@ -885,15 +885,18 @@ def write_cluster_config(
     Raises:
         exceptions.ResourcesUnavailableError: if the region/zones requested does
             not appear in the catalog, or an ssh_proxy_command is specified but
-            not for the given region.
+            not for the given region, or GPUs are requested in a Kubernetes
+            cluster but the cluster does not have nodes labeled with GPU types.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourcesUnavailableError, when the region/zones
-    # requested does not appear in the catalog. It can be triggered when the
-    # user changed the catalog file, while there is a cluster in the removed
-    # region/zone.
+    # This can raise a ResourcesUnavailableError when:
+    #  * The region/zones requested does not appear in the catalog. It can be
+    #    triggered if the user changed the catalog file while there is a cluster
+    #    in the removed region/zone.
+    #  * GPUs are requested in a Kubernetes cluster but the cluster does not
+    #    have nodes labeled with GPU types.
     #
     # TODO(zhwu): We should change the exception type to a more specific one, as
     # the ResourcesUnavailableError is overly used. Also, it would be better to

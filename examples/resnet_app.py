@@ -4,7 +4,14 @@ import sky
 
 # The working directory contains all code and will be synced to remote.
 workdir = '~/Downloads/tpu'
-subprocess.run(f'cd {workdir} && git checkout 222cc86', shell=True, check=True)
+
+# Clone the repo locally to workdir
+subprocess.run(
+    'git clone https://github.com/concretevitamin/tpu '
+    f'{workdir} || true',
+    shell=True,
+    check=True)
+subprocess.run(f'cd {workdir} && git checkout 9459fee', shell=True, check=True)
 
 # The setup command.  Will be run under the working directory.
 setup = """\
@@ -18,6 +25,9 @@ setup = """\
         conda install cudatoolkit=11.0 -y
         pip install tensorflow==2.4.0 pyyaml
         pip install protobuf==3.20
+        mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+        echo 'CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn;print(nvidia.cudnn.__file__)"))' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+        echo 'export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/:$CUDNN_PATH/lib:$LD_LIBRARY_PATH' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
         cd models && pip install -e .
     fi
     """

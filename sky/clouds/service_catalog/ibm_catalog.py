@@ -1,5 +1,4 @@
-"""
-IBM Offerings Catalog.
+"""IBM Offerings Catalog.
 
 This module loads the service catalog file and can be used to query
 instance types and pricing information for IBM.
@@ -64,7 +63,8 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
