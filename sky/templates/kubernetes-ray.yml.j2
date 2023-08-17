@@ -17,7 +17,7 @@ provider:
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
     # Use False if running from outside of k8s cluster
-    use_internal_ips: false
+    use_internal_ips: true
 
     timeout: {{timeout}}
 
@@ -78,7 +78,6 @@ provider:
             skypilot-cluster: {{cluster_name}}
           name: {{cluster_name}}-ray-head-ssh
         spec:
-          type: NodePort
           selector:
             component: {{cluster_name}}-ray-head
           ports:
@@ -126,6 +125,8 @@ available_node_types:
             parent: skypilot
             component: {{cluster_name}}-ray-head
             skypilot-cluster: {{cluster_name}}
+            # This label is being used by the life cycle management of the ssh jump pod
+            skypilot-sshjump: {{sshjump}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
