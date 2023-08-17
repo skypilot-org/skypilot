@@ -373,7 +373,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
             # TODO(romilb): Allow user to specify custom images
-            'image_id': self.IMAGE,
+            'image_id': image,
             'sshjump': self.SKY_SSH_JUMP_NAME
         }
         return deploy_vars
