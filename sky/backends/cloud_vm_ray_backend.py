@@ -4400,7 +4400,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _execute_storage_csync(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
-        """Executes continuous syncing on storages.
+        """Executes CSYNC on storages.
 
         This function only runs the CSYNC daemon on the given storage
         and the files/dirs to be copied to remote node are handled in
@@ -4410,7 +4410,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.C_SYNC
+            if storage_mount.mode == storage_lib.StorageMode.CSYNC
         }
 
         if not storage_mounts:
@@ -4428,7 +4428,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage continuous sync{plural}.{style.RESET_ALL}')
+                    f'storage CSYNC{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
         assert ip_list is not None, 'external_ips is not cached in handle'
@@ -4438,12 +4438,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ip_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
 
-        for src, storage_obj in storage_mounts.items():
-            if not os.path.isabs(src) and not src.startswith('~/'):
-                src = f'{SKY_REMOTE_WORKDIR}/{src}'
+        for dst, storage_obj in storage_mounts.items():
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to sync
             store = list(storage_obj.stores.values())[0]
-            csync_cmd = store.csync_command(src, storage_obj.interval)
+            csync_cmd = store.csync_command(dst, storage_obj.interval)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4451,7 +4451,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src_print,
-                target=src,
+                target=dst,
                 cmd=csync_cmd,
                 run_rsync=False,
                 action_message='Setting cont. sync',

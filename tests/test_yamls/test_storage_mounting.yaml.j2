@@ -27,11 +27,11 @@ file_mounts:
     source: ~/tmp-workdir
     mode: MOUNT
 
-  # Mounting a private bucket in C_SYNC mode
+  # Mounting a private bucket in CSYNC mode
   /mount_private_csync:
     name: {{csync_storage_name}}
     source: ~/tmp-workdir-2
-    mode: C_SYNC
+    mode: CSYNC
     interval: 5
 
     
@@ -58,7 +58,7 @@ run: |
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
 
-  # Write to private bucket in C_SYNC mode should pass
+  # Write to private bucket in CSYNC mode should pass
   echo "bye" > /mount_private_csync/bye.txt
-  # Giving enough time for syncing launched by C_SYNC mode
+  # Giving enough time for syncing launched by CSYNC mode
   sleep 10

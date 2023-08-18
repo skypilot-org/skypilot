@@ -120,7 +120,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-    C_SYNC = 'C_SYNC'
+    CSYNC = 'CSYNC'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -442,9 +442,9 @@ class Storage(object):
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
-            the remote VM. Can be either MOUNT, COPY, or C_SYNC. Defaults to
+            the remote VM. Can be either MOUNT, COPY, or CSYNC. Defaults to
             MOUNT.
-          interval: int; Used for C_SYNC mode only. Runs the sync command
+          interval: int; Used for CSYNC mode only. Runs the sync command
             continuously for every INTERVAL seconds.
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
@@ -939,7 +939,7 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
-        if self.mode == StorageMode.C_SYNC:
+        if self.mode == StorageMode.CSYNC:
             add_if_not_none('interval', self.interval)
         if self.force_delete:
             config['_force_delete'] = True
@@ -1285,7 +1285,7 @@ class S3Store(AbstractStore):
         """
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {self.bucket.name} --interval {interval} '
-                     '--lock --delete')
+                     '--lock --delete --no-follow-symlinks')
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _create_s3_bucket(self,
@@ -1732,7 +1732,7 @@ class GcsStore(AbstractStore):
         """
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f'gcs {self.bucket.name} --interval {interval} '
-                     '--lock --delete')
+                     '--lock --delete --no-follow-symlinks')
         return csync_utils.get_csync_command(csync_cmd, csync_path)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:

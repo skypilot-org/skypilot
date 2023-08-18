@@ -12,7 +12,7 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-C_SYNC_FILE_PATH = '~/.skystorage'
+CSYNC_FILE_PATH = '~/.skystorage'
 
 
 @click.group()
@@ -26,21 +26,6 @@ def update_interval(interval: int, elapsed_time: int):
         return 0
     else:
         return diff
-
-
-def is_locked(file_path: str):
-    """Checks if the given lock file is locked"""
-    locked = False
-    if os.path.exists(file_path):
-        lock = filelock.FileLock(file_path)
-        try:
-            lock.acquire(timeout=0)
-        except filelock.Timeout:
-            locked = True
-        finally:
-            if not locked:
-                lock.release()
-    return locked
 
 
 def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
@@ -93,7 +78,7 @@ def run_sync(src: str,
         raise ValueError(f'Unknown store type: {storetype}')
 
     log_file_name = f'csync_{storetype}_{bucketname}.log'
-    base_dir = os.path.expanduser(C_SYNC_FILE_PATH)
+    base_dir = os.path.expanduser(CSYNC_FILE_PATH)
     log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
 
     with open(log_path, 'a') as fout:
@@ -159,7 +144,7 @@ def csync(src: str, storetype: str, bucketname: str, num_threads: int,
     Syncs the source to the bucket every INTERVAL seconds. Creates a lock file
     while sync command is runninng and removes it when completed.
     """
-    base_dir = os.path.expanduser(C_SYNC_FILE_PATH)
+    base_dir = os.path.expanduser(CSYNC_FILE_PATH)
     os.makedirs(base_dir, exist_ok=True)
     lock_file_name = f'csync_{storetype}_{bucketname}.lock'
     lock_path = os.path.expanduser(os.path.join(base_dir, lock_file_name))
@@ -215,7 +200,7 @@ def terminate() -> None:
                 bucket_name = running_sync[pid][1]
                 lock_file_name = f'csync_{store_type}_{bucket_name}.lock'
                 lock_file_path = os.path.expanduser(
-                    os.path.join(C_SYNC_FILE_PATH, lock_file_name))
+                    os.path.join(CSYNC_FILE_PATH, lock_file_name))
                 if not os.path.exists(lock_file_path):
                     # kill csync process
                     psutil.Process(pid).terminate()

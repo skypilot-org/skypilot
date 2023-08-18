@@ -5,8 +5,8 @@ import textwrap
 
 def get_csync_command(csync_cmd: str, csync_path: str) -> str:
     """
-    Generates the C_SYNC command for a given bucket. Generated script first
-    creates the CSYNC_PATH if it does not exist, and finally runs C_SYNC
+    Generates the CSYNC command for a given bucket. Generated script first
+    creates the CSYNC_PATH if it does not exist, and finally runs CSYNC
     daemon on CSYNC_PATH to the bucket.
 
     Args:
@@ -26,7 +26,7 @@ def get_csync_command(csync_cmd: str, csync_path: str) -> str:
 
         # Check if csync path exists
         if [ ! -d "$CSYNC_PATH" ]; then
-          echo "C_SYNC path $CSYNC_PATH does not exist. Creating..."
+          echo "CSYNC path $CSYNC_PATH does not exist. Creating..."
           sudo mkdir -p $CSYNC_PATH
           sudo chmod 777 $CSYNC_PATH
         fi
@@ -36,7 +36,6 @@ def get_csync_command(csync_cmd: str, csync_path: str) -> str:
 
     script_path = f'~/.sky/sync_{random.randint(0, 1000000)}.sh'
     first_line = r'(cat <<-\EOF > {}'.format(script_path)
-
     command = (f'{first_line}'
                f'{script}'
                f') && chmod +x {script_path}'
