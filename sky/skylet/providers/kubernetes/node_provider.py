@@ -1,5 +1,6 @@
 import copy
 import logging
+import os
 import time
 from typing import Dict
 from uuid import uuid4
@@ -209,10 +210,35 @@ class KubernetesNodeProvider(NodeProvider):
         start = time.time()
         while True:
             if time.time() - start > self.timeout:
+                pod_status = new_nodes[0].status.phase
+                pod_name = new_nodes[0]._metadata._name
+                events = kubernetes.core_api().list_namespaced_event(
+                    self.namespace,
+                    field_selector=f"involvedObject.name={pod_name}")
+                for event in events.items:
+                    if event.reason == 'FailedScheduling':
+                        event_message = event.message
+                        break
+                if pod_status == 'Pending':
+                    if 'Insufficient cpu' in event_message:
+                        total_cpus = os.cpu_count()
+                        raise config.KubernetesError(
+                            'More than available CPU(s) are requested. '
+                            f'In total, {total_cpus} CPUs are available in '
+                            'the machine. Run \'sky status\' to see the '
+                            'number of CPUs that are already in use.')
+                    if 'didn\'t match Pod\'s node affinity/selector' in event_message:
+                        node_selector = pod.spec.node_selector
+                        if node_selector is not None:
+                            raise config.KubernetesError(
+                                'Unavailable GPU(s) are requested. '
+                                f'Please confirm if {node_selector} is '
+                                'available in the cluster.')
                 raise config.KubernetesError(
                     'Timed out while waiting for nodes to start. '
                     'Cluster may be out of resources or '
-                    'may be too slow to autoscale.')
+                    'may be too slow to autoscale. More details: '
+                    f'{event_message}')
             all_ready = True
 
             for node in new_nodes:
