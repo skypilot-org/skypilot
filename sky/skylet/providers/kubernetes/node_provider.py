@@ -238,8 +238,7 @@ class KubernetesNodeProvider(NodeProvider):
                 raise config.KubernetesError(
                     'Timed out while waiting for nodes to start. '
                     'Cluster may be out of resources or '
-                    'may be too slow to autoscale. More details: '
-                    f'{event_message}')
+                    'may be too slow to autoscale.')
             all_ready = True
 
             for node in new_nodes:
