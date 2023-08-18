@@ -1,4 +1,5 @@
 # Code is borrowed from gorilla's colab
+# https://colab.research.google.com/drive/1DEBPsccVLF_aUnmD0FwPeHFrtdC0QIUP?usp=sharing  # pylint: disable=line-too-long
 
 import openai
 import urllib.parse

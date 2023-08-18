@@ -19,6 +19,8 @@ async def main():
         task = asyncio.create_task(fetch(session, f'http://{redirector_endpoint}/'))
 
         await asyncio.sleep(timeout)
+        # We manually cancel requests for test purposes.
+        # You could also manually Ctrl + C a curl to cancel a request.
         task.cancel()
 
         try:
