@@ -454,6 +454,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
 def _get_jobs(
         username: Optional[str],
         status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+    """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -702,19 +703,30 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
-    """Cancel the jobs.
+def cancel_jobs(job_owner: str,
+                jobs: Optional[List[int]],
+                cancel_latest_running_job: bool = False) -> None:
+    """Cancel jobs.
 
     Args:
-        jobs: The job ids to cancel. If None, cancel all the jobs.
+        jobs: Job IDs to cancel. If None, cancel all jobs.
+        cancel_latest_running_job: Whether to cancel the latest running job. If
+            set to True, asserts `jobs` is set to None.
     """
-    # Update the status of the jobs to avoid setting the status of stale
-    # jobs to CANCELLED.
-    if jobs is None:
-        job_records = _get_jobs(
-            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
+    if cancel_latest_running_job:
+        # Cancel the latest (largest job ID) running job.
+        assert jobs is None, (
+            'Cannot specify both jobs and cancel_latest_running_job')
+        job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
     else:
-        job_records = _get_jobs_by_ids(jobs)
+        if jobs is None:
+            # Cancel all in-progress jobs.
+            job_records = _get_jobs(
+                None,
+                [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
+        else:
+            # Cancel jobs with specified IDs.
+            job_records = _get_jobs_by_ids(jobs)
 
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
@@ -821,8 +833,12 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
+    def cancel_jobs(cls,
+                    job_owner: str,
+                    job_ids: Optional[List[int]],
+                    cancel_latest_running_job: bool = False) -> str:
+        code = [(f'job_lib.cancel_jobs({job_owner!r},{job_ids!r},'
+                 f'{cancel_latest_running_job})')]
         return cls._build(code)
 
     @classmethod

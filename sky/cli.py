@@ -2035,22 +2035,30 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     """Cancel job(s)."""
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
+    cancel_latest_running_job = False
+    job_identity_str = None
     if not jobs and not all:
-        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        message = textwrap.dedent(f"""\
-          Use:
-            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
-            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
+        job_identity_str = 'the latest running job'
+        cancel_latest_running_job = True
+        # # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
+        # message = textwrap.dedent(f"""\
+        #   Use:
+        #     {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
+        #     {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
 
-          Job IDs can be looked up by {bold}sky queue{reset}.""")
-        raise click.UsageError(message)
+        #   Job IDs can be looked up by {bold}sky queue{reset}.""")
+        # raise click.UsageError(message)
 
     if not yes:
-        job_ids = ' '.join(map(str, jobs))
-        plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} {job_ids}'
-        if all:
-            job_identity_str = 'all jobs'
+        if job_identity_str is None:
+            job_ids = ' '.join(map(str, jobs))
+            plural = 's' if len(job_ids) > 1 else ''
+            job_identity_str = f'job{plural} {job_ids}'
+            if all:
+                job_identity_str = 'all jobs'
         job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
@@ -2058,10 +2066,11 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                       show_default=True)
 
     try:
-        core.cancel(cluster, all, jobs)
+        core.cancel(cluster, all, jobs, cancel_latest_running_job)
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
+        # FIXME(zongheng)
         if all:
             arg_str = '--all'
         else:

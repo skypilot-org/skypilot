@@ -3435,17 +3435,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
-    def cancel_jobs(self, handle: CloudVmRayResourceHandle,
-                    jobs: Optional[List[int]]):
+    def cancel_jobs(self,
+                    handle: CloudVmRayResourceHandle,
+                    jobs: Optional[List[int]],
+                    cancel_latest_running_job: bool = False):
+        if cancel_latest_running_job:
+            assert jobs is None, (
+                'Cannot specify both jobs and cancel_latest_running_job')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
-        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
+        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs,
+                                                 cancel_latest_running_job)
 
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
+        logger.info(stdout)
         subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
