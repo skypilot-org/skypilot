@@ -4044,7 +4044,8 @@ def serve_up(
     app_port = int(task.service.app_port)
     task.set_resources(requested_resources.copy(ports=[app_port]))
 
-    controller_resources_config = copy.copy(serve_lib.CONTROLLER_RESOURCES)
+    controller_resources_config: Dict[str, Any] = copy.copy(
+        serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
         controller_resources_config.update(task.service.controller_resources)
     # TODO(tian): We might need a thorough design on this.

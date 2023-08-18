@@ -1,0 +1,16 @@
+resources:
+  cloud: gcp
+  cpus: 2+
+
+workdir: sky/serve/examples/http_server
+
+run: python3 server.py
+
+service:
+  port: 8081
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 2
+  controller_resources:
+    cloud: aws

@@ -180,7 +180,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            timeout=10 * 60,  # 10 mins
+            timeout=15 * 60,  # 15 mins
             shell=True,
         )
 
@@ -2600,6 +2600,57 @@ def test_gcp_zero_quota_failover():
         ],
         f'sky down -y {name}',
     )
+    run_one_test(test)
+
+
+# ---------- Testing skyserve ----------
+
+
+def _get_skyserve_test_task(name: str, suffix: str, timeout_minutes: int) -> Test:
+    url_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
+    test = Test(
+        f'test-skyserve-{suffix.replace("_", "-")}',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/http_{suffix}.yaml',
+            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
+            f'url=$(sky serve status {name} | grep -Eo "{url_regex}"); curl -L http://$url | grep "Hi, SkyPilot here"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=timeout_minutes * 60,
+    )
+    return test
+
+
+@pytest.mark.gcp
+def test_skyserve_gcp():
+    """Test skyserve on GCP"""
+    name = _get_cluster_name()
+    test = _get_skyserve_test_task(name, 'gcp', 20)
+    run_one_test(test)
+
+
+@pytest.mark.aws
+def test_skyserve_aws():
+    """Test skyserve on AWS"""
+    name = _get_cluster_name()
+    test = _get_skyserve_test_task(name, 'aws', 20)
+    run_one_test(test)
+
+
+@pytest.mark.azure
+def test_skyserve_azure():
+    """Test skyserve on Azure"""
+    name = _get_cluster_name()
+    test = _get_skyserve_test_task(name, 'azure', 30)
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.aws
+def test_skyserve_mixed_cloud():
+    """Test skyserve on mixed cloud"""
+    name = _get_cluster_name()
+    test = _get_skyserve_test_task(name, 'mixed_cloud', 20)
     run_one_test(test)
 
 
