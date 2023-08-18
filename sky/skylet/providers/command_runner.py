@@ -74,18 +74,6 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
 
-    def __init__(self, docker_config, docker_login_config, **common_args):
-        self.ssh_command_runner = SSHCommandRunner(**common_args)
-        self.container_name = docker_config['container_name']
-        self.docker_config = docker_config
-        self.home_dir = None
-        self.initialized = False
-        # Optionally use 'podman' instead of 'docker'
-        use_podman = docker_config.get('use_podman', False)
-        self.docker_cmd = 'podman' if use_podman else 'docker'
-        # SkyPilot: Add docker login config.
-        self.docker_login_config = docker_login_config
-
     # SkyPilot: New function to check whether a container is exited
     # (but not removed). This is due to previous `sky stop` command,
     # which will stop the container but not remove it.
@@ -122,16 +110,15 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             return True
 
         # SkyPilot: Docker login if user specified a private docker registry.
-        if self.docker_login_config is not None:
+        if constants.DOCKER_USERNAME_ENV_KEY in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
             self.run('{} login --username {} --password {} {}'.format(
                 self.docker_cmd,
-                self.docker_login_config[constants.DOCKER_USERNAME_ENV_KEY],
-                self.docker_login_config[constants.DOCKER_PASSWORD_ENV_KEY],
-                self.docker_login_config[constants.DOCKER_REPO_URI_ENV_KEY],
+                self.docker_config[constants.DOCKER_USERNAME_ENV_KEY],
+                self.docker_config[constants.DOCKER_PASSWORD_ENV_KEY],
+                self.docker_config[constants.DOCKER_REPO_URI_ENV_KEY],
             ))
-            repo_uri = self.docker_login_config[
-                constants.DOCKER_REPO_URI_ENV_KEY]
+            repo_uri = self.docker_config[constants.DOCKER_REPO_URI_ENV_KEY]
             specific_image = f'{repo_uri}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):

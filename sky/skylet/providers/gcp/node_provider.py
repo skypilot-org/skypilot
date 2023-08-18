@@ -390,8 +390,8 @@ class GCPNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
         if docker_config and docker_config["container_name"] != "":
-            return SkyDockerCommandRunner(
-                docker_config, self.docker_login_config, **common_args
-            )
+            if self.docker_login_config is not None:
+                docker_config.update(self.docker_login_config)
+            return SkyDockerCommandRunner(docker_config, **common_args)
         else:
             return SSHCommandRunner(**common_args)
