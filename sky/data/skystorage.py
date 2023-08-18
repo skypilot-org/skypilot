@@ -1,12 +1,13 @@
 """Skystorage module"""
-import click
 import contextlib
-import filelock
 import os
-import psutil
 import subprocess
 import time
 from typing import Dict, Tuple
+
+import click
+import filelock
+import psutil
 
 from sky import sky_logging
 

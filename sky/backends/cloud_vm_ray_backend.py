@@ -4454,7 +4454,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 target=dst,
                 cmd=csync_cmd,
                 run_rsync=False,
-                action_message='Setting cont. sync',
+                action_message='Setting CSYNC',
                 log_path=log_path,
             )
 

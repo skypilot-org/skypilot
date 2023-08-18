@@ -1283,6 +1283,8 @@ class S3Store(AbstractStore):
           csync_path: str; Path to continuously sync the bucket to.
           interval: int; runs the sync command every INTERVAL seconds
         """
+        if interval is None:
+            interval = 600
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {self.bucket.name} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
@@ -1730,6 +1732,8 @@ class GcsStore(AbstractStore):
           csync_path: str; Path to continuously sync the bucket to.
           interval: int; runs the sync command every INTERVAL seconds
         """
+        if interval is None:
+            interval = 600
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f'gcs {self.bucket.name} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
