@@ -5,6 +5,7 @@ from typing import Dict
 
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 
@@ -65,11 +66,25 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     """A DockerCommandRunner that
         1. Run some custom setup commands;
         2. Reimplement docker stop to save the container after the host VM
-           is shut down.
+           is shut down;
+        3. Allow docker login before running the container, to enable pulling
+           from private docker registry.
 
     The code is borrowed from
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
+
+    def __init__(self, docker_config, docker_login_config, **common_args):
+        self.ssh_command_runner = SSHCommandRunner(**common_args)
+        self.container_name = docker_config['container_name']
+        self.docker_config = docker_config
+        self.home_dir = None
+        self.initialized = False
+        # Optionally use 'podman' instead of 'docker'
+        use_podman = docker_config.get('use_podman', False)
+        self.docker_cmd = 'podman' if use_podman else 'docker'
+        # SkyPilot: Add docker login config.
+        self.docker_login_config = docker_login_config
 
     # SkyPilot: New function to check whether a container is exited
     # (but not removed). This is due to previous `sky stop` command,
@@ -105,6 +120,19 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             self.run(f'docker start {self.container_name}', run_env='host')
             self.run('sudo service ssh start')
             return True
+
+        # SkyPilot: Docker login if user specified a private docker registry.
+        if self.docker_login_config is not None:
+            # TODO(tian): Maybe support a command to get the login password?
+            self.run('{} login --username {} --password {} {}'.format(
+                self.docker_cmd,
+                self.docker_login_config[constants.DOCKER_USERNAME_ENV_KEY],
+                self.docker_login_config[constants.DOCKER_PASSWORD_ENV_KEY],
+                self.docker_login_config[constants.DOCKER_REPO_URI_ENV_KEY],
+            ))
+            repo_uri = self.docker_login_config[
+                constants.DOCKER_REPO_URI_ENV_KEY]
+            specific_image = f'{repo_uri}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

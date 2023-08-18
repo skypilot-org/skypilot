@@ -553,6 +553,25 @@ class Task:
                 'call set_time_estimator() first')
         return self.time_estimator_func(resources)
 
+    def check_and_fill_in_docker_login_config(self) -> None:
+        all_keys = {
+            constants.DOCKER_USERNAME_ENV_KEY,
+            constants.DOCKER_PASSWORD_ENV_KEY,
+            constants.DOCKER_REPO_URI_ENV_KEY,
+        }
+        existing_keys = all_keys & set(self.envs.keys())
+        if not existing_keys:
+            return
+        if len(existing_keys) != len(all_keys):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'If any of DOCKER_USERNAME, DOCKER_PASSWORD, '
+                    'DOCKER_REPO_URI is set, all of them must be set. '
+                    f'Missing envs: {all_keys - existing_keys}')
+        for resource in self.resources:
+            resource.set_docker_login_config(
+                {k: self.envs.pop(k) for k in existing_keys})
+
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
         """Sets the file mounts for this task.
 

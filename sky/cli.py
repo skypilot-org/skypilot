@@ -760,6 +760,8 @@ def _launch_with_confirm(
         task, _ = backend_utils.check_can_clone_disk_and_override_task(
             clone_disk_from, cluster, task)
 
+    task.check_and_fill_in_docker_login_config()
+
     with sky.Dag() as dag:
         dag.add(task)
 

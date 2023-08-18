@@ -50,6 +50,9 @@ SPOT_DASHBOARD_REMOTE_PORT = 5000
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
+DOCKER_USERNAME_ENV_KEY = 'DOCKER_USERNAME'
+DOCKER_PASSWORD_ENV_KEY = 'DOCKER_PASSWORD'
+DOCKER_REPO_URI_ENV_KEY = 'DOCKER_REPO_URI'
 
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not

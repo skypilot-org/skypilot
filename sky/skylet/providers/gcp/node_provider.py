@@ -82,6 +82,9 @@ class GCPNodeProvider(NodeProvider):
         self.cached_nodes: Dict[str, GCPNode] = {}
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
 
+        # Set docker login config if it exists
+        self.docker_login_config = provider_config.get("docker_login_config", None)
+
     def _construct_clients(self):
         _, _, compute, tpu = construct_clients_from_provider_config(
             self.provider_config
@@ -387,6 +390,8 @@ class GCPNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
         if docker_config and docker_config["container_name"] != "":
-            return SkyDockerCommandRunner(docker_config, **common_args)
+            return SkyDockerCommandRunner(
+                docker_config, self.docker_login_config, **common_args
+            )
         else:
             return SSHCommandRunner(**common_args)

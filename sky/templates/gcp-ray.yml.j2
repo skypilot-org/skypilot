@@ -34,6 +34,12 @@ provider:
     - {{port}}
 {%- endfor %}
 {%- endif %}
+{%- if DOCKER_USERNAME is not none %}
+  docker_login_config:
+    DOCKER_USERNAME: {{DOCKER_USERNAME}}
+    DOCKER_PASSWORD: {{DOCKER_PASSWORD}}
+    DOCKER_REPO_URI: {{DOCKER_REPO_URI}}
+{%- endif %}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}

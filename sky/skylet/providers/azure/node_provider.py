@@ -86,6 +86,9 @@ class AzureNodeProvider(NodeProvider):
         # cache node objects
         self.cached_nodes = {}
 
+        # Set docker login config if it exists
+        self.docker_login_config = provider_config.get("docker_login_config", None)
+
     @synchronized
     def _get_filtered_nodes(self, tag_filters):
         # add cluster name filter to only get nodes from this cluster
@@ -443,6 +446,8 @@ class AzureNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
         if docker_config and docker_config["container_name"] != "":
-            return SkyDockerCommandRunner(docker_config, **common_args)
+            return SkyDockerCommandRunner(
+                docker_config, self.docker_login_config, **common_args
+            )
         else:
             return SSHCommandRunner(**common_args)
