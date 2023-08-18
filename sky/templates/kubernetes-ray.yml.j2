@@ -154,7 +154,7 @@ available_node_types:
             path: /dev/fuse
         containers:
         - name: ray-node
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           image: {{image_id}}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
@@ -222,7 +222,7 @@ available_node_types:
             path: /dev/fuse
         containers:
         - name: ray-node
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           image: {{image_id}}
           command: ["/bin/bash", "-c", "--"]
           args: ["trap : TERM INT; sleep infinity & wait;"]
