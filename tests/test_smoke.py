@@ -2046,6 +2046,8 @@ def test_spot_recovery_gcp():
 def test_spot_pipeline_recovery_aws(aws_config_region):
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
     if region != 'us-west-2':
         pytest.skip('Only run spot pipeline recovery test in us-west-2')
@@ -2067,7 +2069,8 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
                 f'aws ec2 terminate-instances --region {region} --instance-ids $('
                 f'aws ec2 describe-instances --region {region} '
                 # TODO(zhwu): fix the name for spot cluster.
-                '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID} '
+                '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID}'
+                f'-{user_hash} '
                 f'--query Reservations[].Instances[].InstanceId '
                 '--output text)'),
             'sleep 100',
@@ -2091,9 +2094,11 @@ def test_spot_pipeline_recovery_gcp():
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     zone = 'us-east4-b'
+    user_hash = common_utils.get_user_hash()
+    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     # TODO(zhwu): fix the name for spot cluster.
     query_cmd = ('gcloud compute instances list --filter='
-                 '"(labels.ray-cluster-name:*-${SPOT_JOB_ID})" '
+                 f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')

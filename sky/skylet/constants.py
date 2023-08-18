@@ -67,3 +67,5 @@ CONDA_INSTALLATION_COMMANDS = (
     # which is the case for VMs created on GCP, and running `conda init` will
     # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;')
+
+USER_ID_ENV = 'SKYPILOT_USER_ID'

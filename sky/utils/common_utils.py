@@ -19,6 +19,7 @@ import colorama
 import yaml
 
 from sky import sky_logging
+from sky.skylet import constants
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -52,7 +53,7 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash(default_value: Optional[str] = None) -> str:
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
@@ -68,6 +69,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
+    default_value = os.getenv(constants.USER_ID_ENV)
     user_hash = default_value
     if _is_valid_user_hash(user_hash):
         assert user_hash is not None
