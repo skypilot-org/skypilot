@@ -1,27 +1,25 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# Specifies which config file kubectl should use.
+export KUBECONFIG="{{ kube_config_path }}"
 
-# Ignore this function and `e home` if you use something like `kubectx` to manage your kubectl contexts and environments
-e(){
-    export KUBECONFIG="/home/gcpuser/.kube/config"
-}
-
-e home
-
+# If the port-forward command is already running on the jump pod, kill it
 pgrep -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22" > /dev/null
-
-# If the command is running, kill it
 if [ $? -eq 0 ]; then
     pkill -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22"
 fi
 
+# Establishes connection between local port and the ssh jump pod
 kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22 &
 K8S_PID=$!
 trap "kill -9 $K8S_PID" EXIT
 
+# checks if a conection to local_port of ipaddress is established 
 while ! nc -z {{ ipaddress }} {{ local_port }}; do
     sleep 0.1
 done
 
+# Estalbishes two directional byte streams to handle stdin/stdout between
+# terminal and the jump pod
 socat - tcp:{{ ipaddress }}:{{ local_port }}

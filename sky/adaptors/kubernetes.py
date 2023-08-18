@@ -15,6 +15,7 @@ LOCAL_PORT_FOR_PORT_FORWARD = 23100
 PORT_FORWARD_PROXY_CMD_TEMPLATE = \
     'kubernetes-port-forward-proxy-command.yaml.j2'
 PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
+KUBE_CONFIG_DEFAULT_PATH = '~/.kube/config'
 
 _configured = False
 _core_api = None

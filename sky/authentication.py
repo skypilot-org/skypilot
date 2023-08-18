@@ -380,7 +380,17 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
+def _get_kubernetes_proxy_command(ingress: int, ipaddress: str,
+                                  ssh_setup_mode: str):
+    """ returns Proxycommand to use when establishing ssh connection
+    to the k8s instance through the jump pod.
+
+    Args:
+        ingress: int; the port number host machine is listening to
+        ipaddress: str; ip address of the host machine
+        ssh_setup_mode: str; networking mode for ssh session. It is either
+            'nodeport' or 'port-forward'
+    """
     if ssh_setup_mode == 'nodeport':
         proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
                          '-o StrictHostKeyChecking=no '
@@ -388,16 +398,19 @@ def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode):
                          f'-o IdentitiesOnly=yes -p {ingress} '
                          f'-W %h:%p sky@{ipaddress}')
     # Setting kubectl port-forward/socat to establish ssh session using
-    # ClusterIP service
+    # ClusterIP service to disallow any ports opened
     else:
         ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        port_forward_proxy_cmd_path = os.path.expanduser(
-            kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
+        kube_config_path = os.path.expanduser(
+            kubernetes.KUBE_CONFIG_DEFAULT_PATH)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
             'ipaddress': ipaddress,
             'local_port': ingress,
+            'kube_config_path': kube_config_path
         }
+        port_forward_proxy_cmd_path = os.path.expanduser(
+            kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
         backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
                                     vars_to_fill,
                                     output_path=port_forward_proxy_cmd_path)
