@@ -1,7 +1,6 @@
+import argparse
 import http.server
 import socketserver
-
-PORT = 8081
 
 
 class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -26,8 +25,12 @@ class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
         return
 
 
-Handler = MyHttpRequestHandler
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='SkyServe HTTP Test Server')
+    parser.add_argument('--port', type=int, required=False, default=8081)
+    args = parser.parse_args()
 
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
-    print("serving at port", PORT)
-    httpd.serve_forever()
+    Handler = MyHttpRequestHandler
+    with socketserver.TCPServer(("", args.port), Handler) as httpd:
+        print("serving at port", args.port)
+        httpd.serve_forever()

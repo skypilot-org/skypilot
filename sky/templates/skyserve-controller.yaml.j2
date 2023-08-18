@@ -1,12 +1,14 @@
 # The template for skyserve controller
 
 setup: |
-  # Install all serve dependencies.
-  pip install skypilot[serve] > /dev/null 2>&1
+  # Install all cloud dependencies.
+  # This is for multicloud support. To allow controller launch on all clouds,
+  # we need to install all cloud dependencies.
+  # This also includes all serve dependencies.
+  pip install skypilot[all] > /dev/null 2>&1
 
-  # Shutdown jupyter service that is default enabled on our GCP Deep
-  # Learning Image. This is to avoid port conflict on 8080.
-  sudo systemctl stop jupyter > /dev/null 2>&1 || true
+  # Install gcloud CLI.
+  {{google_sdk_installation_commands}}
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
