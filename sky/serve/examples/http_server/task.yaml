@@ -1,4 +1,5 @@
 resources:
+  cloud: gcp
   cpus: 2+
 
 workdir: sky/serve/examples/http_server
@@ -10,4 +11,4 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
-  replicas: 2
+  replicas: 1

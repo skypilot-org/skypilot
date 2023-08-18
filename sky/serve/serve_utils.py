@@ -297,6 +297,22 @@ def stream_logs(service_name: str,
     return ''
 
 
+def reload_replica(replica_id: int, resources_override_cli: str) -> str:
+    resp = requests.post(_CONTROLLER_URL + '/controller/reload_replica',
+                         json={
+                             'replica_id': replica_id,
+                             'resources_override_cli': resources_override_cli
+                         })
+    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
+    return common_utils.encode_payload(resp)
+
+
+def load_reload_replica_result(payload: str) -> Any:
+    reload_resp = common_utils.decode_payload(payload)
+    reload_resp = pickle.loads(base64.b64decode(reload_resp))
+    return reload_resp
+
+
 class ServeCodeGen:
     """Code generator for SkyServe.
 
@@ -333,6 +349,15 @@ class ServeCodeGen:
             f'msg = serve_utils.stream_logs({service_name!r}, {replica_id!r}, '
             f'follow={follow}, skip_local_log_file_check='
             f'{skip_local_log_file_check})', 'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def reload_replica(cls, replica_id: int,
+                       resources_override_cli: List[str]) -> str:
+        code = [
+            f'msg = serve_utils.reload_replica({replica_id!r}, '
+            f'{resources_override_cli!r})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

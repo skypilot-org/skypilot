@@ -4371,6 +4371,77 @@ def serve_logs(
         core.serve_tail_logs(service_record, replica_id, follow=follow)
 
 
+@serve.command('reload', cls=_DocumentedCodeCommand)
+@click.option(
+    '--cloud',
+    required=False,
+    type=str,
+    help=('The cloud to use. If specified, overrides the "resources.cloud" '
+          'config. Passing "none" resets the config.'))
+@click.option(
+    '--gpus',
+    required=False,
+    type=str,
+    help=('Type and number of GPUs to use. Example values: '
+          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+          '(fractional counts are supported by the scheduling framework). '
+          'If a new cluster is being launched by this command, this is the '
+          'resources to provision. If an existing cluster is being reused, this'
+          ' is seen as the task demand, which must fit the cluster\'s total '
+          'resources and is used for scheduling the task. '
+          'Overrides the "accelerators" '
+          'config in the YAML if both are supplied. '
+          'Passing "none" resets the config.'))
+@click.argument('service_name',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_service_name))
+@click.argument('replica_id', required=True, type=int)
+@usage_lib.entrypoint
+def serve_reload(
+    cloud: Optional[str],
+    gpus: Optional[str],
+    service_name: str,
+    replica_id: int,
+):
+    """Reload a replica of a service.
+
+    This will force shutdown the replica and restart it with specified
+    resources. It will ignore any errors that occurred to the replica. If not
+    specified, use the resources specified in the service YAML file.
+
+    Example:
+
+    .. code-block:: bash
+
+        # Reload replica 1 of a service
+        sky serve reload [SERVICE_ID] 1
+        \b
+        # Reload replica 3 of a service with 8 A100 GPUs on GCP
+        sky serve reload --cloud gcp --gpus A100:8 [SERVICE_ID] 3
+    """
+    previous_service_record = global_user_state.get_service_from_name(
+        service_name)
+    prompt = None
+    if previous_service_record is None:
+        prompt = 'Service {service_name!r} not found.'
+    else:
+        if previous_service_record['status'] in [
+                status_lib.ServiceStatus.CONTRLLER_FAILED,
+        ]:
+            prompt = (f'Service {service_name!r}\'s controller has failed. '
+                      'Please clean up the service and try again.')
+    if prompt is not None:
+        click.secho(prompt, fg='red')
+        return
+    resources_override_cli: List[str] = []
+    if cloud is not None:
+        resources_override_cli.extend(['--cloud', cloud])
+    if gpus is not None:
+        resources_override_cli.extend(['--gpus', gpus])
+    sky.serve_reload(service_name, replica_id, resources_override_cli)
+
+
 # ==============================
 # Sky Benchmark CLIs
 # ==============================

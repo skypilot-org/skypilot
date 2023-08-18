@@ -220,6 +220,11 @@ class InfraProvider:
         # delete or the number of replicas to delete
         raise NotImplementedError
 
+    def reload_replica(self, replica_id: int,
+                       resources_override_cli: List[str]) -> Optional[str]:
+        # Reload a replica
+        raise NotImplementedError
+
     def terminate(self) -> Optional[str]:
         # Terminate service
         raise NotImplementedError
@@ -383,16 +388,24 @@ class SkyPilotInfraProvider(InfraProvider):
                 ready_replicas.add(info.ip)
         return ready_replicas
 
-    def _launch_cluster(self, replica_id: int) -> None:
+    def _launch_cluster(self,
+                        replica_id: int,
+                        resources_override_cli: Optional[List[str]] = None) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
         if cluster_name in self.launch_process_pool:
             logger.warning(f'Launch process for cluster {cluster_name} '
                            'already exists. Skipping.')
             return
+        assert cluster_name not in self.replica_info
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
+        if resources_override_cli is not None:
+            cmd.extend(resources_override_cli)
+        # TODO(tian): Remove this hack
+        # if replica_id == 1:
+        #     cmd.extend(['--cloud', 'azure'])
         fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
@@ -401,7 +414,6 @@ class SkyPilotInfraProvider(InfraProvider):
                                  stdout=f,
                                  stderr=f)
         self.launch_process_pool[cluster_name] = p
-        assert cluster_name not in self.replica_info
         self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
 
     def _scale_up(self, n: int) -> None:
@@ -473,6 +485,37 @@ class SkyPilotInfraProvider(InfraProvider):
 
     def scale_down(self, n: int) -> None:
         self._scale_down(n)
+
+    def reload_replica(self, replica_id: int,
+                       resources_override_cli: List[str]) -> Optional[str]:
+        replica_cluster_name = serve_utils.generate_replica_cluster_name(
+            self.service_name, replica_id)
+        if replica_cluster_name not in self.replica_info:
+            return f'Cluster {replica_cluster_name} not found.'
+        if replica_cluster_name in self.launch_process_pool:
+            p = self.launch_process_pool[replica_cluster_name]
+            del self.launch_process_pool[replica_cluster_name]
+            if p.poll() is None:
+                assert p.pid is not None
+                os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                p.wait()
+                logger.info('Interrupted launch process for cluster '
+                            f'{replica_cluster_name} due to reload.')
+            info = self.replica_info[replica_cluster_name]
+            # For correctly display as shutting down
+            info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+        self._teardown_cluster(replica_cluster_name, sync_down_logs=False)
+        # Wait until the down process finishes
+        while replica_cluster_name in self.down_process_pool:
+            logger.info(f'Waiting for down process of replica {replica_id} '
+                        'to finish...')
+            time.sleep(10)
+        logger.info(f'Relaunching replica {replica_id}...')
+        # Allow delete replicas that once failed
+        if replica_cluster_name in self.replica_info:
+            del self.replica_info[replica_cluster_name]
+        self._launch_cluster(replica_id, resources_override_cli)
+        return None
 
     def terminate(self) -> Optional[str]:
         logger.info('Terminating infra provider daemon threads...')

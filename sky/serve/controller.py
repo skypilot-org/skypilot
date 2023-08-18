@@ -83,6 +83,15 @@ class Controller:
             }
             return latest_info
 
+        @self.app.post('/controller/reload_replica')
+        async def reload_replica(request: fastapi.Request):
+            body = await request.json()
+            replica_id = body['replica_id']
+            resources_override_cli = body['resources_override_cli']
+            msg = self.infra_provider.reload_replica(replica_id,
+                                                     resources_override_cli)
+            return {'message': msg}
+
         @self.app.post('/controller/terminate')
         def terminate(request: fastapi.Request):
             del request

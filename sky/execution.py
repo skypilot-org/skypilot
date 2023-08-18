@@ -1258,3 +1258,35 @@ def serve_down(
     assert handle is not None
     handle.cleanup_ephemeral_storage()
     global_user_state.remove_service(service_name)
+
+
+# TODO(tian): Maybe move to core?
+def serve_reload(service_name: str, replica_id: int,
+                 resources_override_cli: List[str]) -> None:
+    service_record = global_user_state.get_service_from_name(service_name)
+    assert service_record is not None, service_name
+    service_handle: serve.ServiceHandle = service_record['handle']
+    handle = global_user_state.get_handle_from_cluster_name(
+        service_handle.controller_cluster_name)
+    assert handle is not None
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    code = serve.ServeCodeGen.reload_replica(replica_id, resources_override_cli)
+    returncode, reload_replica_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        code,
+        'Failed when submit reload request to controller.',
+        stderr,
+        stream_logs=False)
+    resp = serve.load_reload_replica_result(reload_replica_payload)
+    if resp.json()['msg']:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Unexpected message when reloading replica of service '
+                f'{service_name}: {resp.json()["msg"]}')
