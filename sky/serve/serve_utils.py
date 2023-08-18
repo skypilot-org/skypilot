@@ -23,12 +23,12 @@ if typing.TYPE_CHECKING:
 
 # A series of pre-hook commands that will be insert to the beginning of each
 # serve-related task, Including controller and replcias.
-SERVE_PREHOOK_COMMANDS = """\
 # Shutdown jupyter service that is default enabled on our GCP Deep
 # Learning Image. This is to avoid port conflict on 8080.
-sudo systemctl stop jupyter > /dev/null 2>&1 || true
 # Shutdown jupyterhub service that is default enabled on our Azure Deep
 # Learning Image. This is to avoid port conflict on 8081.
+SERVE_PREHOOK_COMMANDS = """\
+sudo systemctl stop jupyter > /dev/null 2>&1 || true
 sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
 """
 

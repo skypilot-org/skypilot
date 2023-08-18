@@ -7,7 +7,7 @@ workdir: sky/serve/examples/http_server
 # Default Azure image have a jupyterhub running on 8081, which will be
 # terminated by skyserve prehook command. Here we still use 8081 to test
 # our prehook commands normally execute
-run: python3 server.py
+run: python3 server.py --port 8081
 
 service:
   port: 8081
