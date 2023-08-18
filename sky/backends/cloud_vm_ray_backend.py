@@ -1531,6 +1531,10 @@ class RetryingVmProvisioner(object):
             # means a second 'sky launch -c <name>' will attempt to reuse.
             handle = CloudVmRayResourceHandle(
                 cluster_name=cluster_name,
+                # Backward compatibility will be guaranteed by the underlying
+                # backend_utils.write_cluster_config, which gets the cluster
+                # name on cloud from the ray yaml file, if the previous cluster
+                # exists.
                 cluster_name_on_cloud=config_dict['cluster_name_on_cloud'],
                 cluster_yaml=cluster_config_file,
                 launched_nodes=num_nodes,

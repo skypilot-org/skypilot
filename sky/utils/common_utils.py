@@ -97,9 +97,12 @@ def truncate_and_hash_cluster_name(cluster_name: str,
         return f'{cluster_name}-{user_hash}'
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH -
                                     USER_HASH_LENGTH_IN_CLUSTER_NAME - 2)
+    truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
+    if truncate_cluster_name.endswith('-'):
+        truncate_cluster_name = truncate_cluster_name[:-1]
     assert truncate_cluster_name_length > 0, (cluster_name, max_length)
     cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
-    return (f'{cluster_name[:truncate_cluster_name_length]}'
+    return (f'{truncate_cluster_name}'
             f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
             f'-{user_hash}')
 
