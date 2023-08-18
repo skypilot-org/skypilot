@@ -271,8 +271,7 @@ class KubernetesNodeProvider(NodeProvider):
                     # takes care of the cleaning
                     kubernetes.core_api().delete_namespaced_pod(
                         sshjump_name,
-                        self.namespace,
-                        _request_timeout=config.DELETION_TIMEOUT)
+                        self.namespace)
                     kubernetes.core_api().delete_namespaced_service(
                         sshjump_name,
                         self.namespace)
@@ -281,7 +280,14 @@ class KubernetesNodeProvider(NodeProvider):
             except kubernetes.api_exception() as e:
                 logger.warning(f'Tried to handle sshjump pod {sshjump_name},'
                                f' but got error {e}\n')
-
+                # we encountered an issue while diagnosing sshjump pod. To be on
+                # the safe side, lets remove its service so the port is freed
+                try:
+                    kubernetes.core_api().delete_namespaced_service(
+                        sshjump_name,
+                        self.namespace)
+                except:
+                    pass
         try:
             kubernetes.core_api().delete_namespaced_pod(
                 node_id,
