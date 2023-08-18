@@ -634,8 +634,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.
 

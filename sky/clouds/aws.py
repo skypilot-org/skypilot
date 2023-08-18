@@ -760,20 +760,21 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (tag_filters, region)
-        del tag_filters, zone  # unused
+        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        del zone  # unused
 
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name,
+        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to find the source cluster on AWS.')
+                raise RuntimeError(
+                    f'Failed to find the source cluster {cluster_name} on AWS.')
 
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():

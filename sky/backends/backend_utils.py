@@ -1839,7 +1839,8 @@ def _query_cluster_status_via_cloud_api(
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
                     f'Failed to query {cloud_name} cluster {cluster_name_on_cloud!r} '
-                    f'status: {e}')
+                    f'status: {common_utils.format_exception(e, use_bracket=True)}'
+                )
     else:
         node_statuses = handle.launched_resources.cloud.query_status(
             cluster_name_on_cloud,
