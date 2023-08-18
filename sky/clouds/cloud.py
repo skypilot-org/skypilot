@@ -393,7 +393,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.

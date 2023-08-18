@@ -2007,17 +2007,25 @@ def _update_cluster_status_no_lock(
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
-            rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                                       stream_logs=False,
-                                       require_outputs=True,
-                                       separate_stderr=True)
+            rc, output, stderr = runner.run(
+                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
             if rc:
+                logger.debug(
+                    'Refreshing status: Failed to use `ray` to get IPs from cluster'
+                    f' {cluster_name!r}. stderr: {stderr}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
+            logger.debug(
+                'Refreshing status: ray status not showing all nodes '
+                f'({ready_head + ready_workers}/{handle.launched_nodes}); '
+                f'output: {output}; stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
                 'Refreshing status: Failed to use `ray` to get IPs from cluster'
@@ -2101,6 +2109,8 @@ def _update_cluster_status_no_lock(
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
         status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
     if is_abnormal:
+        logger.debug('The cluster is abnormal. Setting to INIT status. '
+                     f'node_statuses: {node_statuses}')
         backend = get_backend_from_handle(handle)
         if isinstance(backend,
                       backends.CloudVmRayBackend) and record['autostop'] >= 0:
