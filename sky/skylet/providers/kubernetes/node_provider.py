@@ -219,8 +219,13 @@ class KubernetesNodeProvider(NodeProvider):
                     if event.reason == 'FailedScheduling':
                         event_message = event.message
                         break
-                if pod_status == 'Pending':
-                    if event_message is not None:
+
+                timeout_err_msg = (
+                    'Timed out while waiting for nodes to start. '
+                    'Cluster may be out of resources or '
+                    'may be too slow to autoscale.')
+                if event_message is not None:
+                    if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
                             total_cpus = os.cpu_count()
                             raise config.KubernetesError(
@@ -235,10 +240,10 @@ class KubernetesNodeProvider(NodeProvider):
                                     'Unavailable GPU(s) are requested. '
                                     f'Please confirm if {node_selector} is '
                                     'available in the cluster.')
-                raise config.KubernetesError(
-                    'Timed out while waiting for nodes to start. '
-                    'Cluster may be out of resources or '
-                    'may be too slow to autoscale.')
+                    raise config.KubernetesError(
+                        f'{timeout_err_msg} '
+                        f'For more details: {event_message}')
+                raise config.KubernetesError(f'{timeout_err_msg}')
             all_ready = True
 
             for node in new_nodes:
