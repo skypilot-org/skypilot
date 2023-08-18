@@ -169,12 +169,12 @@ def terminate_instances(
         try:
             operations.append(
                 delete(resource_group_name=resource_group, vm_name=node_id))
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete VM: {}'.format(e))
     for opr in operations:
         try:
             opr.wait()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete VM: {}'.format(e))
 
     for metadata in instances_to_terminate.values():
@@ -188,7 +188,7 @@ def terminate_instances(
                 resource_group_name=resource_group,
                 network_interface_name=metadata['nic_name'],
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete nic: {}'.format(e))
 
         # delete ip address
@@ -202,7 +202,7 @@ def terminate_instances(
                     resource_group_name=resource_group,
                     public_ip_address_name=metadata['public_ip_name'],
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning('Failed to delete public ip: {}'.format(e))
 
     # delete disks
@@ -211,5 +211,5 @@ def terminate_instances(
     for disk in disks:
         try:
             delete(resource_group_name=resource_group, disk_name=disk)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning('Failed to delete disk: {}'.format(e))
