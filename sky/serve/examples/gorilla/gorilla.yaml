@@ -20,7 +20,7 @@ setup: |
 
   # Install dependencies
   pip install git+https://github.com/lm-sys/FastChat.git
-  pip install transformers torch accelerate sentencepiece protobuf einops
+  pip install protobuf einops
 
 run: |
   conda activate chatbot
