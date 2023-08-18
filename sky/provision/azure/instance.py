@@ -1,18 +1,14 @@
 """Azure instance provisioning."""
-from typing import Any, Callable, Dict, Set, List, Optional
+from typing import Any, Callable, Dict, Optional, Set
 
 from sky import sky_logging
 from sky.adaptors import azure
 
 logger = sky_logging.init_logger(__name__)
 
-MAX_POLLS = 12
-# Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_STOP = MAX_POLLS * 8
-POLL_INTERVAL = 5
-
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
+TAG_RAY_NODE_KIND = 'ray-node-type'
 
 
 def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
@@ -80,12 +76,13 @@ def _filter_instances(
     cluster_name: str,
     provider_config,
     tag_filters,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool,
 ):
     subscription_id = provider_config['subscription_id']
     # add cluster name filter to only get nodes from this cluster
     cluster_tag_filters = {**tag_filters, TAG_RAY_CLUSTER_NAME: cluster_name}
+    if worker_only:
+        cluster_tag_filters[TAG_RAY_NODE_KIND] = 'worker'
 
     def match_tags(vm):
         for k, v in cluster_tag_filters.items():
@@ -107,20 +104,17 @@ def _filter_instances(
 def stop_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     assert provider_config is not None, cluster_name
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
-    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
 
     instances_to_stop = _filter_instances(
         cluster_name,
         provider_config,
-        name_filter,
-        included_instances,
-        excluded_instances,
+        {},
+        worker_only,
     )
     compute_client = azure.get_client('compute', subscription_id)
 
@@ -135,8 +129,7 @@ def stop_instances(
 def terminate_instances(
     cluster_name: str,
     provider_config: Optional[Dict[str, Any]] = None,
-    included_instances: Optional[List[str]] = None,
-    excluded_instances: Optional[List[str]] = None,
+    worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name
@@ -145,20 +138,18 @@ def terminate_instances(
     compute_client = azure.get_client('compute', subscription_id)
     network_client = azure.get_client('network', subscription_id)
 
-    if included_instances is None and not excluded_instances:
+    if not worker_only:
         # If we are going to terminate all instances, then
         # we just take down the resource group in case of resource leak.
         resource_client = azure.get_client('resource', subscription_id)
         resource_client.resource_groups.begin_delete(resource_group)
         return
 
-    name_filter = {TAG_RAY_CLUSTER_NAME: cluster_name}
     instances_to_terminate = _filter_instances(
         cluster_name,
         provider_config,
-        name_filter,
-        included_instances,
-        excluded_instances,
+        {},
+        worker_only,
     )
 
     disks: Set[str] = set()
