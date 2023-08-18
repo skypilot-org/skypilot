@@ -219,7 +219,6 @@ class KubernetesNodeProvider(NodeProvider):
                     if event.reason == 'FailedScheduling':
                         event_message = event.message
                         break
-
                 timeout_err_msg = (
                     'Timed out while waiting for nodes to start. '
                     'Cluster may be out of resources or '
