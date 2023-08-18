@@ -2032,7 +2032,25 @@ def logs(
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel job(s)."""
+    """Cancel job(s).
+
+    Example usage:
+
+    .. code-block:: bash
+
+      \b
+      # Cancel specific jobs on a cluster.
+      sky cancel cluster_name 1
+      sky cancel cluster_name 1 2 3
+      \b
+      # Cancel all jobs on a cluster.
+      sky cancel cluster_name -a
+      \b
+      # Cancel the latest running job on a cluster.
+      sky cancel cluster_name
+
+    Job IDs can be looked up by ``sky queue cluster_name``.
+    """
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     cancel_latest_running_job = False
@@ -2043,14 +2061,6 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                    f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
         cancel_latest_running_job = True
-        # # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        # message = textwrap.dedent(f"""\
-        #   Use:
-        #     {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
-        #     {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
-
-        #   Job IDs can be looked up by {bold}sky queue{reset}.""")
-        # raise click.UsageError(message)
 
     if not yes:
         if job_identity_str is None:
@@ -2070,15 +2080,9 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
-        # FIXME(zongheng)
-        if all:
-            arg_str = '--all'
-        else:
-            arg_str = ' '.join(map(str, jobs))
         error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
-                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-                     f'job IDs> [--all]'
-                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+                     f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
+                     f'job IDs> [--all]{reset}')
         click.echo(error_str)
         sys.exit(1)
     except ValueError as e:

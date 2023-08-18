@@ -703,15 +703,19 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def cancel_jobs(job_owner: str,
-                jobs: Optional[List[int]],
-                cancel_latest_running_job: bool = False) -> None:
+def cancel_jobs_encoded_results(job_owner: str,
+                                jobs: Optional[List[int]],
+                                cancel_latest_running_job: bool = False) -> str:
     """Cancel jobs.
 
     Args:
         jobs: Job IDs to cancel. If None, cancel all jobs.
         cancel_latest_running_job: Whether to cancel the latest running job. If
             set to True, asserts `jobs` is set to None.
+
+    Returns:
+        Encoded job IDs that are actually cancelled. Caller should use
+        common_utils.decode_payload() to parse.
     """
     if cancel_latest_running_job:
         # Cancel the latest (largest job ID) running job.
@@ -731,6 +735,7 @@ def cancel_jobs(job_owner: str,
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     job_client = _create_ray_job_submission_client()
+    cancelled_ids = []
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
@@ -752,8 +757,10 @@ def cancel_jobs(job_owner: str,
                     JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
             ]:
                 _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+                cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
+    return common_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -837,8 +844,13 @@ class JobLibCodeGen:
                     job_owner: str,
                     job_ids: Optional[List[int]],
                     cancel_latest_running_job: bool = False) -> str:
-        code = [(f'job_lib.cancel_jobs({job_owner!r},{job_ids!r},'
-                 f'{cancel_latest_running_job})')]
+        """See job_lib.cancel_jobs()."""
+        code = [
+            (f'cancelled = job_lib.cancel_jobs_encoded_results({job_owner!r},'
+             f' {job_ids!r}, {cancel_latest_running_job})'),
+            # Print cancelled IDs. Caller should parse by decoding.
+            'print(cancelled, flush=True)',
+        ]
         return cls._build(code)
 
     @classmethod

@@ -538,6 +538,8 @@ def cancel(
 
     Please refer to the sky.cli.cancel for the document.
     Additional arguments:
+        cancel_latest_running_job: (bool) whether to cancel the latest running
+            job on the cluster. If True, ``job_ids`` and ``all`` are ignored.
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the spot controller to cancel the job when the
@@ -553,12 +555,6 @@ def cancel(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    # FIXME(zongheng)
-    # if not job_ids and not all:
-    #     raise ValueError(
-    #         'sky cancel requires either a job id '
-    #         f'(see `sky queue {cluster_name} -s`) or the --all flag.')
-
     backend_utils.check_cluster_name_not_reserved(
         cluster_name, operation_str='Cancelling jobs')
 

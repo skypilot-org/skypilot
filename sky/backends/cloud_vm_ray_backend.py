@@ -3438,7 +3438,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
-                    cancel_latest_running_job: bool = False):
+                    cancel_latest_running_job: bool = False) -> None:
+        """Cancel jobs.
+
+        CloudVMRayBackend specific method.
+
+        Args:
+            handle: The cluster handle.
+            jobs: Job IDs to cancel. If None, cancel all jobs.
+            cancel_latest_running_job: Whether to cancel the latest running job.
+                If set to True, asserts `jobs` is set to None.
+        """
         if cancel_latest_running_job:
             assert jobs is None, (
                 'Cannot specify both jobs and cancel_latest_running_job')
@@ -3452,10 +3462,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
-        logger.info(stdout)
         subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+
+        cancelled_ids = common_utils.decode_payload(stdout)
+        if cancelled_ids:
+            logger.info(
+                f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
+        else:
+            logger.info(
+                'No jobs cancelled. They may already be in terminal states.')
 
     def sync_down_logs(
             self,
