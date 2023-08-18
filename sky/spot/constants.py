@@ -19,3 +19,5 @@ SPOT_FM_REMOTE_TMP_DIR = '/tmp/sky-spot-filemounts-files'
 # for Azure, and n1-standard-8 (8 vCPUs, 32 GB) for GCP.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES = {'disk_size': 50}
+
+SPOT_CLUSTER_NAME_PREFIX_LENGTH = 30

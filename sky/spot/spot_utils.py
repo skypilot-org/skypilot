@@ -22,6 +22,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
+from sky.spot import constants as spot_constants
 from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -205,7 +206,8 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     # Truncate the task name to 30 chars to avoid the cluster name being too
     # long after appending the job id, which will cause another truncation in
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
-    cluster_name = common_utils.truncate_and_hash_cluster_name(task_name, 30)
+    cluster_name = common_utils.truncate_and_hash_cluster_name(
+        task_name, spot_constants.SPOT_CLUSTER_NAME_PREFIX_LENGTH)
     return f'{cluster_name}-{job_id}'
 
 

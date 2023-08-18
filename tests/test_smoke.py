@@ -22,7 +22,6 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
-import hashlib
 import inspect
 import os
 import pathlib
@@ -41,6 +40,7 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky import spot
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -2009,9 +2009,11 @@ def test_spot_recovery_aws(aws_config_region):
 def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    name_on_cloud = sky.GCP.truncate_and_hash_cluster_name(name)
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH)
     zone = 'us-east4-b'
     query_cmd = (f'gcloud compute instances list --filter='
+                 # `:` means prefix match.
                  f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
