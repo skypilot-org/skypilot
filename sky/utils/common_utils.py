@@ -24,7 +24,10 @@ _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
-CLUSTER_NAME_HASH_LENGTH = 4
+# We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
+# possibilities. considering the final cluster name contains the prefix as well,
+# we should be fine with 2 chars.
+CLUSTER_NAME_HASH_LENGTH = 2
 
 _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
@@ -88,6 +91,20 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
         f.write(user_hash)
     return user_hash
 
+def base36_encode(hex_str: str) -> str:
+    """Converts a hex string to a base36 string."""
+    int_value = int(hex_str, 16)
+
+    def _base36_encode(num: int) -> str:
+        if num == 0:
+            return '0'
+        alphabet = '0123456789abcdefghijklmnopqrstuvwxyz'
+        base36 = ''
+        while num != 0:
+            num, i = divmod(num, 36)
+            base36 = alphabet[i] + base36
+        return base36
+    return _base36_encode(int_value)
 
 def truncate_and_hash_cluster_name(cluster_name: str,
                                    max_length: Optional[int] = 15) -> str:
@@ -102,6 +119,8 @@ def truncate_and_hash_cluster_name(cluster_name: str,
         truncate_cluster_name = truncate_cluster_name[:-1]
     assert truncate_cluster_name_length > 0, (cluster_name, max_length)
     cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    # Use base36 to reduce the length of the hash.
+    cluster_name_hash = base36_encode(cluster_name_hash)
     return (f'{truncate_cluster_name}'
             f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
             f'-{user_hash}')
