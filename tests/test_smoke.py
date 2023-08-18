@@ -2057,14 +2057,15 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
-            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-             'cut -d\'-\' -f2 | rev`;'
-             f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             # TODO(zhwu): fix the name for spot cluster.
-             '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID} '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            (
+                f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+                'cut -d\'-\' -f2 | rev`;'
+                f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                f'aws ec2 describe-instances --region {region} '
+                # TODO(zhwu): fix the name for spot cluster.
+                '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID} '
+                f'--query Reservations[].Instances[].InstanceId '
+                '--output text)'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',

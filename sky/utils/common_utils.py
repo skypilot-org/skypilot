@@ -91,6 +91,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
         f.write(user_hash)
     return user_hash
 
+
 def base36_encode(hex_str: str) -> str:
     """Converts a hex string to a base36 string."""
     int_value = int(hex_str, 16)
@@ -104,7 +105,9 @@ def base36_encode(hex_str: str) -> str:
             num, i = divmod(num, 36)
             base36 = alphabet[i] + base36
         return base36
+
     return _base36_encode(int_value)
+
 
 def truncate_and_hash_cluster_name(cluster_name: str,
                                    max_length: Optional[int] = 15) -> str:
