@@ -202,7 +202,11 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 
 def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     """Generate spot cluster name."""
-    return f'{task_name}-{job_id}'
+    # Truncate the task name to 30 chars to avoid the cluster name being too
+    # long after appending the job id, which will cause another truncation in
+    # the underlying sky.launch, hiding the `job_id` in the cluster name.
+    cluster_name = common_utils.truncate_and_hash_cluster_name(task_name, 30)
+    return f'{cluster_name}-{job_id}'
 
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
