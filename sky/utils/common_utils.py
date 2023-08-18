@@ -110,13 +110,19 @@ def base36_encode(hex_str: str) -> str:
 
 
 def truncate_and_hash_cluster_name(cluster_name: str,
-                                   max_length: Optional[int] = 15) -> str:
-    user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
-    if (max_length is None or len(cluster_name) <=
-            max_length - USER_HASH_LENGTH_IN_CLUSTER_NAME - 1):
-        return f'{cluster_name}-{user_hash}'
-    truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH -
-                                    USER_HASH_LENGTH_IN_CLUSTER_NAME - 2)
+                                   max_length: Optional[int] = 15,
+                                   add_user_hash: bool = True) -> str:
+    user_hash = ''
+    if add_user_hash:
+        user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
+        user_hash = f'-{user_hash}'
+    user_hash_length = len(user_hash)
+
+    if (max_length is None or
+            len(cluster_name) <= max_length - user_hash_length):
+        return f'{cluster_name}{user_hash}'
+    truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
+                                    user_hash_length)
     truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name[:-1]
@@ -125,8 +131,7 @@ def truncate_and_hash_cluster_name(cluster_name: str,
     # Use base36 to reduce the length of the hash.
     cluster_name_hash = base36_encode(cluster_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}'
-            f'-{user_hash}')
+            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
 
 
 def get_global_job_id(job_timestamp: str,

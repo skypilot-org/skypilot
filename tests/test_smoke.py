@@ -1977,7 +1977,8 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 def test_spot_recovery_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    name_on_cloud = sky.AWS.truncate_and_hash_cluster_name(name)
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_aws',
@@ -2010,18 +2011,19 @@ def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     name_on_cloud = common_utils.truncate_and_hash_cluster_name(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH)
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-east4-b'
-    query_cmd = (f'gcloud compute instances list --filter='
-                 # `:` means prefix match.
-                 f'"(labels.ray-cluster-name:{name_on_cloud})" '
-                 f'--zones={zone} --format="value(name)"')
+    query_cmd = (
+        f'gcloud compute instances list --filter='
+        # `:` means prefix match.
+        f'"(labels.ray-cluster-name:{name_on_cloud})" '
+        f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
         'spot_recovery_gcp',
         [
-            f'sky spot launch --cloud gcp --zone {zone} -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -2150,7 +2152,8 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    name_on_cloud = sky.AWS.truncate_and_hash_cluster_name(name)
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_multi_node_aws',
@@ -2183,7 +2186,8 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
 def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    name_on_cloud = sky.GCP.truncate_and_hash_cluster_name(name)
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west2-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
@@ -2217,9 +2221,12 @@ def test_spot_recovery_multi_node_gcp():
 @pytest.mark.managed_spot
 def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
-    name_on_cloud = sky.AWS.truncate_and_hash_cluster_name(name)
-    name_2_on_cloud = sky.AWS.truncate_and_hash_cluster_name(f'{name}-2')
-    name_3_on_cloud = sky.AWS.truncate_and_hash_cluster_name(f'{name}-3')
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_2_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        f'{name}-2', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_3_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        f'{name}-3', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_cancellation_aws',
@@ -2284,7 +2291,8 @@ def test_spot_cancellation_aws(aws_config_region):
 @pytest.mark.managed_spot
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
-    name_on_cloud = sky.GCP.truncate_and_hash_cluster_name(name)
+    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
     query_state_cmd = ('gcloud compute instances list '
                        f'--filter="(labels.ray-cluster-name:{name_on_cloud})" '
@@ -2550,13 +2558,14 @@ def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
+        name_on_cloud = sky.Azure.truncate_and_hash_cluster_name(name)
         region = 'westus2'
         test = Test(
             'azure-disk-tier',
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
-                f'az resource list --tag ray-cluster-name={name} --query '
+                f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
                 f'--output tsv | grep {type}'
             ],

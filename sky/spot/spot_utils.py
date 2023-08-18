@@ -207,7 +207,9 @@ def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     # long after appending the job id, which will cause another truncation in
     # the underlying sky.launch, hiding the `job_id` in the cluster name.
     cluster_name = common_utils.truncate_and_hash_cluster_name(
-        task_name, spot_constants.SPOT_CLUSTER_NAME_PREFIX_LENGTH)
+        task_name,
+        spot_constants.SPOT_CLUSTER_NAME_PREFIX_LENGTH,
+        add_user_hash=False)
     return f'{cluster_name}-{job_id}'
 
 
