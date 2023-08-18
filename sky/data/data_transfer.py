@@ -24,7 +24,8 @@ import colorama
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import aws, gcp
+from sky.adaptors import aws
+from sky.adaptors import gcp
 from sky.data import data_utils
 from sky.utils import log_utils
 from sky.utils import ux_utils
@@ -45,7 +46,8 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
-    from oauth2client.client import GoogleCredentials  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from oauth2client.client import GoogleCredentials
 
     oauth_credentials = GoogleCredentials.get_application_default()
     storagetransfer = gcp.build('storagetransfer',

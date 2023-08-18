@@ -62,18 +62,18 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import common_utils
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
+from sky.usage import usage_lib
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
-from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -1287,9 +1287,13 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors.'))
+          'to unavailability errors.'),
+)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1341,7 +1345,6 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1350,6 +1353,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching tasks on it')
@@ -2281,8 +2285,12 @@ def autostop(
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if we fail to start the cluster due to unavailability errors.'))
+          'if we fail to start the cluster due to unavailability errors.'),
+)
 @click.option(
     '--force',
     '-f',
@@ -3481,11 +3489,12 @@ def spot():
     default=None,
     is_flag=True,
     required=False,
-    help=('(Default: True; this flag is deprecated and will be removed in a '
-          'future release.) Whether to retry provisioning infinitely until the '
-          'cluster is up, if unavailability errors are encountered. This '
-          'applies to launching the spot clusters (both the initial and any '
-          'recovery attempts), not the spot controller.'))
+    help=(
+        '(Default: True; this flag is deprecated and will be removed in a '
+        'future release.) Whether to retry provisioning infinitely until the '
+        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
+        'applies to launching the spot clusters (both the initial and any '
+        'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,

@@ -14,9 +14,9 @@ import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
-import yaml
 
 import colorama
+import yaml
 
 from sky import sky_logging
 

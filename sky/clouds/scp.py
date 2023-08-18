@@ -9,11 +9,11 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
+from sky import sky_logging
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
-from sky import exceptions
-from sky import sky_logging
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

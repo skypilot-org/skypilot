@@ -1,9 +1,9 @@
-import pytest
 import tempfile
 from typing import List
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 # Usage: use
 #   @pytest.mark.slow
@@ -182,6 +182,7 @@ def generic_cloud(request) -> str:
 @pytest.fixture
 def enable_all_clouds(monkeypatch):
     from sky import clouds
+
     # Monkey-patching is required because in the test environment, no cloud is
     # enabled. The optimizer checks the environment to find enabled clouds, and
     # only generates plans within these clouds. The tests assume that all three

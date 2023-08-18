@@ -1,6 +1,10 @@
 from unittest.mock import patch
-from sky.clouds.gcp import GCP, GCPReservation, SpecificReservation
+
 import pytest
+
+from sky.clouds.gcp import GCP
+from sky.clouds.gcp import GCPReservation
+from sky.clouds.gcp import SpecificReservation
 
 
 @pytest.mark.parametrize((

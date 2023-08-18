@@ -17,23 +17,14 @@ import io
 import os
 import platform
 import re
-import warnings
 from typing import Dict, List
+import warnings
 
 import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 
 system = platform.system()
-if system == 'Darwin':
-    mac_version = platform.mac_ver()[0]
-    mac_major, mac_minor = mac_version.split('.')[:2]
-    mac_major = int(mac_major)
-    mac_minor = int(mac_minor)
-    if mac_major < 10 or (mac_major == 10 and mac_minor < 15):
-        warnings.warn(
-            f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
-            'is required to install ray>=1.9\'')
 
 
 def find_version(*filepath):
@@ -69,15 +60,15 @@ install_requires = [
     # docs display weird blockquotes.
     # TODO(zongheng): investigate how to make click 8.1.x display nicely and
     # remove the upper bound.
-    'click<=8.0.4,>=7.0',
+    'click <= 8.0.4, >= 7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
-    'colorama<0.4.5',
+    'colorama < 0.4.5',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
     # https://github.com/pallets/jinja/issues/1585
-    'jinja2>=3.0',
+    'jinja2 >= 3.0',
     'jsonschema',
     'networkx',
     'oauth2client',
@@ -85,17 +76,19 @@ install_requires = [
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
-    'PrettyTable>=2.0.0',
+    'PrettyTable >= 2.0.0',
     'python-dotenv',
     # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
-    'ray[default]>=2.2.0,<=2.4.0',
+    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
+    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
     'rich',
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
     "typing_extensions; python_version < '3.8'",
-    'filelock>=3.6.0',
+    'filelock >= 3.6.0',
     # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
     # ray start is called (#2054).
@@ -113,7 +106,9 @@ install_requires = [
     'pulp',
     # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
     # https://github.com/ray-project/ray/issues/36990
-    'pydantic<2.0',
+    # >=1.10.8 is needed for ray>=2.6. See
+    # https://github.com/ray-project/ray/issues/35661
+    'pydantic <2.0, >=1.10.8',
     # Cython 3.0 release breaks PyYAML installed by aws-cli.
     # https://github.com/yaml/pyyaml/issues/601
     # https://github.com/aws/aws-cli/issues/8036

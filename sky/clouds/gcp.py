@@ -1,5 +1,6 @@
 """Google Cloud Platform."""
 import dataclasses
+import datetime
 import functools
 import json
 import os
@@ -7,8 +8,7 @@ import re
 import subprocess
 import time
 import typing
-import datetime
-from typing import Dict, Iterator, List, Optional, Tuple, Set
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
 
@@ -114,9 +114,7 @@ class SpecificReservation:
 
 
 class GCPReservation:
-    """
-    GCP Reservation object that contains the reservation information.
-    """
+    """GCP Reservation object that contains the reservation information."""
 
     def __init__(self, self_link: str, zone: str,
                  specific_reservation: SpecificReservation,
@@ -138,9 +136,7 @@ class GCPReservation:
 
     @property
     def available_resources(self) -> int:
-        """
-        Count the resources available that can be used in this reservation.
-        """
+        """Count resources available that can be used in this reservation."""
         return (self.specific_reservation.count -
                 self.specific_reservation.in_use_count)
 
@@ -148,7 +144,8 @@ class GCPReservation:
         self,
         specific_reservations: Set[str],
     ) -> bool:
-        """
+        """Check if the reservation is consumable.
+
         Check if the reservation is consumable with the provided specific
         reservation names. This is defined by the Consumption type.
         For more details:
@@ -159,7 +156,8 @@ class GCPReservation:
 
     @property
     def name(self) -> str:
-        """Name is derived from reservation self link.
+        """Name derived from reservation self link.
+
         The naming convention can be found here:
         https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
         """
@@ -349,8 +347,9 @@ class GCP(clouds.Cloud):
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
         return find_machine is not None
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # Unused.
+    @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -358,7 +357,7 @@ class GCP(clouds.Cloud):
                                 'v1',
                                 credentials=None,
                                 cache_discovery=False)
-        except gcp.credential_error_exception() as e:
+        except gcp.credential_error_exception():
             return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
@@ -370,7 +369,7 @@ class GCP(clouds.Cloud):
             # of which are specified with the image_id field. We will
             # distinguish them by checking if the image_id contains
             # 'machineImages'.
-            if self._is_machine_image(image_id):
+            if cls._is_machine_image(image_id):
                 image_infos = compute.machineImages().get(
                     project=project, machineImage=image_name).execute()
                 # The VM launching in a different region than the machine
@@ -379,8 +378,10 @@ class GCP(clouds.Cloud):
                 return float(
                     image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
             else:
+                start = time.time()
                 image_infos = compute.images().get(project=project,
                                                    image=image_name).execute()
+                logger.debug(f'GCP image get took {time.time() - start:.2f}s')
                 return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
@@ -392,6 +393,11 @@ class GCP(clouds.Cloud):
                     raise ValueError(f'Image {image_id!r} not found in '
                                      'GCP.') from None
             raise
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del region  # Unused.
+        return cls._get_image_size(image_id)
 
     @classmethod
     def get_default_instance_type(
@@ -644,8 +650,8 @@ class GCP(clouds.Cloud):
         self,
         instance_type: str,
     ) -> List[GCPReservation]:
-        """
-        List all reservations for the given instance type.
+        """List all reservations for the given instance type.
+
         TODO: We need to incorporate accelerators because the reserved instance
         can be consumed only when the instance_type + GPU type matches, and in
         GCP GPUs except for A100 and L4 do not have their own instance type.
@@ -694,8 +700,8 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth  # type: ignore
             # Check google-api-python-client installation.
+            from google import auth  # type: ignore
             import googleapiclient
 
             # Check the installation of google-cloud-sdk.
@@ -799,8 +805,9 @@ class GCP(clouds.Cloud):
                   'some time.')
 
         # pylint: disable=import-outside-toplevel,unused-import
-        import googleapiclient.discovery
         import google.auth
+        import googleapiclient.discovery
+
         from sky.skylet.providers.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
@@ -984,7 +991,8 @@ class GCP(clouds.Cloud):
         use_spot = resources.use_spot
         region = resources.region
 
-        from sky.clouds.service_catalog import gcp_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import gcp_catalog
 
         quota_code = gcp_catalog.get_quota_code(accelerator, use_spot)
 
@@ -1025,7 +1033,8 @@ class GCP(clouds.Cloud):
         """Query the status of a cluster."""
         del region  # unused
 
-        from sky.utils import tpu_utils  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import tpu_utils
         use_tpu_vm = kwargs.pop('use_tpu_vm', False)
 
         label_filter_str = cls._label_filter_str(tag_filters)

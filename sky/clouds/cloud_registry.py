@@ -1,10 +1,10 @@
-"""
-Cloud need to be registered in the CLOUD_REGISTRY so that they can be discovered
-"""
+"""Clouds need to be registered in CLOUD_REGISTRY to be discovered"""
+
 import typing
 from typing import Optional, Type
 
 from sky.utils import ux_utils
+
 if typing.TYPE_CHECKING:
     import sky
 

@@ -12,8 +12,8 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
     from sky import resources as resources_lib
+    from sky import status_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -386,7 +386,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.

@@ -30,18 +30,19 @@ from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp, ibm
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
 

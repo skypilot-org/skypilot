@@ -9,9 +9,9 @@ from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
+from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -21,8 +21,7 @@ _CREDENTIAL_PATH = '~/.kube/config'
 
 
 class KubernetesInstanceType:
-    """
-    Class to represent the "Instance Type" in a Kubernetes.
+    """Class to represent the "Instance Type" in a Kubernetes.
 
     Since Kubernetes does not have a notion of instances, we generate
     virtual instance types that represent the resources requested by a

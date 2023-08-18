@@ -15,9 +15,9 @@ DAG assumption: chain.  If multiple branches, take into account of parallelism?
 Incorporate the notion of region/zone (affects pricing).
 Incorporate the notion of per-account egress quota (affects pricing).
 """
-import sky
-
 import time_estimators
+
+import sky
 
 
 def make_application():

@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-import colorama
 import glob
 import hashlib
 import os
@@ -11,6 +10,7 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import pandas as pd
 
 from sky import exceptions
@@ -245,7 +245,8 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """

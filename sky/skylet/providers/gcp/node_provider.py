@@ -14,13 +14,13 @@ from sky.skylet.providers.gcp.config import (
 )
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
 
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_KIND,
     TAG_RAY_USER_NODE_TYPE,
 )
 from ray.autoscaler._private.cli_logger import cf, cli_logger
-from ray.autoscaler._private.command_runner import SSHCommandRunner
 
 
 # The logic has been abstracted away here to allow for different GCP resources

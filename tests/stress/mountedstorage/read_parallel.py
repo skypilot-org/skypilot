@@ -1,8 +1,8 @@
 # Read all files in a directory recursively in parallel
 
-import os
-from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 
 def parse_args():
