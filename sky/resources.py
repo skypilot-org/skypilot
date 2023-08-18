@@ -850,6 +850,8 @@ class Resources:
             self, region, zones)
         docker_image = self.extract_docker_image()
         docker_login_config = self._docker_login_config or {}
+        docker_login_config['use_docker_login'] = (self._docker_login_config
+                                                   is not None)
         return dict(
             cloud_specific_variables,
             **docker_login_config,

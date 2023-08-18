@@ -34,7 +34,7 @@ provider:
     - {{port}}
 {%- endfor %}
 {%- endif %}
-{%- if DOCKER_USERNAME is not none %}
+{%- if use_docker_login %}
   docker_login_config:
     DOCKER_USERNAME: {{DOCKER_USERNAME}}
     DOCKER_PASSWORD: {{DOCKER_PASSWORD}}
