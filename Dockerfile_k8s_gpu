@@ -4,7 +4,9 @@
 FROM rayproject/ray:2.4.0-gpu
 
 # Initialize conda for root user, install ssh and other local dependencies
-RUN sudo apt update -y && \
+# We remove cuda lists to avoid conflicts with the cuda version installed by ray
+RUN sudo rm -rf /etc/apt/sources.list.d/cuda* && \
+    sudo apt update -y && \
     sudo apt install gcc rsync sudo patch openssh-server pciutils nano fuse unzip -y && \
     sudo rm -rf /var/lib/apt/lists/* && \
     sudo apt remove -y python3 && \

@@ -49,7 +49,6 @@ if [[ $push ]]; then
   else
     echo "Building and pushing CPU image for amd64 and arm64"
     docker buildx build --push --platform linux/arm64,linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
-  fi
 fi
 
 # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
