@@ -220,20 +220,21 @@ class KubernetesNodeProvider(NodeProvider):
                         event_message = event.message
                         break
                 if pod_status == 'Pending':
-                    if 'Insufficient cpu' in event_message:
-                        total_cpus = os.cpu_count()
-                        raise config.KubernetesError(
-                            'More than available CPU(s) are requested. '
-                            f'In total, {total_cpus} CPUs are available in '
-                            'the machine. Run \'sky status\' to see the '
-                            'number of CPUs that are already in use.')
-                    if 'didn\'t match Pod\'s node affinity/selector' in event_message:
-                        node_selector = pod.spec.node_selector
-                        if node_selector is not None:
+                    if event_message is not None:
+                        if 'Insufficient cpu' in event_message:
+                            total_cpus = os.cpu_count()
                             raise config.KubernetesError(
-                                'Unavailable GPU(s) are requested. '
-                                f'Please confirm if {node_selector} is '
-                                'available in the cluster.')
+                                'More than available CPU(s) are requested. '
+                                f'In total, {total_cpus} CPUs are available in '
+                                'the machine. Run \'sky status\' to see the '
+                                'number of CPUs that are already in use.')
+                        if 'didn\'t match Pod\'s node affinity/selector' in event_message:
+                            node_selector = pod.spec.node_selector
+                            if node_selector is not None:
+                                raise config.KubernetesError(
+                                    'Unavailable GPU(s) are requested. '
+                                    f'Please confirm if {node_selector} is '
+                                    'available in the cluster.')
                 raise config.KubernetesError(
                     'Timed out while waiting for nodes to start. '
                     'Cluster may be out of resources or '
