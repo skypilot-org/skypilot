@@ -124,7 +124,8 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
                                     f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
             clone_disk_from,
-            backend_utils.tag_filter_for_cluster(clone_disk_from),
+            backend_utils.tag_filter_for_cluster(
+                original_cloud.truncate_and_hash_cluster_name(clone_disk_from)),
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )
