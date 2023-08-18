@@ -2395,7 +2395,7 @@ def check_cluster_available(
     reset = colorama.Style.RESET_ALL
     if handle is None:
         error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
-            'provider.')
+                     'provider.')
         if previous_cluster_status is not None:
             assert record is not None, previous_cluster_status
             actions = []
