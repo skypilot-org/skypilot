@@ -6,6 +6,7 @@ import getpass
 import json
 import os
 import pathlib
+import pprint
 import re
 import subprocess
 import tempfile
@@ -1828,7 +1829,7 @@ def _query_cluster_status_via_cloud_api(
             node_status_dict = provision_lib.query_instances(
                 cloud_name, cluster_name, provider_config)
             logger.debug(f'Querying {cloud_name} cluster {cluster_name!r} '
-                         f'status: {node_status_dict}')
+                         f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -1997,6 +1998,7 @@ def _update_cluster_status_no_lock(
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
+            assert handle.head_ssh_port is not None, handle
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
@@ -2007,8 +2009,8 @@ def _update_cluster_status_no_lock(
                 separate_stderr=True)
             if rc:
                 logger.debug(
-                    'Refreshing status: Failed to use `ray` to get IPs from cluster'
-                    f' {cluster_name!r}. stderr: {stderr}')
+                    'Refreshing status: Failed to use `ray` to get IPs from '
+                    f'cluster {cluster_name!r}. stderr: {stderr}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
