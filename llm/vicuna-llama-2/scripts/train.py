@@ -259,6 +259,13 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
 
     return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
+def _calculate_checksum(ckpt_path: str):
+    proc = subprocess.run(
+                f'find {ckpt_path} ! -name checksum -type f -exec md5sum {{}} \; '
+                '| sort | md5sum', shell=True, stdout=subprocess.PIPE)
+    if proc.returncode:
+        return None
+    return proc.stdout.decode().split()[0]
 
 class CheckpointCallback(transformers.TrainerCallback):
 
@@ -267,8 +274,9 @@ class CheckpointCallback(transformers.TrainerCallback):
         if state.is_world_process_zero:
             ckpt_path = os.path.join(args.output_dir,
                                      f'checkpoint-{state.global_step}')
-            with open(os.path.join(ckpt_path, 'complete'), 'w') as f:
-                f.write('')
+            checksum = _calculate_checksum(ckpt_path)
+            with open(os.path.join(ckpt_path, 'checksum'), 'w') as f:
+                f.write(checksum)
             print(f'Checkpoint {state.global_step} saved.')
         torch.distributed.barrier()
 
@@ -281,24 +289,18 @@ def cleanup_incomplete_checkpoints(output_dir):
                          key=lambda x: int(x.name.split('-')[-1]),
                          reverse=True)
     for checkpoint in checkpoints:
-        if not (checkpoint / 'complete').exists():
+        if not (checkpoint / 'checksum').exists():
             print(f'Removing incomplete checkpoint {checkpoint}')
             shutil.rmtree(checkpoint)
         else:
-            print(f'Using checkpoint {checkpoint}, copying to ~/tmp/ for '
-                  'optimization of loading.')
-            tmp_dir = os.path.expanduser('~/tmp')
-            os.makedirs(tmp_dir, exist_ok=True)
-            try:
-                # Optimization for checkpoint loading. This is to force the
-                # mounting tool to download the checkpoints in parallel first.
-                # It will improve the loading speed of the checkpoints
-                # significantly.
-                subprocess.run(
-                    ['gsutil', '-m', 'rsync', '-r', checkpoint, tmp_dir],
-                    check=True)
-            except:
-                print('Failed to optimize checkpoint loading. Skip.')
+            checksum = _calculate_checksum(checkpoint)
+            with open(checkpoint / 'checksum', 'r') as f:
+                old_checksum = f.read()
+            if checksum.strip() != old_checksum.strip():
+                print(f'Removing incomplete checkpoint {checkpoint}')
+                shutil.rmtree(checkpoint)
+                continue
+            print(f'Using checkpoint {checkpoint}.')
             break
 
 
