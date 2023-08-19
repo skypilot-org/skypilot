@@ -2809,6 +2809,8 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                            '>/dev/null 2>&1')
 
     def _run_csync_terminate(runner):
-        runner.run(csync_terminate_cmd, stream_logs=False)
+        rc, _, stderr = runner.run(csync_terminate_cmd, stream_logs=False, require_outputs=True)
+        if rc != 0:
+            logger.debug(f'CSYNC: failed to terminate the CSYNC on {runner.ip}')
 
     subprocess_utils.run_in_parallel(_run_csync_terminate, runners)
