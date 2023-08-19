@@ -29,7 +29,7 @@ def update_interval(interval: int, elapsed_time: int):
         return diff
 
 
-def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
+def get_s3_upload_cmd(src_path: str, bucketname: str, num_threads: int,
                     delete: bool, no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
@@ -43,7 +43,7 @@ def set_s3_sync_cmd(src_path: str, bucketname: str, num_threads: int,
     return sync_cmd
 
 
-def set_gcs_sync_cmd(src_path: str, bucketname: str, num_threads: int,
+def get_gcs_upload_cmd(src_path: str, bucketname: str, num_threads: int,
                      delete: bool, no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
@@ -70,10 +70,10 @@ def run_sync(src: str,
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
-        sync_cmd = set_s3_sync_cmd(src, bucketname, num_threads, delete,
+        sync_cmd = get_s3_upload_cmd(src, bucketname, num_threads, delete,
                                    no_follow_symlinks)
     elif storetype == 'gcs':
-        sync_cmd = set_gcs_sync_cmd(src, bucketname, num_threads, delete,
+        sync_cmd = get_gcs_upload_cmd(src, bucketname, num_threads, delete,
                                     no_follow_symlinks)
     else:
         raise ValueError(f'Unknown store type: {storetype}')

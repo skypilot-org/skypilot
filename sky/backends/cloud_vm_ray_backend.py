@@ -4448,15 +4448,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
                 src_print = ', '.join(src_print)
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=csync_cmd,
-                run_rsync=False,
-                action_message='Setting CSYNC',
-                log_path=log_path,
-            )
+            try:
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src_print,
+                    target=dst,
+                    cmd=csync_cmd,
+                    run_rsync=False,
+                    action_message='Setting CSYNC',
+                    log_path=log_path,
+                )
+            except exceptions.CommandError as e:
+                # Strip the command (a big heredoc) from the exception
+                raise exceptions.CommandError(
+                    e.returncode, command='to CSYNC',
+                    error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage Sync setup took {end - start} seconds.')
