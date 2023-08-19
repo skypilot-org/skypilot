@@ -52,12 +52,12 @@ sky launch -c vllm-llama2 serving-openai-api.yaml
 ```
 sky status -a
 ```
-3. You can now use the OpenAI API to interact with the model. 
-  - you can use the following completion API to query the models hosted on the cluster:
+3. You can now use the OpenAI API to interact with the model.
+  - Query the models hosted on the cluster:
 ```bash
 curl http://<IP>:8000/v1/models
 ```
-  - you can use the following completion API to query the models hosted on the cluster:
+  - Query the model with input prompts:
 ```bash
 curl http://<IP>:8000/v1/completions \
 -H "Content-Type: application/json" \
@@ -70,5 +70,15 @@ curl http://<IP>:8000/v1/completions \
 ```
   You should get similar response as the following:
 ```
-{"id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f","object":"text_completion","created":1692427390,"model":"meta-llama/Llama-2-7b-chat-hf","choices":[{"index":0,"text":"city in Northern California that is known","logprobs":null,"finish_reason":"length"}],"usage":{"prompt_tokens":5,"total_tokens":12,"completion_tokens":7}}
+{
+    "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
+    "object":"text_completion","created":1692427390,
+    "model":"meta-llama/Llama-2-7b-chat-hf",
+    "choices":[{
+        "index":0,
+        "text":"city in Northern California that is known",
+        "logprobs":null,"finish_reason":"length"
+    }],
+    "usage":{"prompt_tokens":5,"total_tokens":12,"completion_tokens":7}
+}
 ```
