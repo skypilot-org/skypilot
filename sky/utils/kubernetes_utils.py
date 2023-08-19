@@ -247,8 +247,7 @@ def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
 
 
 def get_port(svc_name: str, namespace: str) -> int:
-    """
-    Gets the nodeport of the specified service.
+    """Gets the nodeport of the specified service.
 
     Args:
         svc_name (str): Name of the kubernetes service. Note that this may be
@@ -262,8 +261,7 @@ def get_port(svc_name: str, namespace: str) -> int:
 
 def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
-    """
-    Check if the credentials in kubeconfig file are valid
+    """Check if the credentials in kubeconfig file are valid
 
     Args:
         timeout (int): Timeout in seconds for the test API call
@@ -315,8 +313,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
 
 
 def get_current_kube_config_context_name() -> Optional[str]:
-    """
-    Get the current kubernetes context from the kubeconfig file
+    """Get the current kubernetes context from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context if it exists, None otherwise
@@ -330,8 +327,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
 
 
 def get_current_kube_config_context_namespace() -> str:
-    """
-    Get the current kubernetes context namespace from the kubeconfig file
+    """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context namespace if it exists, else
