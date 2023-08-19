@@ -3457,6 +3457,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs,
                                                  cancel_all)
 
+        # TODO(zhwu): backward compatibility for old clusters. We need to hint
+        # users to upgrade their clusters with `sky start`.
+
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
