@@ -63,8 +63,8 @@ class KubernetesInstanceType:
         """Returns the name of the instance."""
         assert self.cpus is not None
         assert self.memory is not None
-        name = (f'{self._format_count(self.cpus)}CPU--'
-                f'{self._format_count(self.memory)}GB')
+        name = (f'{common_utils.format_float(self.cpus)}CPU--'
+                f'{common_utils.format_float(self.memory)}GB')
         if self.accelerator_count:
             name += f'--{self.accelerator_count}{self.accelerator_type}'
         return name
@@ -122,7 +122,7 @@ class KubernetesInstanceType:
     def from_resources(cls,
                        cpus: float,
                        memory: float,
-                       accelerator_count: int = 0,
+                       accelerator_count: Union[float, int] = 0,
                        accelerator_type: str = '') -> 'KubernetesInstanceType':
         """Returns an instance name object from the given resources.
 
@@ -141,14 +141,6 @@ class KubernetesInstanceType:
 
     def __str__(self):
         return self.name
-
-    @classmethod
-    def _format_count(cls, num: Union[float, int]) -> str:
-        """Formats a float to not show decimal point if it is a whole number"""
-        if isinstance(num, int):
-            return str(num)
-        return '{:.0f}'.format(num) if num.is_integer() else '{:.1f}'.format(
-            num)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -276,7 +268,8 @@ class Kubernetes(clouds.Cloud):
         inst = KubernetesInstanceType.from_instance_type(instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
-        } if (inst.accelerator_count and inst.accelerator_type) else None
+        } if (inst.accelerator_count is not None and
+              inst.accelerator_type is not None) else None
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -427,7 +420,7 @@ class Kubernetes(clouds.Cloud):
             return kubernetes_utils.check_credentials()
         else:
             return (False, 'Credentials not found - '
-                    'check if {_CREDENTIAL_PATH} exists.')
+                    f'check if {_CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}

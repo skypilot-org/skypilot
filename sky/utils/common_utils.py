@@ -416,3 +416,12 @@ def find_free_port(start_port: int) -> int:
 def is_valid_env_var(name: str) -> bool:
     """Checks if the task environment variable name is valid."""
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
+def format_float(num: Union[float, int], precision: int = 1) -> str:
+    """Formats a float to not show decimal point if it is a whole number
+
+    If it is not a whole number, it will show upto precision decimal point."""
+    if isinstance(num, int):
+        return str(num)
+    return '{:.0f}'.format(num) if num.is_integer() else f'{num:.{precision}f}'
