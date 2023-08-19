@@ -136,8 +136,8 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
-        return False, '`kubernetes` package is not installed. ' \
-                      'Install it with: pip install kubernetes'
+        return False, ('`kubernetes` package is not installed. '
+                       'Install it with: pip install kubernetes')
     except kubernetes.api_exception() as e:
         # Check if the error is due to invalid credentials
         if e.status == 401:
@@ -154,7 +154,8 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except ValueError as e:
         return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
-        return False, f'An error occurred: {str(e)}'
+        return False, ('An error occurred: '
+                       f'{common_utils.format_exception(e, use_bracket=True)}')
 
 
 def get_current_kube_config_context_name() -> Optional[str]:
