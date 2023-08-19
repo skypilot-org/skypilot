@@ -6,8 +6,9 @@
 
 import json
 import os
-import tensorflow as tf
+
 import numpy as np
+import tensorflow as tf
 
 
 def mnist_dataset(batch_size):
