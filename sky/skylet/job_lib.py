@@ -705,29 +705,29 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
 
 def cancel_jobs_encoded_results(job_owner: str,
                                 jobs: Optional[List[int]],
-                                cancel_latest_running_job: bool = False) -> str:
+                                cancel_all: bool = False) -> str:
     """Cancel jobs.
 
     Args:
-        jobs: Job IDs to cancel. If None, cancel all jobs.
-        cancel_latest_running_job: Whether to cancel the latest running job. If
+        jobs: Job IDs to cancel. If None, cancel the latest running job.
+        all: Whether to cancel all the jobs. If
             set to True, asserts `jobs` is set to None.
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
         common_utils.decode_payload() to parse.
     """
-    if cancel_latest_running_job:
+    if cancel_all:
         # Cancel the latest (largest job ID) running job.
         assert jobs is None, (
-            'Cannot specify both jobs and cancel_latest_running_job')
-        job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
-    else:
-        if jobs is None:
-            # Cancel all in-progress jobs.
-            job_records = _get_jobs(
+            'Cannot specify both jobs and all')
+        job_records = _get_jobs(
                 None,
                 [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
+    else:
+        if jobs is None:
+            # Cancel the latest running job.
+            job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
         else:
             # Cancel jobs with specified IDs.
             job_records = _get_jobs_by_ids(jobs)
@@ -843,11 +843,11 @@ class JobLibCodeGen:
     def cancel_jobs(cls,
                     job_owner: str,
                     job_ids: Optional[List[int]],
-                    cancel_latest_running_job: bool = False) -> str:
+                    cancel_all: bool = False) -> str:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results({job_owner!r},'
-             f' {job_ids!r}, {cancel_latest_running_job})'),
+             f' {job_ids!r}, {cancel_all})'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]

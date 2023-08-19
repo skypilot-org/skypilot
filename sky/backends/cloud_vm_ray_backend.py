@@ -3438,7 +3438,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
-                    cancel_latest_running_job: bool = False) -> None:
+                    cancel_all: bool = False) -> None:
         """Cancel jobs.
 
         CloudVMRayBackend specific method.
@@ -3449,13 +3449,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             cancel_latest_running_job: Whether to cancel the latest running job.
                 If set to True, asserts `jobs` is set to None.
         """
-        if cancel_latest_running_job:
+        if cancel_all:
             assert jobs is None, (
-                'Cannot specify both jobs and cancel_latest_running_job')
+                'Cannot specify both jobs and all')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs,
-                                                 cancel_latest_running_job)
+                                                 cancel_all)
 
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
