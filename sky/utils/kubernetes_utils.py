@@ -144,13 +144,18 @@ def get_kubernetes_nodes() -> List[Dict[str, Any]]:
     return nodes
 
 
-def get_gpu_label_key_value(acc_type: str) -> Tuple[str, str]:
+def get_gpu_label_key_value(acc_type: str, check_mode = False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
     Args:
-        acc_type: The GPU type required
+        acc_type: The GPU type required by the task.
+        check_mode: If True, only checks if the cluster has GPU resources and labels
+            are setup on the cluster. acc_type is ignore does not return the label key and value.
+            Useful for checking if GPUs are configured correctly on the cluster
+            without explicitly requesting a acc_type.
     Returns:
-        A tuple of the label key and value.
+        A tuple of the label key and value. Returns empty strings if check_mode
+        is True.
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU resources (nvidia.com/gpu)
@@ -164,7 +169,7 @@ def get_gpu_label_key_value(acc_type: str) -> Tuple[str, str]:
     #  For AS clusters, we may need a way for users to specify GPU node pools
     #  to use since the cluster may be scaling up from zero nodes and may not
     #  have any GPU nodes yet.
-    has_gpus = detect_gpu_resource()
+    has_gpus, cluster_resources = detect_gpu_resource()
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
@@ -182,12 +187,16 @@ def get_gpu_label_key_value(acc_type: str) -> Tuple[str, str]:
                     suffix = f' Found node labels: {node_labels}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not detect GPU labels in Kubernetes cluster. '
-                    'Please ensure at least one node in the cluster has '
+                    'If this cluster has GPUs, please ensure GPU nodes have '
                     'node labels of either of these formats: '
                     f'{supported_formats}. Please refer to '
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
         if label_formatter is not None:
+            if check_mode:
+                # If check mode is enabled and we reached so far, we can conclude
+                # that the cluster is setup correctly and we can return.
+                return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
             k8s_acc_label_value = label_formatter.get_label_value(
                 acc_type)
@@ -210,21 +219,25 @@ def get_gpu_label_key_value(acc_type: str) -> Tuple[str, str]:
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
-                    f'with GPU type {acc_type}. Please ensure at least '
+                    f'with {acc_type} GPU. Please ensure at least '
                     f'one node in the cluster has {acc_type} GPU and . '
                     'Please refer to the documentation on how to set up '
                     f'node labels.{suffix}')
     else:
         # If GPU resources are not detected, raise error
         with ux_utils.print_exception_no_traceback():
+            suffix = ''
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                suffix = (' Available resources on the cluster: '
+                          f'{cluster_resources}')
             raise exceptions.ResourcesUnavailableError(
-                'Could not detect GPU resources (nvidia.com/gpu) in Kubernetes '
-                'cluster. Please ensure at least one node in the cluster has '
-                'GPUs and GPU drivers are installed on the node. You can '
-                ' check if the nodes have GPUs by running '
-                '`kubectl describe nodes` and looking for the nvidia.com/gpu '
-                'resource. Please refer to the documentation on how '
-                'to set up GPUs.')
+                'Could not detect GPU resources (`nvidia.com/gpu`) in '
+                'Kubernetes cluster. If this cluster contains GPUs, please '
+                'ensure GPU drivers are installed on the node. Check if the '
+                'GPUs are setup correctly by running `kubectl describe nodes` '
+                'and looking for the nvidia.com/gpu resource. '
+                'Please refer to the documentation on how '
+                f'to set up GPUs.{suffix}')
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
@@ -261,7 +274,6 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     try:
         ns = get_current_kube_config_context_namespace()
         kubernetes.core_api().list_namespaced_pod(ns, _request_timeout=timeout)
-        return True, None
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -285,6 +297,21 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except Exception as e:  # pylint: disable=broad-except
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
+    # If we reach here, the credentials are valid and Kubernetes cluster is up
+    # We now check if GPUs are available and labels are set correctly on the
+    # cluster, and if not we return hints that may help debug any issues.
+    # This early check avoids later surprises for user when they try to run
+    # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
+    # provider if their cluster GPUs are not setup correctly.
+    try:
+        _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
+    except exceptions.ResourcesUnavailableError as e:
+        # If GPUs are not available, we return cluster as enabled (since it can
+        # be a CPU-only cluster) but we also return the exception message which
+        # serves as a hint for how to enable GPU access.
+        return True, f'{e}'
+    return True, None
+
 
 
 def get_current_kube_config_context_name() -> Optional[str]:

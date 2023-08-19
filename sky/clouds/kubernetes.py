@@ -400,7 +400,12 @@ class Kubernetes(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
             # Test using python API
-            return kubernetes_utils.check_credentials()
+            try:
+                return kubernetes_utils.check_credentials()
+            except Exception as e:  # pylint: disable=broad-except
+                return (False,
+                        'Credential check failed: '
+                        f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '
                     f'check if {_CREDENTIAL_PATH} exists.')
