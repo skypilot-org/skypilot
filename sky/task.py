@@ -115,7 +115,7 @@ def _with_docker_login_config(
     }
     existing_keys = all_keys & set(task_envs.keys())
     if not existing_keys:
-        return
+        return resources
     if len(existing_keys) != len(all_keys):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('If any of DOCKER_USERNAME, DOCKER_PASSWORD, '
