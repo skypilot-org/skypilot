@@ -2802,14 +2802,17 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     ip_list = handle.external_ips()
     if not ip_list:
         return
+    port_list = handle.external_ssh_ports()
     ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
     runners = command_runner.SSHCommandRunner.make_runner_list(
-        ip_list, **ssh_credentials)
+        ip_list, port_list=port_list, **ssh_credentials)
     csync_terminate_cmd = ('python -m sky.data.skystorage terminate '
                            '>/dev/null 2>&1')
 
     def _run_csync_terminate(runner):
-        rc, _, stderr = runner.run(csync_terminate_cmd, stream_logs=False, require_outputs=True)
+        rc, _, stderr = runner.run(csync_terminate_cmd,
+                                   stream_logs=False,
+                                   require_outputs=True)
         if rc != 0:
             logger.debug(f'CSYNC: failed to terminate the CSYNC on {runner.ip}')
 

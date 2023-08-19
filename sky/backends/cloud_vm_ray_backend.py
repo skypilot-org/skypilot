@@ -4431,11 +4431,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'storage CSYNC{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        port_list = handle.external_ssh_ports()
         assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, **ssh_credentials)
+            ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
 
         for dst, storage_obj in storage_mounts.items():
@@ -4460,9 +4461,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 )
             except exceptions.CommandError as e:
                 # Strip the command (a big heredoc) from the exception
-                raise exceptions.CommandError(
-                    e.returncode, command='to CSYNC',
-                    error_msg=e.error_msg) from None
+                raise exceptions.CommandError(e.returncode,
+                                              command='to CSYNC',
+                                              error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage Sync setup took {end - start} seconds.')

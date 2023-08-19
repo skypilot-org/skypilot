@@ -30,7 +30,7 @@ def update_interval(interval: int, elapsed_time: int):
 
 
 def get_s3_upload_cmd(src_path: str, bucketname: str, num_threads: int,
-                    delete: bool, no_follow_symlinks: bool):
+                      delete: bool, no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
@@ -44,7 +44,7 @@ def get_s3_upload_cmd(src_path: str, bucketname: str, num_threads: int,
 
 
 def get_gcs_upload_cmd(src_path: str, bucketname: str, num_threads: int,
-                     delete: bool, no_follow_symlinks: bool):
+                       delete: bool, no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
                 'rsync -r')
@@ -64,17 +64,15 @@ def run_sync(src: str,
              delete: bool,
              no_follow_symlinks: bool,
              max_retries: int = 10):
-    """
-    Runs the sync command to from SRC to STORETYPE bucket
-    """
+    """Runs the sync command to from SRC to STORETYPE bucket"""
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
         sync_cmd = get_s3_upload_cmd(src, bucketname, num_threads, delete,
-                                   no_follow_symlinks)
+                                     no_follow_symlinks)
     elif storetype == 'gcs':
         sync_cmd = get_gcs_upload_cmd(src, bucketname, num_threads, delete,
-                                    no_follow_symlinks)
+                                      no_follow_symlinks)
     else:
         raise ValueError(f'Unknown store type: {storetype}')
 
@@ -141,9 +139,8 @@ def run_sync(src: str,
               help='')
 def csync(src: str, storetype: str, bucketname: str, num_threads: int,
           interval: int, delete: bool, lock: bool, no_follow_symlinks: bool):
-    """
-    Syncs the source to the bucket every INTERVAL seconds. Creates a lock file
-    while sync command is runninng and removes it when completed.
+    """Syncs the source to the bucket every INTERVAL seconds. Creates a lock
+    file while sync command is runninng and removes it when completed.
     """
     base_dir = os.path.expanduser(CSYNC_FILE_PATH)
     os.makedirs(base_dir, exist_ok=True)
@@ -166,16 +163,15 @@ def csync(src: str, storetype: str, bucketname: str, num_threads: int,
             end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
         elapsed_time = int(end_time - start_time)
-        updated_interval = update_interval(interval, elapsed_time)
+        remaining_interval = update_interval(interval, elapsed_time)
         if lock and os.path.exists(lock_path):
             os.remove(lock_path)
-        time.sleep(updated_interval)
+        time.sleep(remaining_interval)
 
 
 @main.command()
 def terminate() -> None:
-    """
-    Terminates all the CSYNC daemon running after checking if all the
+    """Terminates all the CSYNC daemon running after checking if all the
     sync process has completed.
     """
     # TODO: Currently, this terminates all the CSYNC daemon by default.

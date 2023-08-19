@@ -21,7 +21,6 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.backends import backend_utils
-from sky.data import csync_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
@@ -320,8 +319,7 @@ class AbstractStore:
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """
-        Returns the command to continuously sync from CSYNC_PATH to
+        """ Returns the command to continuously sync from CSYNC_PATH to
         Storage bucket.
 
         Args:
@@ -1269,14 +1267,13 @@ class S3Store(AbstractStore):
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
                      f'{self.bucket.name} {mount_path}')
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        return mounting_utils.get_mounting_command('MOUNT', mount_path,
+                                                   mount_cmd, install_cmd)
 
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """
-        Returns the command to continuously sync from CSYNC_PATH to
+        """ Returns the command to continuously sync from CSYNC_PATH to
         Storage bucket.
 
         Args:
@@ -1288,7 +1285,8 @@ class S3Store(AbstractStore):
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {self.bucket.name} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
-        return csync_utils.get_csync_command(csync_cmd, csync_path)
+        return mounting_utils.get_mounting_command('CSYNC', csync_path,
+                                                   csync_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1718,14 +1716,14 @@ class GcsStore(AbstractStore):
                      f'{self.bucket.name} {mount_path}')
         version_check_cmd = (
             f'gcsfuse --version | grep -q {self.GCSFUSE_VERSION}')
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd, version_check_cmd)
+        return mounting_utils.get_mounting_command('MOUNT', mount_path,
+                                                   mount_cmd, install_cmd,
+                                                   version_check_cmd)
 
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """
-        Returns the command to continuously sync from CSYNC_PATH to
+        """ Returns the command to continuously sync from CSYNC_PATH to
         Storage bucket.
 
         Args:
@@ -1737,7 +1735,8 @@ class GcsStore(AbstractStore):
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f'gcs {self.bucket.name} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
-        return csync_utils.get_csync_command(csync_cmd, csync_path)
+        return mounting_utils.get_mounting_command('CSYNC', csync_path,
+                                                   csync_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -2099,14 +2098,13 @@ class R2Store(AbstractStore):
             f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
             f'--endpoint {endpoint_url} '
             f'{self.bucket.name} {mount_path}')
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        return mounting_utils.get_mounting_command('MOUNT', mount_path,
+                                                   mount_cmd, install_cmd)
 
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """
-        Returns the command to continuously sync from CSYNC_PATH to
+        """ Returns the command to continuously sync from CSYNC_PATH to
         Storage bucket.
 
         Args:
@@ -2521,8 +2519,8 @@ class IBMCosStore(AbstractStore):
         install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
         # --daemon will keep the mounting process running in the background.
         mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
-        return mounting_utils.get_mounting_command(mount_path, install_cmd,
-                                                   mount_cmd)
+        return mounting_utils.get_mounting_command('MOUNT', mount_path,
+                                                   mount_cmd, install_cmd)
 
     def _create_cos_bucket(self,
                            bucket_name: str,
