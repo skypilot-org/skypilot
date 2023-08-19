@@ -1992,6 +1992,8 @@ def _update_cluster_status_no_lock(
             # user will be notified that any auto stop/down might not be
             # triggered.
             if external_ips is None or len(external_ips) == 0:
+                logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
+                             f'IPs found. External IPs: {external_ips}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
@@ -2009,8 +2011,8 @@ def _update_cluster_status_no_lock(
                 separate_stderr=True)
             if rc:
                 logger.debug(
-                    'Refreshing status: Failed to use `ray` to get IPs from '
-                    f'cluster {cluster_name!r}. stderr: {stderr}')
+                    f'Refreshing status ({cluster_name!r}): Failed to use '
+                    f'`ray` to get IPs. stderr: {stderr}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
@@ -2018,13 +2020,12 @@ def _update_cluster_status_no_lock(
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
             logger.debug(
-                'Refreshing status: ray status not showing all nodes '
-                f'({ready_head + ready_workers}/{handle.launched_nodes}); '
-                f'output: {output}; stderr: {stderr}')
+                f'Refreshing status ({cluster_name!r}): ray status not showing '
+                f'all nodes ({ready_head + ready_workers}/'
+                f'{handle.launched_nodes}); output: {output}; stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
-                'Refreshing status: Failed to use `ray` to get IPs from cluster'
-                f' {cluster_name!r}.')
+                f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         return False
 
     # Determining if the cluster is healthy (UP):
