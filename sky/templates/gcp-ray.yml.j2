@@ -36,9 +36,9 @@ provider:
 {%- endif %}
 {%- if docker_login_config is not none %}
   docker_login_config:
-    DOCKER_USERNAME: {{docker_login_config.username}}
-    DOCKER_PASSWORD: {{docker_login_config.password}}
-    DOCKER_REPO_URI: {{docker_login_config.repo_uri}}
+    {{docker_login_config.username_key}}: {{docker_login_config.username}}
+    {{docker_login_config.password_key}}: {{docker_login_config.password}}
+    {{docker_login_config.repo_uri_key}}: {{docker_login_config.repo_uri}}
 {%- endif %}
 {%- if tpu_vm %}
   _has_tpus: True

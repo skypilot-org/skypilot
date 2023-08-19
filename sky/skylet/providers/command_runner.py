@@ -1,4 +1,5 @@
 """Sky's DockerCommandRunner."""
+import dataclasses
 import json
 import os
 from typing import Dict
@@ -9,6 +10,25 @@ from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 
 from sky.skylet import constants
+
+
+@dataclasses.dataclass
+class DockerLoginConfig:
+    """Config for docker login. Used for pulling from private registries."""
+    username: str
+    password: str
+    repo_uri: str
+    username_key: str = constants.DOCKER_USERNAME_ENV_KEY
+    password_key: str = constants.DOCKER_PASSWORD_ENV_KEY
+    repo_uri_key: str = constants.DOCKER_REPO_URI_ENV_KEY
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
+        return cls(
+            username=d[cls.username_key],
+            password=d[cls.password_key],
+            repo_uri=d[cls.repo_uri_key],
+        )
 
 
 def docker_start_cmds(
@@ -109,16 +129,17 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             return True
 
         # SkyPilot: Docker login if user specified a private docker registry.
-        if constants.DOCKER_USERNAME_ENV_KEY in self.docker_config:
+        if "docker_login_config" in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
+            docker_login_config: DockerLoginConfig = self.docker_config[
+                "docker_login_config"]
             self.run('{} login --username {} --password {} {}'.format(
                 self.docker_cmd,
-                self.docker_config[constants.DOCKER_USERNAME_ENV_KEY],
-                self.docker_config[constants.DOCKER_PASSWORD_ENV_KEY],
-                self.docker_config[constants.DOCKER_REPO_URI_ENV_KEY],
+                docker_login_config.username,
+                docker_login_config.password,
+                docker_login_config.repo_uri,
             ))
-            repo_uri = self.docker_config[constants.DOCKER_REPO_URI_ENV_KEY]
-            specific_image = f'{repo_uri}/{specific_image}'
+            specific_image = f'{docker_login_config.repo_uri}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

@@ -17,6 +17,7 @@ from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
+from sky.skylet.providers import command_runner
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -121,7 +122,7 @@ def _with_docker_login_config(
             raise ValueError('If any of DOCKER_USERNAME, DOCKER_PASSWORD, '
                              'DOCKER_REPO_URI is set, all of them must be set. '
                              f'Missing envs: {all_keys - existing_keys}')
-    docker_login_config = backend_utils.DockerLoginConfig.from_dict(task_envs)
+    docker_login_config = command_runner.DockerLoginConfig.from_dict(task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         if resources.extract_docker_image() is None:

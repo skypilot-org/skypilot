@@ -25,6 +25,7 @@ from sky.skylet.providers.aws.utils import (
     client_cache,
 )
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.skylet.providers.command_runner import DockerLoginConfig
 
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger, cf
@@ -139,9 +140,6 @@ class AWSNodeProvider(NodeProvider):
         # Cache of node objects from the last nodes() call. This avoids
         # excessive DescribeInstances requests.
         self.cached_nodes = {}
-
-        # Set docker login config if it exists
-        self.docker_login_config = provider_config.get("docker_login_config", None)
 
     def non_terminated_nodes(self, tag_filters):
         # Note that these filters are acceptable because they are set on
@@ -740,8 +738,10 @@ class AWSNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
         if docker_config and docker_config["container_name"] != "":
-            if self.docker_login_config is not None:
-                docker_config.update(self.docker_login_config)
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = DockerLoginConfig.from_dict(
+                    self.provider_config["docker_login_config"]
+                )
             return SkyDockerCommandRunner(docker_config, **common_args)
         else:
             return SSHCommandRunner(**common_args)
