@@ -1,9 +1,10 @@
 """Autostop utilities."""
 import pickle
-import psutil
 import shlex
 import time
 from typing import List, Optional
+
+import psutil
 
 from sky import sky_logging
 from sky.skylet import configs
@@ -28,7 +29,7 @@ class AutostopConfig:
 
     def __init__(self,
                  autostop_idle_minutes: int,
-                 boot_time: int,
+                 boot_time: float,
                  backend: Optional[str],
                  down: bool = False):
         assert autostop_idle_minutes < 0 or backend is not None, (

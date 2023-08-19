@@ -1,11 +1,18 @@
 """Lambda Cloud helper functions."""
-import os
 import json
+import os
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
 import requests
-from typing import Any, Dict, List
+
+from sky.utils import common_utils
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
+INITIAL_BACKOFF_SECONDS = 10
+MAX_BACKOFF_FACTOR = 10
+MAX_ATTEMPTS = 6
 
 
 class LambdaCloudError(Exception):
@@ -24,13 +31,14 @@ class Metadata:
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
-    def __getitem__(self, instance_id: str) -> Dict[str, Any]:
-        assert os.path.exists(self.path), 'Metadata file not found'
+    def get(self, instance_id: str) -> Optional[Dict[str, Any]]:
+        if not os.path.exists(self.path):
+            return None
         with open(self.path, 'r') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
-    def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
+    def set(self, instance_id: str, value: Optional[Dict[str, Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
             with open(self.path, 'r') as f:
@@ -77,11 +85,36 @@ def raise_lambda_error(response: requests.Response) -> None:
         raise LambdaCloudError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
-        code = resp_json['error']['code']
-        message = resp_json['error']['message']
-    except (KeyError, json.decoder.JSONDecodeError):
-        raise LambdaCloudError(f'Unexpected error. Status code: {status_code}')
+        code = resp_json.get('error', {}).get('code')
+        message = resp_json.get('error', {}).get('message')
+    except json.decoder.JSONDecodeError:
+        raise LambdaCloudError(
+            'Response cannot be parsed into JSON. Status '
+            f'code: {status_code}; reason: {response.reason}; '
+            f'content: {response.text}')
     raise LambdaCloudError(f'{code}: {message}')
+
+
+def _try_request_with_backoff(method: str,
+                              url: str,
+                              headers: Dict[str, str],
+                              data: Optional[str] = None):
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
+                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
+    for i in range(MAX_ATTEMPTS):
+        if method == 'get':
+            response = requests.get(url, headers=headers)
+        elif method == 'post':
+            response = requests.post(url, headers=headers, data=data)
+        else:
+            raise ValueError(f'Unsupported requests method: {method}')
+        # If rate limited, wait and try again
+        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
+            time.sleep(backoff.current_backoff())
+            continue
+        if response.status_code == 200:
+            return response
+        raise_lambda_error(response)
 
 
 class LambdaCloudClient:
@@ -96,17 +129,15 @@ class LambdaCloudClient:
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
             }
         self.api_key = self._credentials['api_key']
-        self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     def create_instances(self,
                          instance_type: str = 'gpu_1x_a100_sxm4',
                          region: str = 'us-east-1',
                          quantity: int = 1,
-                         name: str = '') -> Dict[str, Any]:
+                         name: str = '',
+                         ssh_key_name: str = '') -> List[str]:
         """Launch new instances."""
-        assert self.ssh_key_name is not None
-
         # Optimization:
         # Most API requests are rate limited at ~1 request every second but
         # launch requests are rate limited at ~1 request every 10 seconds.
@@ -130,14 +161,15 @@ class LambdaCloudClient:
         data = json.dumps({
             'region_name': region,
             'instance_type_name': instance_type,
-            'ssh_key_names': [self.ssh_key_name],
+            'ssh_key_names': [ssh_key_name],
             'quantity': quantity,
             'name': name
         })
-        response = requests.post(f'{API_ENDPOINT}/instance-operations/launch',
-                                 data=data,
-                                 headers=self.headers)
-        raise_lambda_error(response)
+        response = _try_request_with_backoff(
+            'post',
+            f'{API_ENDPOINT}/instance-operations/launch',
+            data=data,
+            headers=self.headers)
         return response.json().get('data', []).get('instance_ids', [])
 
     def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
@@ -147,35 +179,68 @@ class LambdaCloudClient:
                 instance_ids[0]  # TODO(ewzeng) don't hardcode
             ]
         })
-        response = requests.post(
+        response = _try_request_with_backoff(
+            'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
             data=data,
             headers=self.headers)
-        raise_lambda_error(response)
         return response.json().get('data', []).get('terminated_instances', [])
 
-    def list_instances(self) -> Dict[str, Any]:
+    def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
-        response = requests.get(f'{API_ENDPOINT}/instances',
-                                headers=self.headers)
-        raise_lambda_error(response)
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/instances',
+                                             headers=self.headers)
         return response.json().get('data', [])
 
-    def set_ssh_key(self, name: str, pub_key: str) -> None:
-        """Set ssh key."""
+    def list_ssh_keys(self) -> List[Dict[str, str]]:
+        """List ssh keys."""
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/ssh-keys',
+                                             headers=self.headers)
+        return response.json().get('data', [])
+
+    def get_unique_ssh_key_name(self, prefix: str,
+                                pub_key: str) -> Tuple[str, bool]:
+        """Returns a ssh key name with the given prefix.
+
+        If no names have given prefix, return prefix. If pub_key exists and
+        has name with given prefix, return that name. Otherwise create a
+        UNIQUE name with given prefix.
+
+        The second return value is True iff the returned name already exists.
+        """
+        candidate_keys = [
+            k for k in self.list_ssh_keys()
+            if k.get('name', '').startswith(prefix)
+        ]
+
+        # Prefix not found
+        if not candidate_keys:
+            return prefix, False
+
+        suffix_digits = [0]
+        for key_info in candidate_keys:
+            name = key_info.get('name', '')
+            if key_info.get('public_key', '').strip() == pub_key.strip():
+                # Pub key already exists. Use strip to avoid whitespace diffs.
+                return name, True
+            if (len(name) > len(prefix) + 1 and name[len(prefix)] == '-' and
+                    name[len(prefix) + 1:].isdigit()):
+                suffix_digits.append(int(name[len(prefix) + 1:]))
+        return f'{prefix}-{max(suffix_digits) + 1}', False
+
+    def register_ssh_key(self, name: str, pub_key: str) -> None:
+        """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
-        response = requests.post(f'{API_ENDPOINT}/ssh-keys',
-                                 data=data,
-                                 headers=self.headers)
-        raise_lambda_error(response)
-        self.ssh_key_name = name
-        with open(self.credentials, 'w') as f:
-            f.write(f'api_key = {self.api_key}\n')
-            f.write(f'ssh_key_name = {self.ssh_key_name}\n')
+        _try_request_with_backoff('post',
+                                  f'{API_ENDPOINT}/ssh-keys',
+                                  data=data,
+                                  headers=self.headers)
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = requests.get(f'{API_ENDPOINT}/instance-types',
-                                headers=self.headers)
-        raise_lambda_error(response)
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/instance-types',
+                                             headers=self.headers)
         return response.json().get('data', [])

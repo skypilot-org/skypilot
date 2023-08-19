@@ -17,6 +17,7 @@ import io
 import os
 import platform
 import re
+from typing import Dict, List
 import warnings
 
 import setuptools
@@ -24,15 +25,6 @@ import setuptools
 ROOT_DIR = os.path.dirname(__file__)
 
 system = platform.system()
-if system == 'Darwin':
-    mac_version = platform.mac_ver()[0]
-    mac_major, mac_minor = mac_version.split('.')[:2]
-    mac_major = int(mac_major)
-    mac_minor = int(mac_minor)
-    if mac_major < 10 or (mac_major == 10 and mac_minor < 15):
-        warnings.warn(
-            f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
-            'is required to install ray>=1.9\'')
 
 
 def find_version(*filepath):
@@ -64,17 +56,19 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
-    # shell completion for click<8.0 for backward compatibility.
-    'click<=8.0.4,>=7.0',
+    # NOTE: ray requires click>=7.0. Also, click 8.1.x makes our rendered CLI
+    # docs display weird blockquotes.
+    # TODO(zongheng): investigate how to make click 8.1.x display nicely and
+    # remove the upper bound.
+    'click <= 8.0.4, >= 7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
-    'colorama<0.4.5',
+    'colorama < 0.4.5',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
     # https://github.com/pallets/jinja/issues/1585
-    'jinja2>=3.0',
+    'jinja2 >= 3.0',
     'jsonschema',
     'networkx',
     'oauth2client',
@@ -82,43 +76,83 @@ install_requires = [
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
-    'PrettyTable>=2.0.0',
-    # Lower local ray version is not fully supported, due to the
-    # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.2.0',
+    'PrettyTable >= 2.0.0',
+    'python-dotenv',
+    # Lower version of ray will cause dependency conflict for
+    # click/grpcio/protobuf.
+    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
+    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
     'rich',
     'tabulate',
-    'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
-    # This is used by ray. The latest 1.44.0 will generate an error
-    # `Fork support is only compatible with the epoll1 and poll
-    # polling strategies`
-    'grpcio>=1.32.0,<=1.43.0',
+    # Light weight requirement, can be replaced with "typing" once
+    # we deprecate Python 3.7 (this will take a while).
+    "typing_extensions; python_version < '3.8'",
+    'filelock >= 3.6.0',
+    # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
+    # ray start is called (#2054).
+    # Tracking issue: https://github.com/ray-project/ray/issues/30984
+    "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    # Original issue: https://github.com/ray-project/ray/issues/33833
+    "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     'packaging',
-    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
-    # fix.
-    # https://github.com/ray-project/ray/pull/25211
-    'protobuf<4.0.0',
+    # Adopted from ray's setup.py:
+    # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
+    'protobuf >= 3.15.3, != 3.19.5',
     'psutil',
     'pulp',
+    # Ray job has an issue with pydantic>2.0.0, due to API changes of pydantic. See
+    # https://github.com/ray-project/ray/issues/36990
+    # >=1.10.8 is needed for ray>=2.6. See
+    # https://github.com/ray-project/ray/issues/35661
+    'pydantic <2.0, >=1.10.8',
+    # Cython 3.0 release breaks PyYAML installed by aws-cli.
+    # https://github.com/yaml/pyyaml/issues/601
+    # https://github.com/aws/aws-cli/issues/8036
+    # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
+    'pyyaml > 3.13, <= 5.3.1'
 ]
 
-# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
-# packages dependencies are changed.
-extras_require = {
-    'aws': [
-        # awscli>=1.27.10 is required for SSO support.
-        'awscli',
-        'boto3',
-        # 'Crypto' module used in authentication.py for AWS.
-        'pycryptodome==3.12.0',
-    ],
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
+# following packages dependencies are changed.
+aws_dependencies = [
+    # botocore does not work with urllib3>=2.0.0, accuroding to https://github.com/boto/botocore/issues/2926
+    # We have to explicitly pin the version to optimize the time for
+    # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
+    'urllib3<2',
+    # NOTE: this installs CLI V1. To use AWS SSO (e.g., `aws sso login`), users
+    # should instead use CLI V2 which is not pip-installable. See
+    # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html.
+    'awscli>=1.27.10',
+    'botocore>=1.29.10',
+    'boto3>=1.26.1',
+    # 'Crypto' module used in authentication.py for AWS.
+    'pycryptodome==3.12.0',
+]
+extras_require: Dict[str, List[str]] = {
+    'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
-    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
+    # We need azure-identity>=1.13.0 to enable the customization of the
+    # timeout of AzureCliCredential.
+    'azure': [
+        'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
+        'azure-mgmt-network'
+    ],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'ibm': [
+        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+    ],
     'docker': ['docker'],
     'lambda': [],
+    'cloudflare': aws_dependencies,
+    'scp': [],
+    'oci': ['oci'],
+    'kubernetes': ['kubernetes'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
@@ -149,7 +183,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
-    requires_python='>=3.6',
+    requires_python='>=3.7',
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
@@ -157,7 +191,6 @@ setuptools.setup(
     },
     include_package_data=True,
     classifiers=[
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',

@@ -1,18 +1,22 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
 import textwrap
+from typing import Optional
+
+from sky import exceptions
 
 
 def get_mounting_command(
     mount_path: str,
     install_cmd: str,
     mount_cmd: str,
+    version_check_cmd: Optional[str] = None,
 ) -> str:
-    """
-    Generates the mounting command for a given bucket. Generated script first
-    unmounts any existing mount at the mount path, checks and installs the
-    mounting utility if required, creates the mount path and finally mounts
-    the bucket.
+    """Generates the mounting command for a given bucket.
+
+    Generated script first unmounts any existing mount at the mount path, checks
+    and installs the mounting utility if required, creates the mount path and
+    finally mounts the bucket.
 
     Args:
         mount_path: Path to mount the bucket at.
@@ -24,6 +28,9 @@ def get_mounting_command(
         str: Mounting command with the mounting script as a heredoc.
     """
     mount_binary = mount_cmd.split()[0]
+    installed_check = f'[ -x "$(command -v {mount_binary})" ]'
+    if version_check_cmd is not None:
+        installed_check += f' && {version_check_cmd}'
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
@@ -39,11 +46,11 @@ def get_mounting_command(
         fi
 
         # Install MOUNT_BINARY if not already installed
-        if ! [ -x "$(command -v $MOUNT_BINARY)" ]; then
+        if {installed_check}; then
+          echo "$MOUNT_BINARY already installed. Proceeding..."
+        else
           echo "Installing $MOUNT_BINARY..."
           {install_cmd}
-        else
-          echo "$MOUNT_BINARY already installed. Proceeding..."
         fi
 
         # Check if mount path exists
@@ -54,8 +61,8 @@ def get_mounting_command(
         else
           # Check if mount path contains files
           if [ "$(ls -A $MOUNT_PATH)" ]; then
-            echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-            exit 1
+            echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
+            exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
           fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."

@@ -1,11 +1,20 @@
 """Exceptions."""
 import enum
+import typing
 from typing import List, Optional
+
+if typing.TYPE_CHECKING:
+    from sky import status_lib
+    from sky.backends import backend
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
 SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
+# Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
+MOUNT_PATH_NON_EMPTY_CODE = 42
+# Return code when git command is ran in a dir that is not git repo
+GIT_FATAL_EXIT_CODE = 128
 
 
 class ResourcesUnavailableError(Exception):
@@ -17,17 +26,19 @@ class ResourcesUnavailableError(Exception):
     """
 
     def __init__(self,
-                 *args: object,
+                 message: str,
                  no_failover: bool = False,
                  failover_history: Optional[List[Exception]] = None) -> None:
-        super().__init__(*args)
+        super().__init__(message)
         self.no_failover = no_failover
         if failover_history is None:
             failover_history = []
         # Copy the list to avoid modifying from outside.
         self.failover_history: List[Exception] = list(failover_history)
 
-    def with_failover_history(self, failover_history: List[Exception]) -> None:
+    def with_failover_history(
+            self,
+            failover_history: List[Exception]) -> 'ResourcesUnavailableError':
         # Copy the list to avoid modifying from outside.
         self.failover_history = list(failover_history)
         return self
@@ -45,8 +56,8 @@ class ProvisionPrechecksError(Exception):
         reasons: (List[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, *args: object, reasons: List[Exception]) -> None:
-        super().__init__(*args)
+    def __init__(self, reasons: List[Exception]) -> None:
+        super().__init__()
         self.reasons = list(reasons)
 
 
@@ -85,7 +96,14 @@ class CommandError(Exception):
 
 class ClusterNotUpError(Exception):
     """Raised when a cluster is not up."""
-    pass
+
+    def __init__(self,
+                 message: str,
+                 cluster_status: Optional['status_lib.ClusterStatus'],
+                 handle: Optional['backend.ResourceHandle'] = None) -> None:
+        super().__init__(message)
+        self.cluster_status = cluster_status
+        self.handle = handle
 
 
 class ClusterSetUpError(Exception):
@@ -191,4 +209,9 @@ class CloudUserIdentityError(Exception):
 
 class ClusterOwnerIdentityMismatchError(Exception):
     """The cluster's owner identity does not match the current user identity."""
+    pass
+
+
+class NoCloudAccessError(Exception):
+    """Raised when all clouds are disabled."""
     pass

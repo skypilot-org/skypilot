@@ -11,25 +11,46 @@ from sky import backends
 from sky import benchmark
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
+from sky.core import autostop
+from sky.core import cancel
+from sky.core import cost_report
+from sky.core import down
+from sky.core import download_logs
+from sky.core import job_status
+from sky.core import queue
+from sky.core import spot_cancel
+from sky.core import spot_queue
+from sky.core import spot_status
+from sky.core import start
+from sky.core import status
+from sky.core import stop
+from sky.core import storage_delete
+from sky.core import storage_ls
+from sky.core import tail_logs
 from sky.dag import Dag
-from sky.execution import launch, exec, spot_launch  # pylint: disable=redefined-builtin
+from sky.data import Storage
+from sky.data import StorageMode
+from sky.data import StoreType
+from sky.execution import exec  # pylint: disable=redefined-builtin
+from sky.execution import launch
+from sky.execution import spot_launch
+from sky.optimizer import Optimizer
+from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
-from sky.task import Task
-from sky.optimizer import Optimizer, OptimizeTarget
-from sky.data import Storage, StorageMode, StoreType
-from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
-from sky.core import (status, start, stop, down, autostop, queue, cancel,
-                      tail_logs, download_logs, job_status, spot_queue,
-                      spot_status, spot_cancel, storage_ls, storage_delete,
-                      cost_report)
+from sky.status_lib import ClusterStatus
+from sky.task import Task
 
 # Aliases.
+IBM = clouds.IBM
 AWS = clouds.AWS
 Azure = clouds.Azure
 GCP = clouds.GCP
 Lambda = clouds.Lambda
+SCP = clouds.SCP
 Local = clouds.Local
+Kubernetes = clouds.Kubernetes
+OCI = clouds.OCI
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -37,8 +58,12 @@ __all__ = [
     'AWS',
     'Azure',
     'GCP',
+    'IBM',
+    'Kubernetes',
     'Lambda',
     'Local',
+    'OCI',
+    'SCP',
     'Optimizer',
     'OptimizeTarget',
     'backends',

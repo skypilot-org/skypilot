@@ -3,7 +3,11 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import requests
+
 from sky import clouds
+from sky import exceptions
+from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
@@ -25,18 +29,23 @@ class Lambda(clouds.Cloud):
 
     # Lamdba has a 64 char limit for cluster name.
     # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # However, we need to account for the suffixes '-head' and '-worker'
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 57
     # Currently, none of clouds.CloudImplementationFeatures are implemented
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
-    # MULTI_NODE: Multi-node is not supported by the implementation yet.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+            f'Docker image is not supported in {_REPR}. '
+            'You can try running docker command inside the `run` section in task.yaml.'
+        ),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {_REPR}.',
     }
-
-    _regions: List[clouds.Region] = []
 
     @classmethod
     def _cloud_unsupported_features(
@@ -48,28 +57,7 @@ class Lambda(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            cls._regions = [
-                # Popular US regions
-                clouds.Region('us-east-1'),
-                clouds.Region('us-west-2'),
-                clouds.Region('us-west-1'),
-                clouds.Region('us-south-1'),
-
-                # Everyone else
-                clouds.Region('asia-northeast-1'),
-                clouds.Region('asia-northeast-2'),
-                clouds.Region('asia-south-1'),
-                clouds.Region('australia-southeast-1'),
-                clouds.Region('europe-central-1'),
-                clouds.Region('europe-south-1'),
-                clouds.Region('me-west-1'),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type: str,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
@@ -77,12 +65,8 @@ class Lambda(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'lambda')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'lambda')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -94,7 +78,7 @@ class Lambda(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: Optional[str] = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -139,9 +123,14 @@ class Lambda(clouds.Cloud):
         return isinstance(other, Lambda)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
                                                          clouds='lambda')
 
     @classmethod
@@ -153,24 +142,21 @@ class Lambda(clouds.Cloud):
             instance_type, clouds='lambda')
 
     @classmethod
-    def get_vcpus_from_instance_type(
+    def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='lambda')
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='lambda')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
-        if region is None:
-            region = self._get_default_region()
+        assert zones is None, 'Lambda does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -185,10 +171,8 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot:
-            return ([], [])
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud
@@ -205,6 +189,7 @@ class Lambda(clouds.Cloud):
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
                     cpus=None,
+                    memory=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -214,7 +199,9 @@ class Lambda(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Lambda.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -228,6 +215,7 @@ class Lambda(clouds.Cloud):
             acc_count,
             use_spot=resources.use_spot,
             cpus=resources.cpus,
+            memory=resources.memory,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')
@@ -235,7 +223,8 @@ class Lambda(clouds.Cloud):
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
 
-    def check_credentials(self) -> Tuple[bool, Optional[str]]:
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
@@ -245,6 +234,10 @@ class Lambda(clouds.Cloud):
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_cloud/lambda_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Lambda Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -253,7 +246,8 @@ class Lambda(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # TODO(ewzeng): Implement get_current_user_identity for Lambda
         return None
 
@@ -272,3 +266,34 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
+
+    @classmethod
+    def regions(cls) -> List['clouds.Region']:
+        return service_catalog.regions(clouds='lambda')
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Lambda does not support disk tiers.')
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        status_map = {
+            'booting': status_lib.ClusterStatus.INIT,
+            'active': status_lib.ClusterStatus.UP,
+            'unhealthy': status_lib.ClusterStatus.INIT,
+            'terminated': None,
+        }
+        # TODO(ewzeng): filter by hash_filter_string to be safe
+        status_list = []
+        vms = lambda_utils.LambdaCloudClient().list_instances()
+        possible_names = [f'{name}-head', f'{name}-worker']
+        for node in vms:
+            if node.get('name') in possible_names:
+                node_status = status_map[node['status']]
+                if node_status is not None:
+                    status_list.append(node_status)
+        return status_list

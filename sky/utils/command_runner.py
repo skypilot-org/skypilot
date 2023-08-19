@@ -1,15 +1,18 @@
 """Runner for commands to be executed on the cluster."""
-import getpass
 import enum
+import getpass
 import hashlib
 import os
 import pathlib
 import shlex
+import time
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
-from sky.utils import subprocess_utils
+from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -43,11 +46,15 @@ def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
                      ssh_proxy_command: Optional[str] = None,
-                     timeout: int = 30) -> List[str]:
+                     docker_ssh_proxy_command: Optional[str] = None,
+                     timeout: int = 30,
+                     port: int = 22) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
     arg_dict = {
+        # SSH port
+        'Port': port,
         # Supresses initial fingerprint verification.
         'StrictHostKeyChecking': 'no',
         # SSH IP and fingerprint pairs no longer added to known_hosts.
@@ -70,7 +77,9 @@ def ssh_options_list(ssh_private_key: Optional[str],
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
     }
-    if ssh_control_name is not None:
+    # SSH Control will have a severe delay when using docker_ssh_proxy_command.
+    # TODO(tian): Investigate why.
+    if ssh_control_name is not None and docker_ssh_proxy_command is None:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -83,6 +92,12 @@ def ssh_options_list(ssh_private_key: Optional[str],
         ssh_private_key,
     ] if ssh_private_key is not None else []
 
+    if docker_ssh_proxy_command is not None:
+        logger.debug(f'--- Docker SSH Proxy: {docker_ssh_proxy_command} ---')
+        arg_dict.update({
+            'ProxyCommand': shlex.quote(docker_ssh_proxy_command),
+        })
+
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
         arg_dict.update({
@@ -90,6 +105,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
+
     return ssh_key_option + [
         x for y in (['-o', f'{k}={v}']
                     for k, v in arg_dict.items()
@@ -118,6 +134,8 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = '__default__',
         ssh_proxy_command: Optional[str] = None,
+        port: int = 22,
+        docker_user: Optional[str] = None,
     ):
         """Initialize SSHCommandRunner.
 
@@ -137,14 +155,33 @@ class SSHCommandRunner:
             ssh_proxy_command: Optional, the value to pass to '-o
                 ProxyCommand'. Useful for communicating with clusters without
                 public IPs using a "jump server".
+            port: The port to use for ssh.
+            docker_user: The docker user to use for ssh. If specified, the
+                command will be run inside a docker container which have a ssh
+                server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT.
         """
-        self.ip = ip
-        self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        if docker_user is not None:
+            assert port is None or port == 22, (
+                f'port must be None or 22 for docker_user, got {port}.')
+            # Already checked in resources
+            assert ssh_proxy_command is None, (
+                'ssh_proxy_command is not supported when using docker.')
+            self.ip = 'localhost'
+            self.ssh_user = docker_user
+            self.port = constants.DEFAULT_DOCKER_PORT
+            self._docker_ssh_proxy_command = lambda ssh: ' '.join(
+                ssh + ssh_options_list(ssh_private_key, None
+                                      ) + ['-W', '%h:%p', f'{ssh_user}@{ip}'])
+        else:
+            self.ip = ip
+            self.ssh_user = ssh_user
+            self.port = port
+            self._docker_ssh_proxy_command = None
 
     @staticmethod
     def make_runner_list(
@@ -153,11 +190,16 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        port_list: Optional[List[int]] = None,
+        docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
+        if not port_list:
+            port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command) for ip in ip_list
+                             ssh_proxy_command, port, docker_user)
+            for ip, port in zip(ip_list, port_list)
         ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
@@ -176,19 +218,25 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
+        else:
+            docker_ssh_proxy_command = None
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name,
             ssh_proxy_command=self._ssh_proxy_command,
+            docker_ssh_proxy_command=docker_ssh_proxy_command,
+            port=self.port,
         ) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
             self,
             cmd: Union[str, List[str]],
             *,
+            require_outputs: bool = False,
             port_forward: Optional[List[int]] = None,
             # Advanced options.
-            require_outputs: bool = False,
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
             process_stream: bool = True,
@@ -276,9 +324,9 @@ class SSHCommandRunner:
 
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
-                                    stream_logs,
-                                    process_stream=process_stream,
                                     require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
                                     **kwargs)
@@ -292,6 +340,7 @@ class SSHCommandRunner:
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
+        max_retry: int = 1,
     ) -> None:
         """Uses 'rsync' to sync 'source' to 'target'.
 
@@ -302,6 +351,8 @@ class SSHCommandRunner:
               for cluster to local.
             log_path: Redirect stdout/stderr to the log_path.
             stream_logs: Stream logs to the stdout/stderr.
+            max_retry: The maximum number of retries for the rsync command.
+              This value should be non-negative.
 
         Raises:
             exceptions.CommandError: rsync command failed.
@@ -326,11 +377,17 @@ class SSHCommandRunner:
                     RSYNC_EXCLUDE_OPTION.format(
                         str(resolved_source / GIT_EXCLUDE)))
 
+        if self._docker_ssh_proxy_command is not None:
+            docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])
+        else:
+            docker_ssh_proxy_command = None
         ssh_options = ' '.join(
             ssh_options_list(
                 self.ssh_private_key,
                 self.ssh_control_name,
                 ssh_proxy_command=self._ssh_proxy_command,
+                docker_ssh_proxy_command=docker_ssh_proxy_command,
+                port=self.port,
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
@@ -351,16 +408,24 @@ class SSHCommandRunner:
             ])
         command = ' '.join(rsync_command)
 
-        returncode, _, stderr = log_lib.run_with_log(command,
-                                                     log_path=log_path,
-                                                     stream_logs=stream_logs,
-                                                     shell=True,
-                                                     require_outputs=True)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        while max_retry >= 0:
+            returncode, _, stderr = log_lib.run_with_log(
+                command,
+                log_path=log_path,
+                stream_logs=stream_logs,
+                shell=True,
+                require_outputs=True)
+            if returncode == 0:
+                break
+            max_retry -= 1
+            time.sleep(backoff.current_backoff())
 
         direction = 'up' if up else 'down'
-        subprocess_utils.handle_returncode(
-            returncode,
-            command,
-            f'Failed to rsync {direction}: {source} -> {target}',
-            stderr=stderr,
-            stream_logs=stream_logs)
+        error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
+                     'Ensure that the network is stable, then retry.')
+        subprocess_utils.handle_returncode(returncode,
+                                           command,
+                                           error_msg,
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)
