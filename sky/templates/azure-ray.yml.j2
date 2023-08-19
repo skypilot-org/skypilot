@@ -31,11 +31,11 @@ provider:
       - {{port}}
 {%- endfor %}
 {%- endif %}
-{%- if DOCKER_USERNAME is not none %}
+{%- if docker_login_config is not none %}
   docker_login_config:
-    DOCKER_USERNAME: {{DOCKER_USERNAME}}
-    DOCKER_PASSWORD: {{DOCKER_PASSWORD}}
-    DOCKER_REPO_URI: {{DOCKER_REPO_URI}}
+    DOCKER_USERNAME: {{docker_login_config.username}}
+    DOCKER_PASSWORD: {{docker_login_config.password}}
+    DOCKER_REPO_URI: {{docker_login_config.repo_uri}}
 {%- endif %}
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.

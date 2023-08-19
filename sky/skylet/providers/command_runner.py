@@ -5,7 +5,6 @@ from typing import Dict
 
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.command_runner import DockerCommandRunner
-from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 

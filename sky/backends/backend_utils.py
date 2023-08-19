@@ -1,4 +1,5 @@
 """Util constants/functions for the backends."""
+import dataclasses
 from datetime import datetime
 import difflib
 import enum
@@ -144,6 +145,27 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+
+
+@dataclasses.dataclass
+class DockerLoginConfig:
+    """Config for docker login. Used for pulling from private registries."""
+    username: str
+    password: str
+    repo_uri: str
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
+        return cls(username=d[constants.DOCKER_USERNAME_ENV_KEY],
+                   password=d[constants.DOCKER_PASSWORD_ENV_KEY],
+                   repo_uri=d[constants.DOCKER_REPO_URI_ENV_KEY])
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            constants.DOCKER_USERNAME_ENV_KEY: self.username,
+            constants.DOCKER_PASSWORD_ENV_KEY: self.password,
+            constants.DOCKER_REPO_URI_ENV_KEY: self.repo_uri
+        }
 
 
 def is_ip(s: str) -> bool:

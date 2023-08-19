@@ -105,7 +105,7 @@ def _fill_in_env_vars_in_file_mounts(
 
 
 def _with_docker_login_config(
-    resources: 'resources_lib.Resources',
+    resources_set: Set['resources_lib.Resources'],
     task_envs: Dict[str, str],
 ) -> 'resources_lib.Resources':
     all_keys = {
@@ -115,14 +115,22 @@ def _with_docker_login_config(
     }
     existing_keys = all_keys & set(task_envs.keys())
     if not existing_keys:
-        return resources
+        return resources_set
     if len(existing_keys) != len(all_keys):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('If any of DOCKER_USERNAME, DOCKER_PASSWORD, '
                              'DOCKER_REPO_URI is set, all of them must be set. '
                              f'Missing envs: {all_keys - existing_keys}')
-    return resources.copy(
-        _docker_login_config={k: task_envs.pop(k) for k in existing_keys})
+    docker_login_config = backend_utils.DockerLoginConfig.from_dict(task_envs)
+
+    def _add_docker_login_config(resources: 'resources_lib.Resources'):
+        if resources.extract_docker_image() is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Docker login config is only supported for docker images.')
+        return resources.copy(_docker_login_config=docker_login_config)
+
+    return {_add_docker_login_config(resources) for resources in resources_set}
 
 
 class Task:
@@ -391,7 +399,6 @@ class Task:
 
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
-        resources = _with_docker_login_config(resources, task.envs)
 
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
@@ -549,7 +556,7 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = resources
+        self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
     def get_resources(self):

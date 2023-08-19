@@ -53,7 +53,8 @@ class Resources:
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
-        _docker_login_config: Optional[Dict[str, str]] = None,
+        _docker_login_config: Optional[
+            'backend_utils.DockerLoginConfig'] = None,
         _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.
@@ -562,14 +563,6 @@ class Resources:
 
         return filtered_regions
 
-    def set_docker_login_config(self, docker_login_config: Dict[str,
-                                                                str]) -> None:
-        if self.extract_docker_image() is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Docker login config is only supported for docker images.')
-        self._docker_login_config = docker_login_config
-
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
             return
@@ -849,21 +842,20 @@ class Resources:
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, region, zones)
         docker_image = self.extract_docker_image()
-        docker_login_config = self._docker_login_config or {}
-        docker_login_config['use_docker_login'] = (self._docker_login_config
-                                                   is not None)
         return dict(
             cloud_specific_variables,
-            **docker_login_config,
             **{
                 # Docker config
-                # docker_image: the image name used to pull the image, e.g.
-                #   ubuntu:latest.
-                # docker_container_name: the name of the container. Default to
-                #   `sky_container`.
+                # Docker image. The image name used to pull the image, e.g.
+                # ubuntu:latest.
                 'docker_image': docker_image,
+                # Docker container name. The name of the container. Default to
+                # `sky_container`.
                 'docker_container_name':
                     constants.DEFAULT_DOCKER_CONTAINER_NAME,
+                # Docker login config (if any). This helps pull the image from
+                # private registries.
+                'docker_login_config': self._docker_login_config
             })
 
     def get_reservations_available_resources(
