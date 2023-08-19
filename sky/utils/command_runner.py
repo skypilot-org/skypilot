@@ -45,7 +45,7 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
-    run_on_k8s: Optional[bool] = False,
+    proxy_to_k8s: Optional[bool] = False,
     *,
     ssh_proxy_command: Optional[str] = None,
     docker_ssh_proxy_command: Optional[str] = None,
@@ -87,7 +87,7 @@ def ssh_options_list(
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.
     if ssh_control_name is not None and docker_ssh_proxy_command is None \
-        and not run_on_k8s:
+        and not proxy_to_k8s:
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -144,7 +144,7 @@ class SSHCommandRunner:
         ssh_proxy_command: Optional[str] = None,
         port: int = 22,
         docker_user: Optional[str] = None,
-        run_on_k8s: Optional[bool] = False,
+        proxy_to_k8s: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -168,13 +168,15 @@ class SSHCommandRunner:
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
                 server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT.
+            proxy_to_k8s: bool; specifies either or not the ssh command will be
+                ran on k8s instance through a jump pod with proxy command.
         """
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
-        self.run_on_k8s = run_on_k8s
+        self.proxy_to_k8s = proxy_to_k8s
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -200,16 +202,16 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        proxy_to_k8s: Optional[bool] = False,
         port_list: Optional[List[int]] = None,
         docker_user: Optional[str] = None,
-        run_on_k8s: Optional[bool] = False,
     ) -> List['SSHCommandRunner']:
         """Helper function for creating runners with the same ssh credentials"""
         if not port_list:
             port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port, docker_user, run_on_k8s)
+                             ssh_proxy_command, port, docker_user, proxy_to_k8s)
             for ip, port in zip(ip_list, port_list)
         ]
 
@@ -239,7 +241,7 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
-            run_on_k8s=self.run_on_k8s) + [f'{self.ssh_user}@{self.ip}']
+            proxy_to_k8s=self.proxy_to_k8s) + [f'{self.ssh_user}@{self.ip}']
 
     def run(
             self,
@@ -398,7 +400,7 @@ class SSHCommandRunner:
                              ssh_proxy_command=self._ssh_proxy_command,
                              docker_ssh_proxy_command=docker_ssh_proxy_command,
                              port=self.port,
-                             run_on_k8s=self.run_on_k8s))
+                             proxy_to_k8s=self.proxy_to_k8s))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to
