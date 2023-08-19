@@ -11,7 +11,6 @@ from sky import exceptions
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 
@@ -328,7 +327,8 @@ class Kubernetes(clouds.Cloud):
 
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
-            k8s_acc_label_key, k8s_acc_label_value = kubernetes_utils.get_gpu_label_key_value(acc_type)
+            k8s_acc_label_key, k8s_acc_label_value = \
+                kubernetes_utils.get_gpu_label_key_value(acc_type)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -384,8 +384,7 @@ class Kubernetes(clouds.Cloud):
         # Check if requested accelerator type is supported in the cluster.
         # If not, this will raise ResourcesUnavailableError.
         try:
-            _, _ = kubernetes_utils.get_gpu_label_key_value(
-                acc_type)
+            _, _ = kubernetes_utils.get_gpu_label_key_value(acc_type)
         except exceptions.ResourcesUnavailableError:
             # If GPU not found, return empty list.
             return [], []
@@ -403,8 +402,7 @@ class Kubernetes(clouds.Cloud):
             try:
                 return kubernetes_utils.check_credentials()
             except Exception as e:  # pylint: disable=broad-except
-                return (False,
-                        'Credential check failed: '
+                return (False, 'Credential check failed: '
                         f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '

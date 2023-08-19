@@ -1,9 +1,11 @@
 """Kubernetes utilities for SkyPilot."""
-from typing import Optional, Set, Tuple, List, Dict, Any
+from typing import Any, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky.adaptors import kubernetes
-from sky.utils import common_utils, ux_utils, env_options
+from sky.utils import common_utils
+from sky.utils import env_options
+from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
 
@@ -105,7 +107,7 @@ def detect_gpu_label_formatter(
         label_key = lf.get_label_key()
         for label, _ in node_labels:
             if label.startswith(label_key):
-                label_formatter = lf
+                label_formatter = lf()
                 break
 
     return label_formatter, node_labels
@@ -131,28 +133,29 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
-def get_kubernetes_nodes() -> List[Dict[str, Any]]:
+def get_kubernetes_nodes() -> List[Any]:
     # TODO(romilb): Calling kube API can take between 10-100ms depending on
     #  the control plane. Consider caching calls to this function (using
     #  kubecontext hash as key).
     try:
-        nodes = kubernetes.core_api().list_node(_request_timeout=kubernetes.API_TIMEOUT).items
-    except kubernetes.max_retry_error:
+        nodes = kubernetes.core_api().list_node(
+            _request_timeout=kubernetes.API_TIMEOUT).items
+    except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
             'Timed out when trying to get node info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry.')
+            'Please check if the cluster is healthy and retry.') from None
     return nodes
 
 
-def get_gpu_label_key_value(acc_type: str, check_mode = False) -> Tuple[str, str]:
+def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
     Args:
         acc_type: The GPU type required by the task.
-        check_mode: If True, only checks if the cluster has GPU resources and labels
-            are setup on the cluster. acc_type is ignore does not return the label key and value.
-            Useful for checking if GPUs are configured correctly on the cluster
-            without explicitly requesting a acc_type.
+        check_mode: If True, only checks if the cluster has GPU resources and
+            labels are setup on the cluster. acc_type is ignore does not return
+            the label key and value. Useful for checking if GPUs are configured
+            correctly on the cluster without explicitly requesting a acc_type.
     Returns:
         A tuple of the label key and value. Returns empty strings if check_mode
         is True.
@@ -178,10 +181,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode = False) -> Tuple[str, str
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
             with ux_utils.print_exception_no_traceback():
-                supported_formats = ', '.join([
-                    f.get_label_key()
-                    for f in LABEL_FORMATTER_REGISTRY
-                ])
+                supported_formats = ', '.join(
+                    [f.get_label_key() for f in LABEL_FORMATTER_REGISTRY])
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
@@ -194,12 +195,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode = False) -> Tuple[str, str
                     f'{suffix}')
         if label_formatter is not None:
             if check_mode:
-                # If check mode is enabled and we reached so far, we can conclude
-                # that the cluster is setup correctly and we can return.
+                # If check mode is enabled and we reached so far, we can
+                # conclude that the cluster is setup correctly and return.
                 return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(
-                acc_type)
+            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
@@ -215,7 +215,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode = False) -> Tuple[str, str
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
-                    gpus_available = set([v for k, v in node_labels if k == k8s_acc_label_key])
+                    gpus_available = set(
+                        v for k, v in node_labels if k == k8s_acc_label_key)
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
@@ -289,9 +290,9 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     except kubernetes.config_exception() as e:
         return False, f'Invalid configuration file: {str(e)}'
     except kubernetes.max_retry_error():
-        return False, 'Failed to communicate with the cluster - timeout. ' \
-                      'Check if your cluster is running and your network ' \
-                      'is stable.'
+        return False, ('Failed to communicate with the cluster - timeout. '
+                       'Check if your cluster is running and your network '
+                       'is stable.')
     except ValueError as e:
         return False, common_utils.format_exception(e)
     except Exception as e:  # pylint: disable=broad-except
@@ -311,7 +312,6 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         # serves as a hint for how to enable GPU access.
         return True, f'{e}'
     return True, None
-
 
 
 def get_current_kube_config_context_name() -> Optional[str]:

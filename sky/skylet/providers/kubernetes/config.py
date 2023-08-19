@@ -2,7 +2,7 @@ import copy
 import logging
 import math
 import re
-from typing import Dict, Any, Union
+from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
@@ -106,7 +106,8 @@ def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def get_autodetected_resources(container_data: Dict[str, Any]) -> Dict[str, Any]:
+def get_autodetected_resources(
+        container_data: Dict[str, Any]) -> Dict[str, Any]:
     container_resources = container_data.get('resources', None)
     if container_resources is None:
         return {'CPU': 0, 'GPU': 0}
@@ -122,7 +123,8 @@ def get_autodetected_resources(container_data: Dict[str, Any]) -> Dict[str, Any]
     return node_type_resources
 
 
-def get_resource(container_resources: Dict[str, Any], resource_name: str) -> int:
+def get_resource(container_resources: Dict[str, Any],
+                 resource_name: str) -> int:
     request = _get_resource(container_resources,
                             resource_name,
                             field_name='requests')
@@ -140,8 +142,7 @@ def get_resource(container_resources: Dict[str, Any], resource_name: str) -> int
     return max(1, math.ceil(res_count))
 
 
-def _get_resource(container_resources: Dict[str, Any],
-                  resource_name: str,
+def _get_resource(container_resources: Dict[str, Any], resource_name: str,
                   field_name: str) -> Union[int, float]:
     """Returns the resource quantity.
 
@@ -198,8 +199,8 @@ def _parse_memory_resource(resource_qty_str: str) -> Union[int, float]:
     return float(number) * MEMORY_SIZE_UNITS[unit_index]
 
 
-def _configure_autoscaler_service_account(namespace: str,
-                                          provider_config: Dict[str, Any]) -> None:
+def _configure_autoscaler_service_account(
+        namespace: str, provider_config: Dict[str, Any]) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(account_field))
@@ -286,8 +287,8 @@ def _configure_autoscaler_role_binding(namespace: str,
     logger.info(log_prefix + created_msg(binding_field, name))
 
 
-def _configure_services(namespace: str,
-                        provider_config: Dict[str, Any]) -> None:
+def _configure_services(namespace: str, provider_config: Dict[str,
+                                                              Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(service_field))
