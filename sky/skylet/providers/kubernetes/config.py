@@ -19,7 +19,7 @@ MEMORY_SIZE_UNITS = {
 
 log_prefix = 'KubernetesNodeProvider: '
 
-# Timeout for deleting a Kubernetes resource_qty (in seconds).
+# Timeout for deleting a Kubernetes resource (in seconds).
 DELETION_TIMEOUT = 90
 
 
@@ -93,7 +93,7 @@ def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
 
         autodetected_resources = get_autodetected_resources(container_data)
         if node_types == head_node_type:
-            # we only autodetect worker type node memory resource_qty
+            # we only autodetect worker type node memory resource
             autodetected_resources.pop('memory')
         if 'resources' not in config['available_node_types'][node_type]:
             config['available_node_types'][node_type]['resources'] = {}
@@ -133,10 +133,10 @@ def get_resource(container_resources: Dict[str, Any], resource_name: str) -> int
     # float('inf') means there's no limit set
     res_count = request if limit == float('inf') else limit
     # Convert to int since Ray autoscaler expects int.
-    # Cap the minimum resource_qty to 1 because if resource_qty count is set to 0,
+    # Cap the minimum resource to 1 because if resource count is set to 0,
     # (e.g., when request=0.5), ray will not be able to schedule any tasks.
-    # We also round up the resource_qty count to the nearest integer to provide the
-    # user at least the amount of resource_qty they requested.
+    # We also round up the resource count to the nearest integer to provide the
+    # user at least the amount of resource they requested.
     return max(1, math.ceil(res_count))
 
 

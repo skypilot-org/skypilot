@@ -79,8 +79,14 @@ class KubernetesInstanceType:
     def _parse_instance_type(
             cls,
             name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
-        """Returns the cpus, memory, accelerator_count, and accelerator_type
-        from the given name."""
+        """Parses and returns resources from the given InstanceType name
+
+        Returns:
+            cpus | float: Number of CPUs
+            memory | float: Amount of memory in GB
+            accelerator_count | float: Number of accelerators
+            accelerator_type | str: Type of accelerator
+        """
         pattern = re.compile(
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
         )
