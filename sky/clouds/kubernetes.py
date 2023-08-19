@@ -328,33 +328,8 @@ class Kubernetes(clouds.Cloud):
 
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
-            label_formatter, node_labels = \
-                kubernetes_utils.detect_gpu_label_formatter()
-            if label_formatter is None:
-                # If GPU labels are not detected, trigger failover by
-                # raising ResourcesUnavailableError.
-                # TODO(romilb): This will fail early for autoscaling clusters.
-                #  For AS clusters, we may need a way for users to specify the
-                #  GPULabelFormatter to use since the cluster may be scaling up
-                #  from zero nodes and may not have any GPU nodes yet.
-                with ux_utils.print_exception_no_traceback():
-                    supported_formats = ', '.join([
-                        f.get_label_key()
-                        for f in kubernetes_utils.LABEL_FORMATTER_REGISTRY
-                    ])
-                    suffix = ''
-                    if env_options.Options.SHOW_DEBUG_INFO.get():
-                        suffix = ' Found node labels: {}'.format(node_labels)
-                    raise exceptions.ResourcesUnavailableError(
-                        'Could not detect GPU labels in Kubernetes cluster. '
-                        'Please ensure at least one node in the cluster has '
-                        'node labels of either of these formats: '
-                        f'{supported_formats}. Please refer to '
-                        'the documentation on how to set up node labels.'
-                        f'{suffix}')
+            k8s_acc_label_key, k8s_acc_label_value = kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-            k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -406,6 +381,14 @@ class Kubernetes(clouds.Cloud):
         assert len(accelerators) == 1, resources
         # GPUs requested - build instance type.
         acc_type, acc_count = list(accelerators.items())[0]
+        # Check if requested accelerator type is supported in the cluster.
+        # If not, this will raise ResourcesUnavailableError.
+        try:
+            _, _ = kubernetes_utils.get_gpu_label_key_value(
+                acc_type)
+        except exceptions.ResourcesUnavailableError:
+            # If GPU not found, return empty list.
+            return [], []
         default_inst = KubernetesInstanceType.from_instance_type(
             default_instance_type)
         instance_type = KubernetesInstanceType.from_resources(
@@ -437,10 +420,12 @@ class Kubernetes(clouds.Cloud):
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        # TODO(romilb): All accelerators are marked as available for now.
-        #  In the future, we should return false for accelerators that we know
-        #  are not supported by the cluster.
-        return True
+        try:
+            # Check if accelerator is available by checking node labels
+            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
+            return True
+        except exceptions.ResourcesUnavailableError:
+            return False
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
