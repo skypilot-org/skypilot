@@ -3158,15 +3158,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=False,
                                                       require_outputs=True)
 
-        if 'has no attribute' in stdout:
-            # Happens when someone calls `sky exec` but remote is outdated
-            # necessicating calling `sky launch`
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
-                    'remote cluster. To update, run: sky launch -c '
-                    f'{handle.cluster_name}{colorama.Style.RESET_ALL}')
-
+        # Happens when someone calls `sky exec` but remote is outdated
+        # necessicating calling `sky launch`
+        common_utils.check_staled_runtime_on_remote(returncode, stdout, handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3450,12 +3444,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 If set to True, asserts `jobs` is set to None.
         """
         if cancel_all:
-            assert jobs is None, (
-                'Cannot specify both jobs and all')
+            assert jobs is None, ('Cannot specify both jobs and all')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
-        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs,
-                                                 cancel_all)
+        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
         # TODO(zhwu): backward compatibility for old clusters. We need to hint
         # users to upgrade their clusters with `sky start`.
@@ -3465,9 +3457,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
+        common_utils.check_staled_runtime_on_remote(
+            returncode, stdout, handle.cluster_name)
         subprocess_utils.handle_returncode(
             returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.',
+            stdout)
 
         cancelled_ids = common_utils.decode_payload(stdout)
         if cancelled_ids:

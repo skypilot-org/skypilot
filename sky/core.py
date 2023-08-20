@@ -538,7 +538,7 @@ def cancel(
     Please refer to the sky.cli.cancel for the document.
 
     When job_ids is None, cancel the last running job.
-    
+
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.

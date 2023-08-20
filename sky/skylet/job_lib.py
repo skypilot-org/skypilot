@@ -719,11 +719,9 @@ def cancel_jobs_encoded_results(job_owner: str,
     """
     if cancel_all:
         # Cancel the latest (largest job ID) running job.
-        assert jobs is None, (
-            'Cannot specify both jobs and all')
+        assert jobs is None, ('Cannot specify both jobs and all')
         job_records = _get_jobs(
-                None,
-                [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
+            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
         if jobs is None:
             # Cancel the latest running job.
