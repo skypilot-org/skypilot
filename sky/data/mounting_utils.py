@@ -1,13 +1,17 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
 import textwrap
+import typing
 from typing import Optional
 
 from sky import exceptions
 
+if typing.TYPE_CHECKING:
+    from sky.data.storage import StorageMode
+
 
 def get_mounting_command(
-    mount_mode: str,
+    mount_mode: 'StorageMode',
     mount_path: str,
     mount_cmd: str,
     install_cmd: Optional[str] = None,
@@ -38,7 +42,7 @@ def get_mounting_command(
     """
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
-    if mount_mode == 'MOUNT':
+    if mount_mode.value == 'MOUNT':
         script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
         if version_check_cmd is not None:
             installed_check += f' && {version_check_cmd}'
@@ -49,7 +53,7 @@ def get_mounting_command(
         #!/usr/bin/env bash
         set -e
         
-        MOUNT_MODE={mount_mode}
+        MOUNT_MODE={mount_mode.value}
         MOUNT_PATH={mount_path}
         echo "MOUNT_MODE is: $MOUNT_MODE"
 
