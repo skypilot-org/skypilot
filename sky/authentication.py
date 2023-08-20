@@ -421,9 +421,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         ssh_jump_port = clouds.Kubernetes.get_port(ssh_jump_name)
 
     elif ssh_setup_mode == 'port-forward':
-        # If ssh connection is establisehd with kubectl port-forward, the
-        # jump pod will run on ClusterIP service. This enables to establish
-        # ssh session without opening any ports on the Kubernetes cluster.
+        # Using `kubectl port-forward` creates a direct tunnel to jump pod and does not require opening any ports on Kubernetes nodes.
+        # As a result, the service can be a simple ClusterIP service that we access using `kubectl port-forward`.
         service_type = 'ClusterIP'
         kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
                                     namespace, service_type)
