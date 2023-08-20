@@ -18,7 +18,7 @@ setup: |
   fi
 
   # Install dependencies
-  pip install fastchat[model_worker,webui]==0.2.24
+  pip install fschat[model_worker,webui]==0.2.24
   pip install protobuf einops
 
 run: |
