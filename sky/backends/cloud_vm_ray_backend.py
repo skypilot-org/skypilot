@@ -3159,8 +3159,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       require_outputs=True)
 
         # Happens when someone calls `sky exec` but remote is outdated
-        # necessicating calling `sky launch`
-        common_utils.check_staled_runtime_on_remote(returncode, stdout,
+        # necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
                                                     handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
@@ -3451,11 +3451,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
-        returncode, stdout, _ = self.run_on_head(handle,
-                                                 code,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-        common_utils.check_staled_runtime_on_remote(returncode, stdout,
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+        # TODO(zongheng): remove after >=0.5.0.
+        backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
                                                     handle.cluster_name)
         subprocess_utils.handle_returncode(
             returncode, code,

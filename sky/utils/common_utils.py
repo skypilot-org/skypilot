@@ -410,21 +410,3 @@ def find_free_port(start_port: int) -> int:
             except OSError:
                 pass
     raise OSError('No free ports available.')
-
-
-def check_staled_runtime_on_remote(returncode: int, stderr: str,
-                                   cluster_name: str) -> None:
-    """Raise RuntimeError for staled SkyPilot runtime."""
-
-    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
-                         r'attribute \'(.*)\'')
-    if returncode != 0:
-        attribute_error = re.findall(pattern, stderr)
-        if attribute_error:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
-                    'remote cluster. To update, run: '
-                    f'{colorama.Style.BRIGHT}sky launch -c {cluster_name}'
-                    f'{colorama.Style.RESET_ALL}'
-                    f'\n--- Details ---\n{stderr.strip()}\n')
