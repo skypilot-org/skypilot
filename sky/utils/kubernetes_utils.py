@@ -113,8 +113,7 @@ def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
 
 
 def get_port(svc_name: str, namespace: str) -> int:
-    """
-    Gets the nodeport of the specified service.
+    """Gets the nodeport of the specified service.
 
     Args:
         svc_name (str): Name of the kubernetes service. Note that this may be
@@ -142,8 +141,7 @@ def get_external_ip():
 
 def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
-    """
-    Check if the credentials in kubeconfig file are valid
+    """Check if the credentials in kubeconfig file are valid
 
     Args:
         timeout (int): Timeout in seconds for the test API call
@@ -181,8 +179,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
 
 
 def get_current_kube_config_context_name() -> Optional[str]:
-    """
-    Get the current kubernetes context from the kubeconfig file
+    """Get the current kubernetes context from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context if it exists, None otherwise
@@ -196,8 +193,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
 
 
 def get_current_kube_config_context_namespace() -> str:
-    """
-    Get the current kubernetes context namespace from the kubeconfig file
+    """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
         str | None: The current kubernetes context namespace if it exists, else
@@ -214,8 +210,7 @@ def get_current_kube_config_context_namespace() -> str:
         return DEFAULT_NAMESPACE
 
 
-def get_ssh_proxy_command(private_key_path: str,
-                          sshjump_name: str,
+def get_ssh_proxy_command(private_key_path: str, sshjump_name: str,
                           namespace: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
@@ -239,8 +234,7 @@ def get_ssh_proxy_command(private_key_path: str,
 
 
 def setup_sshjump_svc(sshjump_name: str, namespace: str):
-    """
-    Sets up Kubernetes service resource to access for SSH jump pod.
+    """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
     setup_sshjump_pod(...) method. This service ensures the pod is accessible.
@@ -250,8 +244,8 @@ def setup_sshjump_svc(sshjump_name: str, namespace: str):
         namespace: Namespace to create the SSH jump service in
     """
     # Fill in template - ssh_key_secret and sshjump_image are not required for
-    # the service spec, so we pass in None.
-    content = fill_sshjump_template(None, None, sshjump_name)
+    # the service spec, so we pass in empty strs.
+    content = fill_sshjump_template('', '', sshjump_name)
     # Create service
     try:
         kubernetes.core_api().create_namespaced_service(namespace,
@@ -267,10 +261,9 @@ def setup_sshjump_svc(sshjump_name: str, namespace: str):
         logger.info(f'Created SSH Jump Service {sshjump_name}.')
 
 
-def setup_sshjump_pod(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
-                  namespace: str):
-    """
-    Sets up Kubernetes RBAC and pod for SSH jump host.
+def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
+                      ssh_key_secret: str, namespace: str):
+    """Sets up Kubernetes RBAC and pod for SSH jump host.
 
     Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
     running inside a cluster. This function sets up the resources needed for
@@ -340,7 +333,8 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str, ssh_key_secret: str
         logger.info(f'Created SSH Jump Host {sshjump_name}.')
 
 
-def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str, sshjump_name: str) -> Dict:
+def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,
+                          sshjump_name: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  'kubernetes-sshjump.yml.j2')
     if not os.path.exists(template_path):

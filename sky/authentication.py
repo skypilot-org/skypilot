@@ -412,9 +412,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     kubernetes_utils.setup_sshjump_svc(sshjump_name, namespace)
 
-    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(PRIVATE_SSH_KEY_PATH,
-                                                           sshjump_name,
-                                                           namespace)
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        PRIVATE_SSH_KEY_PATH, sshjump_name, namespace)
 
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     return config
