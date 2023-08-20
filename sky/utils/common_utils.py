@@ -19,7 +19,6 @@ import colorama
 import yaml
 
 from sky import sky_logging
-from sky.utils import ux_utils
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
