@@ -591,6 +591,7 @@ def cancel(
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
     elif not job_ids:
+        # job_ids is not None or empty.
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling latest running job on cluster {cluster_name!r}...'

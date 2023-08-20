@@ -3440,9 +3440,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         Args:
             handle: The cluster handle.
-            jobs: Job IDs to cancel. If None, cancel all jobs.
-            cancel_latest_running_job: Whether to cancel the latest running job.
-                If set to True, asserts `jobs` is set to None.
+            jobs: Job IDs to cancel. If None or empty, cancel the latest running
+                job.
+            cancel_all: Whether to cancel all the jobs. If set to True, asserts
+                `jobs` is set to None or empty.
         """
         if cancel_all:
             assert not jobs, ('Cannot specify both jobs and all')
