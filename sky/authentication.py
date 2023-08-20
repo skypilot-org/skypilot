@@ -380,51 +380,6 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-def _get_kubernetes_proxy_command(ingress: int, ipaddress: str,
-                                  ssh_setup_mode: str):
-    """ returns Proxycommand to use when establishing ssh connection
-    to the k8s instance through the jump pod.
-
-    Args:
-        ingress: int; the port number host machine is listening to
-        ipaddress: str; ip address of the host machine
-        ssh_setup_mode: str; networking mode for ssh session. It is either
-            'nodeport' or 'port-forward'
-    """
-    if ssh_setup_mode == 'nodeport':
-        proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
-                         '-o StrictHostKeyChecking=no '
-                         '-o UserKnownHostsFile=/dev/null '
-                         f'-o IdentitiesOnly=yes -p {ingress} '
-                         f'-W %h:%p sky@{ipaddress}')
-    # Setting kubectl port-forward/socat to establish ssh session using
-    # ClusterIP service to disallow any ports opened
-    else:
-        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        kube_config_path = os.path.expanduser(
-            kubernetes.KUBE_CONFIG_DEFAULT_PATH)
-        vars_to_fill = {
-            'ssh_jump_name': ssh_jump_name,
-            'ipaddress': ipaddress,
-            'local_port': ingress,
-            'kube_config_path': kube_config_path
-        }
-        port_forward_proxy_cmd_path = os.path.expanduser(
-            kubernetes.PORT_FORWARD_PROXY_CMD_PATH)
-        backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=port_forward_proxy_cmd_path)
-        os.chmod(port_forward_proxy_cmd_path,
-                 os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
-        proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
-                         f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
-                         '-o StrictHostKeyChecking=no '
-                         '-o UserKnownHostsFile=/dev/null '
-                         f'-o IdentitiesOnly=yes -p {ingress} '
-                         f'-W %h:%p sky@{ipaddress}')
-    return proxy_command
-
-
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service
@@ -455,25 +410,27 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(suffix)
             raise
 
-    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image = clouds.Kubernetes.IMAGE_CPU
+    ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    ssh_jump_image = clouds.Kubernetes.IMAGE_CPU
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     ssh_jump_ip = clouds.Kubernetes.get_external_ip()
     if ssh_setup_mode == 'nodeport':
         service_type = 'NodePort'
-    # If ssh connection is establisehd with kubectl port-forward, the jump pod
-    # will run on ClusterIP service. This enables to establish ssh session
-    # without opening any ports on the Kubernetes cluster.
-    else:
-        service_type = 'ClusterIP'
+        kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
+                                    namespace, service_type)
+        ssh_jump_port = clouds.Kubernetes.get_port(ssh_jump_name)
 
-    kubernetes_utils.setup_sshjump(sshjump_name, sshjump_image, key_label,
-                                   namespace, service_type)
-    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
-    if ssh_setup_mode == 'nodeport':
-        ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
+    elif ssh_setup_mode == 'port-forward':
+        # If ssh connection is establisehd with kubectl port-forward, the
+        # jump pod will run on ClusterIP service. This enables to establish
+        # ssh session without opening any ports on the Kubernetes cluster.
+        service_type = 'ClusterIP'
+        kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
+                                    namespace, service_type)
+        ssh_jump_port = clouds.Kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
     else:
-        ssh_jump_port = kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
-    config['auth']['ssh_proxy_command'] = _get_kubernetes_proxy_command(
-        ssh_jump_port, ssh_jump_ip, ssh_setup_mode)
+        raise ValueError(f'Unsupported kubernetes networking type: '
+                         f'{ssh_setup_mode}. Please check: ~/.sky/config.yaml')
+    config['auth']['ssh_proxy_command'] = kubernetes_utils.get_kubernetes_proxy_command(
+        ssh_jump_port, ssh_jump_ip, ssh_jump_name, ssh_setup_mode, PRIVATE_SSH_KEY_PATH, clouds.kubernetes.CREDENTIAL_PATH, clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH, clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
     return config

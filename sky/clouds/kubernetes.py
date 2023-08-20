@@ -19,7 +19,8 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-_CREDENTIAL_PATH = '~/.kube/config'
+
+CREDENTIAL_PATH = '~/.kube/config'
 
 
 class KubernetesInstanceType:
@@ -150,7 +151,10 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-sshjump-{common_utils.get_user_hash()}'
-
+    LOCAL_PORT_FOR_PORT_FORWARD = 23100
+    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
+        'kubernetes-port-forward-proxy-command.sh.j2'
+    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler
@@ -421,15 +425,15 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Test using python API
             return kubernetes_utils.check_credentials()
         else:
             return (False, 'Credentials not found - '
-                    'check if {_CREDENTIAL_PATH} exists.')
+                    'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
+        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return KubernetesInstanceType.is_valid_instance_type(instance_type)

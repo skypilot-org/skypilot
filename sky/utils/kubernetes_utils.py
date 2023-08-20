@@ -9,6 +9,7 @@ import yaml
 import sky
 from sky import sky_logging
 from sky.adaptors import kubernetes
+from sky.backends import backend_utils
 from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'
@@ -208,6 +209,58 @@ def get_current_kube_config_context_namespace() -> str:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
         return DEFAULT_NAMESPACE
+
+
+def get_kubernetes_proxy_command(ingress: int, ipaddress: str, ssh_jump_name: str,
+                                  ssh_setup_mode: str, private_ssh_key_path: str, kube_config_path: str,
+                                  port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
+    """ returns Proxycommand to use when establishing ssh connection
+    to the k8s instance through the jump pod.
+
+    Args:
+        ingress: int; the port number host machine is listening to
+        ipaddress: str; ip address of the host machine
+        ssh_jump_name: str; name of the pod/svc used for jump pod
+        ssh_setup_mode: str; networking mode for ssh session. It is either
+            'nodeport' or 'port-forward'
+        private_ssh_key_path: str; path to the private key used to ssh
+        kube_config_path: str; path to kubernetes config
+        port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
+            with kubectl port-forward
+        port_fwd_proxy_cmd_template: str; template to create 
+            kubectl port-forward Proxycommand
+        
+    """
+    if ssh_setup_mode == 'nodeport':
+        proxy_command = (f'ssh -tt -i {private_ssh_key_path} '
+                         '-o StrictHostKeyChecking=no '
+                         '-o UserKnownHostsFile=/dev/null '
+                         f'-o IdentitiesOnly=yes -p {ingress} '
+                         f'-W %h:%p sky@{ipaddress}')
+    # Setting kubectl port-forward/socat to establish ssh session using
+    # ClusterIP service to disallow any ports opened
+    else:
+        kube_config_path = os.path.expanduser(kube_config_path)
+        vars_to_fill = {
+            'ssh_jump_name': ssh_jump_name,
+            'ipaddress': ipaddress,
+            'local_port': ingress,
+            'kube_config_path': kube_config_path
+        }
+        port_forward_proxy_cmd_path = os.path.expanduser(
+            port_fwd_proxy_cmd_path)
+        backend_utils.fill_template(port_fwd_proxy_cmd_template,
+                                    vars_to_fill,
+                                    output_path=port_forward_proxy_cmd_path)
+        os.chmod(port_forward_proxy_cmd_path,
+                 os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
+        proxy_command = (f'ssh -tt -i {private_ssh_key_path} '
+                         f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
+                         '-o StrictHostKeyChecking=no '
+                         '-o UserKnownHostsFile=/dev/null '
+                         f'-o IdentitiesOnly=yes -p {ingress} '
+                         f'-W %h:%p sky@{ipaddress}')
+    return proxy_command
 
 
 def setup_sshjump(sshjump_name: str, sshjump_image: str, ssh_key_secret: str,
