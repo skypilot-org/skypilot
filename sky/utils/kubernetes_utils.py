@@ -7,6 +7,7 @@ import jinja2
 import yaml
 
 import sky
+from sky import clouds
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
@@ -331,6 +332,56 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
             raise
     else:
         logger.info(f'Created SSH Jump Host {sshjump_name}.')
+
+
+def analyze_sshjump_pod(namespace: str):
+    """Analyzes SSH jump pod to check its readiness.
+
+    Prevents the existence of a dangling SSH jump pod. This could happen
+    in case the pod main container did not start properly and SSH jump pod LCM
+    will not function properly to take care of removing the pod and service
+    when needed.
+
+    Args:
+        namespace: Namespace to remove the SSH jump pod and service from
+    """
+    def find(l, predicate):
+        """
+        Utility function to find element in given list
+        """
+        results = [x for x in l if predicate(x)]
+        return results[0] if len(results) > 0 else None
+    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    try:
+        sshjump_pod = kubernetes.core_api().read_namespaced_pod(
+            sshjump_name, namespace)
+        cont_ready_cond = find(
+            sshjump_pod.status.conditions, lambda c: c.type == 'ContainersReady')
+        if cont_ready_cond and \
+            cont_ready_cond.status == 'False':
+            # The main container is not ready. To be on the safe-side
+            # and prevent a dangling sshjump pod - lets remove it and
+            # the service. Otherwise main container is ready and its lcm
+            # takes care of the cleaning
+            kubernetes.core_api().delete_namespaced_pod(
+                sshjump_name,
+                namespace)
+            kubernetes.core_api().delete_namespaced_service(
+                sshjump_name,
+                namespace)
+
+    # only warn and proceed as usual
+    except kubernetes.api_exception() as e:
+        logger.warning(f'Tried to analyze sshjump pod {sshjump_name},'
+                       f' but got error {e}\n')
+        # we encountered an issue while analyzing sshjump pod. To be on
+        # the safe side, lets remove its service so the port is freed
+        try:
+            kubernetes.core_api().delete_namespaced_service(
+                sshjump_name,
+                namespace)
+        except:
+            pass
 
 
 def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,

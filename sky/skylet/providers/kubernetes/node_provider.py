@@ -243,54 +243,7 @@ class KubernetesNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
-        def find(l, predicate):
-            """
-            Utility function to find element in given list
-            """
-            results = [x for x in l if predicate(x)]
-            return results[0] if len(results) > 0 else None
-
-        sshjump_name = None
-        try:
-            sshjump_name = self.node_tags(node_id).get('skypilot-sshjump')
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
-                logger.warning(config.log_prefix +
-                               f'Tried to get pod {node_id},'
-                               ' but the pod was not found (404).')
-            else:
-                raise
-        if sshjump_name:
-            try:
-                sshjump_pod = kubernetes.core_api().read_namespaced_pod(
-                    sshjump_name, self.namespace)
-                containersReadyCondition = find(
-                    sshjump_pod.status.conditions, lambda c: c.type == 'ContainersReady')
-                if containersReadyCondition and \
-                    containersReadyCondition.status == 'False':
-                    # The main container is not ready. To be on the safe-side
-                    # and prevent a dangling sshjump pod - lets remove it and
-                    # the service. Otherwise main container is ready and its lcm
-                    # takes care of the cleaning
-                    kubernetes.core_api().delete_namespaced_pod(
-                        sshjump_name,
-                        self.namespace)
-                    kubernetes.core_api().delete_namespaced_service(
-                        sshjump_name,
-                        self.namespace)
-
-            # only warn and proceed as usual
-            except kubernetes.api_exception() as e:
-                logger.warning(f'Tried to handle sshjump pod {sshjump_name},'
-                               f' but got error {e}\n')
-                # we encountered an issue while diagnosing sshjump pod. To be on
-                # the safe side, lets remove its service so the port is freed
-                try:
-                    kubernetes.core_api().delete_namespaced_service(
-                        sshjump_name,
-                        self.namespace)
-                except:
-                    pass
+        kubernetes_utils.analyze_sshjump_pod(self.namespace)
         try:
             kubernetes.core_api().delete_namespaced_pod(
                 node_id,
