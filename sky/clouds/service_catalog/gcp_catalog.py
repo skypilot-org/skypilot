@@ -33,12 +33,6 @@ _image_df = common.read_catalog('gcp/images.csv',
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_TPU_REGIONS = [
-    'us-central1',
-    'europe-west4',
-    'asia-east1',
-]
-
 # We will select from the following three CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
     # This is the latest general-purpose instance family as of Mar 2023.
@@ -353,23 +347,17 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False,
                                 region: Optional[str] = None,
                                 zone: Optional[str] = None) -> float:
-    # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
-    # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
-    if region is None:
-        for tpu_region in _TPU_REGIONS:
-            df = _get_accelerator(_df, accelerator, count, tpu_region)
-            if len(set(df['Price'])) == 1:
-                region = tpu_region
-                break
 
     df = _get_accelerator(_df, accelerator, count, region, zone)
-    assert len(set(df['Price'])) == 1, df
+    if region is not None:
+        assert len(set(df['Price'])) == 1, df
+    min_price = df['Price'].min()
     if not use_spot:
-        return df['Price'].iloc[0]
+        return min_price
 
     cheapest_idx = df['SpotPrice'].idxmin()
     if pd.isnull(cheapest_idx):
-        return df['Price'].iloc[0]
+        return min_price
 
     cheapest = df.loc[cheapest_idx]
     return cheapest['SpotPrice']

@@ -1,19 +1,20 @@
-"""Manages lifecycle of sshjump pod.
+"""Manages lifecycle of ssh jump pod.
 
-This script runs inside sshjump pod as the main process (PID 1).
+This script runs inside ssh jump pod as the main process (PID 1).
 
 It terminates itself (by removing sshjump service and pod via a call to
 kubeapi), if it does not see ray pods in the duration of 10 minutes. If the
-user re-launches a task before the duration is over, then sshjump pod is being
+user re-launches a task before the duration is over, then ssh jump pod is being
 reused and will terminate itself when it sees that no ray cluster exist in that
-amount duration.
+duration.
 """
 import datetime
 import os
 import sys
 import time
 
-from kubernetes import client, config
+from kubernetes import client
+from kubernetes import config
 
 # Load kube config
 config.load_incluster_config()
@@ -29,8 +30,8 @@ alert_threshold = int(os.getenv('ALERT_THRESHOLD', '600'))
 # The amount of time in seconds to wait between Ray pods existence checks
 retry_interval = int(os.getenv('RETRY_INTERVAL', '60'))
 
-# Ray pods are labeled with this value i.e sshjump name which is unique per user
-#(based on userhash)
+# Ray pods are labeled with this value i.e., sshjump name which is unique per
+# user (based on user hash)
 label_selector = f'skypilot-sshjump={current_name}'
 
 
@@ -55,7 +56,7 @@ def poll():
             ret = v1.list_namespaced_pod(current_namespace,
                                          label_selector=label_selector)
         except Exception as e:
-            sys.stdout.write(f'[ERROR] exit poll() with error: {e}\n')
+            sys.stdout.write(f'Error: listing pods failed with error: {e}\n')
             raise
 
         if len(ret.items) == 0:
@@ -92,15 +93,15 @@ def poll():
 
 
 def main():
-    sys.stdout.write('enter main()\n')
-    sys.stdout.write(f'*** current_name {current_name}\n')
-    sys.stdout.write(f'*** current_namespace {current_namespace}\n')
-    sys.stdout.write(f'*** alert_threshold time {alert_threshold}\n')
-    sys.stdout.write(f'*** retry_interval time {retry_interval}\n')
-    sys.stdout.write(f'*** label_selector {label_selector}\n')
+    sys.stdout.write('SkyPilot SSH Jump Pod Lifecycle Manager\n')
+    sys.stdout.write(f'current_name: {current_name}\n')
+    sys.stdout.write(f'current_namespace: {current_namespace}\n')
+    sys.stdout.write(f'alert_threshold time: {alert_threshold}\n')
+    sys.stdout.write(f'retry_interval time: {retry_interval}\n')
+    sys.stdout.write(f'label_selector: {label_selector}\n')
 
     if not current_name or not current_namespace:
-        raise Exception('[ERROR] One or more environment variables is missing '
+        raise Exception('One or more environment variables is missing '
                         'with an actual value.')
     poll()
 

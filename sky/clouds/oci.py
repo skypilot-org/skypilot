@@ -1,25 +1,24 @@
-"""
-Oracle Cloud Infrastructure (OCI)
+"""Oracle Cloud Infrastructure (OCI)
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
  - Hysun He (hysun.he@oracle.com) @ May 4, 2023: Support use the default
    image_id (configurable) if no image_id specified in the task yaml.
 """
-import os
 import json
-import typing
 import logging
+import os
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
 from sky import status_lib
+from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
+from sky.skylet.providers.oci.config import oci_conf
 from sky.utils import common_utils
 from sky.utils import ux_utils
-from sky.adaptors import oci as oci_adaptor
-from sky.skylet.providers.oci.config import oci_conf
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -32,7 +31,7 @@ _tenancy_prefix = None
 
 @clouds.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
-    """ OCI: Oracle Cloud Infrastructure """
+    """OCI: Oracle Cloud Infrastructure """
 
     _REPR = 'OCI'
 
@@ -48,6 +47,10 @@ class OCI(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+                (f'Docker image is not supported in {cls._REPR}. '
+                 'You can try running docker command inside the '
+                 '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is not supported in {cls._REPR}.'),
         }
@@ -124,8 +127,9 @@ class OCI(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        """
-        https://www.oracle.com/cis/cloud/networking/pricing/
+        """Get the egress cost for the given number of gigabytes.
+
+        Reference: https://www.oracle.com/cis/cloud/networking/pricing/
         """
         # Free for first 10T (per month)
         if num_gigabytes <= 10 * 1024:
@@ -438,7 +442,8 @@ class OCI(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'oci')
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # We ignore checking the image size because most of situations the
         # boot volume size is larger than the image size. For specific rare
         # situations, the configuration/setup commands should make sure the
