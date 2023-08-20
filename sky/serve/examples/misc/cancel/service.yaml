@@ -1,0 +1,14 @@
+service:
+  port: 9000
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 120
+  controller_resources:
+    cpus: 2+
+
+resources:
+  cpus: 2+
+
+workdir: sky/serve/examples/misc/cancel
+
+run: python3 server.py --port 9000
