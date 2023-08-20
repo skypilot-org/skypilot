@@ -2053,14 +2053,12 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     """
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
-    cancel_latest_running_job = False
     job_identity_str = None
     if not jobs and not all:
         click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
                    'cancelling the latest running job.'
                    f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
-        cancel_latest_running_job = True
 
     if not yes:
         if job_identity_str is None:
@@ -2076,7 +2074,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                       show_default=True)
 
     try:
-        core.cancel(cluster, all, jobs, cancel_latest_running_job)
+        core.cancel(cluster, all, jobs)
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
