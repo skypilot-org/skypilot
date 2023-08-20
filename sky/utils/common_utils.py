@@ -425,6 +425,6 @@ def check_staled_runtime_on_remote(returncode: int, stderr: str,
                 raise RuntimeError(
                     f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
                     'remote cluster. To update, run: '
-                    f'{colorama.Style.BRIGHT}sky start -f {cluster_name}'
+                    f'{colorama.Style.BRIGHT}sky launch -c {cluster_name}'
                     f'{colorama.Style.RESET_ALL}'
                     f'\n--- Details ---\n{stderr.strip()}\n')
