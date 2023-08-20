@@ -3445,7 +3445,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 If set to True, asserts `jobs` is set to None.
         """
         if cancel_all:
-            assert jobs is None, ('Cannot specify both jobs and all')
+            assert not jobs, ('Cannot specify both jobs and all')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
