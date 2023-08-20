@@ -3160,7 +3160,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Happens when someone calls `sky exec` but remote is outdated
         # necessicating calling `sky launch`
-        common_utils.check_staled_runtime_on_remote(returncode, stdout, handle.cluster_name)
+        common_utils.check_staled_runtime_on_remote(returncode, stdout,
+                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3449,20 +3450,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
-        # TODO(zhwu): backward compatibility for old clusters. We need to hint
-        # users to upgrade their clusters with `sky start`.
-
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
-        common_utils.check_staled_runtime_on_remote(
-            returncode, stdout, handle.cluster_name)
+        common_utils.check_staled_runtime_on_remote(returncode, stdout,
+                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(
             returncode, code,
-            f'Failed to cancel jobs on cluster {handle.cluster_name}.',
-            stdout)
+            f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
         cancelled_ids = common_utils.decode_payload(stdout)
         if cancelled_ids:

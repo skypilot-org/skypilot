@@ -558,7 +558,7 @@ def cancel(
     backend_utils.check_cluster_name_not_reserved(
         cluster_name, operation_str='Cancelling jobs')
 
-    if all and job_ids is not None:
+    if all and job_ids:
         raise ValueError('Cannot specify both `all` and `job_ids`.')
 
     # Check the status of the cluster.
@@ -590,7 +590,12 @@ def cancel(
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
-    elif job_ids is not None:
+    elif not job_ids:
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
+    else:
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'

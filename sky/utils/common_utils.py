@@ -413,7 +413,7 @@ def find_free_port(start_port: int) -> int:
 
 
 def check_staled_runtime_on_remote(returncode: int, stderr: str,
-                                cluster_name: str) -> None:
+                                   cluster_name: str) -> None:
     """Raise RuntimeError for staled SkyPilot runtime."""
 
     pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
@@ -427,5 +427,4 @@ def check_staled_runtime_on_remote(returncode: int, stderr: str,
                     'remote cluster. To update, run: '
                     f'{colorama.Style.BRIGHT}sky start -f {cluster_name}'
                     f'{colorama.Style.RESET_ALL}'
-                    f'\n--- Details ---\n{stderr.strip()}\n'
-                )
+                    f'\n--- Details ---\n{stderr.strip()}\n')
