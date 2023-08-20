@@ -723,7 +723,7 @@ def cancel_jobs_encoded_results(job_owner: str,
         job_records = _get_jobs(
             None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
-        if jobs is None:
+        if not jobs:
             # Cancel the latest running job.
             job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
         else:
