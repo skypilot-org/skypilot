@@ -214,9 +214,37 @@ def get_current_kube_config_context_namespace() -> str:
 def get_kubernetes_proxy_command(ingress: int, ipaddress: str, ssh_jump_name: str,
                                   ssh_setup_mode: str, private_ssh_key_path: str, kube_config_path: str,
                                   port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
-    """ returns Proxycommand to use when establishing ssh connection
-    to the k8s instance through the jump pod.
+    """ By default, establishing an SSH connection creates a communication
+    channel to a remote node by setting up a TCP connection. When a
+    ProxyCommand is specified, this default behavior is overridden. The command
+    specified in ProxyCommand is executed, and its standard input and output
+    become the communication channel for the SSH session.
 
+    Pods within a Kubernetes cluster have internal IP addresses that are
+    typically not accessible from outside the cluster. Since the default TCP
+    connection of SSH won't allow access to these pods, we employ a
+    ProxyCommand to establish the required communication channel. We offer this
+    in two different networking options: NodePort/port-forward.
+
+    With the NodePort networking mode, a NodePort service is launched. This
+    service opens an external port on the node which redirects to the desired
+    port within the pod. When establishing an SSH session in this mode, the
+    ProxyCommand makes use of this external port to create a communication
+    channel directly to port 22, which is the default port ssh server listens
+    on, of the jump pod.
+
+    With Port-forward mode, instead of directly exposing an external port,
+    'kubectl port-forward' sets up a tunnel between a local port
+    (127.0.0.1:23100) and port 22 of the jump pod. Then we establish a TCP
+    connection to the local end of this tunnel, 127.0.0.1:23100, using 'socat'.
+    This is setup in the inner ProxyCommand of the nested ProxyCommand, and the
+    rest is the same as NodePort approach, which the outer ProxyCommand
+    establishes a communication channel between 127.0.0.1:23100 and port 22 on
+    the jump pod. Consequently, any stdin provided on the local machine is
+    forwarded through this tunnel to the application (SSH server) listening in
+    the pod. Similarly, any output from the application in the pod is tunneled 
+    back and displayed in the terminal on the local machine. 
+    
     Args:
         ingress: int; the port number host machine is listening to
         ipaddress: str; ip address of the host machine

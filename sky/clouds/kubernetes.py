@@ -19,7 +19,6 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-
 CREDENTIAL_PATH = '~/.kube/config'
 
 
