@@ -38,6 +38,8 @@ class Local(clouds.Cloud):
             ('Docker image is not supported in Local. '
              'You can try running docker command inside the '
              '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Custom disk tier is not supported for Local.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
             ('Opening ports is not supported for Local.'),
     }
@@ -199,5 +201,8 @@ class Local(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
+        del instance_type  # unused
+        if disk_tier is None or disk_tier == 'best':
+            return
         raise exceptions.NotSupportedError(
-            'Local cloud does not support disk tiers.')
+            f'Local does not support disk tier {disk_tier}.')

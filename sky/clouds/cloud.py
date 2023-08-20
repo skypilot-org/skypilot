@@ -58,6 +58,7 @@ class Cloud:
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
+    _BEST_DISK_TIER = 'high'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -505,6 +506,14 @@ class Cloud:
             exceptions.NotSupportedError: If the disk tier is not supported.
         """
         raise NotImplementedError
+
+    @classmethod
+    def normalize_disk_tier(cls, disk_tier: Optional[str]) -> str:
+        if disk_tier is None:
+            return cls._DEFAULT_DISK_TIER
+        if disk_tier == 'best':
+            return cls._BEST_DISK_TIER
+        return disk_tier
 
     @classmethod
     def _check_instance_type_accelerators_combination(

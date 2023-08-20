@@ -274,8 +274,11 @@ class Lambda(clouds.Cloud):
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
+        del instance_type  # unused
+        if disk_tier is None or disk_tier == 'best':
+            return
         raise exceptions.NotSupportedError(
-            'Lambda does not support disk tiers.')
+            f'Lambda does not support disk tier {disk_tier}.')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

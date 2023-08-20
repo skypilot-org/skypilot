@@ -50,7 +50,7 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
-        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        disk_tier: Optional[Literal['low', 'medium', 'high', 'best']] = None,
         ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
@@ -755,11 +755,11 @@ class Resources:
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
             return
-        if self.disk_tier not in ['high', 'medium', 'low']:
+        if self.disk_tier not in ['low', 'medium', 'high', 'best']:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Invalid disk_tier {self.disk_tier}. '
-                    'Please use one of "high", "medium", or "low".')
+                    f'Invalid disk_tier {self.disk_tier}. Please '
+                    'use one of "low", "medium", "high", or "best".')
         if self.instance_type is None:
             return
         if self.cloud is not None:
@@ -931,9 +931,20 @@ class Resources:
             if other.disk_tier is None:
                 return False
             if self.disk_tier != other.disk_tier:
+                if self.cloud is not None:
+                    self_tier = self.cloud.normalize_disk_tier(self.disk_tier)
+                else:
+                    self_tier = self.disk_tier
+                if other.cloud is not None:
+                    other_tier = other.cloud.normalize_disk_tier(
+                        other.disk_tier)
+                else:
+                    other_tier = other.disk_tier
+                # best disk tier without knowledge of cloud cannot be compared
+                if 'best' in [self_tier, other_tier]:
+                    return False
                 types = ['low', 'medium', 'high']
-                return types.index(self.disk_tier) < types.index(
-                    other.disk_tier)
+                return types.index(self_tier) < types.index(other_tier)
 
         if self.ports is not None:
             if other.ports is None:
@@ -1035,7 +1046,7 @@ class Resources:
         features = set()
         if self.use_spot:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
-        if self.disk_tier is not None:
+        if self.disk_tier is not None and self.disk_tier != 'best':
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)

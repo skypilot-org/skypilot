@@ -2487,7 +2487,8 @@ def test_aws_disk_tier():
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in ['low', 'medium', 'high', 'best']:
+        disk_tier = AWS.normalize_disk_tier(disk_tier)
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'us-west-2'
@@ -2515,7 +2516,8 @@ def test_aws_disk_tier():
 
 @pytest.mark.gcp
 def test_gcp_disk_tier():
-    for disk_tier in ['low', 'medium', 'high']:
+    for disk_tier in ['low', 'medium', 'high', 'best']:
+        disk_tier = GCP.normalize_disk_tier(disk_tier)
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'us-west2'
@@ -2537,7 +2539,8 @@ def test_gcp_disk_tier():
 
 @pytest.mark.azure
 def test_azure_disk_tier():
-    for disk_tier in ['low', 'medium']:
+    for disk_tier in ['low', 'medium', 'best']:
+        disk_tier = Azure.normalize_disk_tier(disk_tier)
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'westus2'

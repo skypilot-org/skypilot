@@ -57,6 +57,7 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+    _BEST_DISK_TIER = 'medium'
 
     _INDENT_PREFIX = ' ' * 4
 
@@ -524,7 +525,7 @@ class Azure(clouds.Cloud):
     @classmethod
     def check_disk_tier(cls, instance_type: Optional[str],
                         disk_tier: Optional[str]) -> Tuple[bool, str]:
-        if disk_tier is None:
+        if disk_tier is None or disk_tier == 'best':
             return True, ''
         if disk_tier == 'high':
             return False, ('Azure disk_tier=high is not supported now. '
@@ -550,7 +551,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+        tier = cls.normalize_disk_tier(disk_tier)
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {

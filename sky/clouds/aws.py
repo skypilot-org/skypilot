@@ -692,7 +692,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_disk_specs(cls, disk_tier: Optional[str]) -> Dict[str, Any]:
-        tier = disk_tier or cls._DEFAULT_DISK_TIER
+        tier = cls.normalize_disk_tier(disk_tier)
         tier2iops = {
             'high': 7000,
             'medium': 3500,

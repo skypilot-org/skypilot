@@ -2,7 +2,7 @@ resources:
   accelerators: A100-80GB:8
   disk_size: 1000
   use_spot: true
-  disk_tier: high
+  disk_tier: best
 
 num_nodes: 1
 

@@ -518,6 +518,10 @@ class OCI(clouds.Cloud):
 
     def get_vpu_from_disktier(self, cpus: Optional[float],
                               disk_tier: Optional[str]) -> int:
+        # Only normalize the disk_tier if it is not None, since OCI have
+        # different default disk tier according to #vCPU.
+        if disk_tier is not None:
+            disk_tier = OCI.normalize_disk_tier(disk_tier)
         vpu = oci_conf.BOOT_VOLUME_VPU[disk_tier]
         if cpus is None:
             return vpu
