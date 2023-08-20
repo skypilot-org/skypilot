@@ -2488,12 +2488,11 @@ def test_aws_disk_tier():
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
     for disk_tier in ['low', 'medium', 'high', 'best']:
-        disk_tier = AWS.normalize_disk_tier(disk_tier)
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'us-west-2'
         test = Test(
-            'aws-disk-tier',
+            'aws-disk-tier-' + disk_tier,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
@@ -2517,12 +2516,11 @@ def test_aws_disk_tier():
 @pytest.mark.gcp
 def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high', 'best']:
-        disk_tier = GCP.normalize_disk_tier(disk_tier)
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'us-west2'
         test = Test(
-            'gcp-disk-tier',
+            'gcp-disk-tier-' + disk_tier,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
@@ -2540,12 +2538,11 @@ def test_gcp_disk_tier():
 @pytest.mark.azure
 def test_azure_disk_tier():
     for disk_tier in ['low', 'medium', 'best']:
-        disk_tier = Azure.normalize_disk_tier(disk_tier)
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
         region = 'westus2'
         test = Test(
-            'azure-disk-tier',
+            'azure-disk-tier-' + disk_tier,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
