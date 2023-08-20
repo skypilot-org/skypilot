@@ -345,30 +345,28 @@ def analyze_sshjump_pod(namespace: str):
     Args:
         namespace: Namespace to remove the SSH jump pod and service from
     """
+
     def find(l, predicate):
-        """
-        Utility function to find element in given list
+        """Utility function to find element in given list
         """
         results = [x for x in l if predicate(x)]
         return results[0] if len(results) > 0 else None
+
     sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     try:
         sshjump_pod = kubernetes.core_api().read_namespaced_pod(
             sshjump_name, namespace)
-        cont_ready_cond = find(
-            sshjump_pod.status.conditions, lambda c: c.type == 'ContainersReady')
+        cont_ready_cond = find(sshjump_pod.status.conditions,
+                               lambda c: c.type == 'ContainersReady')
         if cont_ready_cond and \
             cont_ready_cond.status == 'False':
             # The main container is not ready. To be on the safe-side
             # and prevent a dangling sshjump pod - lets remove it and
             # the service. Otherwise main container is ready and its lcm
             # takes care of the cleaning
-            kubernetes.core_api().delete_namespaced_pod(
-                sshjump_name,
-                namespace)
+            kubernetes.core_api().delete_namespaced_pod(sshjump_name, namespace)
             kubernetes.core_api().delete_namespaced_service(
-                sshjump_name,
-                namespace)
+                sshjump_name, namespace)
 
     # only warn and proceed as usual
     except kubernetes.api_exception() as e:
@@ -378,9 +376,8 @@ def analyze_sshjump_pod(namespace: str):
         # the safe side, lets remove its service so the port is freed
         try:
             kubernetes.core_api().delete_namespaced_service(
-                sshjump_name,
-                namespace)
-        except:
+                sshjump_name, namespace)
+        except kubernetes.api_exception():
             pass
 
 
