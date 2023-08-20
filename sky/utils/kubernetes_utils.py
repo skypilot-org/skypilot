@@ -338,9 +338,9 @@ def analyze_sshjump_pod(namespace: str):
     """Analyzes SSH jump pod to check its readiness.
 
     Prevents the existence of a dangling SSH jump pod. This could happen
-    in case the pod main container did not start properly and SSH jump pod LCM
-    will not function properly to take care of removing the pod and service
-    when needed.
+    in case the pod main container did not start properly (or failed) and SSH
+    jump pod LCM will not function properly to take care of removing the pod
+    and service when needed.
 
     Args:
         namespace: Namespace to remove the SSH jump pod and service from
