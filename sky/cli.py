@@ -304,6 +304,8 @@ def _interactive_node_cli_command(cli_func):
         instance_type_option,
         cpus,
         memory,
+        disk_size,
+        disk_tier,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -312,8 +314,6 @@ def _interactive_node_cli_command(cli_func):
         # Attach options
         screen_option,
         tmux_option,
-        disk_size,
-        disk_tier,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -387,6 +387,38 @@ _TASK_OPTIONS = [
         help=('Number of nodes to execute the task on. '
               'Overrides the "num_nodes" config in the YAML if both are '
               'supplied.')),
+    click.option(
+        '--cpus',
+        default=None,
+        type=str,
+        required=False,
+        help=('Number of vCPUs each instance must have (e.g., '
+              '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+              'This is used to automatically select the instance type.')),
+    click.option(
+        '--memory',
+        default=None,
+        type=str,
+        required=False,
+        help=(
+            'Amount of memory each instance must have in GB (e.g., '
+            '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'
+        )),
+    click.option('--disk-size',
+                 default=None,
+                 type=int,
+                 required=False,
+                 help=('OS disk size in GBs.')),
+    click.option(
+        '--disk-tier',
+        default=None,
+        type=click.Choice(['low', 'medium', 'high', 'best'],
+                          case_sensitive=False),
+        required=False,
+        help=
+        ('OS disk tier. Could be one of "low", "medium", "high" or "best". if '
+         '"best" is specified, use the best possible disk tier. Default: medium'
+        )),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,
@@ -1232,34 +1264,6 @@ def cli():
               default=False,
               help='If used, runs locally inside a docker container.')
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--cpus',
-              default=None,
-              type=str,
-              required=False,
-              help=('Number of vCPUs each instance must have (e.g., '
-                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
-                    'This is used to automatically select the instance type.'))
-@click.option(
-    '--memory',
-    default=None,
-    type=str,
-    required=False,
-    help=('Amount of memory each instance must have in GB (e.g., '
-          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'best'], case_sensitive=False),
-    required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best possible disk tier. Default: medium')
-)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1458,6 +1462,10 @@ def exec(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
@@ -1517,6 +1525,7 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    del cpus, memory, disk_size, disk_tier  # Unused.
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -3449,38 +3458,10 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--cpus',
-              default=None,
-              type=str,
-              required=False,
-              help=('Number of vCPUs each instance must have (e.g., '
-                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
-                    'This is used to automatically select the instance type.'))
-@click.option(
-    '--memory',
-    default=None,
-    type=str,
-    required=False,
-    help=('Amount of memory each instance must have in GB (e.g., '
-          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
               help='Spot recovery strategy to use for the managed spot task.')
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'best'], case_sensitive=False),
-    required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best possible disk tier. Default: medium')
-)
 @click.option(
     '--detach-run',
     '-d',
@@ -3931,20 +3912,6 @@ def bench():
               type=str,
               help=('Comma-separated list of GPUs to run benchmark on. '
                     'Example values: "T4:4,V100:8" (without blank spaces).'))
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--disk-tier',
-    default=None,
-    type=click.Choice(['low', 'medium', 'high', 'best'], case_sensitive=False),
-    required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best possible disk tier. Default: medium')
-)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -3976,6 +3943,8 @@ def benchmark_launch(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
     idle_minutes_to_autostop: Optional[int],
@@ -3988,6 +3957,7 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
+    del cpus, memory  # Unused.
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
