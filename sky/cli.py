@@ -1295,19 +1295,20 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
-    # Disabling quote check here, as there seems to be a bug in pylint,
-    # which incorrectly recognizes the help string as a docstring.
-    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors.'),
 )
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
+@click.option(
+    '--yes',
+    '-y',
+    is_flag=True,
+    default=False,
+    required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
+    help='Skip confirmation prompt.')
 @click.option('--no-setup',
               is_flag=True,
               default=False,
