@@ -1,8 +1,8 @@
-resources:
-  accelerators: A100-80GB:8
-
 envs:
   MODEL_NAME: decapoda-research/llama-65b-hf
+
+resources:
+  accelerators: A100-80GB:8
 
 setup: |
   conda activate vllm

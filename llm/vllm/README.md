@@ -51,15 +51,17 @@ sky launch -c vllm-llama2 serving-openai-api.yaml
 2. Check the IP for the cluster with:
 ```
 sky status -a
+# Or get the IP with Python API:
+IP=$(python -c "import sky; print(sky.status('vllm-llama2')[0]['handle'].head_ip)")
 ```
 3. You can now use the OpenAI API to interact with the model.
   - Query the models hosted on the cluster:
 ```bash
-curl http://<IP>:8000/v1/models
+curl http://$IP:8000/v1/models
 ```
   - Query a model with input prompts for text completion:
 ```bash
-curl http://<IP>:8000/v1/completions \
+curl http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
       "model": "meta-llama/Llama-2-7b-chat-hf",
@@ -84,7 +86,7 @@ curl http://<IP>:8000/v1/completions \
 ```
   - Query a model with input prompts for chat completion:
 ```bash
-curl http://<IP>:8000/v1/chat/completions \
+curl http://$IP:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-2-7b-chat-hf",
@@ -106,11 +108,14 @@ curl http://<IP>:8000/v1/chat/completions \
     "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
     "object":"text_completion","created":1692427390,
     "model":"meta-llama/Llama-2-7b-chat-hf",
-    "choices":[{
-        "index":0,
-        "text":"city in Northern California that is known",
-        "logprobs":null,"finish_reason":"length"
+    "choices": [{
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "\n\nHello there, how may I assist you today?",
+      },
+      "finish_reason": "stop"
     }],
-    "usage":{"prompt_tokens":5,"total_tokens":12,"completion_tokens":7}
+    "usage":{"prompt_tokens":9,"total_tokens":12,"completion_tokens":21}
 }
 ```
