@@ -7,7 +7,6 @@ import jinja2
 import yaml
 
 import sky
-from sky import clouds
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
@@ -334,7 +333,7 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
         logger.info(f'Created SSH Jump Host {sshjump_name}.')
 
 
-def analyze_sshjump_pod(namespace: str):
+def analyze_sshjump_pod(namespace: str, node_id: str):
     """Analyzes SSH jump pod to check its readiness.
 
     Prevents the existence of a dangling SSH jump pod. This could happen
@@ -344,6 +343,7 @@ def analyze_sshjump_pod(namespace: str):
 
     Args:
         namespace: Namespace to remove the SSH jump pod and service from
+        node_id: Name of ray head pod
     """
 
     def find(l, predicate):
@@ -352,7 +352,15 @@ def analyze_sshjump_pod(namespace: str):
         results = [x for x in l if predicate(x)]
         return results[0] if len(results) > 0 else None
 
-    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    try:
+        pod = kubernetes.core_api().read_namespaced_pod(node_id, namespace)
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            logger.warning(f'Tried to retrieve pod {node_id},'
+                           ' but the pod was not found (404).')
+        raise
+    else:
+        sshjump_name = pod.metadata.labels.get('skypilot-sshjump')
     try:
         sshjump_pod = kubernetes.core_api().read_namespaced_pod(
             sshjump_name, namespace)

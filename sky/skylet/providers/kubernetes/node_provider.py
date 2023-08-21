@@ -243,7 +243,11 @@ class KubernetesNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
-        kubernetes_utils.analyze_sshjump_pod(self.namespace)
+        try:
+            kubernetes_utils.analyze_sshjump_pod(self.namespace, node_id)
+        except Exception as e:
+            logger.warning(config.log_prefix +
+                           f'Error occurred when analyzing SSH Jump pod: {e}')
         try:
             kubernetes.core_api().delete_namespaced_pod(
                 node_id,
