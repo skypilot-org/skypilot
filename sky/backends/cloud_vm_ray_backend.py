@@ -3434,19 +3434,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
                     cancel_all: bool = False) -> None:
-        """Cancel jobs.
+        """Cancels jobs.
 
         CloudVMRayBackend specific method.
 
         Args:
             handle: The cluster handle.
-            jobs: Job IDs to cancel. If None or empty, cancel the latest running
-                job.
-            cancel_all: Whether to cancel all the jobs. If set to True, asserts
-                `jobs` is set to None or empty.
+            jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
+            cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
+                set to None. If False and `jobs` is None, cancel the latest
+                running job.
         """
         if cancel_all:
-            assert not jobs, ('Cannot specify both jobs and all')
+            assert jobs is None, (
+                'If cancel_all=True, usage is to set jobs=None')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
@@ -3456,7 +3457,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       code,
                                                       stream_logs=False,
                                                       require_outputs=True)
-        # TODO(zongheng): remove after >=0.5.0.
+        # TODO(zongheng): remove after >=0.5.0, 2 minor versions after.
         backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
                                                     handle.cluster_name)
         subprocess_utils.handle_returncode(

@@ -537,7 +537,7 @@ def cancel(
 
     Please refer to the sky.cli.cancel for the document.
 
-    When job_ids is None, cancel the last running job.
+    When `all` is False and `job_ids` is None, cancel the latest running job.
 
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
@@ -559,7 +559,8 @@ def cancel(
         cluster_name, operation_str='Cancelling jobs')
 
     if all and job_ids:
-        raise ValueError('Cannot specify both `all` and `job_ids`.')
+        raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
+                         'all jobs, set `job_ids` to None.')
 
     # Check the status of the cluster.
     handle = None
@@ -590,18 +591,22 @@ def cancel(
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
-    elif not job_ids:
-        # job_ids is not None or empty.
+    elif job_ids is None:
+        # all = False, job_ids is None => cancel the latest running job.
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling latest running job on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
-    else:
+    elif len(job_ids):
+        # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
+    else:
+        # all = False, len(job_ids) == 0 => no jobs to cancel.
+        return
 
     backend.cancel_jobs(handle, job_ids, all)
 

@@ -709,21 +709,23 @@ def cancel_jobs_encoded_results(job_owner: str,
     """Cancel jobs.
 
     Args:
-        jobs: Job IDs to cancel. If None or empty, cancel the latest running
-            job.
-        all: Whether to cancel all the jobs. If set to True, asserts `jobs` is
-            set to None or empty.
+        jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
+        cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
+            set to None. If False and `jobs` is None, cancel the latest
+            running job.
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
         common_utils.decode_payload() to parse.
     """
     if cancel_all:
-        assert not jobs, ('Cannot specify both jobs and all')
+        # Cancel all in-progress jobs.
+        assert jobs is None, (
+            'If cancel_all=True, usage is to set jobs=None')
         job_records = _get_jobs(
             None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
-        if not jobs:
+        if jobs is None:
             # Cancel the latest (largest job ID) running job.
             job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
         else:
