@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import functools
 from typing import Dict, List, Optional, Set, Union
 
 import colorama
@@ -10,6 +11,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import schemas
@@ -23,6 +25,10 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 class Resources:
     """Resources: compute requirements of Tasks.
+
+    This class is immutable once created (to ensure some validations are done
+    whenever properties change). To update the property of an instance of
+    Resources, use `resources.copy(**new_properties)`.
 
     Used:
 
@@ -171,6 +177,12 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
+    # When querying the accelerators inside this func (we call self.accelerators
+    # which is a @property), we will check the cloud's catalog, which can error
+    # if it fails to fetch some account specific catalog information (e.g., AWS
+    # zone mapping). It is fine to use the default catalog as this function is
+    # only for display purposes.
+    @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -303,6 +315,7 @@ class Resources:
         return self._memory
 
     @property
+    @functools.lru_cache(maxsize=1)
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
