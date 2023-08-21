@@ -57,7 +57,7 @@ sky status -a
 ```bash
 curl http://<IP>:8000/v1/models
 ```
-  - Query the model with input prompts:
+  - Query a model with input prompts:
 ```bash
 curl http://<IP>:8000/v1/completions \
 -H "Content-Type: application/json" \
