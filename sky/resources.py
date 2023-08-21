@@ -177,10 +177,10 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
-    # When querying the accelerators for the instance type, we will check the
-    # cloud's catalog, whcih can cause error when it fails to fetch some account
-    # specific catalog information. It is fine to use the default catalog as the
-    # this function is only for display purpose.
+    # When querying the accelerators inside this func (we call self.accelerators which is a @property), we will check the
+    # cloud's catalog, which can error if it fails to fetch some account
+    # specific catalog information (e.g., AWS zone mapping). It is fine to use the default catalog as
+    # this function is only for display purposes.
     @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
