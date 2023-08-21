@@ -74,8 +74,8 @@ Available fields:
       disk_size: 256
 
       # Disk tier to use for OS (optional).
-      # Could be one of 'low', 'medium', 'high' or 'best' (default: 'medium'). if
-      # 'best' is specified, use the best disk tier enabled.
+      # Could be one of 'low', 'medium', 'high' or 'best' (default: 'medium').
+      # if 'best' is specified, use the best disk tier enabled.
       # Rough performance estimate:
       #   low: 500 IOPS; read 20MB/s; write 40 MB/s
       #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s

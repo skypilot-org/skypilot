@@ -233,7 +233,7 @@ def _interactive_node_cli_command(cli_func):
                              required=False,
                              help=('OS disk tier. Could be one of "low", '
                                    '"medium", "high" or "best". if "best" is '
-                                   'specified, use the best disk tier enabled. '
+                                   'specified, use the best possible disk tier. '
                                    'Default: medium'))
     no_confirm = click.option('--yes',
                               '-y',
