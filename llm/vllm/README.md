@@ -97,7 +97,7 @@ curl http://$IP:8000/v1/chat/completions \
       },
       {
         "role": "user",
-        "content": "Hello!"
+        "content": "Who are you?"
       }
     ]
   }'
@@ -105,17 +105,22 @@ curl http://$IP:8000/v1/chat/completions \
   You should get a similar response as the following:
 ```console
 {
-    "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
-    "object":"text_completion","created":1692427390,
-    "model":"meta-llama/Llama-2-7b-chat-hf",
-    "choices": [{
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "\n\nHello there, how may I assist you today?",
-      },
-      "finish_reason": "stop"
-    }],
-    "usage":{"prompt_tokens":9,"total_tokens":12,"completion_tokens":21}
+  "id": "cmpl-879a58992d704caf80771b4651ff8cb6",
+  "object": "chat.completion",
+  "created": 1692650569,
+  "model": "meta-llama/Llama-2-7b-chat-hf",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": " Hello! I'm just an AI assistant, here to help you"
+    },
+    "finish_reason": "length"
+  }],
+  "usage": {
+    "prompt_tokens": 31,
+    "total_tokens": 47,
+    "completion_tokens": 16
+  }
 }
 ```
