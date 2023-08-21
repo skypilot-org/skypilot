@@ -57,19 +57,51 @@ sky status -a
 ```bash
 curl http://<IP>:8000/v1/models
 ```
-  - Query a model with input prompts:
+  - Query a model with input prompts for text completion:
 ```bash
 curl http://<IP>:8000/v1/completions \
--H "Content-Type: application/json" \
--d '{
-"model": "meta-llama/Llama-2-7b-chat-hf",
-"prompt": "San Francisco is a",
-"max_tokens": 7,
-"temperature": 0
-}'
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "meta-llama/Llama-2-7b-chat-hf",
+      "prompt": "San Francisco is a",
+      "max_tokens": 7,
+      "temperature": 0
+  }'
 ```
   You should get a similar response as the following:
+```console
+{
+    "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
+    "object":"text_completion","created":1692427390,
+    "model":"meta-llama/Llama-2-7b-chat-hf",
+    "choices":[{
+        "index":0,
+        "text":"city in Northern California that is known",
+        "logprobs":null,"finish_reason":"length"
+    }],
+    "usage":{"prompt_tokens":5,"total_tokens":12,"completion_tokens":7}
+}
 ```
+  - Query a model with input prompts for chat completion:
+```bash
+curl http://<IP>:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-2-7b-chat-hf",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "Hello!"
+      }
+    ]
+  }'
+```
+  You should get a similar response as the following:
+```console
 {
     "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
     "object":"text_completion","created":1692427390,
