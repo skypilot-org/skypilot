@@ -68,7 +68,7 @@ curl http://<IP>:8000/v1/completions \
 "temperature": 0
 }'
 ```
-  You should get similar response as the following:
+  You should get a similar response as the following:
 ```
 {
     "id":"cmpl-50a231f7f06a4115a1e4bd38c589cd8f",
