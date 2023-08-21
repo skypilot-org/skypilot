@@ -720,6 +720,7 @@ def cancel_jobs_encoded_results(job_owner: str,
     """
     if cancel_all:
         # Cancel all in-progress jobs.
+        # Cancel all in-progress jobs.
         assert jobs is None, ('If cancel_all=True, usage is to set jobs=None')
         job_records = _get_jobs(
             None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
