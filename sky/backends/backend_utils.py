@@ -1066,7 +1066,6 @@ def write_cluster_config(
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
         config_dict['ray'] = tmp_yaml_path
-        print(tmp_yaml_path)
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
 
