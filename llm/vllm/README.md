@@ -40,7 +40,7 @@ sky launch -c vllm-serve -s serve.yaml
 sky launch -c vllm-serve -s serve.yaml --gpus A100:1 --env MODEL_NAME=decapoda-research/llama-13b-hf
 ```
 
-## Serve Llama-2 with vLLM's OpenAI API compatibility server
+## Serving Llama-2 with vLLM's OpenAI-compatible API server
 
 Before you get started, you need to have access to the Llama-2 model weights on huggingface. Please check the prerequisites section in [Llama-2 example](../llama-2/README.md#pre-requisites) for more details.
 
