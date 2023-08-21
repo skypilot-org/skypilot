@@ -26,8 +26,8 @@ _DEFAULT_DISK_SIZE_GB = 256
 class Resources:
     """Resources: compute requirements of Tasks.
 
-    This class is immutable once created to make sure the checks is applied
-    whenever the properties change. To update the property of an instance of
+    This class is immutable once created (to ensure some validations are done
+    whenever properties change). To update the property of an instance of
     Resources, use `resources.copy(**new_properties)`.
 
     Used:
