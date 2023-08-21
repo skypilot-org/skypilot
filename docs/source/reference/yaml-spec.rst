@@ -157,8 +157,8 @@ Available fields:
     # Values set here can be overridden by a CLI flag:
     # `sky launch/exec --env ENV=val` (if ENV is present).
     #
-    # If you want to use a docker image in a private registry, you need to specify your
-    # username, password and registry server in task envs. For example:
+    # If you want to use a docker image in a private registry, you can specify your
+    # username, password, and registry server as task environment variable. For example:
     #   envs:
     #     SKYPILOT_DOCKER_USERNAME: <username>
     #     SKYPILOT_DOCKER_PASSWORD: <password>
