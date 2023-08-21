@@ -551,7 +551,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
-        tier = cls.normalize_disk_tier(disk_tier)
+        tier = cls.translate_disk_tier(disk_tier)
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {

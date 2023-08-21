@@ -932,11 +932,11 @@ class Resources:
                 return False
             if self.disk_tier != other.disk_tier:
                 if self.cloud is not None:
-                    self_tier = self.cloud.normalize_disk_tier(self.disk_tier)
+                    self_tier = self.cloud.translate_disk_tier(self.disk_tier)
                 else:
                     self_tier = self.disk_tier
                 if other.cloud is not None:
-                    other_tier = other.cloud.normalize_disk_tier(
+                    other_tier = other.cloud.translate_disk_tier(
                         other.disk_tier)
                 else:
                     other_tier = other.disk_tier

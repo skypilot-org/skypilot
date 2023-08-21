@@ -508,7 +508,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def normalize_disk_tier(cls, disk_tier: Optional[str]) -> str:
+    def translate_disk_tier(cls, disk_tier: Optional[str]) -> str:
         if disk_tier is None:
             return cls._DEFAULT_DISK_TIER
         if disk_tier == 'best':

@@ -955,7 +955,7 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
-        tier = cls.normalize_disk_tier(disk_tier)
+        tier = cls.translate_disk_tier(disk_tier)
         tier2name = {
             'high': 'pd-ssd',
             'medium': 'pd-balanced',
