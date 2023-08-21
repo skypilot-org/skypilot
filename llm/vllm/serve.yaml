@@ -12,6 +12,7 @@ setup: |
   fi
 
   git clone https://github.com/vllm-project/vllm.git || true
+  pip install fschat
 
   cd vllm
   pip list | grep vllm || pip install .
