@@ -225,16 +225,16 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_tier = click.option('--disk-tier',
-                             default=None,
-                             type=click.Choice(
-                                 ['low', 'medium', 'high', 'best'],
-                                 case_sensitive=False),
-                             required=False,
-                             help=('OS disk tier. Could be one of "low", '
-                                   '"medium", "high" or "best". if "best" is '
-                                   'specified, use the best possible disk tier. '
-                                   'Default: medium'))
+    disk_tier = click.option(
+        '--disk-tier',
+        default=None,
+        type=click.Choice(['low', 'medium', 'high', 'best'],
+                          case_sensitive=False),
+        required=False,
+        help=('OS disk tier. Could be one of "low", '
+              '"medium", "high" or "best". if "best" is '
+              'specified, use the best possible disk tier. '
+              'Default: medium'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -1258,7 +1258,8 @@ def cli():
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best disk tier enabled. Default: medium'))
+        '"best" is specified, use the best possible disk tier. Default: medium')
+)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -3478,7 +3479,8 @@ def spot():
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best disk tier enabled. Default: medium'))
+        '"best" is specified, use the best possible disk tier. Default: medium')
+)
 @click.option(
     '--detach-run',
     '-d',
@@ -3941,7 +3943,8 @@ def bench():
     required=False,
     help=(
         'OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-        '"best" is specified, use the best disk tier enabled. Default: medium'))
+        '"best" is specified, use the best possible disk tier. Default: medium')
+)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
