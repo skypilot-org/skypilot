@@ -4555,6 +4555,10 @@ def local_down():
         # Run sky check
         with log_utils.safe_rich_status('Running sky check...'):
             sky_check.check(quiet=True)
+        # Local 'Kubernetes' had been removed. Run sky status -r to remove
+        # clusters state
+        with log_utils.safe_rich_status('Running sky status --refresh...'):
+            core.status(refresh=True)
         click.echo('Local cluster removed.')
 
 
