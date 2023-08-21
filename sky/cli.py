@@ -519,7 +519,8 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                 ~/.sky/.sky-complete.bash && \
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
-        cmd = f'(grep -q "SkyPilot" ~/.bashrc) || ({install_cmd})'
+        cmd = (f'(grep -q "SkyPilot" ~/.bashrc) || '
+               f'[[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd})')
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
