@@ -491,25 +491,41 @@ class SkyPilotInfraProvider(InfraProvider):
         replica_cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
         if replica_cluster_name not in self.replica_info:
-            return f'Cluster {replica_cluster_name} not found.'
+            msg = f'Cluster {replica_cluster_name} not found.'
+            logger.warning(msg)
+            return msg
+        info = self.replica_info[replica_cluster_name]
+        if info.status == status_lib.ReplicaStatus.FAILED_CLEANUP:
+            msg = (f'Cannot reload replica {replica_id} since it is in '
+                   'FAILED_CLEANUP status. For safety, please manually '
+                   'check the cloud console to make sure no resource leak. '
+                   'Skipping reload request.')
+            logger.warning(msg)
+            return msg
         if replica_cluster_name in self.launch_process_pool:
             p = self.launch_process_pool[replica_cluster_name]
-            del self.launch_process_pool[replica_cluster_name]
             if p.poll() is None:
                 assert p.pid is not None
                 os.killpg(os.getpgid(p.pid), signal.SIGINT)
                 p.wait()
                 logger.info('Interrupted launch process for cluster '
                             f'{replica_cluster_name} due to reload.')
-            info = self.replica_info[replica_cluster_name]
+            del self.launch_process_pool[replica_cluster_name]
             # For correctly display as shutting down
             info.status_property.sky_launch_status = ProcessStatus.SUCCESS
-        self._teardown_cluster(replica_cluster_name, sync_down_logs=False)
+        if info.status not in [status_lib.ReplicaStatus.SHUTTING_DOWN, status_lib.ReplicaStatus.FAILED]:
+            self._teardown_cluster(replica_cluster_name, sync_down_logs=False)
         # Wait until the down process finishes
         while replica_cluster_name in self.down_process_pool:
             logger.info(f'Waiting for down process of replica {replica_id} '
                         'to finish...')
             time.sleep(10)
+        if info.status == status_lib.ReplicaStatus.FAILED_CLEANUP:
+            msg = (f'Down process for replica {replica_id} failed. Please '
+                   'manually check the cloud console to make sure no resource '
+                   'leak. Skipping relaunch.')
+            logger.warning(msg)
+            return msg
         logger.info(f'Relaunching replica {replica_id}...')
         # Allow delete replicas that once failed
         if replica_cluster_name in self.replica_info:

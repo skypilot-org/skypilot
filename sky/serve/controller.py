@@ -3,6 +3,7 @@
 Responsible for autoscaling and replica management.
 """
 import argparse
+import asyncio
 import base64
 import logging
 import pickle
@@ -50,9 +51,8 @@ class Controller:
     def run(self) -> None:
 
         @self.app.post('/controller/update_num_requests')
-        async def update_num_requests(request: fastapi.Request):
-            # await request
-            request_data = await request.json()
+        def update_num_requests(request: fastapi.Request):
+            request_data = asyncio.run(request.json())
             # get request data
             num_requests = request_data['num_requests']
             logger.info(f'Received request: {request_data}')
@@ -84,12 +84,17 @@ class Controller:
             return latest_info
 
         @self.app.post('/controller/reload_replica')
-        async def reload_replica(request: fastapi.Request):
-            body = await request.json()
-            replica_id = body['replica_id']
-            resources_override_cli = body['resources_override_cli']
-            msg = self.infra_provider.reload_replica(replica_id,
-                                                     resources_override_cli)
+        def reload_replica(request: fastapi.Request):
+            request_data = asyncio.run(request.json())
+            replica_id = request_data['replica_id']
+            resources_override_cli = request_data['resources_override_cli']
+            logger.info(f'Reloading replica {replica_id} with resources '
+                        f'override {resources_override_cli}...')
+            try:
+                msg = self.infra_provider.reload_replica(replica_id,
+                                                        resources_override_cli)
+            except Exception as e:  # pylint: disable=broad-except
+                msg = repr(e)
             return {'message': msg}
 
         @self.app.post('/controller/terminate')
