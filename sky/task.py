@@ -119,8 +119,7 @@ def _with_docker_login_config(
         return resources_set
     if len(existing_keys) != len(all_keys):
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('If any of DOCKER_USERNAME, DOCKER_PASSWORD, '
-                             'DOCKER_REPO_URI is set, all of them must be set. '
+            raise ValueError(f'If any of {", ".join(all_keys)} is set, all of them must be set. '
                              f'Missing envs: {all_keys - existing_keys}')
     docker_login_config = command_runner.DockerLoginConfig.from_dict(task_envs)
 

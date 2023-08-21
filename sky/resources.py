@@ -119,7 +119,7 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
-          docker_login_config: the docker configuration to use. This include the
+          _docker_login_config: the docker configuration to use. This include the
             docker username, password, and repo URI. If None, skip docker login.
         """
         self._version = self._VERSION
