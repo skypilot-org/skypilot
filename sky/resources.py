@@ -177,10 +177,11 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
-    # When querying the accelerators inside this func (we call self.accelerators which is a @property), we will check the
-    # cloud's catalog, which can error if it fails to fetch some account
-    # specific catalog information (e.g., AWS zone mapping). It is fine to use the default catalog as
-    # this function is only for display purposes.
+    # When querying the accelerators inside this func (we call self.accelerators
+    # which is a @property), we will check the cloud's catalog, which can error
+    # if it fails to fetch some account specific catalog information (e.g., AWS
+    # zone mapping). It is fine to use the default catalog as this function is
+    # only for display purposes.
     @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
@@ -314,7 +315,7 @@ class Resources:
         return self._memory
 
     @property
-    @functools.lru_cache()
+    @functools.lru_cache(maxsize=1)
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
