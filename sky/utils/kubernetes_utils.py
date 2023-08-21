@@ -211,9 +211,12 @@ def get_current_kube_config_context_namespace() -> str:
         return DEFAULT_NAMESPACE
 
 
-def get_kubernetes_proxy_command(ingress: int, ipaddress: str, ssh_jump_name: str,
-                                  ssh_setup_mode: str, private_ssh_key_path: str, kube_config_path: str,
-                                  port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
+def get_kubernetes_proxy_command(ingress: int, ipaddress: str,
+                                 ssh_jump_name: str, ssh_setup_mode: str,
+                                 private_ssh_key_path: str,
+                                 kube_config_path: str,
+                                 port_fwd_proxy_cmd_path: str,
+                                 port_fwd_proxy_cmd_template: str) -> str:
     """ By default, establishing an SSH connection creates a communication
     channel to a remote node by setting up a TCP connection. When a
     ProxyCommand is specified, this default behavior is overridden. The command

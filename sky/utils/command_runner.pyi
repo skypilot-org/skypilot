@@ -23,9 +23,9 @@ RSYNC_EXCLUDE_OPTION: str
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
-    proxy_to_k8s: Optional[bool] = False,
     *,
     timeout: int = ...,
+    disable_control_master: Optional[bool] = False,
 ) -> List[str]:
     ...
 
@@ -43,7 +43,7 @@ class SSHCommandRunner:
     ssh_control_name: Optional[str]
     docker_user: str
     port: int
-    proxy_to_k8s: Optional[bool]
+    disable_control_master: Optional[bool]
 
     def __init__(
         self,
@@ -53,7 +53,7 @@ class SSHCommandRunner:
         ssh_control_name: Optional[str] = ...,
         port: str = ...,
         docker_user: Optional[str] = ...,
-        proxy_to_k8s: Optional[bool] = ...,
+        disable_control_master: Optional[bool] = ...,
     ) -> None:
         ...
 
@@ -66,7 +66,7 @@ class SSHCommandRunner:
         ssh_proxy_command: Optional[str] = ...,
         port_list: Optional[List[int]] = ...,
         docker_user: Optional[str] = ...,
-        proxy_to_k8s: Optional[bool] = ...,
+        disable_control_master: Optional[bool] = ...,
     ) -> List['SSHCommandRunner']:
         ...
 

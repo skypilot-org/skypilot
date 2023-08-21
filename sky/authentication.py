@@ -417,19 +417,39 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     if ssh_setup_mode == 'nodeport':
         service_type = 'NodePort'
         kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
-                                    namespace, service_type)
+                                       namespace, service_type)
         ssh_jump_port = clouds.Kubernetes.get_port(ssh_jump_name)
 
     elif ssh_setup_mode == 'port-forward':
-        # Using `kubectl port-forward` creates a direct tunnel to jump pod and does not require opening any ports on Kubernetes nodes.
-        # As a result, the service can be a simple ClusterIP service that we access using `kubectl port-forward`.
+        # Using `kubectl port-forward` creates a direct tunnel to jump pod and
+        # does not require opening any ports on Kubernetes nodes. As a result,
+        # the service can be a simple ClusterIP service which we access with
+        # `kubectl port-forward`.
+        
+        # Checks if 'socat' is installed
+        try:
+            subprocess.run(['which', 'socat'],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
+                           check=True)
+        except subprocess.CalledProcessError:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    '`socat` is required to setup Kubernetes cloud with '
+                    '`port-forward` default networking mode and it is not '
+                    'installed. For Debian/Ubuntu system, install it with:\n'
+                    '  $ sudo apt install socat') from None
         service_type = 'ClusterIP'
         kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
-                                    namespace, service_type)
+                                       namespace, service_type)
         ssh_jump_port = clouds.Kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
     else:
         raise ValueError(f'Unsupported kubernetes networking type: '
                          f'{ssh_setup_mode}. Please check: ~/.sky/config.yaml')
-    config['auth']['ssh_proxy_command'] = kubernetes_utils.get_kubernetes_proxy_command(
-        ssh_jump_port, ssh_jump_ip, ssh_jump_name, ssh_setup_mode, PRIVATE_SSH_KEY_PATH, clouds.kubernetes.CREDENTIAL_PATH, clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH, clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
+    config['auth'][
+        'ssh_proxy_command'] = kubernetes_utils.get_kubernetes_proxy_command(
+            ssh_jump_port, ssh_jump_ip, ssh_jump_name, ssh_setup_mode,
+            PRIVATE_SSH_KEY_PATH, clouds.kubernetes.CREDENTIAL_PATH,
+            clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
+            clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
     return config

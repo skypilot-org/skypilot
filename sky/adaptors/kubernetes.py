@@ -11,7 +11,6 @@ from sky.utils import ux_utils
 kubernetes = None
 urllib3 = None
 
-
 _configured = False
 _core_api = None
 _auth_api = None

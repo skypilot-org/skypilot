@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Specifies which config file kubectl should use.
+# Checks if socat is installed
+if [ ! "$(which socat)" ]; then
+  echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'socat' to be installed. Please install 'socat'" >&2
+  exit
+fi
+
+# Specifies which config file kubectl should use
 export KUBECONFIG="{{ kube_config_path }}"
 
 # If the port-forward command is already running on the jump pod, kill it

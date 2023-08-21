@@ -1360,7 +1360,7 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     ssh_provider_module = config['provider']['module']
     # If we are running ssh command on kubernetes node.
     if 'kubernetes' in ssh_provider_module:
-        credentials['proxy_to_k8s'] = True
+        credentials['disable_control_master'] = True
     return credentials
 
 
