@@ -17,17 +17,14 @@ class DockerLoginConfig:
     """Config for docker login. Used for pulling from private registries."""
     username: str
     password: str
-    repo_uri: str
-    username_key: str = constants.DOCKER_USERNAME_ENV_KEY
-    password_key: str = constants.DOCKER_PASSWORD_ENV_KEY
-    repo_uri_key: str = constants.DOCKER_REPO_URI_ENV_KEY
+    server: str
 
     @classmethod
-    def from_dict(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
+    def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
         return cls(
-            username=d[cls.username_key],
-            password=d[cls.password_key],
-            repo_uri=d[cls.repo_uri_key],
+            username=d[constants.DOCKER_USERNAME_ENV_KEY],
+            password=d[constants.DOCKER_PASSWORD_ENV_KEY],
+            server=d[constants.DOCKER_SERVER_ENV_KEY],
         )
 
 
@@ -137,9 +134,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 self.docker_cmd,
                 docker_login_config.username,
                 docker_login_config.password,
-                docker_login_config.repo_uri,
+                docker_login_config.server,
             ))
-            specific_image = f'{docker_login_config.repo_uri}/{specific_image}'
+            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

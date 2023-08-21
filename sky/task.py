@@ -112,16 +112,18 @@ def _with_docker_login_config(
     all_keys = {
         constants.DOCKER_USERNAME_ENV_KEY,
         constants.DOCKER_PASSWORD_ENV_KEY,
-        constants.DOCKER_REPO_URI_ENV_KEY,
+        constants.DOCKER_SERVER_ENV_KEY,
     }
     existing_keys = all_keys & set(task_envs.keys())
     if not existing_keys:
         return resources_set
     if len(existing_keys) != len(all_keys):
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'If any of {", ".join(all_keys)} is set, all of them must be set. '
-                             f'Missing envs: {all_keys - existing_keys}')
-    docker_login_config = command_runner.DockerLoginConfig.from_dict(task_envs)
+            raise ValueError(
+                f'If any of {", ".join(all_keys)} is set, all of them must '
+                f'be set. Missing envs: {all_keys - existing_keys}')
+    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+        task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         if resources.extract_docker_image() is None:

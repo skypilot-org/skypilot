@@ -445,8 +445,8 @@ class AzureNodeProvider(NodeProvider):
         }
         if docker_config and docker_config["container_name"] != "":
             if "docker_login_config" in self.provider_config:
-                docker_config["docker_login_config"] = DockerLoginConfig.from_dict(
-                    self.provider_config["docker_login_config"]
+                docker_config["docker_login_config"] = DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
                 )
             return SkyDockerCommandRunner(docker_config, **common_args)
         else:
