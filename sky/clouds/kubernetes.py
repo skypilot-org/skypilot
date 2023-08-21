@@ -150,7 +150,6 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-sshjump-{common_utils.get_user_hash()}'
-    LOCAL_PORT_FOR_PORT_FORWARD = 23100
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'

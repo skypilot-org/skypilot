@@ -50,7 +50,7 @@ class KubernetesNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.cluster_name = cluster_name
 
-        # Kubernetes namespace to user
+        # Kubernetes namespace to use
         self.namespace = kubernetes_utils.get_current_kube_config_context_namespace(
         )
 
@@ -99,7 +99,7 @@ class KubernetesNodeProvider(NodeProvider):
         return pod.metadata.labels
 
     def external_ip(self, node_id):
-        return utils.get_external_ip()
+        return kubernetes_utils.get_external_ip()
 
     def external_port(self, node_id):
         # Extract the NodePort of the head node's SSH service

@@ -40,8 +40,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.adaptors import kubernetes
-from sky.backends import backend_utils
 from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
@@ -411,21 +409,15 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    ssh_jump_image = clouds.Kubernetes.IMAGE_CPU
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
     if ssh_setup_mode == 'nodeport':
         service_type = 'NodePort'
-        kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
-                                       namespace, service_type)
-        ssh_jump_port = clouds.Kubernetes.get_port(ssh_jump_name)
 
     elif ssh_setup_mode == 'port-forward':
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
         # `kubectl port-forward`.
-        
+
         # Checks if 'socat' is installed
         try:
             subprocess.run(['which', 'socat'],
@@ -440,16 +432,21 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                     'installed. For Debian/Ubuntu system, install it with:\n'
                     '  $ sudo apt install socat') from None
         service_type = 'ClusterIP'
-        kubernetes_utils.setup_sshjump(ssh_jump_name, ssh_jump_image, key_label,
-                                       namespace, service_type)
-        ssh_jump_port = clouds.Kubernetes.LOCAL_PORT_FOR_PORT_FORWARD
     else:
         raise ValueError(f'Unsupported kubernetes networking type: '
                          f'{ssh_setup_mode}. Please check: ~/.sky/config.yaml')
-    config['auth'][
-        'ssh_proxy_command'] = kubernetes_utils.get_kubernetes_proxy_command(
-            ssh_jump_port, ssh_jump_ip, ssh_jump_name, ssh_setup_mode,
-            PRIVATE_SSH_KEY_PATH, clouds.kubernetes.CREDENTIAL_PATH,
-            clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
-            clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
+    # Setup service for SSH jump pod. We create the SSH jump service here
+    # because we need to know the service IP address and port to set the
+    # ssh_proxy_command in the autoscaler config.
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    kubernetes_utils.setup_sshjump_svc(ssh_jump_name, namespace, service_type)
+
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        PRIVATE_SSH_KEY_PATH, ssh_jump_name, ssh_setup_mode, namespace,
+        clouds.kubernetes.CREDENTIAL_PATH,
+        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
+        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
+
+    config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
+
     return config

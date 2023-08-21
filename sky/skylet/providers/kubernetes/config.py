@@ -3,6 +3,7 @@ import logging
 import math
 import re
 
+from sky import clouds
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
 
@@ -62,6 +63,8 @@ def bootstrap_kubernetes(config):
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     _configure_services(namespace, config['provider'])
+
+    config = _configure_ssh_jump(namespace, config)
 
     if not config['provider'].get('_operator'):
         # These steps are unecessary when using the Operator.
@@ -278,6 +281,34 @@ def _configure_autoscaler_role_binding(namespace, provider_config):
     logger.info(log_prefix + not_found_msg(binding_field, name))
     kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
     logger.info(log_prefix + created_msg(binding_field, name))
+
+
+def _configure_ssh_jump(namespace, config):
+    """Creates a SSH jump pod to connect to the cluster.
+
+    Also updates config['auth']['ssh_proxy_command'] to use the newly created
+    jump pod.
+    """
+    # TODO(romilb): These variables should be moved and fetched from config
+    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    sshjump_image = clouds.Kubernetes.IMAGE_CPU
+    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+
+    # TODO(romilb): We currently split SSH jump pod and svc creation. Service
+    #  is first created in authentication.py::setup_kubernetes_authentication
+    #  and then SSH jump pod creation happens here. This is because we need to
+    #  set the ssh_proxy_command in the ray YAML before we pass it to the
+    #  autoscaler. If in the future if we can write the ssh_proxy_command to the
+    #  cluster yaml through this method, then we should move the service
+    #  creation here.
+
+    # TODO(romilb): We should add a check here to make sure the service is up
+    #  and available before we create the SSH jump pod. If for any reason the
+    #  service is missing, we should raise an error.
+
+    kubernetes_utils.setup_sshjump_pod(sshjump_name, sshjump_image, key_label,
+                                       namespace)
+    return config
 
 
 def _configure_services(namespace, provider_config):
