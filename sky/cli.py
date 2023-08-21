@@ -4371,6 +4371,7 @@ def serve_logs(
         core.serve_tail_logs(service_record, replica_id, follow=follow)
 
 
+# TODO(tian): Add more options
 @serve.command('reload', cls=_DocumentedCodeCommand)
 @click.option(
     '--cloud',
@@ -4378,6 +4379,13 @@ def serve_logs(
     type=str,
     help=('The cloud to use. If specified, overrides the "resources.cloud" '
           'config. Passing "none" resets the config.'))
+@click.option('--cpus',
+              default=None,
+              type=str,
+              required=False,
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
 @click.option(
     '--gpus',
     required=False,
@@ -4400,6 +4408,7 @@ def serve_logs(
 @usage_lib.entrypoint
 def serve_reload(
     cloud: Optional[str],
+    cpus: Optional[str],
     gpus: Optional[str],
     service_name: str,
     replica_id: int,
@@ -4437,6 +4446,8 @@ def serve_reload(
     resources_override_cli: List[str] = []
     if cloud is not None:
         resources_override_cli.extend(['--cloud', cloud])
+    if cpus is not None:
+        resources_override_cli.extend(['--cpus', cpus])
     if gpus is not None:
         resources_override_cli.extend(['--gpus', gpus])
     sky.serve_reload(service_name, replica_id, resources_override_cli)
