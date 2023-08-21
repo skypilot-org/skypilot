@@ -11,6 +11,7 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -223,7 +224,8 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         del disk_tier  # Unused.
         # TODO(romilb): Allow fractional CPUs and memory
         # TODO(romilb): We should check the maximum number of CPUs and memory

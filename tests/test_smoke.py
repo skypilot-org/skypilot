@@ -53,6 +53,7 @@ from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils import resources_utils
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -2487,21 +2488,22 @@ def test_aws_disk_tier():
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
-    for disk_tier in ['low', 'medium', 'high', 'best']:
+    for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        disk_tier_str = disk_tier.value.lower()
+        name = _get_cluster_name() + '-' + disk_tier_str
         region = 'us-west-2'
         test = Test(
-            'aws-disk-tier-' + disk_tier,
+            'aws-disk-tier-' + disk_tier_str,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'id=`aws ec2 describe-instances --region {region} --filters '
                 f'Name=tag:ray-cluster-name,Values={name} --query '
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
-                ('' if disk_tier == 'low' else
+                ('' if disk_tier == resources_utils.DiskTier.LOW else
                  (_get_aws_query_command(region, '$id', 'Iops',
                                          specs['disk_iops']) +
                   _get_aws_query_command(region, '$id', 'Throughput',
@@ -2515,15 +2517,16 @@ def test_aws_disk_tier():
 
 @pytest.mark.gcp
 def test_gcp_disk_tier():
-    for disk_tier in ['low', 'medium', 'high', 'best']:
+    for disk_tier in list(resources_utils.DiskTier):
         type = GCP._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        disk_tier_str = disk_tier.value.lower()
+        name = _get_cluster_name() + '-' + disk_tier_str
         region = 'us-west2'
         test = Test(
-            'gcp-disk-tier-' + disk_tier,
+            'gcp-disk-tier-' + disk_tier_str,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'name=`gcloud compute instances list --filter='
                 f'"labels.ray-cluster-name:{name}" --format="value(name)"`; '
                 f'gcloud compute disks list --filter="name=$name" '
@@ -2537,15 +2540,19 @@ def test_gcp_disk_tier():
 
 @pytest.mark.azure
 def test_azure_disk_tier():
-    for disk_tier in ['low', 'medium', 'best']:
+    for disk_tier in list(resources_utils.DiskTier):
+        if disk_tier == resources_utils.DiskTier.HIGH:
+            # Azure does not support high disk tier.
+            continue
         type = Azure._get_disk_type(disk_tier)
-        name = _get_cluster_name() + '-' + disk_tier
+        disk_tier_str = disk_tier.value.lower()
+        name = _get_cluster_name() + '-' + disk_tier_str
         region = 'westus2'
         test = Test(
-            'azure-disk-tier-' + disk_tier,
+            'azure-disk-tier-' + disk_tier_str,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
-                f'--disk-tier {disk_tier} echo "hello sky"',
+                f'--disk-tier {disk_tier.value} echo "hello sky"',
                 f'az resource list --tag ray-cluster-name={name} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
                 f'--output tsv | grep {type}'

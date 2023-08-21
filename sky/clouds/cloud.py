@@ -9,6 +9,7 @@ from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -57,8 +58,8 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
-    _DEFAULT_DISK_TIER = 'medium'
-    _BEST_DISK_TIER = 'high'
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
 
     @classmethod
     def _cloud_unsupported_features(
@@ -239,7 +240,8 @@ class Cloud:
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory and
         disk tier.
 
@@ -251,8 +253,8 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_rier='medium', this method returns the default instance type
-        that support medium disk tier.
+        If disk_rier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
         When cpus is None, memory is None or disk tier is None, this method will
         never return None. This method may return None if the cloud's default
@@ -499,7 +501,7 @@ class Cloud:
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         """Errors out if the disk tier is not supported by the cloud provider.
 
         Raises:
@@ -508,10 +510,12 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def translate_disk_tier(cls, disk_tier: Optional[str]) -> str:
+    def translate_disk_tier(
+        cls, disk_tier: Optional[resources_utils.DiskTier]
+    ) -> resources_utils.DiskTier:
         if disk_tier is None:
             return cls._DEFAULT_DISK_TIER
-        if disk_tier == 'best':
+        if disk_tier == resources_utils.DiskTier.BEST:
             return cls._BEST_DISK_TIER
         return disk_tier
 

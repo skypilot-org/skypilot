@@ -18,6 +18,7 @@ from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.skylet.providers.oci.config import oci_conf
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -160,7 +161,8 @@ class OCI(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -512,12 +514,13 @@ class OCI(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         # All the disk_tier are supported for any instance_type
         del instance_type, disk_tier  # unused
 
-    def get_vpu_from_disktier(self, cpus: Optional[float],
-                              disk_tier: Optional[str]) -> int:
+    def get_vpu_from_disktier(
+            self, cpus: Optional[float],
+            disk_tier: Optional[resources_utils.DiskTier]) -> int:
         # Only normalize the disk_tier if it is not None, since OCI have
         # different default disk tier according to #vCPU.
         if disk_tier is not None:

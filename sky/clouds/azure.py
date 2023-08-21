@@ -19,6 +19,7 @@ from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -57,7 +58,7 @@ class Azure(clouds.Cloud):
     # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
-    _BEST_DISK_TIER = 'medium'
+    _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
 
     _INDENT_PREFIX = ' ' * 4
 
@@ -128,7 +129,8 @@ class Azure(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -283,8 +285,8 @@ class Azure(clouds.Cloud):
     def _get_feasible_launchable_resources(self, resources):
 
         def failover_disk_tier(
-                instance_type: str,
-                disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
+            instance_type: str, disk_tier: Optional[resources_utils.DiskTier]
+        ) -> Tuple[bool, Optional[resources_utils.DiskTier]]:
             """Figure out the actual disk tier to be used
 
             Check the disk_tier specified by the user with the instance type to
@@ -302,7 +304,7 @@ class Azure(clouds.Cloud):
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
                 return (True, disk_tier) if ok else (False, None)
             disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
-            all_tiers = {'high', 'medium', 'low'}
+            all_tiers = set(resources_utils.DiskTier)
             while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
                 all_tiers.remove(disk_tier)
                 if not all_tiers:
@@ -523,9 +525,10 @@ class Azure(clouds.Cloud):
         return 's' in x.group(5)
 
     @classmethod
-    def check_disk_tier(cls, instance_type: Optional[str],
-                        disk_tier: Optional[str]) -> Tuple[bool, str]:
-        if disk_tier is None or disk_tier == 'best':
+    def check_disk_tier(
+            cls, instance_type: Optional[str],
+            disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
+        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
         if disk_tier == 'high':
             return False, ('Azure disk_tier=high is not supported now. '
@@ -543,21 +546,22 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(msg)
 
     @classmethod
-    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
+    def _get_disk_type(cls,
+                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls.translate_disk_tier(disk_tier)
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {
-            'high': 'Disabled',
-            'medium': 'Premium_LRS',
-            'low': 'Standard_LRS',
+            resources_utils.DiskTier.HIGH: 'Disabled',
+            resources_utils.DiskTier.MEDIUM: 'Premium_LRS',
+            resources_utils.DiskTier.LOW: 'Standard_LRS',
         }
         return tier2name[tier]
 

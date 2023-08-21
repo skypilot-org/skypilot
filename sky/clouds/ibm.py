@@ -13,6 +13,7 @@ from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -250,7 +251,8 @@ class IBM(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -421,9 +423,9 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         del instance_type  # unused
-        if disk_tier is None or disk_tier == 'best':
+        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return
         raise exceptions.NotSupportedError(
             f'IBM does not support disk tier {disk_tier}.')

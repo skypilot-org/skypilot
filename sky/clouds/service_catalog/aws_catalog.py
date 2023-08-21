@@ -19,6 +19,7 @@ from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -211,9 +212,10 @@ def get_vcpus_mem_from_instance_type(
                                                         instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'

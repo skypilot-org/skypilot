@@ -69,6 +69,7 @@ from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -225,16 +226,13 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_tier = click.option(
-        '--disk-tier',
-        default=None,
-        type=click.Choice(['low', 'medium', 'high', 'best'],
-                          case_sensitive=False),
-        required=False,
-        help=('OS disk tier. Could be one of "low", '
-              '"medium", "high" or "best". if "best" is '
-              'specified, use the best possible disk tier. '
-              'Default: medium'))
+    disk_tier = click.option('--disk-tier',
+                             default=None,
+                             type=click.Choice(
+                                 resources_utils.DiskTier.supported_tiers(),
+                                 case_sensitive=False),
+                             required=False,
+                             help=resources_utils.DiskTier.cli_help_message())
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -409,16 +407,12 @@ _TASK_OPTIONS = [
                  type=int,
                  required=False,
                  help=('OS disk size in GBs.')),
-    click.option(
-        '--disk-tier',
-        default=None,
-        type=click.Choice(['low', 'medium', 'high', 'best'],
-                          case_sensitive=False),
-        required=False,
-        help=
-        ('OS disk tier. Could be one of "low", "medium", "high" or "best". if '
-         '"best" is specified, use the best possible disk tier. Default: medium'
-        )),
+    click.option('--disk-tier',
+                 default=None,
+                 type=click.Choice(resources_utils.DiskTier.supported_tiers(),
+                                   case_sensitive=False),
+                 required=False,
+                 help=resources_utils.DiskTier.cli_help_message()),
     click.option(
         '--use-spot/--no-use-spot',
         required=False,

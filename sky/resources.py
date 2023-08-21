@@ -2,7 +2,6 @@
 from typing import Dict, List, Optional, Set, Union
 
 import colorama
-from typing_extensions import Literal
 
 from sky import clouds
 from sky import global_user_state
@@ -12,6 +11,7 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -50,7 +50,7 @@ class Resources:
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
-        disk_tier: Optional[Literal['low', 'medium', 'high', 'best']] = None,
+        disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
         _is_image_managed: Optional[bool] = None,
@@ -115,7 +115,7 @@ class Resources:
 
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
-            ``'medium'``.
+            ``'MEDIUM'``.
           ports: the ports to open on the instance.
         """
         self._version = self._VERSION
@@ -156,6 +156,8 @@ class Resources:
                 }
         self._is_image_managed = _is_image_managed
 
+        if isinstance(disk_tier, str):
+            disk_tier = resources_utils.DiskTier[str(disk_tier).upper()]
         self._disk_tier = disk_tier
         self._ports = ports
 
@@ -226,7 +228,7 @@ class Resources:
 
         disk_tier = ''
         if self.disk_tier is not None:
-            disk_tier = f', disk_tier={self.disk_tier}'
+            disk_tier = f', disk_tier={self.disk_tier.value}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
@@ -342,7 +344,7 @@ class Resources:
         return self._image_id
 
     @property
-    def disk_tier(self) -> str:
+    def disk_tier(self) -> resources_utils.DiskTier:
         return self._disk_tier
 
     @property
@@ -755,11 +757,6 @@ class Resources:
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
             return
-        if self.disk_tier not in ['low', 'medium', 'high', 'best']:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Invalid disk_tier {self.disk_tier}. Please '
-                    'use one of "low", "medium", "high", or "best".')
         if self.instance_type is None:
             return
         if self.cloud is not None:
@@ -941,9 +938,9 @@ class Resources:
                 else:
                     other_tier = other.disk_tier
                 # best disk tier without knowledge of cloud cannot be compared
-                if 'best' in [self_tier, other_tier]:
+                if resources_utils.DiskTier.BEST in [self_tier, other_tier]:
                     return False
-                types = ['low', 'medium', 'high']
+                types = list(resources_utils.DiskTier)
                 return types.index(self_tier) < types.index(other_tier)
 
         if self.ports is not None:
@@ -1046,7 +1043,8 @@ class Resources:
         features = set()
         if self.use_spot:
             features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
-        if self.disk_tier is not None and self.disk_tier != 'best':
+        if (self.disk_tier is not None and
+                self.disk_tier != resources_utils.DiskTier.BEST):
             features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         if self.extract_docker_image() is not None:
             features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)

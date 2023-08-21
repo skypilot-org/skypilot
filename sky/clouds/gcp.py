@@ -20,6 +20,7 @@ from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -404,7 +405,8 @@ class GCP(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[str] = None) -> Optional[str]:
+            disk_tier: Optional[resources_utils.DiskTier] = None
+    ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -950,16 +952,17 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         del instance_type, disk_tier  # unused
 
     @classmethod
-    def _get_disk_type(cls, disk_tier: Optional[str]) -> str:
+    def _get_disk_type(cls,
+                       disk_tier: Optional[resources_utils.DiskTier]) -> str:
         tier = cls.translate_disk_tier(disk_tier)
         tier2name = {
-            'high': 'pd-ssd',
-            'medium': 'pd-balanced',
-            'low': 'pd-standard',
+            resources_utils.DiskTier.HIGH: 'pd-ssd',
+            resources_utils.DiskTier.MEDIUM: 'pd-balanced',
+            resources_utils.DiskTier.LOW: 'pd-standard',
         }
         return tier2name[tier]
 

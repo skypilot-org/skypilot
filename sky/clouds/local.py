@@ -4,6 +4,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -109,10 +110,11 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[str] = None) -> str:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
         del cpus, memory, disk_tier  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
@@ -200,9 +202,9 @@ class Local(clouds.Cloud):
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: str) -> None:
+                                disk_tier: resources_utils.DiskTier) -> None:
         del instance_type  # unused
-        if disk_tier is None or disk_tier == 'best':
+        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return
         raise exceptions.NotSupportedError(
             f'Local does not support disk tier {disk_tier}.')
