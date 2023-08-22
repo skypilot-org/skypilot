@@ -114,6 +114,20 @@ def base36_encode(hex_str: str) -> str:
 def truncate_and_hash_cluster_name(cluster_name: str,
                                    max_length: Optional[int] = 15,
                                    add_user_hash: bool = True) -> str:
+    """Truncates and hashes the cluster name to less than max_length.
+
+    This is to map the cluster name to a valid length for cloud providers, e.g.
+    GCP limits the length of the cluster name to 35 characters. If the cluster
+    name with user hash is longer than max_length:
+      1. Truncate it to max_length - cluster_hash - user_hash_length.
+      2. Append the hash of the cluster name
+    
+    Args:
+        cluster_name: The cluster name to be truncated and hashed.
+        max_length: The maximum length of the cluster name. If None, no
+            truncation is performed.
+        add_user_hash: Whether to append user hash to the cluster name.
+    """
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]

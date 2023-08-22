@@ -1087,6 +1087,8 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
+    # Read the cluster name from the tmp yaml file, to take the backward
+    # compatbility restortion above into account.
     yaml_config = common_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 

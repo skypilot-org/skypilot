@@ -2182,11 +2182,14 @@ class RetryingVmProvisioner(object):
 
 
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
-    """A handle for the cluster created by CloudVmRayBackend.
+    """A pickle-able handle for the cluster created by CloudVmRayBackend.
 
     The handle object will last for the whole lifecycle of the cluster.
 
     - (required) Cluster name.
+    - (required) Cluster name on cloud (different from the cluster name, as we
+        append user hash to avoid confliction across multiple accounts in a same
+        organization, and truncate the name for length limit).
     - (required) Path to a cluster.yaml file.
     - (optional) A cached head node public IP.  Filled in after a
         successful provision().
@@ -2213,7 +2216,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
-        self._cluster_name_on_cloud = cluster_name_on_cloud
+        # self._cluster_name_on_cloud will only be None for clusters created
+        # before #2403.
+        self._cluster_name_on_cloud: Optional[str] = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
         # List of (internal_ip, external_ip) tuples for all the nodes
