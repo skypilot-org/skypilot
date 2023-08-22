@@ -303,14 +303,12 @@ def reload_replica(replica_id: int, resources_override_cli: str) -> str:
                              'replica_id': replica_id,
                              'resources_override_cli': resources_override_cli
                          })
-    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
-    return common_utils.encode_payload(resp)
+    return common_utils.encode_payload(resp['message'])
 
 
-def load_reload_replica_result(payload: str) -> Any:
-    reload_resp = common_utils.decode_payload(payload)
-    reload_resp = pickle.loads(base64.b64decode(reload_resp))
-    return reload_resp
+def load_reload_replica_result(payload: str) -> Optional[str]:
+    message = common_utils.decode_payload(payload)
+    return message
 
 
 class ServeCodeGen:

@@ -91,8 +91,8 @@ class Controller:
             logger.info(f'Reloading replica {replica_id} with resources '
                         f'override {resources_override_cli}...')
             try:
-                msg = self.infra_provider.reload_replica(replica_id,
-                                                        resources_override_cli)
+                msg = self.infra_provider.reload_replica(
+                    replica_id, resources_override_cli)
             except Exception as e:  # pylint: disable=broad-except
                 msg = repr(e)
             return {'message': msg}

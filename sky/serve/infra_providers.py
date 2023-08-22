@@ -2,15 +2,14 @@
 from concurrent import futures
 import enum
 import logging
-import os
 import random
 import signal
 import subprocess
-import psutil
 import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+import psutil
 import requests
 
 from sky import backends
@@ -402,9 +401,10 @@ class SkyPilotInfraProvider(InfraProvider):
                 ready_replicas.add(info.ip)
         return ready_replicas
 
-    def _launch_cluster(self,
-                        replica_id: int,
-                        resources_override_cli: Optional[List[str]] = None) -> None:
+    def _launch_cluster(
+            self,
+            replica_id: int,
+            resources_override_cli: Optional[List[str]] = None) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
         if cluster_name in self.launch_process_pool:
@@ -527,7 +527,10 @@ class SkyPilotInfraProvider(InfraProvider):
             del self.launch_process_pool[replica_cluster_name]
             # For correctly display as shutting down
             info.status_property.sky_launch_status = ProcessStatus.SUCCESS
-        if info.status not in [status_lib.ReplicaStatus.SHUTTING_DOWN, status_lib.ReplicaStatus.FAILED]:
+        if info.status not in [
+                status_lib.ReplicaStatus.SHUTTING_DOWN,
+                status_lib.ReplicaStatus.FAILED
+        ]:
             self._teardown_cluster(replica_cluster_name, sync_down_logs=False)
         # Wait until the down process finishes
         while replica_cluster_name in self.down_process_pool:

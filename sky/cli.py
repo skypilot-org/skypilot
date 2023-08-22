@@ -4450,6 +4450,11 @@ def serve_reload(
         resources_override_cli.extend(['--cpus', cpus])
     if gpus is not None:
         resources_override_cli.extend(['--gpus', gpus])
+    click.confirm(
+        f'Reloading replica {replica_id} of service {service_name!r}. Proceed?',
+        default=True,
+        abort=True,
+        show_default=True)
     sky.serve_reload(service_name, replica_id, resources_override_cli)
 
 

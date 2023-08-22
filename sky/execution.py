@@ -1284,9 +1284,9 @@ def serve_reload(service_name: str, replica_id: int,
         'Failed when submit reload request to controller.',
         stderr,
         stream_logs=False)
-    resp = serve.load_reload_replica_result(reload_replica_payload)
-    if resp.json()['msg']:
+    message = serve.load_reload_replica_result(reload_replica_payload)
+    if message:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 f'Unexpected message when reloading replica of service '
-                f'{service_name}: {resp.json()["msg"]}')
+                f'{service_name}: {message}')
