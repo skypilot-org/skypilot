@@ -999,6 +999,7 @@ def write_cluster_config(
             resources_vars,
             **{
                 'cluster_name': cluster_name_on_cloud,
+                'user_cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'ports': ports,
                 'disk_size': to_provision.disk_size,
