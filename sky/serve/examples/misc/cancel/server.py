@@ -1,6 +1,8 @@
-from aiohttp import web
 import argparse
 import asyncio
+
+from aiohttp import web
+
 
 async def handle(request):
     response = web.StreamResponse()
@@ -19,9 +21,11 @@ async def handle(request):
 
     return response
 
+
 async def health_check(request):
     print("Received health check")
     return web.Response(text="Healthy")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='SkyServe HTTP Test Server')

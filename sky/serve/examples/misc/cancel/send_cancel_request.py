@@ -1,7 +1,9 @@
-import aiohttp
 import asyncio
 
+import aiohttp
+
 redirector_endpoint = input('Enter redirector endpoint: ')
+
 
 async def fetch(session, url):
     try:
@@ -12,11 +14,13 @@ async def fetch(session, url):
         print("Request was cancelled!")
         raise
 
+
 async def main():
     timeout = 2
 
     async with aiohttp.ClientSession() as session:
-        task = asyncio.create_task(fetch(session, f'http://{redirector_endpoint}/'))
+        task = asyncio.create_task(
+            fetch(session, f'http://{redirector_endpoint}/'))
 
         await asyncio.sleep(timeout)
         # We manually cancel requests for test purposes.
@@ -27,5 +31,6 @@ async def main():
             await task
         except asyncio.CancelledError:
             print("Main function caught the cancelled exception.")
+
 
 asyncio.run(main())
