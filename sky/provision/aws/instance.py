@@ -21,8 +21,9 @@ INITIAL_BACKOFF_SECONDS = 7
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
-_DEPENDENCY_VIOLATION_PATTERN = (
-    r'An error occurred \((.*)\) when calling the (.*) operation(.*): (.*)')
+_DEPENDENCY_VIOLATION_PATTERN = re.compile(
+    r'An error occurred \(DependencyViolation\) when calling the '
+    r'DeleteSecurityGroup operation(.*): (.*)')
 
 
 def _default_ec2_resource(region: str) -> Any:
@@ -196,8 +197,7 @@ def cleanup_ports(
         try:
             list(sgs)[0].delete()
         except aws.botocore_exceptions().ClientError as e:
-            match_str = 'An error occurred (DeleteSecurityGrou) when calling the DeleteSecurityGroup operation (.*): (.*)'
-            if re.findall(match_str, str(e):
+            if _DEPENDENCY_VIOLATION_PATTERN.findall(str(e)):
                 logger.debug(
                     f'Security group {sg_name} is still in use. Retry.')
                 time.sleep(backoff.current_backoff())
