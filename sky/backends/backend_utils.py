@@ -1836,7 +1836,7 @@ def _query_cluster_status_via_cloud_api(
             node_status_dict = provision_lib.query_instances(
                 cloud_name, cluster_name_on_cloud, provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
-            f'{cluster_name_on_cloud!r} '
+                         f'{cluster_name_on_cloud!r} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
