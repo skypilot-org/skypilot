@@ -17,8 +17,6 @@ BOTO_MAX_RETRIES = 12
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
 
-INITIAL_BACKOFF_SECONDS = 7
-MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
 _DEPENDENCY_VIOLATION_PATTERN = re.compile(
@@ -191,8 +189,7 @@ def cleanup_ports(
         logger.warning(f'Expected security group {sg_name} not found. '
                        'Skip cleanup.')
         return
-    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
-                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
+    backoff = common_utils.Backoff()
     for _ in range(MAX_ATTEMPTS):
         try:
             list(sgs)[0].delete()
