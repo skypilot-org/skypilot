@@ -392,7 +392,8 @@ class Kubernetes(clouds.Cloud):
         default_inst = KubernetesInstanceType.from_instance_type(
             default_instance_type)
         gpu_task_cpus = default_inst.cpus
-        gpu_task_memory = gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
+        gpu_task_memory = gpu_task_cpus * \
+                          self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
         instance_type = KubernetesInstanceType.from_resources(
             gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
         # No fuzzy lists for Kubernetes
