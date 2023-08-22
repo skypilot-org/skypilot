@@ -1,16 +1,29 @@
 """AWS instance provisioning."""
+import re
+import time
 from typing import Any, Dict, List, Optional
 
 from botocore import config
+from botocore import exceptions
 
+from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.utils import common_utils
+
+logger = sky_logging.init_logger(__name__)
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+INITIAL_BACKOFF_SECONDS = 7
+MAX_BACKOFF_FACTOR = 10
+MAX_ATTEMPTS = 6
+
+_DEPENDENCY_VIOLATION_PATTERN = (
+    r'An error occurred \((.*)\) when calling the (.*) operation(.*): (.*)')
 
 
 def _default_ec2_resource(region: str) -> Any:
@@ -175,6 +188,24 @@ def cleanup_ports(
         'Values': [sg_name]
     }])
     if len(list(sgs)) != 1:
-        raise ValueError(f'Expected security group {sg_name} not found. '
-                         'Cannot cleanup ports.')
-    list(sgs)[0].delete()
+        logger.warning(f'Expected security group {sg_name} not found. '
+                       'Skip cleanup.')
+        return
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
+                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
+    for _ in range(MAX_ATTEMPTS):
+        try:
+            list(sgs)[0].delete()
+        except exceptions.ClientError as e:
+            match = re.search(_DEPENDENCY_VIOLATION_PATTERN, str(e))
+            if match is None:
+                raise e
+            if (match.group(1) == 'DependencyViolation' and
+                    match.group(2) == 'DeleteSecurityGroup'):
+                logger.warning(
+                    f'Security group {sg_name} is still in use. Retry.')
+                time.sleep(backoff.current_backoff())
+                continue
+        return
+    logger.warning(f'Cannot delete security group {sg_name} after '
+                   f'{MAX_ATTEMPTS} attempts. Please delete it manually.')
