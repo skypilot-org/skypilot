@@ -160,6 +160,7 @@ class Kubernetes(clouds.Cloud):
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
+    _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -390,8 +391,10 @@ class Kubernetes(clouds.Cloud):
             return [], []
         default_inst = KubernetesInstanceType.from_instance_type(
             default_instance_type)
+        gpu_task_cpus = default_inst.cpus
+        gpu_task_memory = gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
         instance_type = KubernetesInstanceType.from_resources(
-            default_inst.cpus, default_inst.memory, acc_count, acc_type).name
+            gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
         # No fuzzy lists for Kubernetes
         return _make([instance_type]), []
 
