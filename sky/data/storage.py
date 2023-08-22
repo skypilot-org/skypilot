@@ -369,6 +369,7 @@ class Storage(object):
 
         - (required) Storage name.
         - (required) Source
+        - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
 
@@ -377,11 +378,13 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
+            mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
+            self.mode = mode
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
@@ -390,6 +393,7 @@ class Storage(object):
             return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
+                    f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
