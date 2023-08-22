@@ -196,15 +196,13 @@ def cleanup_ports(
         try:
             list(sgs)[0].delete()
         except aws.botocore_exceptions().ClientError as e:
-            match = re.search(_DEPENDENCY_VIOLATION_PATTERN, str(e))
-            if match is None:
-                raise
-            if match.group(1) == 'DependencyViolation':
-                assert match.group(2) == 'DeleteSecurityGroup', match.group(2)
+            match_str = 'An error occurred (DeleteSecurityGrou) when calling the DeleteSecurityGroup operation (.*): (.*)'
+            if re.findall(match_str, str(e):
                 logger.debug(
                     f'Security group {sg_name} is still in use. Retry.')
                 time.sleep(backoff.current_backoff())
                 continue
+            raise
         return
     logger.warning(f'Cannot delete security group {sg_name} after '
                    f'{MAX_ATTEMPTS} attempts. Please delete it manually.')
