@@ -545,7 +545,7 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:10]
+         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:11]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -570,7 +570,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:10]
+         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:11]
         # TODO: use namedtuple instead of dict
 
         record = {
