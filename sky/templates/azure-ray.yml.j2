@@ -133,6 +133,8 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
+  # Line 'sudo systemctl stop jupyterhub ..': stop jupyterhub service to avoid port conflict on 8081
+  # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8888
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
@@ -148,6 +150,8 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+    sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;
+    sudo systemctl stop jupyter > /dev/null 2>&1 || true;
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
