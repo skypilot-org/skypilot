@@ -127,9 +127,8 @@ def _with_docker_login_config(
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         if resources.extract_docker_image() is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Docker login config is only supported for docker images.')
+            logger.warning('{colorama.Fore.YELLOW}Docker login configs {", ".join(all_keys)} are provided, but no docker image is specified in `image_id`. The login configs will be ignored.{colorama.Style.RESET_ALL}'
+            return resources
         return resources.copy(_docker_login_config=docker_login_config)
 
     return {_add_docker_login_config(resources) for resources in resources_set}
