@@ -168,6 +168,7 @@ Available fields:
     # You could also specify any of them through the CLI flag if you don't want to store them in
     # your yaml file or if you want to generate them for constantly changing password. For example:
     #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+    # For more information about docker support in SkyPilot, please refer to the `image_id` section above.
     envs:
       MY_BUCKET: skypilot-temp-gcs-test
       MY_LOCAL_PATH: tmp-workdir
