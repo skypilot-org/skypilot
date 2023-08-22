@@ -2386,7 +2386,10 @@ def check_cluster_available(
             if len(actions) > 1:
                 actions[-1] = 'or ' + actions[-1]
             actions_str = ', '.join(actions)
-            error_msg += (f' It was likely {actions_str}.')
+            message = f' It was likely {actions_str}.'
+            if len(actions) > 1:
+                message = message.replace('likely', 'either')
+            error_msg += message
 
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
