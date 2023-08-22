@@ -258,9 +258,9 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
         namespace: Kubernetes namespace to use
         kube_config_path: str; path to kubernetes config
         port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
-            with kubectl port-forward
-        port_fwd_proxy_cmd_template: str; template to create 
-            kubectl port-forward Proxycommand
+            with 'kubectl port-forward'
+        port_fwd_proxy_cmd_template: str; template used to create 
+            'kubectl port-forward' Proxycommand
         
     """
 
@@ -281,9 +281,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
         kube_config_path = os.path.expanduser(kube_config_path)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
-            'ipaddress': ssh_jump_ip,
             'local_port': ssh_jump_port,
-            'kube_config_path': kube_config_path
         }
         port_forward_proxy_cmd_path = os.path.expanduser(
             port_fwd_proxy_cmd_path)

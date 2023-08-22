@@ -15,14 +15,16 @@ fi
 
 # Establishes connection between local port and the ssh jump pod
 kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22 &
-K8S_PID=$!
-trap "kill -9 $K8S_PID" EXIT
+# Terminate the port-forward process when this script exits.
+K8S_PORT_FWD_PID=$!
+trap "kill -9 $K8S_PORT_FWD_PID" EXIT
 
-# checks if a conection to local_port of ipaddress is established 
-while ! nc -z {{ ipaddress }} {{ local_port }}; do
+# checks if a conection to local_port of 127.0.0.1:[local_port] is established 
+while ! nc -z 127.0.0.1 {{ local_port }}; do
     sleep 0.1
 done
 
 # Establishes two directional byte streams to handle stdin/stdout between
-# terminal and the jump pod
-socat - tcp:{{ ipaddress }}:{{ local_port }}
+# terminal and the jump pod.
+# socat process terminates when port-forward terminates.
+socat - tcp:127.0.0.1:{{ local_port }}
