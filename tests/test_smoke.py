@@ -52,8 +52,8 @@ from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
@@ -2490,11 +2490,10 @@ def test_aws_disk_tier():
 
     for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        disk_tier_str = disk_tier.value.lower()
-        name = _get_cluster_name() + '-' + disk_tier_str
+        name = _get_cluster_name() + '-' + disk_tier.value
         region = 'us-west-2'
         test = Test(
-            'aws-disk-tier-' + disk_tier_str,
+            'aws-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
@@ -2519,11 +2518,10 @@ def test_aws_disk_tier():
 def test_gcp_disk_tier():
     for disk_tier in list(resources_utils.DiskTier):
         type = GCP._get_disk_type(disk_tier)
-        disk_tier_str = disk_tier.value.lower()
-        name = _get_cluster_name() + '-' + disk_tier_str
+        name = _get_cluster_name() + '-' + disk_tier.value
         region = 'us-west2'
         test = Test(
-            'gcp-disk-tier-' + disk_tier_str,
+            'gcp-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
@@ -2545,11 +2543,10 @@ def test_azure_disk_tier():
             # Azure does not support high disk tier.
             continue
         type = Azure._get_disk_type(disk_tier)
-        disk_tier_str = disk_tier.value.lower()
-        name = _get_cluster_name() + '-' + disk_tier_str
+        name = _get_cluster_name() + '-' + disk_tier.value
         region = 'westus2'
         test = Test(
-            'azure-disk-tier-' + disk_tier_str,
+            'azure-disk-tier-' + disk_tier.value,
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',

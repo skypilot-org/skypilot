@@ -5,10 +5,10 @@ from typing import List
 
 class DiskTier(enum.Enum):
     """All disk tiers supported by SkyPilot."""
-    LOW = 'LOW'
-    MEDIUM = 'MEDIUM'
-    HIGH = 'HIGH'
-    BEST = 'BEST'
+    LOW = 'low'
+    MEDIUM = 'medium'
+    HIGH = 'high'
+    BEST = 'best'
 
     @classmethod
     def supported_tiers(cls) -> List[str]:
@@ -19,5 +19,4 @@ class DiskTier(enum.Enum):
         return (
             f'OS disk tier. Could be one of {", ".join(cls.supported_tiers())}'
             f'. if {cls.BEST.value} is specified, use the best possible disk '
-            f'tier. Default: {cls.MEDIUM.value}'
-        )
+            f'tier. Default: {cls.MEDIUM.value}')
