@@ -417,9 +417,6 @@ class SkyPilotInfraProvider(InfraProvider):
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
         if resources_override_cli is not None:
             cmd.extend(resources_override_cli)
-        # TODO(tian): Remove this hack
-        # if replica_id == 1:
-        #     cmd.extend(['--cloud', 'azure'])
         fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
