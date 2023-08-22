@@ -365,7 +365,7 @@ class StrategyExecutor:
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                                default=False):
-    """Failover strategy: wait in same region and failover after timout."""
+    """Failover strategy: wait in same region and failover after timeout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
@@ -463,6 +463,19 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
     observation that the preemption is likely to happen again shortly in the
     same region, so trying other regions first is more likely to get a longer
     running cluster.
+
+    Example: Assume the user has access to 3 regions, R1, R2, R3, in that price
+    order. Then the following are some possible event sequences:
+
+        R1Z1 (preempted) -> R2 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (failed to launch)
+                                                  -> R1Z2 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (failed to launch)
+                                                  -> R1Z1 (success)
     """
 
     def recover(self) -> float:

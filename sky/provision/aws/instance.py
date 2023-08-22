@@ -162,10 +162,14 @@ def cleanup_ports(
         'ec2',
         region_name=region,
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
-    # TODO(tian): Add a function to generate SG name for AWS, then replace here
-    # and backend_utils::write_cluster_config
-    sg_name = f'sky-sg-{cluster_name}'
-    sgs = ec2.security_groups.filter(GroupNames=[sg_name])
+    sg_name = provider_config['security_group']['GroupName']
+    # GroupNames will only filter SGs in the default VPC, so we need to use
+    # Filters here. Ref:
+    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
+    sgs = ec2.security_groups.filter(Filters=[{
+        'Name': 'group-name',
+        'Values': [sg_name]
+    }])
     if len(list(sgs)) != 1:
         raise ValueError(f'Expected security group {sg_name} not found. '
                          'Cannot cleanup ports.')

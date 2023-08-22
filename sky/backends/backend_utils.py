@@ -6,6 +6,7 @@ import getpass
 import json
 import os
 import pathlib
+import pprint
 import re
 import subprocess
 import tempfile
@@ -1834,6 +1835,9 @@ def _query_cluster_status_via_cloud_api(
         try:
             node_status_dict = provision_lib.query_instances(
                 cloud_name, cluster_name_on_cloud, provider_config)
+            logger.debug(f'Querying {cloud_name} cluster '
+            f'{cluster_name_on_cloud!r} '
+                         f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -1999,12 +2003,15 @@ def _update_cluster_status_no_lock(
             # user will be notified that any auto stop/down might not be
             # triggered.
             if external_ips is None or len(external_ips) == 0:
+                logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
+                             f'IPs found. External IPs: {external_ips}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
+            assert handle.head_ssh_port is not None, handle
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
@@ -2014,23 +2021,24 @@ def _update_cluster_status_no_lock(
                 require_outputs=True,
                 separate_stderr=True)
             if rc:
-                logger.debug(
-                    'Refreshing status: Failed to use `ray` to get IPs from cluster'
-                    f' {cluster_name!r}. stderr: {stderr}')
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
+                raise RuntimeError(
+                    f'Refreshing status ({cluster_name!r}): Failed to check '
+                    f'ray cluster\'s healthiness with '
+                    f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                    f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
-            logger.debug(
-                'Refreshing status: ray status not showing all nodes '
-                f'({ready_head + ready_workers}/{handle.launched_nodes}); '
-                f'output: {output}; stderr: {stderr}')
+            raise RuntimeError(
+                f'Refreshing status ({cluster_name!r}): ray status not showing '
+                f'all nodes ({ready_head + ready_workers}/'
+                f'{handle.launched_nodes}); output: {output}; stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
-                'Refreshing status: Failed to use `ray` to get IPs from cluster'
-                f' {cluster_name!r}.')
+                f'Refreshing status ({cluster_name!r}) failed to get IPs.')
+        except RuntimeError as e:
+            logger.debug(str(e))
         return False
 
     # Determining if the cluster is healthy (UP):
@@ -2793,3 +2801,25 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
+
+
+def check_stale_runtime_on_remote(returncode: int, stderr: str,
+                                  cluster_name: str) -> None:
+    """Raises RuntimeError if remote SkyPilot runtime needs to be updated.
+
+    We detect this by parsing certain backward-incompatible error messages from
+    `stderr`. Typically due to the local client version just got updated, and
+    the remote runtime is an older version.
+    """
+    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
+                         r'attribute \'(.*)\'')
+    if returncode != 0:
+        attribute_error = re.findall(pattern, stderr)
+        if attribute_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
+                    'on the remote cluster. To update, run (existing jobs are '
+                    f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
+                    f'{cluster_name}{colorama.Style.RESET_ALL}'
+                    f'\n--- Details ---\n{stderr.strip()}\n')

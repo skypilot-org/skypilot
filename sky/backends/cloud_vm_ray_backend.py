@@ -3175,15 +3175,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                       stream_logs=False,
                                                       require_outputs=True)
 
-        if 'has no attribute' in stdout:
-            # Happens when someone calls `sky exec` but remote is outdated
-            # necessicating calling `sky launch`
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.RED}SkyPilot runtime is stale on the '
-                    'remote cluster. To update, run: sky launch -c '
-                    f'{handle.cluster_name}{colorama.Style.RESET_ALL}')
-
+        # Happens when someone calls `sky exec` but remote is outdated
+        # necessitating calling `sky launch`.
+        backend_utils.check_stale_runtime_on_remote(returncode, stdout,
+                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
                                            f'Failed to submit job {job_id}.',
@@ -3452,20 +3447,47 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
-    def cancel_jobs(self, handle: CloudVmRayResourceHandle,
-                    jobs: Optional[List[int]]):
+    def cancel_jobs(self,
+                    handle: CloudVmRayResourceHandle,
+                    jobs: Optional[List[int]],
+                    cancel_all: bool = False) -> None:
+        """Cancels jobs.
+
+        CloudVMRayBackend specific method.
+
+        Args:
+            handle: The cluster handle.
+            jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
+            cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
+                set to None. If False and `jobs` is None, cancel the latest
+                running job.
+        """
+        if cancel_all:
+            assert jobs is None, (
+                'If cancel_all=True, usage is to set jobs=None')
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                handle.docker_user)
-        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
+        code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs, cancel_all)
 
         # All error messages should have been redirected to stdout.
-        returncode, stdout, _ = self.run_on_head(handle,
-                                                 code,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+        # TODO(zongheng): remove after >=0.5.0, 2 minor versions after.
+        backend_utils.check_stale_runtime_on_remote(returncode, stdout + stderr,
+                                                    handle.cluster_name)
         subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
+
+        cancelled_ids = common_utils.decode_payload(stdout)
+        if cancelled_ids:
+            logger.info(
+                f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')
+        else:
+            logger.info(
+                'No jobs cancelled. They may already be in terminal states.')
 
     def sync_down_logs(
             self,
