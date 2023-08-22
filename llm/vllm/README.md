@@ -46,7 +46,11 @@ Before you get started, you need to have access to the Llama-2 model weights on 
 
 1. Start serving the Llama-2 model:
 ```bash
-sky launch -c vllm-llama2 serving-openai-api.yaml
+sky launch -c vllm-llama2 serve-openai-api.yaml
+```
+**Optional**: Only GCP offers the specified L4 GPUs currently. To use other clouds, use the `--gpus` flag to request other GPUs. For example, to use V100 GPUs:
+```bash
+sky launch -c vllm-llama2 serve-openai-api.yaml --gpus V100:1
 ```
 2. Check the IP for the cluster with:
 ```
