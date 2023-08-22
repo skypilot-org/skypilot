@@ -4301,7 +4301,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         for dst, storage_metadata in storage_mounts_metadata.items():
             storage_obj = storage_lib.Storage(name=storage_metadata.name,
                                               source=storage_metadata.source,
-                                              mode=storage_metadata.mode)
+                                              mode=storage_metadata.mode,
+                                              sync_on_reconstruction=False)
             storage_mounts[dst] = storage_obj
         return storage_mounts
 
