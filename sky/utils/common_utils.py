@@ -121,7 +121,7 @@ def truncate_and_hash_cluster_name(cluster_name: str,
     name with user hash is longer than max_length:
       1. Truncate it to max_length - cluster_hash - user_hash_length.
       2. Append the hash of the cluster name
-    
+
     Args:
         cluster_name: The cluster name to be truncated and hashed.
         max_length: The maximum length of the cluster name. If None, no
