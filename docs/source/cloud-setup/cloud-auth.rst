@@ -46,6 +46,72 @@ Example of mixing a default profile and an SSO profile:
     $ # A cluster launched under a different profile.
     $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c my-sso-cluster
 
+Using temporary credentials
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can leverage aws-vault and docker to use temporary credentials. First, install and setup `aws-vault <https://github.com/99designs/aws-vault>`__ . 
+
+Once done, add your aws-profile:
+
+.. code-block:: console
+    
+    $ aws-vault add skypilot
+
+
+Then use the two following snippets:
+
+*docker-compose.yml*
+
+.. code-block:: yaml
+
+    version: '3.3'
+    services:
+    skypilot:
+        image: berkeleyskypilot/skypilot:latest
+        container_name: skypilot
+        environment:
+        AWS_VAULT: ${AWS_VAULT}
+        AWS_REGION: ${AWS_REGION}
+        AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+        AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+        AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+        AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+        AWS_CREDENTIAL_EXPIRATION: ${AWS_CREDENTIAL_EXPIRATION}
+        volumes:
+            - ./credentials_script.sh:/root/credentials_script.sh
+        command: sh -c "chmod +x /root/credentials_script.sh && sh /root/credentials_script.sh && tail -f /dev/null" 
+
+*credentials_script.sh*
+
+.. code-block:: bash
+
+    #!/bin/bash
+    output_file="/root/.aws/credentials"
+
+    mkdir -p "$(dirname "$output_file")"
+    cat << EOF > "$output_file"
+    [default]
+    aws_access_key_id = $AWS_ACCESS_KEY_ID
+    aws_secret_access_key = $AWS_SECRET_ACCESS_KEY
+    aws_region = $AWS_REGION
+    EOF
+
+
+Build and up your docker-compose:
+
+.. code-block:: console
+
+    $ docker-compose build
+    $ aws-vault exec skypilot --duration 1h -- docker-compose up -d
+    $ # --duration 1h means your credentials will expire in one hour
+
+Finally run:
+
+.. code-block:: console
+
+    $ docker exec -it skypilot bash
+
+Here you can type any Skypilot command with temporary credentials.
 
 GCP
 -------------------------------
