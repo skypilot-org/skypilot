@@ -7,12 +7,14 @@ import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
+import colorama
 import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -23,6 +25,8 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
@@ -127,7 +131,10 @@ def _with_docker_login_config(
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
         if resources.extract_docker_image() is None:
-            logger.warning('{colorama.Fore.YELLOW}Docker login configs {", ".join(all_keys)} are provided, but no docker image is specified in `image_id`. The login configs will be ignored.{colorama.Style.RESET_ALL}'
+            logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
+                           f'{", ".join(all_keys)} are provided, but no docker '
+                           'image is specified in `image_id`. The login configs'
+                           f' will be ignored.{colorama.Style.RESET_ALL}')
             return resources
         return resources.copy(_docker_login_config=docker_login_config)
 
