@@ -199,10 +199,10 @@ def cleanup_ports(
         except exceptions.ClientError as e:
             match = re.search(_DEPENDENCY_VIOLATION_PATTERN, str(e))
             if match is None:
-                raise e
+                raise
             if (match.group(1) == 'DependencyViolation' and
                     match.group(2) == 'DeleteSecurityGroup'):
-                logger.warning(
+                logger.debug(
                     f'Security group {sg_name} is still in use. Retry.')
                 time.sleep(backoff.current_backoff())
                 continue
