@@ -2864,7 +2864,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
-        self._set_cluster_metadata_storage_mounts(handle, storage_mounts)
+        self._set_cluster_storage_mounts_metadata(handle, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -4271,44 +4271,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-    def _set_cluster_metadata_storage_mounts(
+
+    def _set_cluster_storage_mounts_metadata(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
         """Sets 'storage_mounts' object in cluster's storage metadata"""
         if not storage_mounts:
             return
-
-        cluster_name = handle.cluster_name
-        cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
-        if cluster_metadata is None:
-            return None
-        if not 'storage' in cluster_metadata.keys():
-            cluster_metadata['storage'] = {}
-        for _, storage_obj in storage_mounts.items():
+        storage_mounts_metadata = {}
+        for dst, storage_obj in storage_mounts.items():
+            storage_obj_metadata = storage_lib.Storage.StorageMetadata(storage_name=storage_obj.name, source=storage_obj.source,mode=storage_obj.mode)
             for _, store_obj in storage_obj.stores.items():
-                # Update some of the non-picklabe attributes of store instances
-                store_obj.make_picklable()
-        cluster_metadata['storage']['storage_mounts'] = storage_mounts
-        global_user_state.set_cluster_metadata(cluster_name, cluster_metadata)
+                storage_obj_metadata.add_store(store_obj)
+            storage_mounts_metadata[dst] = storage_obj_metadata
+        global_user_state.set_cluster_storage_mounts_metadata(handle.cluster_name, storage_mounts_metadata)
 
-    def get_cluster_metadata_storage_mounts(
+
+    def get_cluster_storage_mounts_metadata(
         self, handle: CloudVmRayResourceHandle
     ) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage metadata"""
-        cluster_name = handle.cluster_name
-        cluster_metadata = global_user_state.get_cluster_metadata(cluster_name)
-        if cluster_metadata is None:
+        storage_mounts_metadata = global_user_state.get_cluster_storage_mounts_metadata(handle.cluster_name)
+        if storage_mounts_metadata is None:
             return None
-        if not 'storage' in cluster_metadata.keys():
-            return None
-        if not 'storage_mounts' in cluster_metadata['storage'].keys():
-            return None
-        storage_mounts = cluster_metadata['storage']['storage_mounts']
-        for _, storage_obj in storage_mounts.items():
-            for _, store_obj in storage_obj.stores.items():
-                # Restoring removed attributes due to non-picklable character
-                store_obj.bucket = store_obj.get_handle()
+        storage_mounts = {}
+        for dst, storage_metadata in storage_mounts_metadata.items():
+            storage_obj = storage_lib.Storage(name=storage_metadata.name, source=storage_metadata.source, mode=storage_metadata.mode)
+            storage_mounts[dst] = storage_obj
         return storage_mounts
+
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,

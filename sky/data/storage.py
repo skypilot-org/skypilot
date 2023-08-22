@@ -119,6 +119,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    CSYNC = 'CSYNC'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -315,11 +316,6 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def make_picklable(self) -> None:
-        """Sets the attributes that are non-picklable to None
-        """
-        raise NotImplementedError
-
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
         # original Store object is returned
@@ -361,6 +357,7 @@ class Storage(object):
 
         - (required) Storage name.
         - (required) Source
+        - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
 
@@ -369,11 +366,13 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
+            mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
+            self.mode = mode
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
@@ -382,6 +381,7 @@ class Storage(object):
             return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
+                    f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
@@ -1318,12 +1318,6 @@ class S3Store(AbstractStore):
             time.sleep(0.1)
         return True
 
-    def make_picklable(self) -> None:
-        """Sets the attributes that are non-picklable to None
-        """
-        self.client = None
-        self.bucket = None
-
 
 class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
@@ -1764,12 +1758,6 @@ class GcsStore(AbstractStore):
                     raise exceptions.StorageBucketDeleteError(
                         f'Failed to delete GCS bucket {bucket_name}.')
 
-    def make_picklable(self) -> None:
-        """Sets the attributes that are non-picklable to None
-        """
-        self.client = None
-        self.bucket = None
-
 
 class R2Store(AbstractStore):
     """R2Store inherits from S3Store Object and represents the backend
@@ -2129,12 +2117,6 @@ class R2Store(AbstractStore):
         while data_utils.verify_r2_bucket(bucket_name):
             time.sleep(0.1)
         return True
-
-    def make_picklable(self) -> None:
-        """Sets the attributes that are non-picklable to None
-        """
-        self.client = None
-        self.bucket = None
 
 
 class IBMCosStore(AbstractStore):
@@ -2521,9 +2503,3 @@ class IBMCosStore(AbstractStore):
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
         Rclone.delete_rclone_bucket_profile(self.name, Rclone.RcloneClouds.IBM)
-
-    def make_picklable(self) -> None:
-        """Sets the attributes that are non-picklable to None
-        """
-        self.client = None
-        self.bucket = None
