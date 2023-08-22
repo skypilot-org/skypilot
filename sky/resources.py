@@ -115,7 +115,7 @@ class Resources:
 
           disk_size: the size of the OS disk in GiB.
           disk_tier: the disk performance tier to use. If None, defaults to
-            ``'MEDIUM'``.
+            ``'medium'``.
           ports: the ports to open on the instance.
         """
         self._version = self._VERSION

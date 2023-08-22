@@ -530,7 +530,7 @@ class Azure(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return True, ''
-        if disk_tier == 'high':
+        if disk_tier == resources_utils.DiskTier.HIGH:
             return False, ('Azure disk_tier=high is not supported now. '
                            'Please use disk_tier={low, medium} instead.')
         # Only S-series supported premium ssd
