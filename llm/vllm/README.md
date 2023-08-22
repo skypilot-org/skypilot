@@ -48,6 +48,10 @@ Before you get started, you need to have access to the Llama-2 model weights on 
 ```bash
 sky launch -c vllm-llama2 serving-openai-api.yaml
 ```
+[Optional] You can also try to use other GPUs by specifying the `--gpus` flag to enable other clouds (The original L4 only presents on GCP). For example, to use T4 GPUs:
+```bash
+sky launch -c vllm-llama2 serving-openai-api.yaml --gpus T4:1
+```
 2. Check the IP for the cluster with:
 ```
 sky status -a
