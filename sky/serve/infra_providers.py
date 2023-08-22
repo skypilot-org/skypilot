@@ -2,7 +2,6 @@
 from concurrent import futures
 import enum
 import logging
-import os
 import random
 import signal
 import subprocess
@@ -10,6 +9,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+import psutil
 import requests
 
 from sky import backends
@@ -29,6 +29,19 @@ _ENDPOINT_PROBE_INTERVAL = 10
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _CONSECUTIVE_FAILURE_THRESHOLD_COUNT = (
     _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT // _ENDPOINT_PROBE_INTERVAL)
+
+
+def _interrupt_process_and_children(pid: int) -> None:
+    parent_process = psutil.Process(pid)
+    for child_process in parent_process.children(recursive=True):
+        try:
+            child_process.send_signal(signal.SIGINT)
+        except psutil.NoSuchProcess:
+            pass
+    try:
+        parent_process.send_signal(signal.SIGINT)
+    except psutil.NoSuchProcess:
+        pass
 
 
 class ProcessStatus(enum.Enum):
@@ -485,7 +498,7 @@ class SkyPilotInfraProvider(InfraProvider):
             # process_pool_refresher terminates
             if p.poll() is None:
                 assert p.pid is not None
-                os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                _interrupt_process_and_children(p.pid)
                 p.wait()
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
