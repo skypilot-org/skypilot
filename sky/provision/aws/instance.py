@@ -4,7 +4,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from botocore import config
-from botocore import exceptions
 
 from sky import sky_logging
 from sky import status_lib
@@ -196,7 +195,7 @@ def cleanup_ports(
     for _ in range(MAX_ATTEMPTS):
         try:
             list(sgs)[0].delete()
-        except exceptions.ClientError as e:
+        except aws.botocore_exceptions().ClientError as e:
             match = re.search(_DEPENDENCY_VIOLATION_PATTERN, str(e))
             if match is None:
                 raise e
