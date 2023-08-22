@@ -101,8 +101,9 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
                                  'TEXT DEFAULT "{}"')
-    
-    db_utils.add_column_to_table(cursor, conn, 'clusters', 'storage_mounts_metadata', 'BLOB')
+
+    db_utils.add_column_to_table(cursor, conn, 'clusters',
+                                 'storage_mounts_metadata', 'BLOB')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
@@ -390,11 +391,13 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
-    
 
-def get_cluster_storage_mounts_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT storage_mounts_metadata FROM clusters WHERE name=(?)',
-                              (cluster_name,))
+
+def get_cluster_storage_mounts_metadata(
+        cluster_name: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT storage_mounts_metadata FROM clusters WHERE name=(?)',
+        (cluster_name,))
     for (storage_mounts_metadata,) in rows:
         if storage_mounts_metadata is None:
             return None
@@ -402,11 +405,13 @@ def get_cluster_storage_mounts_metadata(cluster_name: str) -> Optional[Dict[str,
     return None
 
 
-def set_cluster_storage_mounts_metadata(cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
-    _DB.cursor.execute('UPDATE clusters SET storage_mounts_metadata=(?) WHERE name=(?)', (
-        pickle.dumps(storage_mounts_metadata),
-        cluster_name,
-    ))
+def set_cluster_storage_mounts_metadata(
+        cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
+    _DB.cursor.execute(
+        'UPDATE clusters SET storage_mounts_metadata=(?) WHERE name=(?)', (
+            pickle.dumps(storage_mounts_metadata),
+            cluster_name,
+        ))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count

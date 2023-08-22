@@ -4271,7 +4271,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-
     def _set_cluster_storage_mounts_metadata(
             self, handle: CloudVmRayResourceHandle,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
@@ -4280,26 +4279,31 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            storage_obj_metadata = storage_lib.Storage.StorageMetadata(storage_name=storage_obj.name, source=storage_obj.source,mode=storage_obj.mode)
+            storage_obj_metadata = storage_lib.Storage.StorageMetadata(
+                storage_name=storage_obj.name,
+                source=storage_obj.source,
+                mode=storage_obj.mode)
             for _, store_obj in storage_obj.stores.items():
                 storage_obj_metadata.add_store(store_obj)
             storage_mounts_metadata[dst] = storage_obj_metadata
-        global_user_state.set_cluster_storage_mounts_metadata(handle.cluster_name, storage_mounts_metadata)
-
+        global_user_state.set_cluster_storage_mounts_metadata(
+            handle.cluster_name, storage_mounts_metadata)
 
     def get_cluster_storage_mounts_metadata(
         self, handle: CloudVmRayResourceHandle
     ) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage metadata"""
-        storage_mounts_metadata = global_user_state.get_cluster_storage_mounts_metadata(handle.cluster_name)
+        storage_mounts_metadata = global_user_state.get_cluster_storage_mounts_metadata(
+            handle.cluster_name)
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_obj = storage_lib.Storage(name=storage_metadata.name, source=storage_metadata.source, mode=storage_metadata.mode)
+            storage_obj = storage_lib.Storage(name=storage_metadata.name,
+                                              source=storage_metadata.source,
+                                              mode=storage_metadata.mode)
             storage_mounts[dst] = storage_obj
         return storage_mounts
-
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
                                task: task_lib.Task, job_id: int,
