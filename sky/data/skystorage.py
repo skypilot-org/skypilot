@@ -183,7 +183,7 @@ def terminate() -> None:
     # check all the running processes to see if CSYNC daemon is running
     for proc in psutil.process_iter(['cmdline']):
         cmd = proc.info['cmdline']
-        if 'csync' in cmd:
+        if 'skystorage csync' in cmd:
             # cmd[5] is store type and cmd[6] is the bucket name
             process_dict[proc.pid] = (cmd[5], cmd[6])
 
