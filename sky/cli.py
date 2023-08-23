@@ -2108,10 +2108,15 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
             arg_str = '--all'
         else:
             arg_str = ' '.join(map(str, jobs))
-        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
-                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-                     f'job IDs> [--all]'
-                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        if cluster == spot_lib.SPOT_CONTROLLER_NAME:
+            error_str = (
+                'Cancelling the spot controller\'s jobs is not allowed.'
+                f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+                f'job IDs> [--all]'
+                f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        else:
+            error_str = (
+                'Cancelling the sky serve controller\'s jobs is not allowed.')
         click.echo(error_str)
         sys.exit(1)
     except ValueError as e:
