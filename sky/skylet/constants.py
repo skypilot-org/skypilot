@@ -69,3 +69,5 @@ CONDA_INSTALLATION_COMMANDS = (
     'which conda | grep /opt/conda || conda init > /dev/null;')
 
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+
+CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'

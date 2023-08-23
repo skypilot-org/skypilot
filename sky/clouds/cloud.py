@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -478,7 +479,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(

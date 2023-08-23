@@ -69,8 +69,7 @@ def get_user_hash() -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    default_value = os.getenv(constants.USER_ID_ENV_VAR)
-    user_hash = default_value
+    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
     if _is_valid_user_hash(user_hash):
         assert user_hash is not None
         return user_hash
@@ -137,17 +136,24 @@ def make_cluster_name_on_cloud(cluster_name: str,
     if (max_length is None or
             len(cluster_name) <= max_length - user_hash_length):
         return f'{cluster_name}{user_hash}'
+    # -1 is for the dash between cluster name and cluster name hash.
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
                                     user_hash_length)
     truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
     if truncate_cluster_name.endswith('-'):
-        truncate_cluster_name = truncate_cluster_name[:-1]
+        truncate_cluster_name = truncate_cluster_name.rstrip('-')
     assert truncate_cluster_name_length > 0, (cluster_name, max_length)
     cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
     cluster_name_hash = base36_encode(cluster_name_hash)
     return (f'{truncate_cluster_name}'
             f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+
+
+def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
+    if cluster_name_on_cloud.startswith(cluster_name):
+        return repr(cluster_name)
+    return f'{cluster_name!r} (name on cloud: {cluster_name_on_cloud!r})'
 
 
 def get_global_job_id(job_timestamp: str,

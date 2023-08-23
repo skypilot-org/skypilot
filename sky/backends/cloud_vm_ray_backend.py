@@ -2218,7 +2218,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cluster_name = cluster_name
         # self._cluster_name_on_cloud will only be None for clusters created
         # before #2403.
-        self._cluster_name_on_cloud: Optional[str] = cluster_name_on_cloud
+        self._cluster_name_on_cloud: str = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
         # List of (internal_ip, external_ip) tuples for all the nodes
@@ -2251,12 +2251,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def get_cluster_name(self):
         return self.cluster_name
-
-    @property
-    def cluster_name_on_cloud(self):
-        if self._cluster_name_on_cloud is None:
-            return self.cluster_name
-        return self._cluster_name_on_cloud
 
     def _maybe_make_local_handle(self):
         """Adds local handle for the local cloud case.
@@ -2538,7 +2532,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['docker_user'] = None
 
         if version < 6:
-            state['_cluster_name_on_cloud'] = None
+            state['_cluster_name_on_cloud'] = state['cluster_name']
 
         self.__dict__.update(state)
 

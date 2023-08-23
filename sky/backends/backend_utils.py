@@ -1821,6 +1821,8 @@ def _query_cluster_status_via_cloud_api(
           fetched from the cloud provider.
     """
     cluster_name_on_cloud = handle.cluster_name_on_cloud
+    cluster_name_in_hint = common_utils.cluster_name_in_hint(
+        handle.cluster_name, cluster_name_on_cloud)
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
@@ -1840,13 +1842,14 @@ def _query_cluster_status_via_cloud_api(
             node_status_dict = provision_lib.query_instances(
                 cloud_name, cluster_name_on_cloud, provider_config)
             logger.debug(f'Querying {cloud_name} cluster '
-                         f'{cluster_name_on_cloud!r} '
+                         f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query {cloud_name} cluster {cluster_name_on_cloud!r} '
+                    f'Failed to query {cloud_name} cluster '
+                    f'{cluster_name_in_hint} '
                     f'status: {common_utils.format_exception(e, use_bracket=True)}'
                 )
     else:
@@ -1861,7 +1864,7 @@ def _query_cluster_status_via_cloud_api(
     # removed.
     if kwargs.get('use_tpu_vm', False) and len(node_statuses) == 0:
         logger.debug(
-            f'Terminating preempted TPU VM cluster {cluster_name_on_cloud}')
+            f'Terminating preempted TPU VM cluster {cluster_name_in_hint}')
         backend = backends.CloudVmRayBackend()
         # Do not use refresh cluster status during teardown, as that will
         # cause infinite recursion by calling cluster status refresh

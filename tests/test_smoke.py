@@ -118,7 +118,7 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    test_name = common_utils.truncate_and_hash_cluster_name(test_name, 23)
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 23)
     return f'{test_name}-{test_id}'
 
 
