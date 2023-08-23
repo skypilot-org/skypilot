@@ -3865,7 +3865,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   '(ResourceGroupNotFound)' not in stderr):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(extra_reason='',
-                                                     cluster_name=cluster_name,
+                                                     cluster_name=common_utils.cluster_name_in_hint(cluster_name, cluster_name_on_cloud),
                                                      stdout=stdout,
                                                      stderr=stderr))
 
@@ -3916,7 +3916,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
-                            cluster_name=handle.cluster_name,
+                            cluster_name=common_utils.cluster_name_in_hint(handle.cluster_name, cluster_name_on_cloud),
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
         if (terminate and handle.launched_resources.is_image_managed is True):
