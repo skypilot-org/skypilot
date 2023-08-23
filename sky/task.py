@@ -114,9 +114,9 @@ def _with_docker_login_config(
     task_envs: Dict[str, str],
 ) -> 'resources_lib.Resources':
     all_keys = {
-        constants.DOCKER_USERNAME_ENV_KEY,
-        constants.DOCKER_PASSWORD_ENV_KEY,
-        constants.DOCKER_SERVER_ENV_KEY,
+        constants.DOCKER_USERNAME_ENV_VAR,
+        constants.DOCKER_PASSWORD_ENV_VAR,
+        constants.DOCKER_SERVER_ENV_VAR,
     }
     existing_keys = all_keys & set(task_envs.keys())
     if not existing_keys:

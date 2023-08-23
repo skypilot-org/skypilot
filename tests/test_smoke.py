@@ -118,7 +118,7 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    test_name = common_utils.make_cluster_name_on_cloud(test_name, 23)
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
     return f'{test_name}-{test_id}'
 
 
@@ -2040,7 +2040,6 @@ def test_spot_recovery_gcp():
     )
     run_one_test(test)
 
-
 @pytest.mark.aws
 @pytest.mark.managed_spot
 def test_spot_pipeline_recovery_aws(aws_config_region):
@@ -2096,7 +2095,6 @@ def test_spot_pipeline_recovery_gcp():
     zone = 'us-east4-b'
     user_hash = common_utils.get_user_hash()
     user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
-    # TODO(zhwu): fix the name for spot cluster.
     query_cmd = ('gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
                  f'--zones={zone} --format="value(name)"')
@@ -2151,13 +2149,12 @@ def test_spot_recovery_default_resources(generic_cloud: str):
     )
     run_one_test(test)
 
-
 @pytest.mark.aws
 @pytest.mark.managed_spot
 def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    name_on_cloud = common_utils.truncate_and_hash_cluster_name(
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
