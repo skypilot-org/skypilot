@@ -164,7 +164,8 @@ Available fields:
     #     SKYPILOT_DOCKER_PASSWORD: <password>
     #     SKYPILOT_DOCKER_SERVER: <registry server>
     # SkyPilot will execute `docker login --username <username> --password <password> <registry server>`
-    # before pulling the docker image.
+    # before pulling the docker image. For `docker login`, see
+    # https://docs.docker.com/engine/reference/commandline/login/
     # You could also specify any of them through the CLI flag if you don't want to store them in
     # your yaml file or if you want to generate them for constantly changing password. For example:
     #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
