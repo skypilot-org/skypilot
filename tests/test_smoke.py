@@ -2040,6 +2040,7 @@ def test_spot_recovery_gcp():
     )
     run_one_test(test)
 
+
 @pytest.mark.aws
 @pytest.mark.managed_spot
 def test_spot_pipeline_recovery_aws(aws_config_region):
@@ -2148,6 +2149,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
         timeout=25 * 60,
     )
     run_one_test(test)
+
 
 @pytest.mark.aws
 @pytest.mark.managed_spot

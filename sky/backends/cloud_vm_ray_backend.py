@@ -2216,9 +2216,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                  tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
-        # self._cluster_name_on_cloud will only be None for clusters created
-        # before #2403.
-        self._cluster_name_on_cloud: str = cluster_name_on_cloud
+        self.cluster_name_on_cloud = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
         # List of (internal_ip, external_ip) tuples for all the nodes
@@ -2532,7 +2530,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             state['docker_user'] = None
 
         if version < 6:
-            state['_cluster_name_on_cloud'] = state['cluster_name']
+            state['cluster_name_on_cloud'] = state['cluster_name']
 
         self.__dict__.update(state)
 
