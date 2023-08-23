@@ -401,7 +401,8 @@ class Kubernetes(clouds.Cloud):
 
         gpu_task_cpus = chosen_inst.cpus
         # Special handling to bump up memory multiplier for GPU instances
-        gpu_task_memory = float(resources.memory) if resources.memory is not None \
+        gpu_task_memory = float(resources.memory) \
+            if resources.memory is not None \
             else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
         gpu_instance_type = KubernetesInstanceType.from_resources(
             gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name

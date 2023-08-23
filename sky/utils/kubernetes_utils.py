@@ -13,11 +13,11 @@ from sky.utils import ux_utils
 DEFAULT_NAMESPACE = 'default'
 
 MEMORY_SIZE_UNITS = {
-    "B": 1,
-    "K": 2**10,
-    "M": 2**20,
-    "G": 2**30,
-    "T": 2**40,
+    'B': 1,
+    'K': 2**10,
+    'M': 2**20,
+    'G': 2**30,
+    'T': 2**40,
     'P': 2**50,
 }
 
@@ -173,8 +173,10 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         bool: True if the instance fits on the cluster, False otherwise.
         Optional[str]: Error message if the instance does not fit.
     """
-    def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
-                           node_list: List[Any]) -> Tuple[bool, str]:
+
+    def check_cpu_mem_fits(
+            candidate_instance_type: kubernetes_cloud.KubernetesInstanceType,
+            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on CPU and memory.
 
         We check only capacity, not allocatable, because availability can
@@ -182,25 +184,26 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         handle that.
         """
         # We log max CPU and memory found on the GPU nodes for debugging.
-        max_cpu = 0
-        max_mem = 0
+        max_cpu = 0.0
+        max_mem = 0.0
 
         for node in node_list:
             node_cpus = parse_cpu_or_gpu_resource(node.status.capacity['cpu'])
             node_memory_gb = parse_memory_resource(
-                node.status.capacity['memory'], unit="G")
+                node.status.capacity['memory'], unit='G')
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
             if node_cpus >= candidate_instance_type.cpus and \
                     node_memory_gb >= candidate_instance_type.memory:
                 return True, None
-        return False, ('Maximum resources found on a single node: ' 
-                       f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
+        return False, (
+            'Maximum resources found on a single node: '
+            f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
     nodes = get_kubernetes_nodes()
-    k8s_instance_type = kubernetes_cloud.KubernetesInstanceType.from_instance_type(
-        instance)
+    k8s_instance_type = kubernetes_cloud.KubernetesInstanceType.\
+        from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
     if acc_type is not None:
         # If GPUs are requested, check if GPU type is available, and if so,
@@ -219,9 +222,11 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         # Check if the CPU and memory requirements are met on at least one node
         fits, reason = check_cpu_mem_fits(k8s_instance_type, gpu_nodes)
         if not fits:
-            reason_prefix = (f'GPU nodes with {acc_type} do not have '
-                             'enough CPU and/or memory.')
-            return fits, reason_prefix + reason
+            if reason is not None:
+                reason_prefix = (f'GPU nodes with {acc_type} do not have '
+                                 'enough CPU and/or memory. ')
+                reason = reason_prefix + reason
+            return fits, reason
         else:
             return fits, reason
     else:
@@ -229,8 +234,10 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         # on at least one node.
         fits, reason = check_cpu_mem_fits(k8s_instance_type, nodes)
         if not fits:
-            reason_prefix = 'No nodes found with enough CPU and/or memory. '
-            return fits, reason_prefix + reason
+            if reason is not None:
+                reason_prefix = 'No nodes found with enough CPU and/or memory. '
+                reason = reason_prefix + reason
+            return fits, reason
         else:
             return fits, reason
 
@@ -441,13 +448,16 @@ def parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
         return float(resource_str)
 
 
-def parse_memory_resource(resource_qty_str: str, unit: str = "B") -> Union[int, float]:
+def parse_memory_resource(resource_qty_str: str,
+                          unit: str = 'B') -> Union[int, float]:
     """Returns memory size in chosen units given a resource quantity string."""
     if unit not in MEMORY_SIZE_UNITS:
+        valid_units = ', '.join(MEMORY_SIZE_UNITS.keys())
         raise ValueError(
-            f"Invalid unit: {unit}. Valid units are: {', '.join(MEMORY_SIZE_UNITS.keys())}")
+            f'Invalid unit: {unit}. Valid units are: {valid_units}')
 
     resource_str = str(resource_qty_str)
+    bytes_value: Union[int, float]
     try:
         bytes_value = int(resource_str)
     except ValueError:
