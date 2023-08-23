@@ -1,21 +1,12 @@
 import copy
 import logging
 import math
-import re
 from typing import Any, Dict, Union
 
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
 
 logger = logging.getLogger(__name__)
-
-MEMORY_SIZE_UNITS = {
-    "K": 2**10,
-    "M": 2**20,
-    "G": 2**30,
-    "T": 2**40,
-    'P': 2**50,
-}
 
 log_prefix = 'KubernetesNodeProvider: '
 
@@ -173,30 +164,9 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
     resource_key = matching_keys.pop()
     resource_quantity = resources[resource_key]
     if resource_name == 'memory':
-        return _parse_memory_resource(resource_quantity)
+        return kubernetes_utils.parse_memory_resource(resource_quantity)
     else:
-        return _parse_cpu_or_gpu_resource(resource_quantity)
-
-
-def _parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
-    resource_str = str(resource_qty_str)
-    if resource_str[-1] == 'm':
-        # For example, '500m' rounds up to 1.
-        return math.ceil(int(resource_str[:-1]) / 1000)
-    else:
-        return float(resource_str)
-
-
-def _parse_memory_resource(resource_qty_str: str) -> Union[int, float]:
-    resource_str = str(resource_qty_str)
-    try:
-        return int(resource_str)
-    except ValueError:
-        pass
-    memory_size = re.sub(r'([KMGTP]+)', r' \1', resource_str)
-    number, unit_index = [item.strip() for item in memory_size.split()]
-    unit_index = unit_index[0]
-    return float(number) * MEMORY_SIZE_UNITS[unit_index]
+        return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
 def _configure_autoscaler_service_account(

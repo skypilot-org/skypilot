@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
@@ -17,6 +18,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+
+logger = sky_logging.init_logger(__name__)
 
 _CREDENTIAL_PATH = '~/.kube/config'
 
@@ -245,10 +248,6 @@ class Kubernetes(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[str] = None) -> str:
         del disk_tier  # Unused.
-        # TODO(romilb): We should check the maximum number of CPUs and memory
-        #  that can be requested, and return None if the requested resources
-        #  exceed the maximum. This may require thought about how to handle
-        #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -367,36 +366,58 @@ class Kubernetes(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
-        default_instance_type = Kubernetes.get_default_instance_type(
-            cpus=resources.cpus,
-            memory=resources.memory,
-            disk_tier=resources.disk_tier)
         if accelerators is None:
-            # Return a default instance type with the given number of vCPUs.
-            if default_instance_type is None:
-                return ([], [])
+            chosen_instance_type = Kubernetes.get_default_instance_type(
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
+            # Return the chosen instance type with the given number of vCPUs.
+            if chosen_instance_type is None:
+                return [], []
             else:
-                return _make([default_instance_type]), []
+                # Check if requested instance type will fit in the cluster.
+                # TODO(romilb): This will fail early for autoscaling clusters.
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    chosen_instance_type)
+                if not fits:
+                    logger.debug(f'Instance type {chosen_instance_type} does '
+                                 'not fit in the Kubernetes cluster. '
+                                 f'Reason: {reason}')
+                    return [], []
+                return _make([chosen_instance_type]), []
 
         assert len(accelerators) == 1, resources
         # GPUs requested - build instance type.
         acc_type, acc_count = list(accelerators.items())[0]
-        # Check if requested accelerator type is supported in the cluster.
-        # If not, this will raise ResourcesUnavailableError.
-        try:
-            _, _ = kubernetes_utils.get_gpu_label_key_value(acc_type)
-        except exceptions.ResourcesUnavailableError:
-            # If GPU not found, return empty list.
-            return [], []
-        default_inst = KubernetesInstanceType.from_instance_type(
+        # Get default instance type to populate CPU/memory.
+        default_instance_type = Kubernetes.get_default_instance_type(
+            cpus=resources.cpus,
+            memory=resources.memory,
+            disk_tier=resources.disk_tier)
+
+        # Parse into KubernetesInstanceType
+        chosen_inst = KubernetesInstanceType.from_instance_type(
             default_instance_type)
-        gpu_task_cpus = default_inst.cpus
-        gpu_task_memory = gpu_task_cpus * \
-                          self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
-        instance_type = KubernetesInstanceType.from_resources(
+
+        gpu_task_cpus = chosen_inst.cpus
+        # Special handling to bump up memory multiplier for GPU instances
+        gpu_task_memory = float(resources.memory) if resources.memory is not None \
+            else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
+        gpu_instance_type = KubernetesInstanceType.from_resources(
             gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
+
+        # Check if requested accelerator type and CPU/memory are
+        # supported in the cluster.
+        # TODO(romilb): This will fail early for autoscaling clusters.
+        fits, reason = kubernetes_utils.check_instance_fits(gpu_instance_type)
+        if not fits:
+            logger.debug(f'Instance type {gpu_instance_type} does '
+                         'not fit in the Kubernetes cluster. '
+                         f'Reason: {reason}')
+            return [], []
+
         # No fuzzy lists for Kubernetes
-        return _make([instance_type]), []
+        return _make([gpu_instance_type]), []
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:

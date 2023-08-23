@@ -1,13 +1,25 @@
 """Kubernetes utilities for SkyPilot."""
-from typing import Any, List, Optional, Set, Tuple
+import math
+import re
+from typing import Any, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky.adaptors import kubernetes
+from sky.clouds import kubernetes as kubernetes_cloud
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
+
+MEMORY_SIZE_UNITS = {
+    "B": 1,
+    "K": 2**10,
+    "M": 2**20,
+    "G": 2**30,
+    "T": 2**40,
+    'P': 2**50,
+}
 
 
 class GPULabelFormatter:
@@ -147,6 +159,82 @@ def get_kubernetes_nodes() -> List[Any]:
     return nodes
 
 
+def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
+    """Checks if the instance fits on the Kubernetes cluster.
+
+    If the instance has GPU requirements, checks if the GPU type is
+    available on the cluster and if enough CPU/memory is available on any node
+    with the GPU type.
+
+    Args:
+        instance: str, the instance type to check.
+
+    Returns:
+        bool: True if the instance fits on the cluster, False otherwise.
+        Optional[str]: Error message if the instance does not fit.
+    """
+    def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
+                           node_list: List[Any]) -> Tuple[bool, str]:
+        """Checks if the instance fits on the cluster based on CPU and memory.
+
+        We check only capacity, not allocatable, because availability can
+        change during scheduling, and we want to let the Kubernetes scheduler
+        handle that.
+        """
+        # We log max CPU and memory found on the GPU nodes for debugging.
+        max_cpu = 0
+        max_mem = 0
+
+        for node in node_list:
+            node_cpus = parse_cpu_or_gpu_resource(node.status.capacity['cpu'])
+            node_memory_gb = parse_memory_resource(
+                node.status.capacity['memory'], unit="G")
+            if node_cpus > max_cpu:
+                max_cpu = node_cpus
+                max_mem = node_memory_gb
+            if node_cpus >= candidate_instance_type.cpus and \
+                    node_memory_gb >= candidate_instance_type.memory:
+                return True, None
+        return False, ('Maximum resources found on a single node: ' 
+                       f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
+
+    nodes = get_kubernetes_nodes()
+    k8s_instance_type = kubernetes_cloud.KubernetesInstanceType.from_instance_type(
+        instance)
+    acc_type = k8s_instance_type.accelerator_type
+    if acc_type is not None:
+        # If GPUs are requested, check if GPU type is available, and if so,
+        # check if CPU and memory requirements on the specific node are met.
+        try:
+            gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type)
+        except exceptions.ResourcesUnavailableError as e:
+            # If GPU not found, return empty list and error message.
+            return False, str(e)
+        # Get the set of nodes that have the GPU type
+        gpu_nodes = [
+            node for node in nodes if gpu_label_key in node.metadata.labels and
+            node.metadata.labels[gpu_label_key] == gpu_label_val
+        ]
+        assert len(gpu_nodes) > 0, 'GPU nodes not found'
+        # Check if the CPU and memory requirements are met on at least one node
+        fits, reason = check_cpu_mem_fits(k8s_instance_type, gpu_nodes)
+        if not fits:
+            reason_prefix = (f'GPU nodes with {acc_type} do not have '
+                             'enough CPU and/or memory.')
+            return fits, reason_prefix + reason
+        else:
+            return fits, reason
+    else:
+        # If no GPU is requested, check if CPU and memory requirements are met
+        # on at least one node.
+        fits, reason = check_cpu_mem_fits(k8s_instance_type, nodes)
+        if not fits:
+            reason_prefix = 'No nodes found with enough CPU and/or memory. '
+            return fits, reason_prefix + reason
+        else:
+            return fits, reason
+
+
 def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
@@ -221,9 +309,9 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
                     f'with {acc_type} GPU. Please ensure at least '
-                    f'one node in the cluster has {acc_type} GPU and . '
-                    'Please refer to the documentation on how to set up '
-                    f'node labels.{suffix}')
+                    f'one node in the cluster has {acc_type} GPU and node '
+                    'labels are setup correctly. '
+                    f'Please refer to the documentation for more. {suffix}')
     else:
         # If GPU resources are not detected, raise error
         with ux_utils.print_exception_no_traceback():
@@ -342,3 +430,29 @@ def get_current_kube_config_context_namespace() -> str:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
         return DEFAULT_NAMESPACE
+
+
+def parse_cpu_or_gpu_resource(resource_qty_str: str) -> Union[int, float]:
+    resource_str = str(resource_qty_str)
+    if resource_str[-1] == 'm':
+        # For example, '500m' rounds up to 1.
+        return math.ceil(int(resource_str[:-1]) / 1000)
+    else:
+        return float(resource_str)
+
+
+def parse_memory_resource(resource_qty_str: str, unit: str = "B") -> Union[int, float]:
+    """Returns memory size in chosen units given a resource quantity string."""
+    if unit not in MEMORY_SIZE_UNITS:
+        raise ValueError(
+            f"Invalid unit: {unit}. Valid units are: {', '.join(MEMORY_SIZE_UNITS.keys())}")
+
+    resource_str = str(resource_qty_str)
+    try:
+        bytes_value = int(resource_str)
+    except ValueError:
+        memory_size = re.sub(r'([KMGTPB]+)', r' \1', resource_str)
+        number, unit_index = [item.strip() for item in memory_size.split()]
+        unit_index = unit_index[0]
+        bytes_value = float(number) * MEMORY_SIZE_UNITS[unit_index]
+    return bytes_value / MEMORY_SIZE_UNITS[unit]
