@@ -297,8 +297,8 @@ def retry(method, max_retries=3, initial_backoff=1):
 def encode_payload(payload: Any) -> str:
     """Encode a payload to make it more robust for parsing.
 
-    The make the message transfer more robust to any additional
-    strings added to the message during transfering.
+    This makes message transfer more robust to any additional strings added to
+    the message during transfer.
 
     An example message that is polluted by the system warning:
     "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long

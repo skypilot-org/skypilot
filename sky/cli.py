@@ -519,7 +519,8 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                 ~/.sky/.sky-complete.bash && \
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
-        cmd = f'(grep -q "SkyPilot" ~/.bashrc) || ({install_cmd})'
+        cmd = (f'(grep -q "SkyPilot" ~/.bashrc) || '
+               f'[[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd})')
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
@@ -1287,9 +1288,13 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors.'))
+          'to unavailability errors.'),
+)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1341,7 +1346,6 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1350,6 +1354,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching tasks on it')
@@ -2028,25 +2033,45 @@ def logs(
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel job(s)."""
+    """Cancel job(s).
+
+    Example usage:
+
+    .. code-block:: bash
+
+      \b
+      # Cancel specific jobs on a cluster.
+      sky cancel cluster_name 1
+      sky cancel cluster_name 1 2 3
+      \b
+      # Cancel all jobs on a cluster.
+      sky cancel cluster_name -a
+      \b
+      # Cancel the latest running job on a cluster.
+      sky cancel cluster_name
+
+    Job IDs can be looked up by ``sky queue cluster_name``.
+    """
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
+    job_identity_str = None
+    job_ids_to_set = None
     if not jobs and not all:
-        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        message = textwrap.dedent(f"""\
-          Use:
-            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
-            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
-
-          Job IDs can be looked up by {bold}sky queue{reset}.""")
-        raise click.UsageError(message)
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
+        job_identity_str = 'the latest running job'
 
     if not yes:
-        job_ids = ' '.join(map(str, jobs))
-        plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} {job_ids}'
-        if all:
-            job_identity_str = 'all jobs'
+        if job_identity_str is None:
+            job_ids_to_set = jobs
+            job_ids = ' '.join(map(str, jobs))
+            plural = 's' if len(job_ids) > 1 else ''
+            job_identity_str = f'job{plural} {job_ids}'
+            if all:
+                job_identity_str = 'all jobs'
+                job_ids_to_set = None
+
         job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
@@ -2054,18 +2079,13 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                       show_default=True)
 
     try:
-        core.cancel(cluster, all, jobs)
+        core.cancel(cluster, all=all, job_ids=job_ids_to_set)
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
-        if all:
-            arg_str = '--all'
-        else:
-            arg_str = ' '.join(map(str, jobs))
         error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
-                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-                     f'job IDs> [--all]'
-                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+                     f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
+                     f'job IDs> [--all]{reset}')
         click.echo(error_str)
         sys.exit(1)
     except ValueError as e:
@@ -2281,8 +2301,12 @@ def autostop(
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if we fail to start the cluster due to unavailability errors.'))
+          'if we fail to start the cluster due to unavailability errors.'),
+)
 @click.option(
     '--force',
     '-f',
@@ -3088,7 +3112,7 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
-@service_catalog.use_default_catalog
+@service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
@@ -3481,11 +3505,12 @@ def spot():
     default=None,
     is_flag=True,
     required=False,
-    help=('(Default: True; this flag is deprecated and will be removed in a '
-          'future release.) Whether to retry provisioning infinitely until the '
-          'cluster is up, if unavailability errors are encountered. This '
-          'applies to launching the spot clusters (both the initial and any '
-          'recovery attempts), not the spot controller.'))
+    help=(
+        '(Default: True; this flag is deprecated and will be removed in a '
+        'future release.) Whether to retry provisioning infinitely until the '
+        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
+        'applies to launching the spot clusters (both the initial and any '
+        'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
