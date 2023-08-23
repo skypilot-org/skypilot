@@ -983,7 +983,8 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    cluster_name_on_cloud = cloud.truncate_and_hash_cluster_name(cluster_name)
+    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=cloud.max_cluster_name_length())
 
     # Only using new security group names for clusters with ports specified.
     default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
@@ -998,8 +999,7 @@ def write_cluster_config(
         dict(
             resources_vars,
             **{
-                'cluster_name': cluster_name_on_cloud,
-                'user_cluster_name': cluster_name,
+                'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
                 'ports': ports,
                 'disk_size': to_provision.disk_size,
@@ -1090,6 +1090,7 @@ def write_cluster_config(
 
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
+    # TODO: remove this after 2 minor releases, 0.5.0.
     yaml_config = common_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 

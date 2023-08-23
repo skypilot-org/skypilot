@@ -1,4 +1,4 @@
-cluster_name: {{cluster_name}}
+cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -111,8 +111,6 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
-            - Key: skypilot-cluster-name
-              Value: {{ user_cluster_name }}
 {%- for tag_key, tag_value in instance_tags.items() %}
             - Key: {{ tag_key }}
               Value: {{ tag_value }}
@@ -166,8 +164,6 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
-            - Key: skypilot-cluster-name
-              Value: {{ cluster_name }}
 {%- for tag_key, tag_value in instance_tags.items() %}
             - Key: {{ tag_key }}
               Value: {{ tag_value }}

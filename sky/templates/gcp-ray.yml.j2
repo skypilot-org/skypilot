@@ -1,5 +1,5 @@
 
-cluster_name: {{cluster_name}}
+cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -54,7 +54,7 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-        skypilot-cluster-name: {{ user_cluster_name }}
+        skypilot-cluster-name: {{ cluster_name }}
       {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
@@ -122,7 +122,6 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-        skypilot-cluster-name: {{ user_cluster_name }}
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}

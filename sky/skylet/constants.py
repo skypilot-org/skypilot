@@ -68,4 +68,4 @@ CONDA_INSTALLATION_COMMANDS = (
     # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;')
 
-USER_ID_ENV = 'SKYPILOT_USER_ID'
+USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'

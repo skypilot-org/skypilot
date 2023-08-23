@@ -109,7 +109,7 @@ class AWS(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -782,7 +782,8 @@ class AWS(clouds.Cloud):
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Failed to find the source cluster {cluster_name} on AWS.')
+                    f'Failed to find the source cluster {cluster_name!r} on '
+                    'AWS.')
 
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():

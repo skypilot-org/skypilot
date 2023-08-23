@@ -69,7 +69,7 @@ def get_user_hash() -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    default_value = os.getenv(constants.USER_ID_ENV)
+    default_value = os.getenv(constants.USER_ID_ENV_VAR)
     user_hash = default_value
     if _is_valid_user_hash(user_hash):
         assert user_hash is not None
@@ -111,10 +111,10 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def truncate_and_hash_cluster_name(cluster_name: str,
-                                   max_length: Optional[int] = 15,
-                                   add_user_hash: bool = True) -> str:
-    """Truncates and hashes the cluster name to less than max_length.
+def make_cluster_name_on_cloud(cluster_name: str,
+                               max_length: Optional[int] = 15,
+                               add_user_hash: bool = True) -> str:
+    """Generate valid cluster name on cloud that is unique to the user.
 
     This is to map the cluster name to a valid length for cloud providers, e.g.
     GCP limits the length of the cluster name to 35 characters. If the cluster

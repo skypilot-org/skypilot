@@ -8,7 +8,6 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
-from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -75,7 +74,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
         This method is used by check_cluster_name_is_valid() to check if the
@@ -84,12 +83,6 @@ class Cloud:
         None means no limit.
         """
         return None
-
-    @classmethod
-    def truncate_and_hash_cluster_name(cls, cluster_name: str) -> str:
-        """Truncates/hashes the cluster name to avoid exceeding the limit."""
-        return common_utils.truncate_and_hash_cluster_name(
-            cluster_name, max_length=cls._max_cluster_name_length())
 
     #### Regions/Zones ####
 

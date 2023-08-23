@@ -807,7 +807,7 @@ def get_usable_vpc(config):
     ports = config["provider"].get("ports", [])
     user_rules = []
     for port in ports:
-        cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
+        cluster_name_hash = common_utils.make_cluster_name_on_cloud(
             config["cluster_name"]
         )
         name = f"user-ports-{cluster_name_hash}-{port}"

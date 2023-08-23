@@ -2182,14 +2182,14 @@ class RetryingVmProvisioner(object):
 
 
 class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
-    """A pickle-able handle for the cluster created by CloudVmRayBackend.
+    """A pickle-able handle to a cluster created by CloudVmRayBackend.
 
     The handle object will last for the whole lifecycle of the cluster.
 
     - (required) Cluster name.
     - (required) Cluster name on cloud (different from the cluster name, as we
-        append user hash to avoid confliction across multiple accounts in a same
-        organization, and truncate the name for length limit).
+        append user hash to avoid conflict b/t multiple users in the same
+        organization/account, and truncate the name for length limit).
     - (required) Path to a cluster.yaml file.
     - (optional) A cached head node public IP.  Filled in after a
         successful provision().
@@ -3399,8 +3399,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 logger.warning(
                     f'{yellow}Purge (-p/--purge) is set, ignoring the '
                     f'identity mismatch error and removing '
-                    f'the cluser record from cluster table.{reset}\n{yellow}It '
-                    'is the user\'s responsibility to ensure that this '
+                    f'the cluster record from cluster table.{reset}\n{yellow}It'
+                    ' is the user\'s responsibility to ensure that this '
                     f'cluster is actually {verbed} on the cloud.{reset}')
                 is_identity_mismatch_and_purge = True
             else:
@@ -3783,14 +3783,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         elif terminate and isinstance(cloud, clouds.SCP):
             # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.scp.node_provider import SCPError
-            from sky.skylet.providers.scp.node_provider import SCPNodeProvider
+            from sky.skylet.providers.scp import node_provider
             config['provider']['cache_stopped_nodes'] = not terminate
-            provider = SCPNodeProvider(config['provider'],
+            provider = node_provider.SCPNodeProvider(config['provider'],
                                        cluster_name_on_cloud)
             try:
                 if not os.path.exists(provider.metadata.path):
-                    raise SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+                    raise node_provider.SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
                                    'Metadata file does not exist.')
 
                 with open(provider.metadata.path, 'r') as f:
@@ -3799,7 +3798,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'creation', {}).get('virtualServerId', None)
                     provider.terminate_node(node_id)
                 returncode = 0
-            except SCPError as e:
+            except node_provider.SCPError as e:
                 returncode = 1
                 stdout = ''
                 stderr = str(e)
@@ -3874,7 +3873,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
-                        cluster_name=cluster_name_on_cloud,
+                        cluster_name=cluster_name,
                         stdout=stdout,
                         stderr=stderr))
 
@@ -3925,7 +3924,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
-                            cluster_name=cluster_name_on_cloud,
+                            cluster_name=cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
         if (terminate and handle.launched_resources.is_image_managed is True):
