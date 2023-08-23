@@ -249,8 +249,6 @@ class Azure(clouds.Cloud):
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
-        # We also stop jupyterhub and jupyter to avoid port conflict on 8081
-        # and 8888.
         # pylint: disable=line-too-long
         cloud_init_setup_commands = base64.b64encode(
             textwrap.dedent("""\
