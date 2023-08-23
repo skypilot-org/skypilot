@@ -3786,11 +3786,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             from sky.skylet.providers.scp import node_provider
             config['provider']['cache_stopped_nodes'] = not terminate
             provider = node_provider.SCPNodeProvider(config['provider'],
-                                       cluster_name_on_cloud)
+                                                     cluster_name_on_cloud)
             try:
                 if not os.path.exists(provider.metadata.path):
-                    raise node_provider.SCPError('SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-                                   'Metadata file does not exist.')
+                    raise node_provider.SCPError(
+                        'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+                        'Metadata file does not exist.')
 
                 with open(provider.metadata.path, 'r') as f:
                     metadata = json.load(f)
@@ -3871,11 +3872,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
                   '(ResourceGroupNotFound)' not in stderr):
                 raise RuntimeError(
-                    _TEARDOWN_FAILURE_MESSAGE.format(
-                        extra_reason='',
-                        cluster_name=cluster_name,
-                        stdout=stdout,
-                        stderr=stderr))
+                    _TEARDOWN_FAILURE_MESSAGE.format(extra_reason='',
+                                                     cluster_name=cluster_name,
+                                                     stdout=stdout,
+                                                     stderr=stderr))
 
         # No need to clean up if the cluster is already terminated
         # (i.e., prev_status is None), as the cleanup has already been done
@@ -3924,7 +3924,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
-                            cluster_name=cluster_name,
+                            cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
         if (terminate and handle.launched_resources.is_image_managed is True):
