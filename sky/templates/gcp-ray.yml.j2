@@ -267,6 +267,7 @@ initialization_commands: []
 #   current num items (num SSH connections): 1  (+1 if tpu_vm)
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
+  # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
   # Line 'mkdir -p ..': Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
@@ -275,12 +276,13 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8080
   - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
     {%- if docker_image is none %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
+    sudo systemctl stop jupyter > /dev/null 2>&1 || true;
+    sudo systemctl disable jupyter > /dev/null 2>&1 || true;
     {%- endif %}
     p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
     sudo kill -9 `echo "$p" | tail -n 1` || true;
@@ -307,7 +309,6 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-    sudo systemctl stop jupyter > /dev/null 2>&1 || true;
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
