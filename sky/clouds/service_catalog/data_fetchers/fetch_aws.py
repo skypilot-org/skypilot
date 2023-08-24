@@ -133,7 +133,7 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
         elif e.response['Error']['Code'] == 'UnauthorizedOperation':
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    'Failed to retrieve availability zone. '
+                    'Failed to retrieve availability zones. '
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.\n'  # pylint: disable=line-too-long
