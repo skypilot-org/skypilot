@@ -2310,6 +2310,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             while True:
                 try:
                     head_ssh_port = clouds.Kubernetes.get_port(svc_name)
+                    break
                 except Exception:  # pylint: disable=broad-except
                     retry_cnt += 1
                     if retry_cnt >= max_attempts:
