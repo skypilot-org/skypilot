@@ -17,7 +17,7 @@ setup: |
     # Setup the environment
     conda create -n chatbot python=3.10 -y
     conda activate chatbot
-    pip install pip install git+https://github.com/lm-sys/FastChat.git
+    pip install git+https://github.com/lm-sys/FastChat.git
     pip install vllm
     pip install accelerate
   fi
