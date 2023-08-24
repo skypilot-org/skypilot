@@ -9,6 +9,15 @@ e(){
 
 e home
 
+POD_NAME=$(kubectl get pods --selector=skypilot-cluster={{ cluster_name }},ray-node-type=head -o jsonpath='{.items[0].metadata.name}' 2> /dev/null)
+if ! [ -z "$POD_NAME" ]; then
+    kubectl exec $POD_NAME -- bash -c "printenv > /home/sky/.k8s_env" 2> /dev/null
+fi
+
+if [ {{ is_nodeport_enabled }} -eq 1 ]; then
+    exit 0
+fi
+
 pgrep -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22" > /dev/null
 
 # If the command is running, kill it
@@ -16,10 +25,6 @@ if [ $? -eq 0 ]; then
     pkill -f "kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22"
 fi
 
-POD_NAME=$(kubectl get pods --selector=skypilot-cluster={{ cluster_name }},ray-node-type=head -o jsonpath='{.items[0].metadata.name}' 2> /dev/null)
-if ! [ -z "$POD_NAME" ]; then
-    kubectl exec $POD_NAME -- bash -c "printenv > /home/sky/.k8s_env" 2> /dev/null
-fi
 kubectl port-forward svc/{{ ssh_jump_name }} {{ local_port }}:22 &
 K8S_PID=$!
 trap "kill -9 $K8S_PID" EXIT

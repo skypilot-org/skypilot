@@ -384,27 +384,32 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_kubernetes_proxy_command(ingress, ipaddress, ssh_setup_mode,
                                   cluster_name: str):
+    ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
+    port_forward_proxy_cmd_path = os.path.expanduser(
+        kubernetes.PORT_FORWARD_PROXY_CMD_PATH.format(
+            cluster_name=cluster_name))
+    vars_to_fill = {
+        'ssh_jump_name': ssh_jump_name,
+        'ipaddress': ipaddress,
+        'local_port': ingress,
+        'cluster_name': cluster_name,
+        'is_nodeport_enabled': int(ssh_setup_mode == 'nodeport')
+    }
+    backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
+                                vars_to_fill,
+                                output_path=port_forward_proxy_cmd_path)
+    os.chmod(port_forward_proxy_cmd_path,
+             os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
+
     if ssh_setup_mode == 'nodeport':
-        proxy_command = 'ssh -tt -i {privkey} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
-            privkey=PRIVATE_SSH_KEY_PATH, ingress=ingress, ipaddress=ipaddress)
+        proxy_command = 'ssh -tt -i {privkey} -o PermitLocalCommand=yes -o LocalCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
+            privkey=PRIVATE_SSH_KEY_PATH,
+            ingress=ingress,
+            ipaddress=ipaddress,
+            port_forward_proxy_cmd_path=port_forward_proxy_cmd_path)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service
     else:
-        ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-        port_forward_proxy_cmd_path = os.path.expanduser(
-            kubernetes.PORT_FORWARD_PROXY_CMD_PATH.format(
-                cluster_name=cluster_name))
-        vars_to_fill = {
-            'ssh_jump_name': ssh_jump_name,
-            'ipaddress': ipaddress,
-            'local_port': ingress,
-            'cluster_name': cluster_name,
-        }
-        backend_utils.fill_template(kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=port_forward_proxy_cmd_path)
-        os.chmod(port_forward_proxy_cmd_path,
-                 os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
         proxy_command = 'ssh -tt -i {privkey} -o ProxyCommand=\'{port_forward_proxy_cmd_path}\' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -p {ingress} -W %h:%p sky@{ipaddress}'.format(
             privkey=PRIVATE_SSH_KEY_PATH,
             ingress=ingress,
