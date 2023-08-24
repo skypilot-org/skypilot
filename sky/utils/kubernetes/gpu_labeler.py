@@ -89,6 +89,7 @@ def label():
 
         # Iterate over nodes
         nodes = v1.list_node().items
+        # TODO(romilb): Run this only on nodes with GPUs.
         for node in nodes:
             node_name = node.metadata.name
 
