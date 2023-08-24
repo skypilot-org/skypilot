@@ -11,7 +11,7 @@ when the following situation happens, it can be annoying:
 
 After #2403, SkyPilot will automatically truncate cluster names to comply with the
 naming length limit of the cloud, and append a user hash to the end of the name to
-distinguish clusters from different users.
+distinguish clusters from different users (we make sure the final result after the append is within length limit).
 
 ## Details
 
