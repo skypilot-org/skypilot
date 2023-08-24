@@ -125,6 +125,8 @@ class Kubernetes(clouds.Cloud):
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[str] = None) -> str:
+        # TODO(romilb): In the future, we may want to move the instance type
+        #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
