@@ -8,7 +8,6 @@ To show debug messages, export SKYPILOT_DEBUG=1
 Class definition: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/node_provider.py
 """
 
-
 import logging
 from threading import RLock
 from typing import Any, Dict, List, Optional
@@ -16,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 
-import runpod
+import rp_helper as runpod_api
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +146,25 @@ class RunPodNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id):
         """Terminates the specified node."""
-        remove(node_id, self.api_key)
+        remove
+
+    @synchronized
+    def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
+        '''
+        SkyPilot Method
+        Caches the nodes with the given tag_filters.
+        '''
+        instances = runpod_api.list_instances(self.api_key)  # FILL_IN
+
+        new_cache = {}
+        for instance_id, instance in instances.items():
+            if instance['status'] != 'running':
+                continue
+            if any(tag in instance['tags'] for tag in tag_filters):
+                new_cache[instance_id] = instance
+
+        self.cached_nodes = new_cache
+        return self.cached_nodes
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
