@@ -1,0 +1,32 @@
+envs:
+  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
+
+resources:
+  accelerators: L4:1
+  ports:
+    - 8000
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.9 -y
+    conda activate vllm
+  fi
+
+  git clone https://github.com/vllm-project/vllm.git || true
+  # Install fschat and accelerate for chat completion
+  pip install fschat
+  pip install accelerate
+
+  cd vllm
+  pip list | grep vllm || pip install .
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME --tokenizer hf-internal-testing/llama-tokenizer \
+    --host 0.0.0.0

@@ -223,7 +223,8 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -481,7 +482,15 @@ class AWS(clouds.Cloud):
         from sky.clouds.service_catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
-        aws_catalog.get_default_instance_type()
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account. It is '
+                'likely due to permission issues, please check the minimal '
+                'permission required for AWS: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
 
     @classmethod

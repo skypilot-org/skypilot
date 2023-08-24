@@ -628,9 +628,7 @@ class Storage(object):
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
-        """
-        Validates the storage spec and updates local fields if necessary.
-        """
+        """Validates the storage spec and updates local fields if necessary."""
 
         def validate_name(name):
             """ Checks for validating the storage name.
@@ -2368,8 +2366,7 @@ class IBMCosStore(AbstractStore):
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
-        """
-        returns IBM COS bucket object if exists, otherwise creates it.
+        """returns IBM COS bucket object if exists, otherwise creates it.
 
         Returns:
           StorageHandle(str): bucket name

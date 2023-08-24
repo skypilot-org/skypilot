@@ -315,8 +315,8 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_image(cls, region) -> str:
-        """
-        Returns default image id, currently stock ubuntu 22-04.
+        """Returns default image id, currently stock ubuntu 22-04.
+
         if user specified 'image_id' in ~/.ibm/credentials.yaml
             matching this 'region', returns it instead.
         """
@@ -350,7 +350,8 @@ class IBM(clouds.Cloud):
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         assert region is not None, (image_id, region)
         client = ibm.client(region=region)
         try:

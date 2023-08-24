@@ -66,9 +66,10 @@ class Autoscaler:
 
 
 class RequestRateAutoscaler(Autoscaler):
-    """
-    Autoscaler that scales  when the number of requests in the given
-    interval is above or below the upper threshold.
+    """RequestRateAutoscaler: Autoscale according to request rate.
+
+    Scales when the number of requests in the given interval is above or below
+    the threshold.
     """
 
     def __init__(self, *args, upper_threshold: Optional[float],
