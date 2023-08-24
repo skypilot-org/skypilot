@@ -2295,14 +2295,15 @@ def test_spot_cancellation_aws(aws_config_region):
 @pytest.mark.managed_spot
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_3 = f'{name}-3'
+    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name_3, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
     query_state_cmd = ('gcloud compute instances list '
-                       f'--filter="(labels.ray-cluster-name:{name_on_cloud})" '
+                       f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
                        '--format="value(status)"')
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name_on_cloud})" '
+                 f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
