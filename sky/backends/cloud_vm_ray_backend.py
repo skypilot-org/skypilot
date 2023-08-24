@@ -4532,10 +4532,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             storage_mounts[dst] = storage_obj
         return storage_mounts
 
-    def _csync_mode_set(self, handle: CloudVmRayResourceHandle):
+    def _csync_mode_set(self, handle: CloudVmRayResourceHandle) -> bool:
         """Chekcs if there is a storage running with CSYNC mode within the
         cluster.
-
         """
         storage_mounts = self._get_cluster_storage_mounts_metadata(handle)
         if storage_mounts is not None:

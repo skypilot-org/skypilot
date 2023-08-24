@@ -9,10 +9,6 @@ import click
 import filelock
 import psutil
 
-from sky import sky_logging
-
-logger = sky_logging.init_logger(__name__)
-
 CSYNC_FILE_PATH = '~/.skystorage'
 
 

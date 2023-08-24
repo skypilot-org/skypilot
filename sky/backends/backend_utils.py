@@ -2827,7 +2827,11 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
-    ip_list = handle.external_ips()
+    try:
+        ip_list = handle.external_ips()
+    # When cluster is in INIT mode, attempt to fetch IP fails raising an error
+    except exceptions.FetchIPError:
+        return
     if not ip_list:
         return
     port_list = handle.external_ssh_ports()
@@ -2838,10 +2842,16 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                            '>/dev/null 2>&1')
 
     def _run_csync_terminate(runner):
+        logger.info('CSYNC termination initiated. If a sync process is '
+                    'currently running, we will wait for it to complete '
+                    'before terminating the CSYNC daemon...\n')
+
         rc, _, stderr = runner.run(csync_terminate_cmd,
                                    stream_logs=False,
                                    require_outputs=True)
         if rc != 0:
             logger.debug(f'CSYNC: failed to terminate the CSYNC on {runner.ip}')
 
-    subprocess_utils.run_in_parallel(_run_csync_terminate, runners)
+    with log_utils.safe_rich_status(
+            f'[bold cyan]Waiting for CSYNC to complete[/]'):
+        subprocess_utils.run_in_parallel(_run_csync_terminate, runners)
