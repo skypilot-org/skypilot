@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from sky.adaptors import aws
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 # Enable most of the regions. Each user's account may have a subset of these
@@ -137,7 +138,9 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
                     'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.\n'  # pylint: disable=line-too-long
-                    f'Details: {e}') from None
+                    'Details: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from None
         else:
             raise
     for resp in response['AvailabilityZones']:
