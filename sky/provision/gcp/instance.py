@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision.gcp import instance_utils
-from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
