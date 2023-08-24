@@ -13,7 +13,7 @@ from sky.backends import backend_utils
 from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'
-_LOCAL_PORT_FOR_PORT_FORWARD = 23100
+LOCAL_PORT_FOR_PORT_FORWARD = 23100
 
 logger = sky_logging.init_logger(__name__)
 
