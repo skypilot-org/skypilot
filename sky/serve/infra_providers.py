@@ -498,6 +498,8 @@ class SkyPilotInfraProvider(InfraProvider):
             # process_pool_refresher terminates
             if p.poll() is None:
                 assert p.pid is not None
+                # Interrupt the launch process and its children. We use SIGINT
+                # here since sky.launch has great handling for it.
                 _interrupt_process_and_children(p.pid)
                 p.wait()
                 logger.info(f'Interrupted launch process for cluster {name} '

@@ -2115,6 +2115,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                 f'job IDs> [--all]'
                 f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
         else:
+            assert cluster.startswith(serve_lib.CONTROLLER_PREFIX)
             error_str = (
                 'Cancelling the sky serve controller\'s jobs is not allowed.')
         click.echo(error_str)
