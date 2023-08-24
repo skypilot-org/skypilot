@@ -17,10 +17,10 @@ distinguish clusters from different users (we make sure the final result after 
 
 Cluster names used in different situations:
 - CLI/API/UI: the name users assign to the cluster, i.e., the original cluster name
-    without any modification.
+    without any modification. `cluster_name` in code.
 - Lower-level components: for the components that directly interact with the cloud
     provider, the newly generated name will be used, including, the underlying
-    `ray up`, `provision` module, etc.
+    `ray up`, `provision` module, etc. `cluster_name_on_cloud` in code.
 
 ## Examples
 
