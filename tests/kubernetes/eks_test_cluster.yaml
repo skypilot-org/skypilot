@@ -16,3 +16,7 @@ managedNodeGroups:
   - name: k80-nodes
     instanceType: p2.xlarge  # This instance type provides 1 NVIDIA K80 GPU.
     desiredCapacity: 1
+
+  - name: cpu-nodes # Creates 16 CPU nodes
+    instanceType: m5.4xlarge
+    desiredCapacity: 1
