@@ -11,6 +11,7 @@ from typing import Optional
 import fastapi
 import uvicorn
 
+from sky import authentication
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -22,6 +23,9 @@ from sky.utils import env_options
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.serve.controller')
 
+# Generate ssh key pair to avoid race condition when multiple sky.launch
+# are executed at the same time.
+authentication.get_or_generate_keys()
 
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
