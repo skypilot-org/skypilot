@@ -998,8 +998,6 @@ def serve_up(
     service_handle.ephemeral_storage = ephemeral_storage
     global_user_state.set_service_handle(service_name, service_handle)
 
-    task.add_skyserve_prehook()
-
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -1021,7 +1019,6 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.add_skyserve_prehook()
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
@@ -1049,7 +1046,7 @@ def serve_up(
         if (cluster_record is None or
                 cluster_record['status'] != status_lib.ClusterStatus.UP):
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs above.{colorama.Style.RESET_ALL}')
             return
@@ -1096,7 +1093,7 @@ def serve_up(
                 controller_cluster_name, 1)
         if not controller_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--controller{colorama.Style.RESET_ALL}')
@@ -1123,7 +1120,7 @@ def serve_up(
                 controller_cluster_name, 2)
         if not redirector_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Redirector failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--redirector{colorama.Style.RESET_ALL}')
@@ -1176,7 +1173,7 @@ def serve_down(
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
-    # Already filered all inexist service in cli.py
+    # Already filtered all inexistent service in cli.py
     assert service_record is not None, service_name
     controller_cluster_name = service_record['handle'].controller_cluster_name
     global_user_state.set_service_status(service_name,

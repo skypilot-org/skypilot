@@ -4,7 +4,7 @@ resources:
 
 workdir: sky/serve/examples/http_server
 
-# Use 8080 to test our prehook commands normally execute
+# Use 8080 to test jupyter service is terminated
 run: python3 server.py --port 8080
 
 service:

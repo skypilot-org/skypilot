@@ -5,7 +5,7 @@ import requests
 
 stream = True
 model = "Llama-2-7b-chat-hf"
-init_prompt = "You are a helful assistant."
+init_prompt = "You are a helpful assistant."
 history = [{"role": "system", "content": init_prompt}]
 endpoint = input("Endpoint: ")
 url = f"http://{endpoint}/v1/chat/completions"

@@ -3994,7 +3994,7 @@ def serve_up(
         service_name)
     if previous_service_record is not None:
         if previous_service_record['status'] in [
-                status_lib.ServiceStatus.CONTRLLER_FAILED,
+                status_lib.ServiceStatus.CONTROLLER_FAILED,
                 status_lib.ServiceStatus.FAILED
         ]:
             prompt = (f'Service {service_name!r} has failed. '

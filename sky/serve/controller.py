@@ -27,6 +27,7 @@ logger = sky_logging.init_logger('sky.serve.controller')
 # are executed at the same time.
 authentication.get_or_generate_keys()
 
+
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -104,7 +105,7 @@ class Controller:
         if self.autoscaler is not None:
             self.autoscaler.start()
 
-        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflood
+        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflowing
         # the controller logs.
         if not env_options.Options.SHOW_DEBUG_INFO.get():
             logging.getLogger('uvicorn.access').addFilter(

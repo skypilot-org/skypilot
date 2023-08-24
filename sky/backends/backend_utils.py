@@ -2634,7 +2634,7 @@ def _refresh_service_record_no_lock(
     if (cluster_record is None or
             cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
         return record, (f'Controller cluster {controller_cluster_name!r} '
                         'is not found or UP.')
 

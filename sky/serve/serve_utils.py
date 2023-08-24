@@ -21,17 +21,6 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import sky
 
-# A series of pre-hook commands that will be insert to the beginning of each
-# serve-related task, Including controller and replcias.
-# Shutdown jupyter service that is default enabled on our GCP Deep
-# Learning Image. This is to avoid port conflict on 8080.
-# Shutdown jupyterhub service that is default enabled on our Azure Deep
-# Learning Image. This is to avoid port conflict on 8081.
-SERVE_PREHOOK_COMMANDS = """\
-sudo systemctl stop jupyter > /dev/null 2>&1 || true
-sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
-"""
-
 _CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
@@ -88,12 +77,12 @@ class ServiceHandle(object):
     """A pickle-able tuple of:
 
     - (required) Controller cluster name.
-    - (required) Service autoscaling policy descriotion str.
+    - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
     - (required) All replica info.
     - (optional) Service uptime.
     - (optional) Service endpoint URL.
-    - (optional) Epemeral storage generated for the service.
+    - (optional) Ephemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.
     """
@@ -135,7 +124,7 @@ class ServiceHandle(object):
             storage = storage_lib.Storage.from_yaml_config(storage_config)
             storage.delete(silent=True)
 
-    def __setsate__(self, state):
+    def __setstate__(self, state):
         self._version = self._VERSION
         self.__dict__.update(state)
 
