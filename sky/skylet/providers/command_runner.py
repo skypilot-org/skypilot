@@ -227,10 +227,19 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                  'patch openssh-server python3-pip;')
 
         # Copy local authorized_keys to docker container.
+        # Stop and disable jupyter service. This is to avoid port conflict on
+        # 8080 if we use default deep learning image in GCP, and 8888 if we use
+        # default deep learning image in Azure.
+        # Azure also has a jupyterhub service running on 8081, so we stop and
+        # disable that too.
         container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
             'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
-            f'{container_name}:/tmp/host_ssh_authorized_keys',
+            f'{container_name}:/tmp/host_ssh_authorized_keys;'
+            'sudo systemctl stop jupyter > /dev/null 2>&1 || true;'
+            'sudo systemctl disable jupyter > /dev/null 2>&1 || true;'
+            'sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;'
+            'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
             run_env='host')
 
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
