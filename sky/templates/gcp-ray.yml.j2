@@ -63,7 +63,6 @@ available_node_types:
     node_config:
       labels:
         skypilot-user: {{ user }}
-        skypilot-cluster-name: {{ cluster_name }}
       {%- if specific_reservations %}
       reservationAffinity:
         consumeReservationType: SPECIFIC_RESERVATION
