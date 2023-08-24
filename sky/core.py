@@ -641,7 +641,7 @@ def cancel(
         # all = False, len(job_ids) == 0 => no jobs to cancel.
         return
 
-    backend.cancel_jobs(handle, job_ids, all)
+    backend.cancel_jobs(handle, job_ids, all, silent=_from_serve_core)
 
 
 @usage_lib.entrypoint

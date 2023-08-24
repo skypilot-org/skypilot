@@ -160,6 +160,7 @@ def _follow_logs(file: TextIO,
                  cluster_name: str,
                  *,
                  finish_stream: Callable[[], bool],
+                 exit_when_no_new_content: bool = False,
                  no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
     line = ''
     log_file = None
@@ -201,12 +202,14 @@ def _follow_logs(file: TextIO,
                             for l in _follow_logs(f,
                                                   cluster_name,
                                                   finish_stream=cluster_is_up,
+                                                  exit_when_no_new_content=
+                                                  exit_when_no_new_content,
                                                   no_new_content_timeout=10):
                                 yield l
                         log_file = None
                 line = ''
         else:
-            if finish_stream():
+            if exit_when_no_new_content or finish_stream():
                 break
             if no_new_content_timeout is not None:
                 if no_new_content_cnt >= no_new_content_timeout:
@@ -265,12 +268,13 @@ def stream_logs(service_name: str,
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
         return target_info['status']
 
-    finish_stream = (lambda: not follow or _get_replica_status() != status_lib.
-                     ReplicaStatus.PROVISIONING)
+    finish_stream = (
+        lambda: _get_replica_status() != status_lib.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
         for line in _follow_logs(f,
                                  replica_cluster_name,
-                                 finish_stream=finish_stream):
+                                 finish_stream=finish_stream,
+                                 exit_when_no_new_content=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:
