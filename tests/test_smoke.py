@@ -983,10 +983,10 @@ def test_scp_logs():
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
-@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
-@pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
-@pytest.mark.no_oci  # OCI does not have K80 gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
+@pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_oci  # OCI does not have T4 gpus
 @pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
@@ -1004,8 +1004,8 @@ def test_job_queue(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
-            f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
         ],
