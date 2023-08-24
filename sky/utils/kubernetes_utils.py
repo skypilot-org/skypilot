@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import enum
 import os
 from typing import Dict, Optional, Set, Tuple
 from urllib.parse import urlparse
@@ -16,6 +17,11 @@ DEFAULT_NAMESPACE = 'default'
 LOCAL_PORT_FOR_PORT_FORWARD = 23100
 
 logger = sky_logging.init_logger(__name__)
+
+
+class KubernetesNetworkingMode(enum.Enum):
+    NODEPORT = 'NODEPORT'
+    PORT_FORWARD = 'PORT_FORWARD'
 
 
 class GPULabelFormatter:
@@ -212,9 +218,32 @@ def get_current_kube_config_context_namespace() -> str:
         return DEFAULT_NAMESPACE
 
 
+def _get_proxy_command(network_mode: KubernetesNetworkingMode,
+                       private_key_path: str,
+                       ssh_jump_port: int,
+                       ssh_jump_ip: str,
+                       port_forward_proxy_cmd_path: str = '') -> str:
+    if network_mode == KubernetesNetworkingMode.NODEPORT:
+        ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
+                                  '-o StrictHostKeyChecking=no '
+                                  '-o UserKnownHostsFile=/dev/null '
+                                  f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
+                                  f'-W %h:%p sky@{ssh_jump_ip}')
+    else:  # network_mode == KubernetesNetworkingMode.PORT_FORWARD:
+        ssh_jump_proxy_command = (
+            f'ssh -tt -i {private_key_path} '
+            f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
+            '-o StrictHostKeyChecking=no '
+            '-o UserKnownHostsFile=/dev/null '
+            f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
+            f'-W %h:%p sky@{ssh_jump_ip}')
+    return ssh_jump_proxy_command
+
+
 def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
-                          ssh_setup_mode: str, namespace: str,
-                          kube_config_path: str, port_fwd_proxy_cmd_path: str,
+                          network_mode: KubernetesNetworkingMode,
+                          namespace: str, kube_config_path: str,
+                          port_fwd_proxy_cmd_path: str,
                           port_fwd_proxy_cmd_template: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
@@ -246,38 +275,33 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     establishes a communication channel between 127.0.0.1:23100 and port 22 on
     the jump pod. Consequently, any stdin provided on the local machine is
     forwarded through this tunnel to the application (SSH server) listening in
-    the pod. Similarly, any output from the application in the pod is tunneled 
-    back and displayed in the terminal on the local machine. 
-    
+    the pod. Similarly, any output from the application in the pod is tunneled
+    back and displayed in the terminal on the local machine.
+
     Args:
-        private_key_path: str; Path to the private key to use for SSH. 
+        private_key_path: str; Path to the private key to use for SSH.
             This key must be authorized to access the SSH jump pod.
         ssh_jump_name: str; Name of the SSH jump service to use
-        ssh_setup_mode: str; networking mode for ssh session. It is either
-            'nodeport' or 'port-forward'
+        network_mode: KubernetesNetworkingMode; networking mode for ssh
+            session. It is either 'NODEPORT' or 'PORT_FORWARD'
         namespace: Kubernetes namespace to use
         kube_config_path: str; path to kubernetes config
         port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
             with 'kubectl port-forward'
-        port_fwd_proxy_cmd_template: str; template used to create 
+        port_fwd_proxy_cmd_template: str; template used to create
             'kubectl port-forward' Proxycommand
-        
     """
-
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip()
-
-    if ssh_setup_mode == 'nodeport':
+    if network_mode == KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
-        ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
-                                  '-o StrictHostKeyChecking=no '
-                                  '-o UserKnownHostsFile=/dev/null '
-                                  f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
-                                  f'-W %h:%p sky@{ssh_jump_ip}')
+        ssh_jump_proxy_command = _get_proxy_command(network_mode,
+                                                    private_key_path,
+                                                    ssh_jump_port, ssh_jump_ip)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
-        ssh_jump_port = _LOCAL_PORT_FOR_PORT_FORWARD
+        ssh_jump_port = LOCAL_PORT_FOR_PORT_FORWARD
         kube_config_path = os.path.expanduser(kube_config_path)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
@@ -290,13 +314,9 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
                                     output_path=port_forward_proxy_cmd_path)
         os.chmod(port_forward_proxy_cmd_path,
                  os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
-        ssh_jump_proxy_command = (
-            f'ssh -tt -i {private_key_path} '
-            f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
-            '-o StrictHostKeyChecking=no '
-            '-o UserKnownHostsFile=/dev/null '
-            f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
-            f'-W %h:%p sky@{ssh_jump_ip}')
+        ssh_jump_proxy_command = _get_proxy_command(
+            network_mode, private_key_path, ssh_jump_port, ssh_jump_ip,
+            port_forward_proxy_cmd_path)
 
     return ssh_jump_proxy_command
 

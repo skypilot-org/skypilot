@@ -410,6 +410,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     if ssh_setup_mode == 'nodeport':
+        network_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
         service_type = 'NodePort'
 
     elif ssh_setup_mode == 'port-forward':
@@ -420,17 +421,18 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
         # Checks if 'socat' is installed
         try:
-            subprocess.run(['which', 'socat'],
+            subprocess.run(['socat', '-V'],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL,
                            check=True)
-        except subprocess.CalledProcessError:
+        except FileNotFoundError:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     '`socat` is required to setup Kubernetes cloud with '
                     '`port-forward` default networking mode and it is not '
                     'installed. For Debian/Ubuntu system, install it with:\n'
                     '  $ sudo apt install socat') from None
+        network_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
         service_type = 'ClusterIP'
     else:
         raise ValueError(f'Unsupported kubernetes networking type: '
@@ -442,7 +444,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     kubernetes_utils.setup_sshjump_svc(ssh_jump_name, namespace, service_type)
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
-        PRIVATE_SSH_KEY_PATH, ssh_jump_name, ssh_setup_mode, namespace,
+        PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
         clouds.kubernetes.CREDENTIAL_PATH,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
