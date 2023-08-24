@@ -2,19 +2,25 @@
 from concurrent import futures
 import enum
 import logging
+import multiprocessing
+import os
 import random
 import signal
 import subprocess
+import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import psutil
 import requests
+import yaml
 
+import sky
 from sky import backends
 from sky import core
 from sky import global_user_state
+from sky import sky_logging
 from sky import status_lib
 from sky.serve import serve_utils
 from sky.skylet import job_lib
@@ -42,6 +48,24 @@ def _interrupt_process_and_children(pid: int) -> None:
         parent_process.send_signal(signal.SIGINT)
     except psutil.NoSuchProcess:
         pass
+
+
+def _redirect_output_to(func: Callable, file: str) -> Callable:
+
+    def wrapper(*args, **kwargs):
+        with open(file, 'w') as f:
+            sys.stdout = f
+            sys.stderr = f
+            # reconfigure logger since the logger is initialized before
+            # with previous stdout/stderr
+            sky_logging.reload_logger()
+            # The subprocess_util.run('sky status') inside
+            # sky.execution::_execute cannot be redirect, since we cannot
+            # directly operate on the stdout/stderr of the subprocess (some
+            # code in skypilot will specify the stdout/stderr of the subprocess)
+            func(*args, **kwargs)
+
+    return wrapper
 
 
 class ProcessStatus(enum.Enum):
@@ -248,11 +272,16 @@ class SkyPilotInfraProvider(InfraProvider):
     def __init__(self, task_yaml_path: str, service_name: str, *args,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.task_yaml_path: str = task_yaml_path
+        with open(os.path.expanduser(task_yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+            if config is None:
+                config = {}
+            config.pop('service', None)
+        self.task: sky.Task = sky.Task.from_yaml_config(config)
         self.service_name: str = service_name
         self.next_replica_id: int = 1
-        self.launch_process_pool: Dict[str, subprocess.Popen] = dict()
-        self.down_process_pool: Dict[str, subprocess.Popen] = dict()
+        self.launch_process_pool: Dict[str, multiprocessing.Process] = dict()
+        self.down_process_pool: Dict[str, multiprocessing.Process] = dict()
 
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
@@ -262,7 +291,7 @@ class SkyPilotInfraProvider(InfraProvider):
     # the corresponding replica.
     def _refresh_process_pool(self) -> None:
         for cluster_name, p in list(self.launch_process_pool.items()):
-            if p.poll() is not None:
+            if not p.is_alive():
                 # TODO(tian): Try-catch in process, and have an enum return
                 # value to indicate which type of failure happened.
                 # Currently we only have user code failure since the
@@ -271,9 +300,9 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.info(f'Launch process for {cluster_name} finished.')
                 del self.launch_process_pool[cluster_name]
                 info = self.replica_info[cluster_name]
-                if p.returncode != 0:
+                if p.exitcode != 0:
                     logger.warning(f'Launch process for {cluster_name} exited '
-                                   f'abnormally with code {p.returncode}. '
+                                   f'abnormally with code {p.exitcode}. '
                                    'Terminating...')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
@@ -282,13 +311,13 @@ class SkyPilotInfraProvider(InfraProvider):
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCESS)
         for cluster_name, p in list(self.down_process_pool.items()):
-            if p.poll() is not None:
+            if not p.is_alive():
                 logger.info(f'Down process for {cluster_name} finished.')
                 del self.down_process_pool[cluster_name]
                 info = self.replica_info[cluster_name]
-                if p.returncode != 0:
+                if p.exitcode != 0:
                     logger.error(f'Down process for {cluster_name} exited '
-                                 f'abnormally with code {p.returncode}.')
+                                 f'abnormally with code {p.exitcode}.')
                     info.status_property.sky_down_status = (
                         ProcessStatus.FAILED)
                 else:
@@ -404,16 +433,17 @@ class SkyPilotInfraProvider(InfraProvider):
                            'already exists. Skipping.')
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
-        cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
-        cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
         fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
-        with open(fn, 'w') as f:
-            # pylint: disable=consider-using-with
-            p = subprocess.Popen(cmd,
-                                 stdin=subprocess.DEVNULL,
-                                 stdout=f,
-                                 stderr=f)
+        p = multiprocessing.Process(target=_redirect_output_to(sky.launch, fn),
+                                    args=(self.task,),
+                                    kwargs={
+                                        'cluster_name': cluster_name,
+                                        'detach_setup': True,
+                                        'detach_run': True,
+                                        'retry_until_up': True,
+                                    })
         self.launch_process_pool[cluster_name] = p
+        p.start()
         assert cluster_name not in self.replica_info
         self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
 
@@ -457,15 +487,13 @@ class SkyPilotInfraProvider(InfraProvider):
                     print(msg, file=f)
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
-        cmd = ['sky', 'down', cluster_name, '-y']
         fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
-        with open(fn, 'w') as f:
-            # pylint: disable=consider-using-with
-            p = subprocess.Popen(cmd,
-                                 stdin=subprocess.DEVNULL,
-                                 stdout=f,
-                                 stderr=f)
+        p = multiprocessing.Process(
+            target=_redirect_output_to(sky.down, fn),
+            args=(cluster_name,),
+        )
         self.down_process_pool[cluster_name] = p
+        p.start()
         info = self.replica_info[cluster_name]
         info.status_property.sky_down_status = ProcessStatus.RUNNING
 
@@ -496,12 +524,12 @@ class SkyPilotInfraProvider(InfraProvider):
             # handling for it
             # Edge case: sky.launched finished after the
             # process_pool_refresher terminates
-            if p.poll() is None:
+            if p.is_alive():
                 assert p.pid is not None
                 # Interrupt the launch process and its children. We use SIGINT
                 # here since sky.launch has great handling for it.
                 _interrupt_process_and_children(p.pid)
-                p.wait()
+                p.join()
                 logger.info(f'Interrupted launch process for cluster {name} '
                             'and deleted the cluster.')
                 self._teardown_cluster(name, sync_down_logs=False)
@@ -524,13 +552,13 @@ class SkyPilotInfraProvider(InfraProvider):
             ]:
                 self._teardown_cluster(name, sync_down_logs=False)
         for name, p in self.down_process_pool.items():
-            p.wait()
+            p.join()
             logger.info(f'Down process for cluster {name} finished.')
-            if p.returncode != 0:
+            if p.exitcode != 0:
                 logger.warning(f'Down process for cluster {name} exited '
-                               f'abnormally with code {p.returncode}.')
+                               f'abnormally with code {p.exitcode}.')
                 msg.append(f'Down process for cluster {name} exited abnormally'
-                           f' with code {p.returncode}. Please login to the '
+                           f' with code {p.exitcode}. Please login to the '
                            'controller and make sure the cluster is released.')
         if not msg:
             return None
