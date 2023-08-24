@@ -679,25 +679,15 @@ def _test_optimize_speed(resources: sky.Resources):
 
 
 def test_optimize_speed(enable_all_clouds, monkeypatch):
-    _test_optimize_speed(_make_resources(monkeypatch, cpus='4+'))
+    _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in clouds.CLOUD_REGISTRY.values():
         if cloud.is_same_cloud(sky.Local()):
             continue
-        _test_optimize_speed(
-            _make_resources(monkeypatch, cloud=cloud, cpus='4+'))
-    _test_optimize_speed(_make_resources(monkeypatch, cpus='4+', memory='4+'))
+        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
-        _make_resources(monkeypatch,
-                        cpus='4+',
-                        memory='4+',
-                        accelerators='V100:1'))
+        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
     _test_optimize_speed(
-        _make_resources(monkeypatch,
-                        cpus='4+',
-                        memory='4+',
-                        accelerators='A100-80GB:8'))
+        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
     _test_optimize_speed(
-        _make_resources(monkeypatch,
-                        cpus='4+',
-                        memory='4+',
-                        accelerators='tpu-v3-32'))
+        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
