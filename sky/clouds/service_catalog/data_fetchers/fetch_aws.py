@@ -136,7 +136,8 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
                     'Failed to retrieve availability zone. '
                     'Please ensure that the `ec2:DescribeAvailabilityZones` '
                     'action is enabled for your AWS account in IAM. '
-                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html'  # pylint: disable=line-too-long
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.\n'  # pylint: disable=line-too-long
+                    f'Details: {e}'
                 ) from None
         else:
             raise
