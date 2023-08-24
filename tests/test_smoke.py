@@ -2606,7 +2606,8 @@ def test_gcp_zero_quota_failover():
 # ---------- Testing skyserve ----------
 
 
-def _get_skyserve_test_task(name: str, suffix: str, timeout_minutes: int) -> Test:
+def _get_skyserve_test_task(name: str, suffix: str,
+                            timeout_minutes: int) -> Test:
     url_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
     test = Test(
         f'test-skyserve-{suffix.replace("_", "-")}',
