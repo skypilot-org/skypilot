@@ -103,8 +103,7 @@ def create_table(cursor, conn):
                                  'TEXT DEFAULT "{}"')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters',
-                                 'storage_mounts_metadata',
-                                 'BLOB DEFAULT null')
+                                 'storage_mounts_metadata', 'BLOB DEFAULT null')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')

@@ -2815,8 +2815,7 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 
 def wait_and_terminate_csync(cluster_name: str) -> None:
-    """
-    Terminatese all the CSYNC process running in each node after
+    """ Terminatese all the CSYNC process running in each node after
     waiting for the sync process launched by CSYNC complete.
 
     Args:

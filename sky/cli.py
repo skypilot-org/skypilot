@@ -2763,7 +2763,6 @@ def _down_or_stop_clusters(
     def _down_or_stop(name: str):
         # if there's a sync process launched by CSYNC mode running
         # in the cluster, wait until the sync completes
-        backend_utils.wait_and_terminate_csync(name)
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
