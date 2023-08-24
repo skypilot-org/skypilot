@@ -21,6 +21,9 @@ Cluster names used in different situations:
 - Lower-level components: for the components that directly interact with the cloud
     provider, the newly generated name will be used, including, the underlying
     `ray up`, `provision` module, etc. `cluster_name_on_cloud` in code.
+- Cluster name on cloud: names of clusters on the cloud will always be
+    `cluster_name_on_cloud`, including the cluster name shown in cloud consoles,
+    the cluster name in the tag (ray-cluster-name), etc.
 
 ## Examples
 

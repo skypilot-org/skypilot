@@ -2189,7 +2189,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (required) Cluster name.
     - (required) Cluster name on cloud (different from the cluster name, as we
         append user hash to avoid conflict b/t multiple users in the same
-        organization/account, and truncate the name for length limit).
+        organization/account, and truncate the name for length limit). See
+        design_docs/cluster_name.md for details.
     - (required) Path to a cluster.yaml file.
     - (optional) A cached head node public IP.  Filled in after a
         successful provision().
@@ -2200,6 +2201,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     - (optional) Docker user name
     - (optional) If TPU(s) are managed, a path to a deletion script.
     """
+    # Bump if any fields get added/removed/changed, and add backward
+    # compaitibility logic in __setstate__.
     _VERSION = 6
 
     def __init__(self,
