@@ -654,7 +654,8 @@ def test_stale_job(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = _get_cluster_name()
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(name, sky.AWS.max_cluster_name_length())
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
     region = 'us-west-2'
     test = Test(
         'aws_stale_job_manual_restart',
@@ -684,7 +685,8 @@ def test_aws_stale_job_manual_restart():
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = _get_cluster_name()
-    name_on_cloud = common_utils.make_cluster_name_on_cloud(name, sky.GCP.max_cluster_name_length())
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.GCP.max_cluster_name_length())
     zone = 'us-west2-a'
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name={name_on_cloud})" '
@@ -2299,9 +2301,10 @@ def test_spot_cancellation_gcp():
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
         name_3, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
-    query_state_cmd = ('gcloud compute instances list '
-                       f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
-                       '--format="value(status)"')
+    query_state_cmd = (
+        'gcloud compute instances list '
+        f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
+        '--format="value(status)"')
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
@@ -2510,7 +2513,8 @@ def test_aws_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
-        name_on_cloud = common_utils.make_cluster_name_on_cloud(name, sky.AWS.max_cluster_name_length())
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.AWS.max_cluster_name_length())
         region = 'us-west-2'
         test = Test(
             'aws-disk-tier',
@@ -2539,7 +2543,8 @@ def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
-        name_on_cloud = common_utils.make_cluster_name_on_cloud(name, sky.GCP.max_cluster_name_length())
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
         test = Test(
             'gcp-disk-tier',
@@ -2563,7 +2568,8 @@ def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
-        name_on_cloud = common_utils.make_cluster_name_on_cloud(name, sky.Azure.max_cluster_name_length())
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.Azure.max_cluster_name_length())
         region = 'westus2'
         test = Test(
             'azure-disk-tier',

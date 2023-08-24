@@ -8,6 +8,7 @@ from botocore import config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
