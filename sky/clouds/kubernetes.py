@@ -132,8 +132,8 @@ class Kubernetes(clouds.Cloud):
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = float(memory.strip('+')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type = kubernetes_utils.KubernetesInstanceType(instance_cpus,
-                                                       instance_mem).name
+        virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
+            instance_cpus, instance_mem).name
         return virtual_instance_type
 
     @classmethod
@@ -141,7 +141,8 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        inst = kubernetes_utils.KubernetesInstanceType.from_instance_type(instance_type)
+        inst = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
         } if (inst.accelerator_count is not None and
@@ -151,7 +152,8 @@ class Kubernetes(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(instance_type)
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return k.cpus, k.memory
 
     @classmethod
@@ -189,7 +191,8 @@ class Kubernetes(clouds.Cloud):
 
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
-        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(resources.instance_type)
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            resources.instance_type)
         cpus = k.cpus
         mem = k.memory
         # Optionally populate accelerator information.
@@ -259,7 +262,8 @@ class Kubernetes(clouds.Cloud):
             acc_type, acc_count = list(accelerators.items())[0]
 
             # Parse into KubernetesInstanceType
-            k8s_instance_type = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            k8s_instance_type = kubernetes_utils.KubernetesInstanceType.\
+                from_instance_type(
                 default_instance_type)
 
             gpu_task_cpus = k8s_instance_type.cpus
@@ -267,12 +271,14 @@ class Kubernetes(clouds.Cloud):
             gpu_task_memory = float(resources.memory.strip('+')) \
                 if resources.memory is not None \
                 else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
-            chosen_instance_type = kubernetes_utils.KubernetesInstanceType.from_resources(
+            chosen_instance_type = kubernetes_utils.KubernetesInstanceType.\
+                from_resources(
                 gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
 
         # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(chosen_instance_type)
+        fits, reason = kubernetes_utils.check_instance_fits(
+            chosen_instance_type)
         if not fits:
             logger.debug(f'Instance type {chosen_instance_type} does '
                          'not fit in the Kubernetes cluster. '
@@ -299,7 +305,8 @@ class Kubernetes(clouds.Cloud):
         return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(instance_type)
+        return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
+            instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Kubernetes doesn't have regions or zones, so we don't need to validate

@@ -5,7 +5,6 @@ from typing import Any, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
 from sky.adaptors import kubernetes
-from sky.clouds import kubernetes as kubernetes_cloud
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -174,9 +173,8 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         Optional[str]: Error message if the instance does not fit.
     """
 
-    def check_cpu_mem_fits(
-            candidate_instance_type: 'KubernetesInstanceType',
-            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
+    def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
+                           node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on CPU and memory.
 
         We check only capacity, not allocatable, because availability can
