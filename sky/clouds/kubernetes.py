@@ -366,59 +366,43 @@ class Kubernetes(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
-        if accelerators is None:
-            chosen_instance_type = Kubernetes.get_default_instance_type(
-                cpus=resources.cpus,
-                memory=resources.memory,
-                disk_tier=resources.disk_tier)
-            # Return the chosen instance type with the given number of vCPUs.
-            if chosen_instance_type is None:
-                return [], []
-            else:
-                # Check if requested instance type will fit in the cluster.
-                # TODO(romilb): This will fail early for autoscaling clusters.
-                fits, reason = kubernetes_utils.check_instance_fits(
-                    chosen_instance_type)
-                if not fits:
-                    logger.debug(f'Instance type {chosen_instance_type} does '
-                                 'not fit in the Kubernetes cluster. '
-                                 f'Reason: {reason}')
-                    return [], []
-                return _make([chosen_instance_type]), []
 
-        assert len(accelerators) == 1, resources
-        # GPUs requested - build instance type.
-        acc_type, acc_count = list(accelerators.items())[0]
-        # Get default instance type to populate CPU/memory.
         default_instance_type = Kubernetes.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier)
 
-        # Parse into KubernetesInstanceType
-        chosen_inst = KubernetesInstanceType.from_instance_type(
-            default_instance_type)
+        if accelerators is None:
+            # For CPU only clusters, need no special handling
+            chosen_instance_type = default_instance_type
+        else:
+            assert len(accelerators) == 1, resources
+            # GPUs requested - build instance type.
+            acc_type, acc_count = list(accelerators.items())[0]
 
-        gpu_task_cpus = chosen_inst.cpus
-        # Special handling to bump up memory multiplier for GPU instances
-        gpu_task_memory = float(resources.memory.strip('+')) \
-            if resources.memory is not None \
-            else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
-        gpu_instance_type = KubernetesInstanceType.from_resources(
-            gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
+            # Parse into KubernetesInstanceType
+            k8s_instance_type = KubernetesInstanceType.from_instance_type(
+                default_instance_type)
 
-        # Check if requested accelerator type and CPU/memory are
-        # supported in the cluster.
+            gpu_task_cpus = k8s_instance_type.cpus
+            # Special handling to bump up memory multiplier for GPU instances
+            gpu_task_memory = float(resources.memory.strip('+')) \
+                if resources.memory is not None \
+                else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
+            chosen_instance_type = KubernetesInstanceType.from_resources(
+                gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
+
+        # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.
-        fits, reason = kubernetes_utils.check_instance_fits(gpu_instance_type)
+        fits, reason = kubernetes_utils.check_instance_fits(chosen_instance_type)
         if not fits:
-            logger.debug(f'Instance type {gpu_instance_type} does '
+            logger.debug(f'Instance type {chosen_instance_type} does '
                          'not fit in the Kubernetes cluster. '
                          f'Reason: {reason}')
             return [], []
 
         # No fuzzy lists for Kubernetes
-        return _make([gpu_instance_type]), []
+        return _make([chosen_instance_type]), []
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
