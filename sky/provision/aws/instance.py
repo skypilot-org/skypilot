@@ -31,10 +31,10 @@ def _default_ec2_resource(region: str) -> Any:
         config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
 
 
-def _cluster_name_filter(cluster_name: str) -> List[Dict[str, Any]]:
+def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     return [{
         'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-        'Values': [cluster_name],
+        'Values': [cluster_name_on_cloud],
     }]
 
 
@@ -61,15 +61,15 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 # Will there be callers who would want this to be False?
 # stop() and terminate() for example already implicitly assume non-terminated.
 def query_instances(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name, provider_config)
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
-    filters = _cluster_name_filter(cluster_name)
+    filters = _cluster_name_filter(cluster_name_on_cloud)
     instances = ec2.instances.filter(Filters=filters)
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
@@ -91,12 +91,12 @@ def query_instances(
 
 
 def stop_instances(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name, provider_config)
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     filters: List[Dict[str, Any]] = [
@@ -104,7 +104,7 @@ def stop_instances(
             'Name': 'instance-state-name',
             'Values': ['pending', 'running'],
         },
-        *_cluster_name_filter(cluster_name),
+        *_cluster_name_filter(cluster_name_on_cloud),
     ]
     if worker_only:
         filters.append({
@@ -122,12 +122,12 @@ def stop_instances(
 
 
 def terminate_instances(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name, provider_config)
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     filters = [
@@ -136,7 +136,7 @@ def terminate_instances(
             # exclude 'shutting-down' or 'terminated' states
             'Values': ['pending', 'running', 'stopping', 'stopped'],
         },
-        *_cluster_name_filter(cluster_name),
+        *_cluster_name_filter(cluster_name_on_cloud),
     ]
     if worker_only:
         filters.append({
@@ -162,11 +162,11 @@ def terminate_instances(
 
 
 def cleanup_ports(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name, provider_config)
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     if 'ports' not in provider_config:
         return
     region = provider_config['region']

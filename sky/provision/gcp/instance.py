@@ -70,14 +70,14 @@ def _wait_for_operations(
 
 
 def stop_instances(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    assert provider_config is not None, cluster_name
+    assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:
         label_filters[TAG_RAY_NODE_KIND] = 'worker'
 
@@ -127,17 +127,17 @@ def stop_instances(
 
 
 def terminate_instances(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, cluster_name
+    assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
 
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     if worker_only:
         label_filters[TAG_RAY_NODE_KIND] = 'worker'
 
@@ -171,16 +171,16 @@ def terminate_instances(
 
 
 def cleanup_ports(
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, cluster_name
+    assert provider_config is not None, cluster_name_on_cloud
     if 'ports' not in provider_config:
         # No new ports were opened, so there is nothing to clean up.
         return
     project_id = provider_config['project_id']
-    cluster_name_hash = common_utils.make_cluster_name_on_cloud(cluster_name)
+    cluster_name_hash = common_utils.make_cluster_name_on_cloud(cluster_name_on_cloud)
     for port in provider_config['ports']:
         rule_name = f'user-ports-{cluster_name_hash}-{port}'
         instance_utils.GCPComputeInstance.delete_firewall_rule(
