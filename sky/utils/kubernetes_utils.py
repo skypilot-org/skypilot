@@ -217,27 +217,21 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
         assert len(gpu_nodes) > 0, 'GPU nodes not found'
-        # Check if the CPU and memory requirements are met on at least one node
-        fits, reason = check_cpu_mem_fits(k8s_instance_type, gpu_nodes)
-        if not fits:
-            if reason is not None:
-                reason_prefix = (f'GPU nodes with {acc_type} do not have '
+        candidate_nodes = gpu_nodes
+        not_fit_reason_prefix = (f'GPU nodes with {acc_type} do not have '
                                  'enough CPU and/or memory. ')
-                reason = reason_prefix + reason
-            return fits, reason
-        else:
-            return fits, reason
     else:
-        # If no GPU is requested, check if CPU and memory requirements are met
-        # on at least one node.
-        fits, reason = check_cpu_mem_fits(k8s_instance_type, nodes)
-        if not fits:
-            if reason is not None:
-                reason_prefix = 'No nodes found with enough CPU and/or memory. '
-                reason = reason_prefix + reason
-            return fits, reason
-        else:
-            return fits, reason
+        candidate_nodes = nodes
+        not_fit_reason_prefix = 'No nodes found with enough CPU and/or memory. '
+    # Check if  CPU and memory requirements are met on at least one
+    # candidate node.
+    fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
+    if not fits:
+        if reason is not None:
+            reason = not_fit_reason_prefix + reason
+        return fits, reason
+    else:
+        return fits, reason
 
 
 def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
