@@ -28,6 +28,7 @@ from sky.utils import env_options
 
 logger = logging.getLogger(__name__)
 
+_SKY_LAUNCH_MAX_ATTEMPTS = 3
 _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
@@ -66,6 +67,48 @@ def _redirect_output_to(func: Callable, file: str) -> Callable:
             func(*args, **kwargs)
 
     return wrapper
+
+
+# Internal use. This function is dedicated for multiprocessing.Process in case
+# the sky.launch failed for some flask reason. We will retry for
+# _SKY_LAUNCH_MAX_ATTEMPTS times and terminate the cluster if it still fails.
+def _sky_launch_with_retry(task: sky.Task, cluster_name: str,
+                           detach_setup: bool, detach_run: bool,
+                           retry_until_up: bool) -> None:
+    for i in range(_SKY_LAUNCH_MAX_ATTEMPTS):
+        try:
+            # TODO(tian): Make sure if sky.launch return, there is no error
+            sky.launch(task,
+                       cluster_name=cluster_name,
+                       detach_setup=detach_setup,
+                       detach_run=detach_run,
+                       retry_until_up=retry_until_up)
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name)
+            if cluster_record is None:
+                raise Exception(f'Cluster {cluster_name} not found.')
+            if cluster_record['status'] != status_lib.ClusterStatus.UP:
+                raise Exception(f'Cluster {cluster_name} is not UP.')
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in sky.launch for cluster {cluster_name}: {e}')
+            # We skip cleanup for last attempt since it will be handled by
+            # _terminate_cluster later.
+            if i == _SKY_LAUNCH_MAX_ATTEMPTS - 1:
+                continue
+            try:
+                sky.down(cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(
+                    f'Error in sky.down for cluster {cluster_name}: {e}')
+                # Immediately exit since failure in sky.down is a potential
+                # resource leak. Later _terminate_cluster will fail again and
+                # cause FAILED_CLEANUP status.
+                sys.exit(1)
+    logger.error(f'Failed to launch cluster {cluster_name} after '
+                 f'{_SKY_LAUNCH_MAX_ATTEMPTS} attempts.')
+    # Exit with a non-zero code to indicate the failure
+    sys.exit(1)
 
 
 class ProcessStatus(enum.Enum):
@@ -434,7 +477,8 @@ class SkyPilotInfraProvider(InfraProvider):
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
         fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
-        p = multiprocessing.Process(target=_redirect_output_to(sky.launch, fn),
+        p = multiprocessing.Process(target=_redirect_output_to(
+            _sky_launch_with_retry, fn),
                                     args=(self.task,),
                                     kwargs={
                                         'cluster_name': cluster_name,
