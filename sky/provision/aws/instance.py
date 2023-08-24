@@ -185,9 +185,17 @@ def cleanup_ports(
         'Name': 'group-name',
         'Values': [sg_name]
     }])
-    if len(list(sgs)) != 1:
+    num_sg = len(list(sgs))
+    if num_sg == 0:
         logger.warning(f'Expected security group {sg_name} not found. '
                        'Skip cleanup.')
+        return
+    if num_sg > 1:
+        # TODO(tian): Better handle this case. Maybe we can check when creating
+        # the SG and throw an error if there is already an existing SG with the
+        # same name.
+        logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
+                       'Skip cleanup. Please delete them manually.')
         return
     backoff = common_utils.Backoff()
     for _ in range(MAX_ATTEMPTS):
