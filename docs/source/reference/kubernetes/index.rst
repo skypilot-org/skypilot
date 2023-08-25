@@ -64,6 +64,11 @@ Once your Kubernetes cluster is up and running:
    .. note::
      GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
 
+
+   .. note::
+     To cleanup any leftover jobs from the GPU labelling process, run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup``.
+
+
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
    .. code-block:: console
