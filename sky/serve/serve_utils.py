@@ -4,6 +4,7 @@ import os
 import pickle
 import re
 import shlex
+import threading
 import time
 import typing
 from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO
@@ -28,6 +29,42 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+
+
+class ThreadSafeDict(dict):
+    """A thread-safe dict."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock = threading.Lock()
+
+    def __getitem__(self, __key: Any) -> Any:
+        with self._lock:
+            return super().__getitem__(__key)
+
+    def __setitem__(self, __key: Any, __value: Any) -> None:
+        with self._lock:
+            return super().__setitem__(__key, __value)
+
+    def __delitem__(self, __key: Any) -> None:
+        with self._lock:
+            return super().__delitem__(__key)
+
+    def __len__(self) -> int:
+        with self._lock:
+            return super().__len__()
+
+    def __contains__(self, __key: object) -> bool:
+        with self._lock:
+            return super().__contains__(__key)
+
+    def items(self):
+        with self._lock:
+            return super().items()
+
+    def values(self):
+        with self._lock:
+            return super().values()
 
 
 def generate_controller_cluster_name(service_name: str) -> str:
