@@ -2300,22 +2300,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
-        # TODO(romilb): Replace this with a call to the cloud class to get ports
-        # Use port 22 for everything except Kubernetes
-        if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_ssh_port = 22
-        else:
-            svc_name = f'{self.cluster_name}-ray-head-ssh'
-            retry_cnt = 0
-            while True:
-                try:
-                    head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-                    break
-                except Exception:  # pylint: disable=broad-except
-                    retry_cnt += 1
-                    if retry_cnt >= max_attempts:
-                        raise
-            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
+        """Fetches and sets the SSH ports for the cluster nodes.
+
+        Use this method to use any cloud-specific port fetching logic.
+        """
+        head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))
 
