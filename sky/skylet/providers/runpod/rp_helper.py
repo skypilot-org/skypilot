@@ -1,35 +1,36 @@
 '''
 RunPod library wrapper, formats the input/output of the RunPod library for SkyPilot.
 '''
+from typing import Dict
 
 import runpod
 
 
 GPU_NAME_MAP = {
-    "NVIDIA A100 80GB PCIe": "A100-80GB",
-    "NVIDIA A100-PCIE-40GB": "A100-40GB",
-    "NVIDIA A100-SXM4-80GB": "A100-80GB-SXM4",
-    "NVIDIA A30": "A30",
-    "NVIDIA A40": "A40",
-    "NVIDIA GeForce RTX 3070": "RTX3070",
-    "NVIDIA GeForce RTX 3080": "RTX3080",
-    "NVIDIA GeForce RTX 3080 Ti": "RTX3080Ti",
-    "NVIDIA GeForce RTX 3090": "RTX3090",
-    "NVIDIA GeForce RTX 3090 Ti": "RTX3090Ti",
-    "NVIDIA GeForce 4070 Ti": "RTX4070Ti",
-    "NVIDIA GeForce RTX 4080": "RTX4080",
-    "NVIDIA GeForce RTX 4090": "RTX4090",
-    "NVIDIA H100 80GB HBM3": "H100-80GB-HBM3",
-    "NVIDIA H100 PCIe": "H100-PCIe",
-    "NVIDIA L40": "L40",
-    "NVIDIA RTX 6000 Ada Generation": "RTX6000-Ada",
-    "NVIDIA RTX A4000": "RTXA4000",
-    "NVIDIA RTX A4500": "RTXA4500",
-    "NVIDIA RTX A5000": "RTXA5000",
-    "NVIDIA RTX A6000": "RTXA6000",
-    "Quadro RTX 5000": "RTX5000",
-    "Tesla V100-FHHL-16GB": "V100-16GB-FHHL",
-    "V100-SXM2-16GB": "V100-16GB-SXM2",
+    "A100-80GB": "NVIDIA A100 80GB PCIe",
+    "A100-40GB": "NVIDIA A100-PCIE-40GB",
+    "A100-80GB-SXM4": "NVIDIA A100-SXM4-80GB",
+    "A30": "NVIDIA A30",
+    "A40": "NVIDIA A40",
+    "RTX3070": "NVIDIA GeForce RTX 3070",
+    "RTX3080": "NVIDIA GeForce RTX 3080",
+    "RTX3080Ti": "NVIDIA GeForce RTX 3080 Ti",
+    "RTX3090": "NVIDIA GeForce RTX 3090",
+    "RTX3090Ti": "NVIDIA GeForce RTX 3090 Ti",
+    "RTX4070Ti": "NVIDIA GeForce 4070 Ti",
+    "RTX4080": "NVIDIA GeForce RTX 4080",
+    "RTX4090": "NVIDIA GeForce RTX 4090",
+    "H100-80GB-HBM3": "NVIDIA H100 80GB HBM3",
+    "H100-PCIe": "NVIDIA H100 PCIe",
+    "L40": "NVIDIA L40",
+    "RTX6000-Ada": "NVIDIA RTX 6000 Ada Generation",
+    "RTXA4000": "NVIDIA RTX A4000",
+    "RTXA4500": "NVIDIA RTX A4500",
+    "RTXA5000": "NVIDIA RTX A5000",
+    "RTXA6000": "NVIDIA RTX A6000",
+    "RTX5000": "Quadro RTX 5000",
+    "V100-16GB-FHHL": "Tesla V100-FHHL-16GB",
+    "V100-16GB-SXM2": "V100-SXM2-16GB"
 }
 
 
@@ -45,7 +46,10 @@ def list_instances(api_key: str):
 
         instance_list[instance['id']]['status'] = instance['desiredStatus']
         instance_list['name'] = instance['name']
-        instance_list['ip'] = instance[]
+
+        for port in instance['ports']:
+            if port['privatePort'] == 22:
+                instance_list['ip'] = port['ip']
 
 
 def launch(name: str, instance_type: str, region: str, api_key: str, ssh_key_name: str):
@@ -53,16 +57,38 @@ def launch(name: str, instance_type: str, region: str, api_key: str, ssh_key_nam
     Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the GPU, and launches the instance.
+    TODO: Return the instance IP.
     '''
     gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
+    cloud_type = instance_type.split('_')[2]
 
     gpu_specs = runpod.get_gpu(gpu_type)
 
     new_instance = runpod.create_pod(
         name=name,
-        image_name='runpod/base:latest',
+        image_name='nvidia/cuda:12.2.0-base-ubuntu20.04',
         gpu_type_id=gpu_type,
+        cloud_type=cloud_type,
         min_vcpu_count=4*gpu_quantity,
         min_memory_in_gb=gpu_specs['memoryInGb']*gpu_quantity,
         country_code=region,
+        ports=["22/tcp"]
+    )
+
+    return new_instance['id']
+
+
+def set_tags(instance_id: str, tags: Dict, api_key: str):
+    '''
+    Sets the tags for the given instance.
+    '''
+    # TODO: Implement tag alternative.
+    pass
+
+
+def remove(instance_id: str, api_key: str):
+    '''
+    Terminates the given instance.
+    '''
+    runpod.terminate_pod(instance_id)

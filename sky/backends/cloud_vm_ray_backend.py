@@ -140,6 +140,7 @@ def _get_cluster_config_template(cloud):
         clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
+        clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
@@ -1692,7 +1693,8 @@ class RetryingVmProvisioner(object):
         head_ip_private = stdout.strip()
 
         ray_config = common_utils.read_yaml(cluster_yaml)
-        worker_start_ray_commands = [f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
+        worker_start_ray_commands = [
+            f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
         worker_start_ray_commands += ray_config['worker_start_ray_commands']
 
         # Setup TPU VM Pod workers and launch Ray cluster.
@@ -2087,7 +2089,7 @@ class RetryingVmProvisioner(object):
                 # flag; see _yield_zones(). Also, the cluster should have been
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                       ), prev_cluster_status
+                        ), prev_cluster_status
                 assert global_user_state.get_handle_from_cluster_name(
                     cluster_name) is None, cluster_name
                 logger.info('Retrying provisioning with requested resources '

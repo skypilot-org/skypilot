@@ -17,8 +17,7 @@ _CREDENTIAL_FILES = [
 
 @clouds.CLOUD_REGISTRY.register
 class RunPod(clouds.Cloud):
-    """
-    RunPod GPU Cloud
+    """ RunPod GPU Cloud
 
     _REPR | The string representation for the RunPod GPU cloud object.
     """
@@ -31,15 +30,15 @@ class RunPod(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
-    @ classmethod
+    @classmethod
     def _cloud_unsupported_features(cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
-    @ classmethod
+    @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
-    @ classmethod
+    @classmethod
     def regions(cls) -> List[clouds.Region]:
         if not cls._regions:
             ########
@@ -51,12 +50,12 @@ class RunPod(clouds.Cloud):
             ]
         return cls._regions
 
-    @ classmethod
+    @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        assert zone is None, 'FluffyCloud does not support zones.'
+        assert zone is None, 'RunPod does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
@@ -71,7 +70,7 @@ class RunPod(clouds.Cloud):
             regions = [r for r in regions if r.name == region]
         return regions
 
-    @ classmethod
+    @classmethod
     def zones_provision_loop(
         cls,
         *,
@@ -102,19 +101,16 @@ class RunPod(clouds.Cloud):
                                                zone=zone,
                                                clouds='runpod')
 
-    def accelerators_to_hourly_cost(self,
-                                    accelerators: Dict[str, int],
-                                    use_spot: bool,
-                                    region: Optional[str] = None,
-                                    zone: Optional[str] = None) -> float:
+    def accelerators_to_hourly_cost(
+            self,
+            accelerators: Dict[str, int],
+            use_spot: bool,
+            region: Optional[str] = None,
+            zone: Optional[str] = None
+    ) -> float:
+        '''Returns the hourly cost of the accelerators, in dollars/hour.'''
         del accelerators, use_spot, region, zone  # unused
-        ########
-        # TODO #
-        ########
-        # This function assumes accelerators are included as part of instance
-        # type. If not, you will need to change this. (However, you can do
-        # this later; `return 0.0` is a good placeholder.)
-        return 0.0
+        return 0.0  # RunPod includes accelerators in the hourly cost of the instance type.
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
@@ -126,29 +122,22 @@ class RunPod(clouds.Cloud):
         # Returns true if the two clouds are the same cloud type.
         return isinstance(other, RunPod)
 
-    @ classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus,
-                                                         clouds='runpod')
+    @classmethod
+    def get_default_instance_type(cls, cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus, clouds='runpod')
 
-    @ classmethod
+    @classmethod
     def get_accelerators_from_instance_type(
         cls,
-        instance_type: str,
+        instance_type: str
     ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-            instance_type, clouds='runpod')
+        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='runpod')
 
-    @ classmethod
-    def get_vcpus_from_instance_type(
-        cls,
-        instance_type: str,
-    ) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type,
-                                                            clouds='runpod')
+    @classmethod
+    def get_vcpus_from_instance_type(cls, instance_type: str) -> Optional[float]:
+        return service_catalog.get_vcpus_from_instance_type(instance_type, clouds='runpod')
 
-    @ classmethod
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
@@ -188,11 +177,6 @@ class RunPod(clouds.Cloud):
                 r = resources.copy(
                     cloud=RunPod(),
                     instance_type=instance_type,
-                    ########
-                    # TODO #
-                    ########
-                    # Set to None if don't separately bill / attach
-                    # accelerators.
                     accelerators=None,
                     cpus=None,
                 )
@@ -203,8 +187,7 @@ class RunPod(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # Return a default instance type
-            default_instance_type = RunPod.get_default_instance_type(
-                cpus=resources.cpus)
+            default_instance_type = RunPod.get_default_instance_type(cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -241,7 +224,7 @@ class RunPod(clouds.Cloud):
 
         except ImportError:
             return False, (
-                "Failed to import runpod. "
+                "Failed to import runpod."
                 "'To install, run: 'pip install runpod' or 'pip install sky[runpod]' "
             )
 
@@ -260,14 +243,14 @@ class RunPod(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type, 'runpod')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='runpod')
+        return service_catalog.validate_region_zone(region, zone, clouds='runpod')
 
-    def accelerator_in_region_or_zone(self,
-                                      accelerator: str,
-                                      acc_count: int,
-                                      region: Optional[str] = None,
-                                      zone: Optional[str] = None) -> bool:
+    def accelerator_in_region_or_zone(
+        self,
+        accelerator: str,
+        acc_count: int,
+        region: Optional[str] = None,
+        zone: Optional[str] = None
+    ) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'runpod')

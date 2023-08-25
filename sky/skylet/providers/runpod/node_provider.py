@@ -39,7 +39,7 @@ class RunPodNodeProvider(NodeProvider):
     """ Node Provider for RunPod. """
 
     def __init__(self, provider_config: Dict[str, Any], cluster_name: str) -> None:
-        """
+        """ Initialize the RunPodNodeProvider.
         cached_nodes |
         api_key | The RunPod API key
         ssh_key_name | The name of the SSH key to use for the pods.
@@ -53,17 +53,6 @@ class RunPodNodeProvider(NodeProvider):
         self.api_key = runpod.get_credentials()['api_key']
         self.ssh_key_name = runpod.get_credentials()['ssh_key_name']
 
-    @synchronized
-    def _get_filtered_nodes(self, tag_filters):
-        running_instances = list_instances(self.api_key)
-
-        ########
-        # TODO #
-        ########
-        self.cached_nodes =  # TODO Filter running instances by tag_filters
-
-        return self.cached_nodes
-
     def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
         """Return a list of node ids filtered by the specified tags dict.
 
@@ -74,7 +63,7 @@ class RunPodNodeProvider(NodeProvider):
         must be called again to refresh results.
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, _ in nodes.items()]
+        return [node_id for node_id, _ in nodes.items()]
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
@@ -96,62 +85,46 @@ class RunPodNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['ip']
 
-    def create_node(self, node_config, tags, count):
-        """
-        Creates a pod on RunPod.
-        Creates a number of nodes within the namespace.
-
-        Currently the `InstanceType` will be the gpu_type for the pod.
-        """
-        assert count == 1, count   # Only support 1-node clusters for now
-
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> Optional[Dict[str, Any]]:
+        """Creates a number of nodes within the namespace."""
         # Get the tags
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
-        # Create node
-        instance_type = node_config['InstanceType']
+        # Create nodes
+        ttype = node_config['InstanceType']
         region = self.provider_config['region']
 
-        # vm_id = launch(name=self.cluster_name,
-        #                instance_type=ttype,
-        #                region=region,
-        #                api_key=self.api_key
-        #                ssh_key_name=self.ssh_key_name)
+        for _ in range(count):
+            instance_id = runpod_api.launch(name=self.cluster_name,
+                                            instance_type=ttype,
+                                            region=region,
+                                            api_key=self.api_key,
+                                            ssh_key_name=self.ssh_key_name)
 
-        pod_id = runpod.create_pod(
-            name=self.cluster_name,
-            image_name='nvidia/cuda:12.2.0-base-ubuntu20.04',
-            gpu_type_id=instance_type
-        )
+        if instance_id is None:
+            raise FluffyCloudError('Failed to launch instance.')
 
-        if pod_id is None:
-            raise RunPodError('Failed to launch instance.')
+        runpod_api.set_tags(instance_id, config_tags, self.api_key)
 
-        set_tags(pod_id, config_tags, self.api_key)
-
-        ########
-        # TODO #
-        ########
-        # May need to poll list_instances() to wait for booting
-        # to finish before returning.
+        # FILL_IN: Only return after all nodes are booted.
+        # If needed poll fc_api.list_instances() to wait for status == 'running'
 
     @synchronized
-    def set_node_tags(self, node_id, tags):
+    def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
-        set_tags(vm_id, node['tags'], self.api_key)
+        runpod_api.set_tags(node_id, node['tags'], self.api_key)
 
-    def terminate_node(self, node_id):
+    def terminate_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Terminates the specified node."""
-        remove
+        runpod_api.remove(node_id, self.api_key)
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
-        '''
-        SkyPilot Method
+        '''SkyPilot Method
         Caches the nodes with the given tag_filters.
         '''
         instances = runpod_api.list_instances(self.api_key)  # FILL_IN
@@ -166,11 +139,17 @@ class RunPodNodeProvider(NodeProvider):
         self.cached_nodes = new_cache
         return self.cached_nodes
 
-    def _get_node(self, node_id):
+    def _get_node(self, node_id: str):
+        ''' SkyPilot Method
+        Returns the node with the given node_id, if it exists.
+        '''
         self._get_filtered_nodes({})  # Side effect: updates cache
         return self.cached_nodes.get(node_id, None)
 
     def _get_cached_node(self, node_id):
+        ''' SkyPilot Method
+        Returns the node with the given node_id, if it is cached.
+        '''
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
