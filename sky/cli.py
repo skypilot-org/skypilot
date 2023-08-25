@@ -4113,7 +4113,8 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_best_resources)
+    sky.serve_up(task, service_name, controller_resources,
+                 controller_best_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
