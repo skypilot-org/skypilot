@@ -35,19 +35,19 @@ In most cases, users need only be aware of the former.
 For a cluster name less than cloud's naming length limit, the name will only be appended
 with a user hash.
 ```
-# Original
+# Original cluster name
 my-cluster-name
 
-# Generated
+# Cluster name on cloud
 my-cluster-name-9eac
 ```
 
 For a cluster name longer than cloud's naming length limit, the name will be truncated
 to less than the limit, appended with a cluster name hash, and then appended with a user hash.
 ```
-# Original
+# Original cluster name
 my-cluster-name-very-long
 
-# Generated
+# Cluster name on cloud
 my-cluster-name-3m-9eac
 ```
