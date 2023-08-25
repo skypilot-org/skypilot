@@ -446,7 +446,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
             raise RuntimeError('Failed to fetch availability zone mappings for '
                                f'all enabled regions.\n{table}')
         else:
-            print('WARNING: Missing availability zone mappings for the '
+            print('\rAWS: [WARNING] Missing availability zone mappings for the '
                   f'following enabled regions:\n{table}')
     az_mappings = pd.concat(az_mappings)
     return az_mappings
