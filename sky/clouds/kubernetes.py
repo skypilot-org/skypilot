@@ -1,9 +1,8 @@
 """Kubernetes."""
 import json
-import math
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -11,7 +10,6 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 

@@ -2304,6 +2304,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         Use this method to use any cloud-specific port fetching logic.
         """
+        del max_attempts  # Unused.
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))

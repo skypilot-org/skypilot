@@ -1,6 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
-import os
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
@@ -12,9 +12,9 @@ import sky
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
-from sky.utils import common_utils
 
 DEFAULT_NAMESPACE = 'default'
 
