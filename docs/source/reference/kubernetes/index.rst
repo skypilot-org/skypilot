@@ -29,6 +29,7 @@ Kubernetes Cluster Requirements
 
 To connect and use a Kubernetes cluster, SkyPilot needs:
 
+* `Kubectl <https://kubernetes.io/docs/tasks/tools/>`_
 * A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
 * Ports 30000-32767 should be accessible on all Kubernetes nodes.
 
@@ -69,8 +70,19 @@ Once your Kubernetes cluster is up and running:
      Kubernetes: enabled
      ...
 
+3. [If using GPUs, not required for GKE clusters] If you want to use GPUs on your cluster, you will need to label each node in your cluster with the GPU type. For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`. We provide a convinience script that automatically detects GPU type and labels each node. You can run it with:
 
-3. You can now run any SkyPilot task on your Kubernetes cluster.
+   .. code-block:: console
+
+     $ python -m sky.utils.kubernetes.gpu_labeler
+
+     Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
+     Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
+     GPU labeling started - this may take a few minutes to complete.
+     To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
+     You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerators: <gpu_name>`. 
+
+4. You can now run any SkyPilot task on your Kubernetes cluster.
 
    .. code-block:: console
 
