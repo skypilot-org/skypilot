@@ -9,6 +9,7 @@ from multiprocessing import pool as mp_pool
 import os
 import subprocess
 import sys
+import textwrap
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -436,9 +437,11 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
     if errored_regions:
         # This could happen if a AWS API glitch happens, it is to make sure
         # that the availability zone does not get lost silently.
-        table = log_utils.create_table(['Reason', 'Regions'])
+        table = log_utils.create_table(['Regions', 'Reason'])
         for reason, regions in errored_regions.items():
-            table.add_row([reason.message, regions])
+            reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
+            region_str = '\n'.join(textwrap.wrap(str(regions), 40))
+            table.add_row([region_str, reason_str])
         if not az_mappings:
             raise RuntimeError('Failed to fetch availability zone mappings for '
                                f'all enabled regions.\n{table}')
