@@ -76,6 +76,6 @@ CONDA_INSTALLATION_COMMANDS = (
 # will be recognized as the same user (e.g., spot controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
 
-# In most of clouds, cluster name can only contain lowercase letters, numbers
+# In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
