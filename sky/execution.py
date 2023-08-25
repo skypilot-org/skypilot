@@ -976,6 +976,8 @@ def serve_up(
     """
     controller_cluster_name = serve.generate_controller_cluster_name(
         service_name)
+    controller_best_resources.cloud.check_cluster_name_is_valid(
+        controller_cluster_name)
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
