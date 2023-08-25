@@ -321,7 +321,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     return ssh_jump_proxy_command
 
 
-def setup_sshjump_svc(sshjump_name: str, namespace: str, service_type: str):
+def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -335,20 +335,46 @@ def setup_sshjump_svc(sshjump_name: str, namespace: str, service_type: str):
     """
     # Fill in template - ssh_key_secret and sshjump_image are not required for
     # the service spec, so we pass in empty strs.
-    content = fill_sshjump_template('', '', sshjump_name, service_type)
+    content = fill_sshjump_template('', '', ssh_jump_name, service_type)
     # Create service
     try:
         kubernetes.core_api().create_namespaced_service(namespace,
                                                         content['service_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
-            logger.warning(
-                f'SSH Jump Service {sshjump_name} already exists in the '
-                'cluster, using it.')
+            ssh_jump_service = kubernetes.core_api().read_namespaced_service(
+                name=ssh_jump_name,
+                namespace=namespace
+            )
+            curr_svc_type = ssh_jump_service.spec.type
+            if service_type == curr_svc_type:
+                # If the currently existing SSH Jump service's type is identical
+                # to user's configuration for networking mode
+                logger.warning(
+                    f'SSH Jump Service {ssh_jump_name} already exists in the '
+                    'cluster, using it.')
+            else:
+                # If a different type of service type for SSH Jump pod compared
+                # to user's configuration for networking mode exists, we remove
+                # existing servie to create a new one following user's config 
+                kubernetes.core_api().delete_namespaced_service(
+                    name=ssh_jump_name,
+                    namespace=namespace
+                )
+                kubernetes.core_api().create_namespaced_service(namespace,
+                                                        content['service_spec'])
+                curr_network_mode = 'Port-Forward' if service_type == 'ClusterIP' else 'NodePort'
+                new_network_mode = 'NodePort' if service_type == 'ClusterIP' else 'Port-Forward'
+                new_svc_type = 'NodePort' if service_type == 'ClusterIP' else 'ClusterIP'
+                logger.info(
+                    f'Switching the networking mode from {curr_network_mode} '
+                    f'to {new_network_mode} following networking '
+                    f'configuration. Deleting existing {curr_svc_type} service'
+                    f'and recreating as {new_svc_type}')
         else:
             raise
     else:
-        logger.info(f'Created SSH Jump Service {sshjump_name}.')
+        logger.info(f'Created SSH Jump Service {ssh_jump_name}.')
 
 
 def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
