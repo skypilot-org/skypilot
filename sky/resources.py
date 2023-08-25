@@ -163,7 +163,7 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         if isinstance(disk_tier, str):
-            disk_tier = resources_utils.DiskTier[str(disk_tier).upper()]
+            disk_tier = resources_utils.DiskTier(str(disk_tier).lower())
         self._disk_tier = disk_tier
         self._ports = ports
 
