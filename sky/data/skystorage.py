@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from typing import Dict, Tuple
+import urllib.parse
 
 import click
 import filelock
@@ -112,7 +113,7 @@ def run_sync(src: str,
 @main.command()
 @click.argument('src', required=True, type=str)
 @click.argument('storetype', required=True, type=str)
-@click.argument('bucketname', required=True, type=str)
+@click.argument('dst', required=True, type=str)
 @click.option('--num-threads', required=False, default=10, type=int, help='')
 @click.option('--interval', required=False, default=600, type=int, help='')
 @click.option('--delete',
@@ -133,11 +134,14 @@ def run_sync(src: str,
               type=bool,
               is_flag=True,
               help='')
-def csync(src: str, storetype: str, bucketname: str, num_threads: int,
+def csync(src: str, storetype: str, dst: str, num_threads: int,
           interval: int, delete: bool, lock: bool, no_follow_symlinks: bool):
     """Syncs the source to the bucket every INTERVAL seconds. Creates a lock
     file while sync command is runninng and removes it when completed.
     """
+    result = urllib.parse.urlsplit(dst)
+    bucketname = result.netloc
+    #if result.path == '':
     base_dir = os.path.expanduser(CSYNC_FILE_PATH)
     os.makedirs(base_dir, exist_ok=True)
     lock_file_name = f'csync_{storetype}_{bucketname}.lock'

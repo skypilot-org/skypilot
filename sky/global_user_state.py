@@ -546,9 +546,9 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          storage_mounts_metadata, to_down, owner, cluster_hash) = row[:11]
-        # TODO: use namedtuple instead of dict
-        if storage_mounts_metadata is None:
+        if not storage_mounts_metadata:
             storage_mounts_metadata = pickle.dumps({})
+        # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -573,9 +573,9 @@ def get_clusters() -> List[Dict[str, Any]]:
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          storage_mounts_metadata, to_down, owner, cluster_hash) = row[:11]
-        # TODO: use namedtuple instead of dict
-        if storage_mounts_metadata is None:
+        if not storage_mounts_metadata:
             storage_mounts_metadata = pickle.dumps({})
+        # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'launched_at': launched_at,

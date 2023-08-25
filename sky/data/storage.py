@@ -466,8 +466,9 @@ class Storage(object):
         # buckets, this can be deprecated.
         self.force_delete = False
 
-        # Validate and correct inputs if necessary
-        self._validate_storage_spec(name)
+        if self.sync_on_reconstruction:
+            # Validate and correct inputs if necessary
+            self._validate_storage_spec(name)
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
@@ -1287,8 +1288,12 @@ class S3Store(AbstractStore):
         """
         if interval is None:
             interval = 600
+        if data_utils.is_cloud_store_url(self.source):
+            dst = self.source
+        else:
+            dst = f's3://{self.bucket.name}'
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
-                     f's3 {self.bucket.name} --interval {interval} '
+                     f's3 {dst} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path, csync_cmd)
@@ -1738,9 +1743,13 @@ class GcsStore(AbstractStore):
         """
         if interval is None:
             interval = 600
+        if data_utils.is_cloud_store_url(self.source):
+            dst = self.source
+        else:
+            dst = f'gs://{self.bucket.name}'
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
-                     f'gcs {self.bucket.name} --interval {interval} '
-                     '--lock --delete --no-follow-symlinks')
+                    f'gcs {dst} --interval {interval} '
+                    '--lock --delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path, csync_cmd)
 
