@@ -13,6 +13,10 @@ managedNodeGroups:
     instanceType: p3.2xlarge  # This instance type provides 1 NVIDIA V100 GPU.
     desiredCapacity: 1
 
-  - name: k80-nodes
-    instanceType: p2.xlarge  # This instance type provides 1 NVIDIA K80 GPU.
+  - name: t4-nodes
+    instanceType: g4dn.2xlarge  # This instance type provides 1 NVIDIA T4 GPU.
+    desiredCapacity: 1
+
+  - name: cpu-nodes # Creates 16 CPU nodes
+    instanceType: m5.4xlarge
     desiredCapacity: 1

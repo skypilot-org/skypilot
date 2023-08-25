@@ -1,21 +1,13 @@
 import copy
 import logging
 import math
-import re
+from typing import Any, Dict, Union
 
 from sky import clouds
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
 
 logger = logging.getLogger(__name__)
-
-MEMORY_SIZE_UNITS = {
-    "K": 2**10,
-    "M": 2**20,
-    "G": 2**30,
-    "T": 2**40,
-    'P': 2**50,
-}
 
 log_prefix = 'KubernetesNodeProvider: '
 
@@ -25,41 +17,41 @@ DELETION_TIMEOUT = 90
 
 class InvalidNamespaceError(ValueError):
 
-    def __init__(self, field_name, namespace):
+    def __init__(self, field_name: str, namespace: str):
         self.message = (
             f'Namespace of {field_name} config does not match provided '
             f'namespace "{namespace}". Either set it to {namespace} or remove the '
             'field')
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.message
 
 
-def using_existing_msg(resource_type, name):
+def using_existing_msg(resource_type: str, name: str) -> str:
     return f'using existing {resource_type} "{name}"'
 
 
-def updating_existing_msg(resource_type, name):
+def updating_existing_msg(resource_type: str, name: str) -> str:
     return f'updating existing {resource_type} "{name}"'
 
 
-def not_found_msg(resource_type, name):
+def not_found_msg(resource_type: str, name: str) -> str:
     return f'{resource_type} "{name}" not found, attempting to create it'
 
 
-def not_checking_msg(resource_type, name):
+def not_checking_msg(resource_type: str, name: str) -> str:
     return f'not checking if {resource_type} "{name}" exists'
 
 
-def created_msg(resource_type, name):
+def created_msg(resource_type: str, name: str) -> str:
     return f'successfully created {resource_type} "{name}"'
 
 
-def not_provided_msg(resource_type):
+def not_provided_msg(resource_type: str) -> str:
     return f'no {resource_type} config provided, must already exist'
 
 
-def bootstrap_kubernetes(config):
+def bootstrap_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
     _configure_services(namespace, config['provider'])
@@ -75,7 +67,7 @@ def bootstrap_kubernetes(config):
     return config
 
 
-def fillout_resources_kubernetes(config):
+def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     """Fills CPU and GPU resources in the ray cluster config.
 
     For each node type and each of CPU/GPU, looks at container's resources
@@ -108,7 +100,8 @@ def fillout_resources_kubernetes(config):
     return config
 
 
-def get_autodetected_resources(container_data):
+def get_autodetected_resources(
+        container_data: Dict[str, Any]) -> Dict[str, Any]:
     container_resources = container_data.get('resources', None)
     if container_resources is None:
         return {'CPU': 0, 'GPU': 0}
@@ -124,7 +117,8 @@ def get_autodetected_resources(container_data):
     return node_type_resources
 
 
-def get_resource(container_resources, resource_name):
+def get_resource(container_resources: Dict[str, Any],
+                 resource_name: str) -> int:
     request = _get_resource(container_resources,
                             resource_name,
                             field_name='requests')
@@ -142,7 +136,8 @@ def get_resource(container_resources, resource_name):
     return max(1, math.ceil(res_count))
 
 
-def _get_resource(container_resources, resource_name, field_name):
+def _get_resource(container_resources: Dict[str, Any], resource_name: str,
+                  field_name: str) -> Union[int, float]:
     """Returns the resource quantity.
 
     The amount of resource is rounded up to nearest integer.
@@ -172,33 +167,13 @@ def _get_resource(container_resources, resource_name, field_name):
     resource_key = matching_keys.pop()
     resource_quantity = resources[resource_key]
     if resource_name == 'memory':
-        return _parse_memory_resource(resource_quantity)
+        return kubernetes_utils.parse_memory_resource(resource_quantity)
     else:
-        return _parse_cpu_or_gpu_resource(resource_quantity)
+        return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
-def _parse_cpu_or_gpu_resource(resource):
-    resource_str = str(resource)
-    if resource_str[-1] == 'm':
-        # For example, '500m' rounds up to 1.
-        return math.ceil(int(resource_str[:-1]) / 1000)
-    else:
-        return float(resource_str)
-
-
-def _parse_memory_resource(resource):
-    resource_str = str(resource)
-    try:
-        return int(resource_str)
-    except ValueError:
-        pass
-    memory_size = re.sub(r'([KMGTP]+)', r' \1', resource_str)
-    number, unit_index = [item.strip() for item in memory_size.split()]
-    unit_index = unit_index[0]
-    return float(number) * MEMORY_SIZE_UNITS[unit_index]
-
-
-def _configure_autoscaler_service_account(namespace, provider_config):
+def _configure_autoscaler_service_account(
+        namespace: str, provider_config: Dict[str, Any]) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(account_field))
@@ -224,7 +199,8 @@ def _configure_autoscaler_service_account(namespace, provider_config):
     logger.info(log_prefix + created_msg(account_field, name))
 
 
-def _configure_autoscaler_role(namespace, provider_config):
+def _configure_autoscaler_role(namespace: str,
+                               provider_config: Dict[str, Any]) -> None:
     role_field = 'autoscaler_role'
     if role_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(role_field))
@@ -250,7 +226,8 @@ def _configure_autoscaler_role(namespace, provider_config):
     logger.info(log_prefix + created_msg(role_field, name))
 
 
-def _configure_autoscaler_role_binding(namespace, provider_config):
+def _configure_autoscaler_role_binding(namespace: str,
+                                       provider_config: Dict[str, Any]) -> None:
     binding_field = 'autoscaler_role_binding'
     if binding_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(binding_field))
@@ -311,7 +288,8 @@ def _configure_ssh_jump(namespace, config):
     return config
 
 
-def _configure_services(namespace, provider_config):
+def _configure_services(namespace: str, provider_config: Dict[str,
+                                                              Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(service_field))

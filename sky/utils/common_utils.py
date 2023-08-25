@@ -297,8 +297,8 @@ def retry(method, max_retries=3, initial_backoff=1):
 def encode_payload(payload: Any) -> str:
     """Encode a payload to make it more robust for parsing.
 
-    The make the message transfer more robust to any additional
-    strings added to the message during transfering.
+    This makes message transfer more robust to any additional strings added to
+    the message during transfer.
 
     An example message that is polluted by the system warning:
     "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long
@@ -416,3 +416,12 @@ def find_free_port(start_port: int) -> int:
 def is_valid_env_var(name: str) -> bool:
     """Checks if the task environment variable name is valid."""
     return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
+
+
+def format_float(num: Union[float, int], precision: int = 1) -> str:
+    """Formats a float to not show decimal point if it is a whole number
+
+    If it is not a whole number, it will show upto precision decimal point."""
+    if isinstance(num, int):
+        return str(num)
+    return '{:.0f}'.format(num) if num.is_integer() else f'{num:.{precision}f}'

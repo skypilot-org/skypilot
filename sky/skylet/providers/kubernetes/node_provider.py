@@ -50,7 +50,7 @@ class KubernetesNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.cluster_name = cluster_name
 
-        # Kubernetes namespace to use
+        # Kubernetes namespace to user
         self.namespace = kubernetes_utils.get_current_kube_config_context_namespace(
         )
 
