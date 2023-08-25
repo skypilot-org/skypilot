@@ -989,10 +989,10 @@ def test_scp_logs():
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
-@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
-@pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
-@pytest.mark.no_oci  # OCI does not have K80 gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
+@pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_oci  # OCI does not have T4 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1284,10 +1284,10 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
-@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_oci  # OCI Cloud does not have K80 gpus
+@pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
