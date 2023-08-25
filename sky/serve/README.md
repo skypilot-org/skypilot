@@ -15,11 +15,5 @@ Sky Serve has four key components:
 4. Infra Providers - provides a uniform interface to talk to SkyPilot.
 
 ## Usage
-** Work in progress**
-```bash
-# Run controller.
-python -m sky.serve.controller --task-yaml examples/fastchat/api_server.yaml
 
-# Run redirector.
-python -m sky.serve.redirector
-```
+[User doc](https://docs.google.com/document/d/1vVmzLF-EkG3Moj-q47DQBGvFipK4PNfkz0V6LyaPstE/edit)
