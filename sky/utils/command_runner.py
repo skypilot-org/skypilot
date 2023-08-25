@@ -82,8 +82,8 @@ def ssh_options_list(
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
-    # We also do not use ControlMaster when we use `kubectl port-forward` to access
-    # Kubernetes pods over SSH+Proxycommand. This is because the
+    # We also do not use ControlMaster when we use `kubectl port-forward`
+    # to access Kubernetes pods over SSH+Proxycommand. This is because the
     # process running ProxyCommand is kept running as long as the ssh session
     # is running and the ControlMaster keeps the session, which results in
     # 'ControlPersist' number of seconds delay per ssh commands ran.

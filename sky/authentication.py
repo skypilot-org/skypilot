@@ -435,8 +435,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         network_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
         service_type = 'ClusterIP'
     else:
-        raise ValueError(f'Unsupported kubernetes networking type: '
-                         f'{ssh_setup_mode}. Please check: ~/.sky/config.yaml')
+        raise ValueError(f'Unsupported kubernetes networking mode: '
+                         f'{ssh_setup_mode}. The mode has to be either '
+                         '\'Port-Forward\' or \'NodePort\'. '
+                         'Please check: ~/.sky/config.yaml')
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.

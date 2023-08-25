@@ -341,11 +341,10 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
         kubernetes.core_api().create_namespaced_service(namespace,
                                                         content['service_spec'])
     except kubernetes.api_exception() as e:
+        # SSH Jump Pod service already exists.
         if e.status == 409:
             ssh_jump_service = kubernetes.core_api().read_namespaced_service(
-                name=ssh_jump_name,
-                namespace=namespace
-            )
+                name=ssh_jump_name, namespace=namespace)
             curr_svc_type = ssh_jump_service.spec.type
             if service_type == curr_svc_type:
                 # If the currently existing SSH Jump service's type is identical
@@ -356,21 +355,23 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
             else:
                 # If a different type of service type for SSH Jump pod compared
                 # to user's configuration for networking mode exists, we remove
-                # existing servie to create a new one following user's config 
+                # existing servie to create a new one following user's config
                 kubernetes.core_api().delete_namespaced_service(
-                    name=ssh_jump_name,
-                    namespace=namespace
-                )
-                kubernetes.core_api().create_namespaced_service(namespace,
-                                                        content['service_spec'])
-                curr_network_mode = 'Port-Forward' if service_type == 'ClusterIP' else 'NodePort'
-                new_network_mode = 'NodePort' if service_type == 'ClusterIP' else 'Port-Forward'
-                new_svc_type = 'NodePort' if service_type == 'ClusterIP' else 'ClusterIP'
+                    name=ssh_jump_name, namespace=namespace)
+                kubernetes.core_api().create_namespaced_service(
+                    namespace, content['service_spec'])
+                curr_network_mode = 'Port-Forward' \
+                    if curr_svc_type == 'ClusterIP' else 'NodePort'
+                new_network_mode = 'NodePort' \
+                    if curr_svc_type == 'ClusterIP' else 'Port-Forward'
+                new_svc_type = 'NodePort' \
+                    if curr_svc_type == 'ClusterIP' else 'ClusterIP'
                 logger.info(
-                    f'Switching the networking mode from {curr_network_mode} '
-                    f'to {new_network_mode} following networking '
-                    f'configuration. Deleting existing {curr_svc_type} service'
-                    f'and recreating as {new_svc_type}')
+                    f'Switching the networking mode from '
+                    f'\'{curr_network_mode}\' to \'{new_network_mode}\' '
+                    f'following networking configuration. Deleting existing '
+                    f'\'{curr_svc_type}\' service and recreating as '
+                    f'\'{new_svc_type}\' service.')
         else:
             raise
     else:
