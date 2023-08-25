@@ -2055,31 +2055,31 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     job_identity_str = None
-    job_ids_to_set = None
+    job_ids_to_cancel = None
     if not jobs and not all:
         click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
                    'cancelling the latest running job.'
                    f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
+    else:
+        # Cancelling specific jobs or --all.
+        job_ids = ' '.join(map(str, jobs))
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = f'job{plural} {job_ids}'
+        job_ids_to_cancel = jobs
+        if all:
+            job_identity_str = 'all jobs'
+            job_ids_to_cancel = None
+    job_identity_str += f' on cluster {cluster!r}'
 
     if not yes:
-        if job_identity_str is None:
-            job_ids_to_set = jobs
-            job_ids = ' '.join(map(str, jobs))
-            plural = 's' if len(job_ids) > 1 else ''
-            job_identity_str = f'job{plural} {job_ids}'
-            if all:
-                job_identity_str = 'all jobs'
-                job_ids_to_set = None
-
-        job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
 
     try:
-        core.cancel(cluster, all=all, job_ids=job_ids_to_set)
+        core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
