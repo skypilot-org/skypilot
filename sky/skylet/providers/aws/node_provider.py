@@ -25,6 +25,7 @@ from sky.skylet.providers.aws.utils import (
     client_cache,
 )
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.skylet.providers.command_runner import DockerLoginConfig
 
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger, cf
@@ -737,6 +738,10 @@ class AWSNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
         if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
+                )
             return SkyDockerCommandRunner(docker_config, **common_args)
         else:
             return SSHCommandRunner(**common_args)

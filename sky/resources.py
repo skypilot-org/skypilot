@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import functools
 from typing import Dict, List, Optional, Set, Union
 
 import colorama
@@ -10,7 +11,9 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
 from sky.skylet import constants
+from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
@@ -24,6 +27,10 @@ _DEFAULT_DISK_SIZE_GB = 256
 class Resources:
     """Resources: compute requirements of Tasks.
 
+    This class is immutable once created (to ensure some validations are done
+    whenever properties change). To update the property of an instance of
+    Resources, use `resources.copy(**new_properties)`.
+
     Used:
 
     * for representing resource requests for tasks/apps
@@ -34,7 +41,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 11
+    _VERSION = 12
 
     def __init__(
         self,
@@ -53,6 +60,7 @@ class Resources:
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[List[Union[int, str]]] = None,
         # Internal use only.
+        _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.
@@ -117,6 +125,9 @@ class Resources:
           disk_tier: the disk performance tier to use. If None, defaults to
             ``'medium'``.
           ports: the ports to open on the instance.
+          _docker_login_config: the docker configuration to use. This include
+            the docker username, password, and registry server. If None, skip
+            docker login.
         """
         self._version = self._VERSION
         self._cloud = cloud
@@ -158,6 +169,7 @@ class Resources:
 
         self._disk_tier = disk_tier
         self._ports = ports
+        self._docker_login_config = _docker_login_config
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -171,6 +183,12 @@ class Resources:
         self._try_validate_disk_tier()
         self._try_validate_ports()
 
+    # When querying the accelerators inside this func (we call self.accelerators
+    # which is a @property), we will check the cloud's catalog, which can error
+    # if it fails to fetch some account specific catalog information (e.g., AWS
+    # zone mapping). It is fine to use the default catalog as this function is
+    # only for display purposes.
+    @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -303,6 +321,7 @@ class Resources:
         return self._memory
 
     @property
+    @functools.lru_cache(maxsize=1)
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
@@ -841,13 +860,16 @@ class Resources:
             cloud_specific_variables,
             **{
                 # Docker config
-                # docker_image: the image name used to pull the image, e.g.
-                #   ubuntu:latest.
-                # docker_container_name: the name of the container. Default to
-                #   `sky_container`.
+                # Docker image. The image name used to pull the image, e.g.
+                # ubuntu:latest.
                 'docker_image': docker_image,
+                # Docker container name. The name of the container. Default to
+                # `sky_container`.
                 'docker_container_name':
                     constants.DEFAULT_DOCKER_CONTAINER_NAME,
+                # Docker login config (if any). This helps pull the image from
+                # private registries.
+                'docker_login_config': self._docker_login_config
             })
 
     def get_reservations_available_resources(
@@ -991,6 +1013,7 @@ class Resources:
             self.disk_tier is None,
             self._image_id is None,
             self.ports is None,
+            self._docker_login_config is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -1012,6 +1035,8 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             ports=override.pop('ports', self.ports),
+            _docker_login_config=override.pop('_docker_login_config',
+                                              self._docker_login_config),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
         )
@@ -1082,6 +1107,9 @@ class Resources:
             resources_fields['disk_tier'] = config.pop('disk_tier')
         if config.get('ports') is not None:
             resources_fields['ports'] = config.pop('ports')
+        if config.get('_docker_login_config') is not None:
+            resources_fields['_docker_login_config'] = config.pop(
+                '_docker_login_config')
         if config.get('_is_image_managed') is not None:
             resources_fields['_is_image_managed'] = config.pop(
                 '_is_image_managed')
@@ -1113,6 +1141,7 @@ class Resources:
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
         add_if_not_none('ports', self.ports)
+        add_if_not_none('_docker_login_config', self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
@@ -1182,5 +1211,8 @@ class Resources:
 
         if version < 11:
             self._ports = None
+
+        if version < 12:
+            self._docker_login_config = None
 
         self.__dict__.update(state)

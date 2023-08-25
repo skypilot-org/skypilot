@@ -1,16 +1,27 @@
 """AWS instance provisioning."""
+import re
+import time
 from typing import Any, Dict, List, Optional
 
 from botocore import config
 
+from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
 from sky.utils import common_utils
+
+logger = sky_logging.init_logger(__name__)
 
 BOTO_MAX_RETRIES = 12
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
+MAX_ATTEMPTS = 6
+
+_DEPENDENCY_VIOLATION_PATTERN = re.compile(
+    r'An error occurred \(DependencyViolation\) when calling the '
+    r'DeleteSecurityGroup operation(.*): (.*)')
 
 
 def _default_ec2_resource(region: str) -> Any:
@@ -167,8 +178,36 @@ def cleanup_ports(
     # and backend_utils::write_cluster_config
     sg_name = (f'sky-sg-{common_utils.user_and_hostname_hash()}'
                f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}')
-    sgs = ec2.security_groups.filter(GroupNames=[sg_name])
-    if len(list(sgs)) != 1:
-        raise ValueError(f'Expected security group {sg_name} not found. '
-                         'Cannot cleanup ports.')
-    list(sgs)[0].delete()
+    # GroupNames will only filter SGs in the default VPC, so we need to use
+    # Filters here. Ref:
+    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
+    sgs = ec2.security_groups.filter(Filters=[{
+        'Name': 'group-name',
+        'Values': [sg_name]
+    }])
+    num_sg = len(list(sgs))
+    if num_sg == 0:
+        logger.warning(f'Expected security group {sg_name} not found. '
+                       'Skip cleanup.')
+        return
+    if num_sg > 1:
+        # TODO(tian): Better handle this case. Maybe we can check when creating
+        # the SG and throw an error if there is already an existing SG with the
+        # same name.
+        logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
+                       'Skip cleanup. Please delete them manually.')
+        return
+    backoff = common_utils.Backoff()
+    for _ in range(MAX_ATTEMPTS):
+        try:
+            list(sgs)[0].delete()
+        except aws.botocore_exceptions().ClientError as e:
+            if _DEPENDENCY_VIOLATION_PATTERN.findall(str(e)):
+                logger.debug(
+                    f'Security group {sg_name} is still in use. Retry.')
+                time.sleep(backoff.current_backoff())
+                continue
+            raise
+        return
+    logger.warning(f'Cannot delete security group {sg_name} after '
+                   f'{MAX_ATTEMPTS} attempts. Please delete it manually.')
