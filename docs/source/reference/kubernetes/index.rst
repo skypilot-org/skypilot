@@ -47,6 +47,17 @@ Once your Kubernetes cluster is up and running:
      $ mkdir -p ~/.kube
      $ cp /path/to/kubeconfig ~/.kube/config
 
+2. [For GPU Support] If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and each node has a label ``skypilot.co/accelerator`` containing the GPU name. You can use our GPU labelling script to do this:
+
+   .. code-block:: console
+
+     $ python -m sky.utils.kubernetes.gpu_labeler
+     # To clean up any pending GPU labelling jobs, run python -m sky.utils.kubernetes.gpu_labeler --cleanup
+
+
+   .. note::
+     GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels.
+
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
    .. code-block:: console
@@ -121,7 +132,7 @@ SkyPilot on Kubernetes is under active development. Some features are in progres
 * CPU Tasks - ✅ Available
 * Auto-down - ✅ Available
 * Storage mounting - ✅ (supported only on x86_64 clusters)
-* GPU Tasks - 🚧 In progress
+* GPU Tasks - ✅ Available
 * Multi-node tasks - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 
