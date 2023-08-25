@@ -2,12 +2,13 @@
 import os
 import math
 import re
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
 import jinja2
 import yaml
 
+import sky
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
