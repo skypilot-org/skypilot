@@ -20,6 +20,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.skylet.providers import command_runner
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -33,7 +34,6 @@ CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -68,11 +68,6 @@ def _is_valid_name(name: str) -> bool:
     if name is None:
         return True
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
-
-
-def _is_valid_env_var(name: str) -> bool:
-    """Checks if the task environment variable name is valid."""
-    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
 def _fill_in_env_vars_in_file_mounts(
@@ -489,7 +484,7 @@ class Task:
                 if not isinstance(key, str):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Env keys must be strings.')
-                if not _is_valid_env_var(key):
+                if not common_utils.is_valid_env_var(key):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Invalid env key: {key}')
         else:

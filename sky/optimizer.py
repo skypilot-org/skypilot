@@ -276,10 +276,26 @@ class Optimizer:
                             location_hint = (
                                 f' Region: {specified_resources.region}.')
 
+                    # If Kubernetes was included in the search space, then
+                    # mention "kubernetes cluster" and/instead of "catalog"
+                    # in the error message.
+                    source_hint = 'catalog'
+                    enabled_clouds = global_user_state.get_enabled_clouds()
+                    if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                        if specified_resources.cloud is None:
+                            source_hint = 'catalog and kubernetes cluster'
+                        elif specified_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()):
+                            source_hint = 'kubernetes cluster'
+
+                    # TODO(romilb): When `sky show-gpus` supports Kubernetes,
+                    #  add a hint to run `sky show-gpus --kubernetes` to list
+                    #  available accelerators on Kubernetes.
+
                     error_msg = (
                         'No launchable resource found for task '
                         f'{node}.{location_hint}\nThis means the '
-                        'catalog does not contain any resources that '
+                        f'{source_hint} does not contain any resources that '
                         'satisfy this request.\n'
                         'To fix: relax or change the resource requirements.\n'
                         'Hint: \'sky show-gpus --all\' '

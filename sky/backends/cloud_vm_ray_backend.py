@@ -1513,9 +1513,10 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
-                # Failed due to catalog issue, e.g. image not found.
-                logger.info(
-                    f'Failed to find catalog in region {region.name}: {e}')
+                # Failed due to catalog issue, e.g. image not found, or
+                # GPUs are requested in a Kubernetes cluster but the cluster
+                # does not have nodes labeled with GPU types.
+                logger.info(f'{e}')
                 continue
             if dryrun:
                 return config_dict
@@ -2309,6 +2310,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             while True:
                 try:
                     head_ssh_port = clouds.Kubernetes.get_port(svc_name)
+                    break
                 except Exception:  # pylint: disable=broad-except
                     retry_cnt += 1
                     if retry_cnt >= max_attempts:
@@ -2979,11 +2981,36 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
+    def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
+                             task: task_lib.Task) -> None:
+        """Update envs with env vars from Kubernetes if cloud is Kubernetes.
+
+        Kubernetes automatically populates containers with critical environment
+        variables, such as those for discovering services running in the
+        cluster and CUDA/nvidia environment variables. We need to update task
+        environment variables with these env vars. This is needed for GPU
+        support and service discovery.
+
+        See https://github.com/skypilot-org/skypilot/issues/2287 for
+        more details.
+        """
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            temp_envs = copy.deepcopy(task.envs)
+            cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
+                handle.cluster_name)
+            task.update_envs(cloud_env_vars)
+
+            # Re update the envs with the original envs to give priority to
+            # the original envs.
+            task.update_envs(temp_envs)
+
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
+
+        self._update_envs_for_k8s(handle, task)
 
         if task.setup is None:
             return
@@ -3293,6 +3320,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
+        self._update_envs_for_k8s(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)
 
