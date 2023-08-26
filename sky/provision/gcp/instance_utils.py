@@ -198,6 +198,8 @@ class GCPComputeInstance(GCPInstance):
     ) -> None:
         rule = cls.load_resource().firewalls().list(
             project=project_id, filter=f'name={firewall_rule_name}').execute()
+        # For the return value format, please refer to
+        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # pylint: disable=line-too-long
         if 'items' not in rule:
             logger.warning(f'Firewall rule {firewall_rule_name} not found. '
                            'Skip cleanup.')
