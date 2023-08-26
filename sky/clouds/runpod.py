@@ -59,6 +59,13 @@ class RunPod(clouds.Cloud):
         return regions
 
     @classmethod
+    def get_vcpus_mem_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type, clouds='runpod')
+
+    @classmethod
     def zones_provision_loop(
         cls,
         *,
