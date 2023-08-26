@@ -206,7 +206,13 @@ class RunPod(clouds.Cloud):
             valid, error = runpod.check_credentials()
 
             if not valid:
-                return False, error
+                return False, (
+                    f'{error} \n'
+                    'Credentials can be set up by running: \n'
+                    f'   $ pip install runpod \n'
+                    f'   $ runpod store_api_key <YOUR_RUNPOD_API_KEY> \n'
+                    'For more information, see https://docs.runpod.io/docs/skypilot'
+                )
 
             return True, None
 
