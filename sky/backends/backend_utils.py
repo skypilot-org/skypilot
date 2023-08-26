@@ -569,7 +569,7 @@ class SSHConfigHelper(object):
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
-                                                    ] * len(external_worker_ips)
+                                                     ] * len(external_worker_ips)
         codegens: List[Optional[str]] = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
@@ -612,7 +612,7 @@ class SSHConfigHelper(object):
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
         if docker_user is not None:
-            docker_proxy_command_generator = lambda ip: ' '.join(
+            def docker_proxy_command_generator(ip): return ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
         docker_proxy_command = None
@@ -1161,6 +1161,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_scp_authentication(config)
     elif isinstance(cloud, clouds.OCI):
         config = auth.setup_oci_authentication(config)
+    elif isinstance(cloud, clouds.RunPod):
+        config = auth.setup_runpod_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1181,7 +1183,7 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
 
 def _count_healthy_nodes_from_ray(output: str,
                                   is_local_cloud: bool = False
-                                 ) -> Tuple[int, int]:
+                                  ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
 
     def get_ready_nodes(pattern, output):
@@ -1338,7 +1340,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str,
                              docker_user: Optional[str] = None
-                            ) -> Dict[str, str]:
+                             ) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -2001,7 +2003,7 @@ def _update_cluster_status_no_lock(
 
     all_nodes_up = (all(
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
-                    len(node_statuses) == handle.launched_nodes)
+        len(node_statuses) == handle.launched_nodes)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
