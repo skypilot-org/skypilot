@@ -7,7 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.runpod import rp_helper as runpod_api
+import sky.skylet.providers.runpod.rp_helper as runpod_api
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib  # Renaming to avoid shadowing variables.
