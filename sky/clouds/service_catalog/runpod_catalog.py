@@ -73,6 +73,7 @@ def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
         cpus: Optional[str] = None,
+        memory: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
