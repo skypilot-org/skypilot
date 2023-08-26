@@ -54,8 +54,9 @@ def get_hourly_cost(instance_type: str,
                                        zone)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
-    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+def get_vcpus_mem_from_instance_type(
+        instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
 def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
