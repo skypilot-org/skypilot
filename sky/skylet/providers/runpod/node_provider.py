@@ -40,18 +40,13 @@ class RunPodNodeProvider(NodeProvider):
 
     def __init__(self, provider_config: Dict[str, Any], cluster_name: str) -> None:
         """ Initialize the RunPodNodeProvider.
-        cached_nodes |
-        api_key | The RunPod API key
+        cached_nodes | The list of nodes that have been cached for quick access.
         ssh_key_name | The name of the SSH key to use for the pods.
         """
         NodeProvider.__init__(self, provider_config, cluster_name)
 
         self.lock = RLock()
         self.cached_nodes: Dict[str, Dict[str, Any]] = {}
-
-        # Load credentials
-        self.api_key = runpod.get_credentials()['api_key']
-        self.ssh_key_name = runpod.get_credentials()['ssh_key_name']
 
     def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
         """Return a list of node ids filtered by the specified tags dict.
@@ -100,13 +95,12 @@ class RunPodNodeProvider(NodeProvider):
             instance_id = runpod_api.launch(name=self.cluster_name,
                                             instance_type=ttype,
                                             region=region,
-                                            api_key=self.api_key,
                                             ssh_key_name=self.ssh_key_name)
 
         if instance_id is None:
-            raise FluffyCloudError('Failed to launch instance.')
+            raise RunPodError('Failed to launch instance.')
 
-        runpod_api.set_tags(instance_id, config_tags, self.api_key)
+        runpod_api.set_tags(instance_id, config_tags)
 
         # FILL_IN: Only return after all nodes are booted.
         # If needed poll fc_api.list_instances() to wait for status == 'running'
@@ -116,18 +110,18 @@ class RunPodNodeProvider(NodeProvider):
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
-        runpod_api.set_tags(node_id, node['tags'], self.api_key)
+        runpod_api.set_tags(node_id, node['tags'])
 
     def terminate_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Terminates the specified node."""
-        runpod_api.remove(node_id, self.api_key)
+        runpod_api.remove(node_id)
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
         '''SkyPilot Method
         Caches the nodes with the given tag_filters.
         '''
-        instances = runpod_api.list_instances(self.api_key)  # FILL_IN
+        instances = runpod_api.list_instances()
 
         new_cache = {}
         for instance_id, instance in instances.items():

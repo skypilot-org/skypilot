@@ -11,7 +11,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib  # Renaming to avoid shadowing variables.
 
 _CREDENTIAL_FILES = [
-    'credentials',
+    'credentials.toml',
 ]
 
 
@@ -37,18 +37,6 @@ class RunPod(clouds.Cloud):
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
-
-    @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            ########
-            # TODO #
-            ########
-            # Add the region from catalog entry
-            cls._regions = [
-                clouds.Region(...),
-            ]
-        return cls._regions
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],

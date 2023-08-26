@@ -1,6 +1,7 @@
 '''
 RunPod library wrapper, formats the input/output of the RunPod library for SkyPilot.
 '''
+import json
 from typing import Dict
 
 import runpod
@@ -34,7 +35,10 @@ GPU_NAME_MAP = {
 }
 
 
-def list_instances(api_key: str):
+TAG_FILE = '~/.runpod/skypilot_tags.json'
+
+
+def list_instances():
     '''
     Lists instances associated with API key.
     '''
@@ -45,19 +49,25 @@ def list_instances(api_key: str):
         instance_list[instance['id']] = {}
 
         instance_list[instance['id']]['status'] = instance['desiredStatus']
-        instance_list['name'] = instance['name']
+        instance_list[instance['id']]['name'] = instance['name']
 
         for port in instance['ports']:
             if port['privatePort'] == 22:
-                instance_list['ip'] = port['ip']
+                instance_list[instance['id']]['ip'] = port['ip']
+
+        # Set tags
+        with open(TAG_FILE, 'r') as tag_file:
+            instance_tags = json.load(tag_file)
+        instance_list[instance['id']]['tags'] = instance_tags[instance['id']]
+
+    return instance_list
 
 
-def launch(name: str, instance_type: str, region: str, api_key: str, ssh_key_name: str):
+def launch(name: str, instance_type: str, region: str, ssh_key_name: str):
     '''
     Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the GPU, and launches the instance.
-    TODO: Return the instance IP.
     '''
     gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
@@ -79,15 +89,20 @@ def launch(name: str, instance_type: str, region: str, api_key: str, ssh_key_nam
     return new_instance['id']
 
 
-def set_tags(instance_id: str, tags: Dict, api_key: str):
+def set_tags(instance_id: str, tags: Dict):
     '''
     Sets the tags for the given instance.
     '''
-    # TODO: Implement tag alternative.
-    pass
+    with open(TAG_FILE, 'r') as tag_file:
+        instance_tags = json.load(tag_file)
+
+    instance_tags[instance_id] = tags
+
+    with open(TAG_FILE, 'w') as tag_file:
+        json.dump(instance_tags, tag_file)
 
 
-def remove(instance_id: str, api_key: str):
+def remove(instance_id: str):
     '''
     Terminates the given instance.
     '''
