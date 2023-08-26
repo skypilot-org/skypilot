@@ -231,7 +231,7 @@ class KubernetesNodeProvider(NodeProvider):
                     if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('CPU(s)'))
+                                lack_resource_msg.format('CPUs'))
                         if 'Insufficient memory' in event_message:
                             raise config.KubernetesError(
                                 lack_resource_msg.format('Memories'))
@@ -239,7 +239,7 @@ class KubernetesNodeProvider(NodeProvider):
                             node_selector = pod.spec.node_selector
                             if node_selector is not None:
                                 raise config.KubernetesError(
-                                    'Unavailable GPU(s) are requested. '
+                                    f'{lack_resource_msg.format("GPUs")}'
                                     f'Please confirm if {node_selector} is '
                                     'available in the cluster.')
                     raise config.KubernetesError(
