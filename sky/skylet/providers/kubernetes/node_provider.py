@@ -226,12 +226,10 @@ class KubernetesNodeProvider(NodeProvider):
                 if event_message is not None:
                     if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
-                            total_cpus = os.cpu_count()
                             raise config.KubernetesError(
                                 'More than available CPU(s) are requested. '
-                                f'In total, {total_cpus} CPUs are available in '
-                                'the machine. Run \'sky status\' to see the '
-                                'number of CPUs that are already in use.')
+                                f'Run \'sky status\' to see the number of CPUs'
+                                'that are already in use.')
                         if 'didn\'t match Pod\'s node affinity/selector' in event_message:
                             node_selector = pod.spec.node_selector
                             if node_selector is not None:
