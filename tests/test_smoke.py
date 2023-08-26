@@ -2633,8 +2633,8 @@ def _get_service_name() -> str:
 # ready replicas and the second number is the number of total replicas. We
 # grep such format to ensure that the service is ready, and early exit if any
 # failure detected. In the end we sleep for serve.CONTROLLER_SYNC_INTERVAL to
-# make sure redirector have enough time to sync with the controller and get all
-# ready replica IPs.
+# make sure load balancer have enough time to sync with the controller and get
+# all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '(while true; do'
     '     output=$(sky serve status {name});'

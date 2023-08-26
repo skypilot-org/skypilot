@@ -1,4 +1,4 @@
-"""Controller: the central controller of SkyServe.
+"""SkyServeController: the central controller of SkyServe.
 
 Responsible for autoscaling and replica management.
 """
@@ -35,8 +35,8 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
         return not ('GET' in message and '200' in message)
 
 
-class Controller:
-    """Controller: control everything about replica.
+class SkyServeController:
+    """SkyServeController: control everything about replica.
 
     This class is responsible for:
         - Starting and terminating the replica monitor and autoscaler.
@@ -153,6 +153,6 @@ if __name__ == '__main__':
         cooldown=60,
         query_interval=60)
 
-    # ======= Controller =========
-    controller = Controller(args.port, _infra_provider, _autoscaler)
+    # ======= SkyServeController =========
+    controller = SkyServeController(args.port, _infra_provider, _autoscaler)
     controller.run()

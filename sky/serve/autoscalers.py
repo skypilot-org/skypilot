@@ -80,7 +80,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.cooldown: int = cooldown
         # Query interval for requests num. Every `query_interval` seconds,
         # Autoscaler will received an update for number of requests from
-        # redirector.
+        # load balancer.
         self.query_interval: int = query_interval
         # Time of last scale operation
         self.last_scale_operation: float = 0.

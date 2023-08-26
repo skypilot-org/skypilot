@@ -1078,7 +1078,7 @@ def serve_up(
 
         # NOTICE: The job submission order cannot be changed since the
         # `sky serve logs` CLI will identify the controller job with
-        # the first job submitted and the redirector job with the second
+        # the first job submitted and the load balancer job with the second
         # job submitted.
         with console.status('[yellow]Launching controller process...[/yellow]'):
             _execute(
@@ -1106,13 +1106,14 @@ def serve_up(
         print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
 
-        with console.status('[yellow]Launching redirector process...[/yellow]'):
+        with console.status(
+                '[yellow]Launching load balancer process...[/yellow]'):
             controller_addr = f'http://localhost:{serve.CONTROLLER_PORT}'
             _execute(
                 entrypoint=sky.Task(
-                    name='run-redirector',
+                    name='run-load-balancer',
                     envs=controller_envs,
-                    run='python -m sky.serve.redirector --task-yaml '
+                    run='python -m sky.serve.load_balancer --task-yaml '
                     f'{remote_task_yaml_path} --port {app_port} '
                     f'--controller-addr {controller_addr}'),
                 stream_logs=False,
@@ -1121,16 +1122,16 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            redirector_job_is_running = _wait_until_job_is_running(
+            load_balancer_job_is_running = _wait_until_job_is_running(
                 controller_cluster_name, 2)
-        if not redirector_job_is_running:
+        if not load_balancer_job_is_running:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}Redirector failed to launch. '
+            print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
-                  f'--redirector{colorama.Style.RESET_ALL}')
+                  f'--load-balancer{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
+        print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
               f'{colorama.Style.RESET_ALL}')
 
         global_user_state.set_service_status(
@@ -1141,15 +1142,15 @@ def serve_up(
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
-              '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --controller '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of redirector:'
-              f'\t{backend_utils.BOLD}sky serve logs --redirector '
-              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo see logs of one replica:'
               f'\t{backend_utils.BOLD}sky serve logs {service_name} '
               f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
+              '\nTo see logs of load balancer:'
+              f'\t{backend_utils.BOLD}sky serve logs --load-balancer '
+              f'{service_name}{backend_utils.RESET_BOLD}'
+              '\nTo see logs of controller:'
+              f'\t{backend_utils.BOLD}sky serve logs --controller '
+              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
               f'\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}'
@@ -1238,7 +1239,7 @@ def serve_down(
             exceptions.CommandError) as e:
         if purge:
             logger.warning('Ignoring error when stopping controller and '
-                           f'redirector jobs of service {service_name}: {e}')
+                           f'load balancer jobs of service {service_name}: {e}')
         else:
             raise RuntimeError(e) from e
 
