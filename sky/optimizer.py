@@ -23,8 +23,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-
-    #pylint: disable=ungrouped-imports
+    # pylint: disable=ungrouped-imports
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -249,13 +248,11 @@ class Optimizer:
             if do_print:
                 logger.debug('#### {} ####'.format(node))
 
+            fuzzy_candidates = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, cloud_candidates = \
-                    _fill_in_launchable_resources(
-                        node,
-                        blocked_resources
-                    )
+                launchable_resources, cloud_candidates, fuzzy_candidates = (
+                    _fill_in_launchable_resources(node, blocked_resources))
                 node_to_candidate_map[node] = cloud_candidates
             else:
                 # Dummy sink node.
@@ -267,6 +264,7 @@ class Optimizer:
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
+                    source_hint = 'catalog'
                     if node.get_resources():
                         specified_resources = list(node.get_resources())[0]
                         if specified_resources.zone is not None:
@@ -276,31 +274,40 @@ class Optimizer:
                             location_hint = (
                                 f' Region: {specified_resources.region}.')
 
-                    # If Kubernetes was included in the search space, then
-                    # mention "kubernetes cluster" and/instead of "catalog"
-                    # in the error message.
-                    source_hint = 'catalog'
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                    if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
-                        if specified_resources.cloud is None:
-                            source_hint = 'catalog and kubernetes cluster'
-                        elif specified_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            source_hint = 'kubernetes cluster'
+                        # If Kubernetes was included in the search space, then
+                        # mention "kubernetes cluster" and/instead of "catalog"
+                        # in the error message.
+                        enabled_clouds = global_user_state.get_enabled_clouds()
+                        if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                            if specified_resources.cloud is None:
+                                source_hint = 'catalog and kubernetes cluster'
+                            elif specified_resources.cloud.is_same_cloud(
+                                    clouds.Kubernetes()):
+                                source_hint = 'kubernetes cluster'
 
                     # TODO(romilb): When `sky show-gpus` supports Kubernetes,
                     #  add a hint to run `sky show-gpus --kubernetes` to list
                     #  available accelerators on Kubernetes.
 
+                    bold = colorama.Style.BRIGHT
+                    cyan = colorama.Fore.CYAN
+                    reset = colorama.Style.RESET_ALL
+                    fuzzy_candidates_str = ''
+                    if fuzzy_candidates:
+                        fuzzy_candidates_str = (
+                            f'\nTry one of these fuzzy matches: {cyan}'
+                            f'{fuzzy_candidates}{reset}')
                     error_msg = (
                         'No launchable resource found for task '
                         f'{node}.{location_hint}\nThis means the '
                         f'{source_hint} does not contain any resources that '
-                        'satisfy this request.\n'
-                        'To fix: relax or change the resource requirements.\n'
-                        'Hint: \'sky show-gpus --all\' '
+                        'satisfy this request.\n\n'
+                        'To fix: relax or change the resource requirements.'
+                        f'{fuzzy_candidates_str}\n\n'
+                        f'Hint: {bold}sky show-gpus{reset} '
                         'to list available accelerators.\n'
-                        '      \'sky check\' to check the enabled clouds.')
+                        f'      {bold}sky check{reset} to check the enabled '
+                        'clouds.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
@@ -969,13 +976,13 @@ def _fill_in_launchable_resources(
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates]:
+           _PerCloudCandidates, List[str]]:
     backend_utils.check_public_cloud_enabled()
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
-    cloud_candidates: Dict[clouds.Cloud,
-                           resources_lib.Resources] = collections.defaultdict(
-                               resources_lib.Resources)
+    all_fuzzy_candidates = set()
+    cloud_candidates: _PerCloudCandidates = collections.defaultdict(
+        List[resources_lib.Resources])
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.get_resources():
@@ -1005,7 +1012,6 @@ def _fill_in_launchable_resources(
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)
                 ]
-            all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(
@@ -1041,4 +1047,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates
+    return launchable, cloud_candidates, list(sorted(all_fuzzy_candidates))

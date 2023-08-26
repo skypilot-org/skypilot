@@ -256,16 +256,9 @@ class IBM(clouds.Cloud):
                                                          clouds='ibm')
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
-        """Returns a list of feasible and launchable resources.
-
-        Feasible resources refer to an offering respecting the resource
-        requirements.  Currently, this function implements "filtering" the
-        cloud's offerings only w.r.t. accelerators constraints.
-
-        Launchable resources require a cloud and an instance type be assigned.
-        """
-        fuzzy_candidate_list: Optional[List[str]] = []
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
