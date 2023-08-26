@@ -2639,23 +2639,16 @@ def test_gcp_zero_quota_failover():
 # ---------- Testing skyserve ----------
 
 
-# TODO(tian): Change this function after #2403 is merged.
 def _get_service_name() -> str:
     """Returns a user-unique service name for each test_skyserve_<name>().
 
     Must be called from each test_skyserve_<name>().
-
-    SkyServe controller have a 11-character prefix 'controller-'. This will
-    generate a service name with 24 characters, which add the length of prefix,
-    is the max length of service name on GCP (35).
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
     test_name = test_name.replace('skyserve-', 'ss-')
-    if len(test_name) >= 16:
-        test_name = test_name[:11] + '-' + hashlib.md5(
-            test_name.encode('utf-8')).hexdigest()[:4]
-    return f'{test_name}-{_smoke_test_hash}-{test_id}'
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
+    return f'{test_name}-{test_id}'
 
 
 # We check the output of the skyserve service to see if it is ready. Output of
