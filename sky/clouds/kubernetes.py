@@ -1,17 +1,15 @@
 """Kubernetes."""
 import json
-import math
 import os
-import re
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.utils import common_utils
-from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 
@@ -19,129 +17,9 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
+logger = sky_logging.init_logger(__name__)
+
 _CREDENTIAL_PATH = '~/.kube/config'
-
-
-class KubernetesInstanceType:
-    """Class to represent the "Instance Type" in a Kubernetes.
-
-    Since Kubernetes does not have a notion of instances, we generate
-    virtual instance types that represent the resources requested by a
-    pod ("node").
-
-    This name captures the following resource requests:
-        - CPU
-        - Memory
-        - Accelerators
-
-    The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
-    k is the amount of memory in GB. Accelerators can be specified by
-    appending "--{a}{type}" where a is the number of accelerators and
-    type is the accelerator type.
-
-    CPU and memory can be specified as floats. Accelerator count must be int.
-
-    Examples:
-        - 4CPU--16GB
-        - 0.5CPU--1.5GB
-        - 4CPU--16GB--1V100
-    """
-
-    def __init__(self,
-                 cpus: float,
-                 memory: float,
-                 accelerator_count: Optional[int] = None,
-                 accelerator_type: Optional[str] = None):
-        self.cpus = cpus
-        self.memory = memory
-        self.accelerator_count = accelerator_count
-        self.accelerator_type = accelerator_type
-
-    @property
-    def name(self) -> str:
-        """Returns the name of the instance."""
-        assert self.cpus is not None
-        assert self.memory is not None
-        name = (f'{self._format_count(self.cpus)}CPU--'
-                f'{self._format_count(self.memory)}GB')
-        if self.accelerator_count:
-            name += f'--{self.accelerator_count}{self.accelerator_type}'
-        return name
-
-    @staticmethod
-    def is_valid_instance_type(name: str) -> bool:
-        """Returns whether the given name is a valid instance type."""
-        pattern = re.compile(r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
-        return bool(pattern.match(name))
-
-    @classmethod
-    def _parse_instance_type(
-            cls,
-            name: str) -> Tuple[float, float, Optional[int], Optional[str]]:
-        """Returns the cpus, memory, accelerator_count, and accelerator_type
-        from the given name."""
-        pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
-        )
-        match = pattern.match(name)
-        if match:
-            cpus = float(match.group('cpus'))
-            memory = float(match.group('memory'))
-            accelerator_count = match.group('accelerator_count')
-            accelerator_type = match.group('accelerator_type')
-            if accelerator_count:
-                accelerator_count = int(accelerator_count)
-                accelerator_type = str(accelerator_type)
-            else:
-                accelerator_count = None
-                accelerator_type = None
-            return cpus, memory, accelerator_count, accelerator_type
-        else:
-            raise ValueError(f'Invalid instance name: {name}')
-
-    @classmethod
-    def from_instance_type(cls, name: str) -> 'KubernetesInstanceType':
-        """Returns an instance name object from the given name."""
-        if not cls.is_valid_instance_type(name):
-            raise ValueError(f'Invalid instance name: {name}')
-        cpus, memory, accelerator_count, accelerator_type = \
-            cls._parse_instance_type(name)
-        return cls(cpus=cpus,
-                   memory=memory,
-                   accelerator_count=accelerator_count,
-                   accelerator_type=accelerator_type)
-
-    @classmethod
-    def from_resources(cls,
-                       cpus: float,
-                       memory: float,
-                       accelerator_count: int = 0,
-                       accelerator_type: str = '') -> 'KubernetesInstanceType':
-        """Returns an instance name object from the given resources.
-
-        If accelerator_count is not an int, it will be rounded up since GPU
-        requests in Kubernetes must be int.
-        """
-        name = f'{cpus}CPU--{memory}GB'
-        # Round up accelerator_count if it is not an int.
-        accelerator_count = math.ceil(accelerator_count)
-        if accelerator_count > 0:
-            name += f'--{accelerator_count}{accelerator_type}'
-        return cls(cpus=cpus,
-                   memory=memory,
-                   accelerator_count=accelerator_count,
-                   accelerator_type=accelerator_type)
-
-    def __str__(self):
-        return self.name
-
-    @classmethod
-    def _format_count(cls, num: Union[float, int]) -> str:
-        """Formats a float to not show decimal point if it is a whole number"""
-        if isinstance(num, int):
-            return str(num)
-        return '{:.0f}'.format(num) if num.is_integer() else '{:.1f}'.format(
-            num)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -163,6 +41,7 @@ class Kubernetes(clouds.Cloud):
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
+    _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
     _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -243,27 +122,21 @@ class Kubernetes(clouds.Cloud):
         return kubernetes_utils.get_port(svc_name, ns)
 
     @classmethod
-    def get_external_ip(cls) -> str:
-        return kubernetes_utils.get_external_ip()
-
-    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[str] = None) -> str:
+        # TODO(romilb): In the future, we may want to move the instance type
+        #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
-        # TODO(romilb): We should check the maximum number of CPUs and memory
-        #  that can be requested, and return None if the requested resources
-        #  exceed the maximum. This may require thought about how to handle
-        #  autoscaling clusters.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
             cpus.strip('+')) if cpus is not None else cls._DEFAULT_NUM_VCPUS
         instance_mem = float(memory.strip('+')) if memory is not None else \
             instance_cpus * cls._DEFAULT_MEMORY_CPU_RATIO
-        virtual_instance_type = KubernetesInstanceType(instance_cpus,
-                                                       instance_mem).name
+        virtual_instance_type = kubernetes_utils.KubernetesInstanceType(
+            instance_cpus, instance_mem).name
         return virtual_instance_type
 
     @classmethod
@@ -271,16 +144,19 @@ class Kubernetes(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        inst = KubernetesInstanceType.from_instance_type(instance_type)
+        inst = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return {
             inst.accelerator_type: inst.accelerator_count
-        } if (inst.accelerator_count and inst.accelerator_type) else None
+        } if (inst.accelerator_count is not None and
+              inst.accelerator_type is not None) else None
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        k = KubernetesInstanceType.from_instance_type(instance_type)
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            instance_type)
         return k.cpus, k.memory
 
     @classmethod
@@ -318,7 +194,8 @@ class Kubernetes(clouds.Cloud):
 
         # resources.memory and cpus are None if they are not explicitly set.
         # We fetch the default values for the instance type in that case.
-        k = KubernetesInstanceType.from_instance_type(resources.instance_type)
+        k = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+            resources.instance_type)
         cpus = k.cpus
         mem = k.memory
         # Optionally populate accelerator information.
@@ -333,33 +210,9 @@ class Kubernetes(clouds.Cloud):
 
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
-            label_formatter, node_labels = \
-                kubernetes_utils.detect_gpu_label_formatter()
-            if label_formatter is None:
-                # If GPU labels are not detected, trigger failover by
-                # raising ResourcesUnavailableError.
-                # TODO(romilb): This will fail early for autoscaling clusters.
-                #  For AS clusters, we may need a way for users to specify the
-                #  GPULabelFormatter to use since the cluster may be scaling up
-                #  from zero nodes and may not have any GPU nodes yet.
-                with ux_utils.print_exception_no_traceback():
-                    supported_formats = ', '.join([
-                        f.get_label_key()
-                        for f in kubernetes_utils.LABEL_FORMATTER_REGISTRY
-                    ])
-                    suffix = ''
-                    if env_options.Options.SHOW_DEBUG_INFO.get():
-                        suffix = ' Found node labels: {}'.format(node_labels)
-                    raise exceptions.ResourcesUnavailableError(
-                        'Could not detect GPU labels in Kubernetes cluster. '
-                        'Please ensure at least one node in the cluster has '
-                        'node labels of either of these formats: '
-                        f'{supported_formats}. Please refer to '
-                        'the documentation on how to set up node labels.'
-                        f'{suffix}')
+            k8s_acc_label_key, k8s_acc_label_value = \
+                kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-            k8s_acc_label_key = label_formatter.get_label_key()
-            k8s_acc_label_value = label_formatter.get_label_value(acc_type)
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -398,41 +251,66 @@ class Kubernetes(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
+
         default_instance_type = Kubernetes.get_default_instance_type(
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier)
-        if accelerators is None:
-            # Return a default instance type with the given number of vCPUs.
-            if default_instance_type is None:
-                return ([], [])
-            else:
-                return _make([default_instance_type]), []
 
-        assert len(accelerators) == 1, resources
-        # GPUs requested - build instance type.
-        acc_type, acc_count = list(accelerators.items())[0]
-        default_inst = KubernetesInstanceType.from_instance_type(
-            default_instance_type)
-        instance_type = KubernetesInstanceType.from_resources(
-            default_inst.cpus, default_inst.memory, acc_count, acc_type).name
+        if accelerators is None:
+            # For CPU only clusters, need no special handling
+            chosen_instance_type = default_instance_type
+        else:
+            assert len(accelerators) == 1, resources
+            # GPUs requested - build instance type.
+            acc_type, acc_count = list(accelerators.items())[0]
+
+            # Parse into KubernetesInstanceType
+            k8s_instance_type = kubernetes_utils.KubernetesInstanceType.\
+                from_instance_type(
+                default_instance_type)
+
+            gpu_task_cpus = k8s_instance_type.cpus
+            # Special handling to bump up memory multiplier for GPU instances
+            gpu_task_memory = float(resources.memory.strip('+')) \
+                if resources.memory is not None \
+                else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
+            chosen_instance_type = kubernetes_utils.KubernetesInstanceType.\
+                from_resources(
+                gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
+
+        # Check if requested instance type will fit in the cluster.
+        # TODO(romilb): This will fail early for autoscaling clusters.
+        fits, reason = kubernetes_utils.check_instance_fits(
+            chosen_instance_type)
+        if not fits:
+            logger.debug(f'Instance type {chosen_instance_type} does '
+                         'not fit in the Kubernetes cluster. '
+                         f'Reason: {reason}')
+            return [], []
+
         # No fuzzy lists for Kubernetes
-        return _make([instance_type]), []
+        return _make([chosen_instance_type]), []
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
             # Test using python API
-            return kubernetes_utils.check_credentials()
+            try:
+                return kubernetes_utils.check_credentials()
+            except Exception as e:  # pylint: disable=broad-except
+                return (False, 'Credential check failed: '
+                        f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '
-                    'check if {_CREDENTIAL_PATH} exists.')
+                    f'check if {_CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        return KubernetesInstanceType.is_valid_instance_type(instance_type)
+        return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
+            instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Kubernetes doesn't have regions or zones, so we don't need to validate
@@ -443,10 +321,12 @@ class Kubernetes(clouds.Cloud):
                                       acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
-        # TODO(romilb): All accelerators are marked as available for now.
-        #  In the future, we should return false for accelerators that we know
-        #  are not supported by the cluster.
-        return True
+        try:
+            # Check if accelerator is available by checking node labels
+            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
+            return True
+        except exceptions.ResourcesUnavailableError:
+            return False
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

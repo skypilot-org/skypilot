@@ -31,15 +31,16 @@ while getopts ":pg" opt; do
   esac
 done
 
-# Shift off the options
-shift $((OPTIND-1))
-
 # Add -gpu to the tag if the GPU image is being built
-if [[ $gpu == "true" ]]; then
+if [[ $gpu ]]; then
   TAG=$TAG-gpu:latest
 else
   TAG=$TAG:latest
 fi
+
+# Shift off the options
+shift $((OPTIND-1))
+
 
 # Navigate to the root of the project (inferred from git)
 cd "$(git rev-parse --show-toplevel)"

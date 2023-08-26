@@ -6,6 +6,7 @@ import getpass
 import json
 import os
 import pathlib
+import pprint
 import re
 import subprocess
 import tempfile
@@ -1219,7 +1220,7 @@ def _count_healthy_nodes_from_ray(output: str,
 def get_docker_user(ip: str, cluster_config_file: str) -> str:
     """Find docker container username."""
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-    runner = command_runner.SSHCommandRunner(ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(ip, port=22, **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
     whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
         f'sudo docker exec {container_name} whoami',
@@ -1252,8 +1253,8 @@ def wait_until_ray_cluster_ready(
     try:
         head_ip = _query_head_ip_with_retries(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
-    except RuntimeError as e:
-        logger.error(e)
+    except exceptions.FetchIPError as e:
+        logger.error(common_utils.format_exception(e))
         return False, None  # failed
 
     config = common_utils.read_yaml(cluster_config_file)
@@ -1268,7 +1269,9 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file, docker_user)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip,
+                                             port=22,
+                                             **ssh_credentials)
     with log_utils.console.status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
@@ -1484,7 +1487,7 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     """Returns the IP of the head node by querying the cloud.
 
     Raises:
-      RuntimeError: if we failed to get the head IP.
+      exceptions.FetchIPError: if we failed to get the head IP.
     """
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
@@ -1513,7 +1516,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                raise RuntimeError('Failed to get head ip') from e
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD) from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(backoff.current_backoff())
@@ -1528,7 +1532,21 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all nodes in the cluster, with head node at front."""
+    """Returns the IPs of all nodes in the cluster, with head node at front.
+
+    Args:
+        cluster_yaml: Path to the cluster yaml.
+        expected_num_nodes: Expected number of nodes in the cluster.
+        handle: Cloud VM Ray resource handle. It is only required for TPU VM or
+            on-prem clusters.
+        head_ip_max_attempts: Max attempts to get head ip.
+        worker_ip_max_attempts: Max attempts to get worker ips.
+        get_internal_ips: Whether to get internal IPs.
+
+    Raises:
+        exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+            HEAD or WORKER.
+    """
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as
@@ -1558,12 +1576,8 @@ def get_node_ips(cluster_yaml: str,
     # ray get-head-ip below, if a long-lasting network connection failure
     # happens.
     check_network_connection()
-    try:
-        head_ip = _query_head_ip_with_retries(cluster_yaml,
-                                              max_attempts=head_ip_max_attempts)
-    except RuntimeError as e:
-        raise exceptions.FetchIPError(
-            exceptions.FetchIPError.Reason.HEAD) from e
+    head_ip = _query_head_ip_with_retries(cluster_yaml,
+                                          max_attempts=head_ip_max_attempts)
     head_ip_list = [head_ip]
     if expected_num_nodes > 1:
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
@@ -1693,47 +1707,6 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     return all_ips
 
 
-@timeline.event
-def get_head_ip(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    max_attempts: int = 1,
-) -> str:
-    """Returns the ip of the head node.
-
-    First try to use the cached head ip. If it is not available, query
-    the head ip from the cluster.
-
-    Args:
-        handle: The ResourceHandle of the cluster.
-        max_attempts: The maximum number of attempts to query the head ip.
-
-    Returns:
-        The ip of the head node.
-    """
-    head_ip = handle.head_ip
-    if head_ip is not None:
-        return head_ip
-    head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
-    return head_ip
-
-
-@timeline.event
-def get_head_ssh_port(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-    use_cache: bool = True,
-    max_attempts: int = 1,
-) -> int:
-    """Returns the ip of the head node."""
-    del handle  # Unused.
-    del use_cache  # Unused.
-    del max_attempts  # Unused.
-    # Use port 22 for everything including Kubernetes.
-    # Note: for Kubernetes we use ssh jump host to access ray head
-    # TODO(romilb): Add a get port method to the cloud classes.
-    head_ssh_port = 22
-    return head_ssh_port
-
-
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
     adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
@@ -1858,6 +1831,8 @@ def _query_cluster_status_via_cloud_api(
         try:
             node_status_dict = provision_lib.query_instances(
                 cloud_name, cluster_name, provider_config)
+            logger.debug(f'Querying {cloud_name} cluster {cluster_name!r} '
+                         f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
@@ -2005,12 +1980,12 @@ def _update_cluster_status_no_lock(
         try:
             # TODO(zhwu): This function cannot distinguish transient network
             # error in ray's get IPs vs. ray runtime failing.
-            #
-            # NOTE: using use_cached_ips=False is very slow as it calls into
-            # `ray get head-ip/worker-ips`. Setting it to True is safe because
+
+            # NOTE: fetching the IPs is very slow as it calls into
+            # `ray get head-ip/worker-ips`. Using cached IPs is safe because
             # in the worst case we time out in the `ray status` SSH command
             # below.
-            external_ips = handle.external_ips(use_cached_ips=True)
+            external_ips = handle.cached_external_ips
             # This happens to a stopped TPU VM as we use gcloud to query the IP.
             # Or user interrupt the `sky launch` process before the first time
             # resources handle is written back to local database.
@@ -2020,29 +1995,42 @@ def _update_cluster_status_no_lock(
             # user will be notified that any auto stop/down might not be
             # triggered.
             if external_ips is None or len(external_ips) == 0:
+                logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
+                             f'IPs found. External IPs: {external_ips}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
+            assert handle.head_ssh_port is not None, handle
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
-            rc, output, _ = runner.run(RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                                       stream_logs=False,
-                                       require_outputs=True,
-                                       separate_stderr=True)
+            rc, output, stderr = runner.run(
+                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
             if rc:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
+                raise RuntimeError(
+                    f'Refreshing status ({cluster_name!r}): Failed to check '
+                    f'ray cluster\'s healthiness with '
+                    f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                    f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
+            raise RuntimeError(
+                f'Refreshing status ({cluster_name!r}): ray status not showing '
+                f'all nodes ({ready_head + ready_workers}/'
+                f'{handle.launched_nodes}); output: {output}; stderr: {stderr}')
         except exceptions.FetchIPError:
             logger.debug(
-                'Refreshing status: Failed to use `ray` to get IPs from cluster'
-                f' {cluster_name!r}.')
+                f'Refreshing status ({cluster_name!r}) failed to get IPs.')
+        except RuntimeError as e:
+            logger.debug(str(e))
         return False
 
     # Determining if the cluster is healthy (UP):
@@ -2122,6 +2110,8 @@ def _update_cluster_status_no_lock(
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or any(
         status != status_lib.ClusterStatus.STOPPED for status in node_statuses))
     if is_abnormal:
+        logger.debug('The cluster is abnormal. Setting to INIT status. '
+                     f'node_statuses: {node_statuses}')
         backend = get_backend_from_handle(handle)
         if isinstance(backend,
                       backends.CloudVmRayBackend) and record['autostop'] >= 0:
@@ -2803,3 +2793,25 @@ def check_rsync_installed() -> None:
                 ' it is not installed. For Debian/Ubuntu system, '
                 'install it with:\n'
                 '  $ sudo apt install rsync') from None
+
+
+def check_stale_runtime_on_remote(returncode: int, stderr: str,
+                                  cluster_name: str) -> None:
+    """Raises RuntimeError if remote SkyPilot runtime needs to be updated.
+
+    We detect this by parsing certain backward-incompatible error messages from
+    `stderr`. Typically due to the local client version just got updated, and
+    the remote runtime is an older version.
+    """
+    pattern = re.compile(r'AttributeError: module \'sky\.(.*)\' has no '
+                         r'attribute \'(.*)\'')
+    if returncode != 0:
+        attribute_error = re.findall(pattern, stderr)
+        if attribute_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.RED}SkyPilot runtime needs to be updated '
+                    'on the remote cluster. To update, run (existing jobs are '
+                    f'not interrupted): {colorama.Style.BRIGHT}sky start -f -y '
+                    f'{cluster_name}{colorama.Style.RESET_ALL}'
+                    f'\n--- Details ---\n{stderr.strip()}\n')

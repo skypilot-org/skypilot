@@ -404,22 +404,16 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(suffix)
             raise
 
-    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image = clouds.Kubernetes.IMAGE_CPU
+    # Setup service for SSH jump pod. We create the SSH jump service here
+    # because we need to know the service IP address and port to set the
+    # ssh_proxy_command in the autoscaler config.
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
 
-    kubernetes_utils.setup_sshjump(sshjump_name, sshjump_image, key_label,
-                                   namespace)
+    kubernetes_utils.setup_sshjump_svc(sshjump_name, namespace)
 
-    ssh_jump_port = clouds.Kubernetes.get_port(sshjump_name)
-    ssh_jump_ip = clouds.Kubernetes.get_external_ip()
+    ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
+        PRIVATE_SSH_KEY_PATH, sshjump_name, namespace)
 
-    ssh_jump_proxy_command = (f'ssh -tt -i {PRIVATE_SSH_KEY_PATH} '
-                              '-o StrictHostKeyChecking=no '
-                              '-o UserKnownHostsFile=/dev/null '
-                              '-o IdentitiesOnly=yes '
-                              f'-p {ssh_jump_port} -W %h:%p sky@{ssh_jump_ip}')
-
-    config['auth']['ssh_proxy_command'] = ssh_jump_proxy_command
-
+    config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
     return config
