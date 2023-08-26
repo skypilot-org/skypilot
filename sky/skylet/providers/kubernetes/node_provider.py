@@ -230,6 +230,11 @@ class KubernetesNodeProvider(NodeProvider):
                                 'More than available CPU(s) are requested. '
                                 f'Run \'sky status\' to see the number of CPUs'
                                 'that are already in use.')
+                        if 'Insufficient memory' in event_message:
+                            raise config.KubernetesError(
+                                'More than available Memories are requested. '
+                                f'Run \'sky status\' to see the amount of '
+                                'Memories that are already in use.')
                         if 'didn\'t match Pod\'s node affinity/selector' in event_message:
                             node_selector = pod.spec.node_selector
                             if node_selector is not None:
