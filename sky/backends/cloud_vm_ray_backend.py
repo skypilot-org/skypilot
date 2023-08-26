@@ -2319,7 +2319,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
             head_ssh_port = 22
         else:
-            svc_name = f'{self.cluster_name}-ray-head-ssh'
+            svc_name = f'{self.cluster_name_on_cloud}-ray-head-ssh'
             retry_cnt = 0
             while True:
                 try:
@@ -3014,7 +3014,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             temp_envs = copy.deepcopy(task.envs)
             cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
-                handle.cluster_name)
+                handle.cluster_name_on_cloud)
             task.update_envs(cloud_env_vars)
 
             # Re update the envs with the original envs to give priority to
