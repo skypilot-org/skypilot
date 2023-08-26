@@ -197,8 +197,8 @@ class GCPComputeInstance(GCPInstance):
         firewall_rule_name: str,
     ) -> None:
         rule = cls.load_resource().firewalls().list(
-            project=project_id, filter=f'name={firewall_rule_name}')
-        if not rule:
+            project=project_id, filter=f'name={firewall_rule_name}').execute()
+        if 'items' not in rule:
             logger.warning(f'Firewall rule {firewall_rule_name} not found. '
                            'Skip cleanup.')
             return
