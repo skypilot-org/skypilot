@@ -1,8 +1,8 @@
 """Constants used for SkyServe."""
 
-CONTROLLER_PREFIX = 'controller-'
+CONTROLLER_PREFIX = 'sky-serve-controller-'
 
-CONTROLLER_TEMPLATE = 'skyserve-controller.yaml.j2'
+CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SERVE_PREFIX = '~/.sky/serve'
 
