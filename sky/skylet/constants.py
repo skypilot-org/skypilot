@@ -50,9 +50,9 @@ SPOT_DASHBOARD_REMOTE_PORT = 5000
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
-DOCKER_USERNAME_ENV_KEY = 'SKYPILOT_DOCKER_USERNAME'
-DOCKER_PASSWORD_ENV_KEY = 'SKYPILOT_DOCKER_PASSWORD'
-DOCKER_SERVER_ENV_KEY = 'SKYPILOT_DOCKER_SERVER'
+DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_DOCKER_USERNAME'
+DOCKER_PASSWORD_ENV_VAR = 'SKYPILOT_DOCKER_PASSWORD'
+DOCKER_SERVER_ENV_VAR = 'SKYPILOT_DOCKER_SERVER'
 
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not
@@ -70,3 +70,12 @@ CONDA_INSTALLATION_COMMANDS = (
     # which is the case for VMs created on GCP, and running `conda init` will
     # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;')
+
+# The name for the environment variable that stores SkyPilot user hash, which
+# is mainly used to make sure sky commands runs on a VM launched by SkyPilot
+# will be recognized as the same user (e.g., spot controller).
+USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+
+# In most clouds, cluster names can only contain lowercase letters, numbers
+# and hyphens. We use this regex to validate the cluster name.
+CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'

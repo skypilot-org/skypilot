@@ -139,3 +139,8 @@ def config_exception():
 @import_package
 def max_retry_error():
     return urllib3.exceptions.MaxRetryError
+
+
+@import_package
+def stream():
+    return kubernetes.stream.stream
