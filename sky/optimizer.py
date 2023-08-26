@@ -23,6 +23,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
+
     # pylint: disable=ungrouped-imports
     from sky import dag as dag_lib
 
@@ -248,7 +249,7 @@ class Optimizer:
             if do_print:
                 logger.debug('#### {} ####'.format(node))
 
-            fuzzy_candidates = []
+            fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources, cloud_candidates, fuzzy_candidates = (

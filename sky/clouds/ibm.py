@@ -258,7 +258,7 @@ class IBM(clouds.Cloud):
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
-        fuzzy_candidate_list = []
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
