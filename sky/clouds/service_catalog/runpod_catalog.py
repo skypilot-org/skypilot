@@ -27,7 +27,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('RunPod does not support zones.')
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('runpod', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
