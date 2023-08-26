@@ -7,7 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.scp import scp_utils
+from sky.skylet.providers.runpod import rp_helper as runpod_api
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib  # Renaming to avoid shadowing variables.
@@ -274,10 +274,10 @@ class RunPod(clouds.Cloud):
             'TERMINATED': None
         }
         status_list = []
-        vms = scp_utils.SCPClient().list_instances()
+        vms = runpod_api.list_instances()
         for node in vms:
-            if node['virtualServerName'] == name:
-                node_status = status_map[node['virtualServerState']]
+            if node['name'] == name:
+                node_status = status_map[node['status']]
                 if node_status is not None:
                     status_list.append(node_status)
         return status_list
