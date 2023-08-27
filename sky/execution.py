@@ -962,6 +962,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
+    controller_resources: 'sky.Resources',
     controller_best_resources: 'sky.Resources',
 ):
     """Spin up a service.
@@ -975,6 +976,8 @@ def serve_up(
     """
     controller_cluster_name = serve.generate_controller_cluster_name(
         service_name)
+    controller_best_resources.cloud.check_cluster_name_is_valid(
+        controller_cluster_name)
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
@@ -1022,6 +1025,8 @@ def serve_up(
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.add_skyserve_prehook()
+        # This is for the case when the best resources failed to provision.
+        controller_task.set_resources(controller_resources)
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
