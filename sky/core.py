@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -560,7 +560,6 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False,
-    _from_serve_core: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
@@ -585,9 +584,8 @@ def cancel(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    if not _from_serve_core:
-        backend_utils.check_cluster_name_not_reserved(
-            cluster_name, operation_str='Cancelling jobs')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster_name, operation_str='Cancelling jobs')
 
     if all and job_ids:
         raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
@@ -618,30 +616,28 @@ def cancel(
 
     backend = backend_utils.get_backend_from_handle(handle)
 
-    printfn: Callable[[str], None] = sky_logging.print
-    if _from_serve_core:
-        printfn = lambda msg: None
-
     if all:
-        printfn(f'{colorama.Fore.YELLOW}'
-                f'Cancelling all jobs on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(f'{colorama.Fore.YELLOW}'
+                          f'Cancelling all jobs on cluster {cluster_name!r}...'
+                          f'{colorama.Style.RESET_ALL}')
     elif job_ids is None:
         # all = False, job_ids is None => cancel the latest running job.
-        printfn(f'{colorama.Fore.YELLOW}'
-                f'Cancelling latest running job on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
     elif len(job_ids):
         # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
-        printfn(f'{colorama.Fore.YELLOW}'
-                f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
     else:
         # all = False, len(job_ids) == 0 => no jobs to cancel.
         return
 
-    backend.cancel_jobs(handle, job_ids, all, silent=_from_serve_core)
+    backend.cancel_jobs(handle, job_ids, all)
 
 
 @usage_lib.entrypoint
@@ -726,12 +722,10 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def job_status(
-    cluster_name: str,
-    job_ids: Optional[List[int]],
-    silent: bool = False,
-    stream_logs: bool = False
-) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+def job_status(cluster_name: str,
+               job_ids: Optional[List[int]],
+               stream_logs: bool = False
+              ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -739,7 +733,7 @@ def job_status(
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        Dict[Optional[int], Optional[job_lib.JobStatus]]: A mapping of job_id to
+        Dict[Optional[str], Optional[job_lib.JobStatus]]: A mapping of job_id to
         job statuses. The status will be None if the job does not exist.
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
@@ -768,10 +762,9 @@ def job_status(
     if job_ids is not None and len(job_ids) == 0:
         return {}
 
-    if not silent:
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-                          'Getting job status...'
-                          f'{colorama.Style.RESET_ALL}')
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      'Getting job status...'
+                      f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)

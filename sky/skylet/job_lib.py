@@ -367,7 +367,7 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
 
 
 def load_statuses_payload(
-        statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
+        statuses_payload: str) -> Dict[Optional[str], Optional[JobStatus]]:
     statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:

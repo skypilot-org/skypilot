@@ -3468,7 +3468,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
-    ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+    ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
