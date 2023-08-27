@@ -102,8 +102,9 @@ class RunPodNodeProvider(NodeProvider):
 
         runpod_api.set_tags(instance_id, config_tags)
 
-        # FILL_IN: Only return after all nodes are booted.
-        # If needed poll fc_api.list_instances() to wait for status == 'running'
+        instance_status = "PENDING"
+        while instance_status != "RUNNING":
+            instance_status = runpod_api.list_instances()[instance_id]['status']
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
