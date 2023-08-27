@@ -622,14 +622,16 @@ def construct_ssh_jump_command(private_key_path: str,
                               f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
                               f'-W %h:%p sky@{ssh_jump_ip}')
     if proxy_cmd_path is not None:
+        proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
+        # adding execution permission to the proxy command script
+        os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
         ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path}\' '
     return ssh_jump_proxy_command
 
 
 def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
                           network_mode: KubernetesNetworkingMode,
-                          namespace: str, kube_config_path: str,
-                          port_fwd_proxy_cmd_path: str,
+                          namespace: str, port_fwd_proxy_cmd_path: str,
                           port_fwd_proxy_cmd_template: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
@@ -671,7 +673,6 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
         network_mode: KubernetesNetworkingMode; networking mode for ssh
             session. It is either 'NODEPORT' or 'PORT_FORWARD'
         namespace: Kubernetes namespace to use
-        kube_config_path: str; path to kubernetes config
         port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
             with 'kubectl port-forward'
         port_fwd_proxy_cmd_template: str; template used to create
@@ -681,29 +682,22 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     ssh_jump_ip = get_external_ip()
     if network_mode == KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
-        ssh_jump_proxy_command = _get_proxy_command(network_mode,
-                                                    private_key_path,
-                                                    ssh_jump_port, ssh_jump_ip)
+        ssh_jump_proxy_command = construct_ssh_jump_command(
+            private_key_path, ssh_jump_port, ssh_jump_ip)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
         ssh_jump_port = LOCAL_PORT_FOR_PORT_FORWARD
-        kube_config_path = os.path.expanduser(kube_config_path)
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
             'local_port': ssh_jump_port,
         }
-        port_forward_proxy_cmd_path = os.path.expanduser(
-            port_fwd_proxy_cmd_path)
         backend_utils.fill_template(port_fwd_proxy_cmd_template,
                                     vars_to_fill,
-                                    output_path=port_forward_proxy_cmd_path)
-        os.chmod(port_forward_proxy_cmd_path,
-                 os.stat(port_forward_proxy_cmd_path).st_mode | 0o111)
-        ssh_jump_proxy_command = _get_proxy_command(
-            network_mode, private_key_path, ssh_jump_port, ssh_jump_ip,
-            port_forward_proxy_cmd_path)
-
+                                    output_path=port_fwd_proxy_cmd_path)
+        ssh_jump_proxy_command = construct_ssh_jump_command(
+            private_key_path, ssh_jump_port, ssh_jump_ip,
+            port_fwd_proxy_cmd_path)
     return ssh_jump_proxy_command
 
 
@@ -746,12 +740,16 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
                     name=ssh_jump_name, namespace=namespace)
                 kubernetes.core_api().create_namespaced_service(
                     namespace, content['service_spec'])
-                curr_network_mode = 'Port-Forward' \
-                    if curr_svc_type == 'ClusterIP' else 'NodePort'
-                new_network_mode = 'NodePort' \
-                    if curr_svc_type == 'ClusterIP' else 'Port-Forward'
-                new_svc_type = 'NodePort' \
-                    if curr_svc_type == 'ClusterIP' else 'ClusterIP'
+                port_forward_mode = KubernetesNetworkingMode.PORT_FORWARD.value
+                nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
+                clusterip_svc = 'ClusterIP'
+                nodeport_svc = 'NodePort'
+                curr_network_mode = port_forward_mode \
+                    if curr_svc_type == clusterip_svc else nodeport_mode
+                new_network_mode = nodeport_mode \
+                    if curr_svc_type == clusterip_svc else port_forward_mode
+                new_svc_type = nodeport_svc \
+                    if curr_svc_type == clusterip_svc else clusterip_svc
                 logger.info(
                     f'Switching the networking mode from '
                     f'\'{curr_network_mode}\' to \'{new_network_mode}\' '
@@ -856,13 +854,14 @@ def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,
     content = yaml.safe_load(cont)
     return content
 
-def check_socat_installed() -> bool:
+
+def check_socat_installed() -> None:
     """Checks if socat is installed"""
     try:
         subprocess.run(['socat', '-V'],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=True)
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
     except FileNotFoundError:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(

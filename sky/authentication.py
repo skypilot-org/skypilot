@@ -381,8 +381,10 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service
-    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                'port-forward').lower()
+    nodeport_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
+    port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
+    ssh_setup_mode = skypilot_config.get_nested(
+        ('kubernetes', 'networking'), port_forward_mode.value).lower()
     get_or_generate_keys()
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
@@ -409,22 +411,22 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    if ssh_setup_mode == 'nodeport':
-        network_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
+    if ssh_setup_mode == nodeport_mode.value.lower():
+        network_mode = nodeport_mode
         service_type = 'NodePort'
 
-    elif ssh_setup_mode == 'port-forward':
+    elif ssh_setup_mode == port_forward_mode.value.lower():
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
         # `kubectl port-forward`.
         kubernetes_utils.check_socat_installed()
-        network_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
+        network_mode = port_forward_mode
         service_type = 'ClusterIP'
     else:
         raise ValueError(f'Unsupported kubernetes networking mode: '
                          f'{ssh_setup_mode}. The mode has to be either '
-                         '\'Port-Forward\' or \'NodePort\'. '
+                         '\'PORT_FORWARD\' or \'NODEPORT\'. '
                          'Please check: ~/.sky/config.yaml')
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
@@ -434,7 +436,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
         PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
-        clouds.kubernetes.CREDENTIAL_PATH,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
 
