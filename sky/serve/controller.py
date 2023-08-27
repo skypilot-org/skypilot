@@ -3,6 +3,7 @@
 Responsible for autoscaling and replica management.
 """
 import argparse
+import asyncio
 import base64
 import logging
 import pickle
@@ -55,9 +56,9 @@ class SkyServeController:
     def run(self) -> None:
 
         @self.app.post('/controller/update_num_requests')
-        async def update_num_requests(request: fastapi.Request):
+        def update_num_requests(request: fastapi.Request):
             # await request
-            request_data = await request.json()
+            request_data = asyncio.run(request.json())
             # get request data
             num_requests = request_data['num_requests']
             logger.info(f'Received request: {request_data}')
