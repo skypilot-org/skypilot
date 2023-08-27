@@ -560,7 +560,6 @@ def cancel(
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
     _try_cancel_if_cluster_is_init: bool = False,
-    _from_serve_core: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
@@ -587,10 +586,8 @@ def cancel(
             'sky cancel requires either a job id '
             f'(see `sky queue {cluster_name} -s`) or the --all flag.')
 
-    if not _from_serve_core:
-        # Skip name checking when the call is from serve core.
-        backend_utils.check_cluster_name_not_reserved(
-            cluster_name, operation_str='Cancelling jobs')
+    backend_utils.check_cluster_name_not_reserved(
+        cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
     handle = None
@@ -618,20 +615,17 @@ def cancel(
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
-        if not _from_serve_core:
-            sky_logging.print(
-                f'{colorama.Fore.YELLOW}'
-                f'Cancelling all jobs on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+        sky_logging.print(f'{colorama.Fore.YELLOW}'
+                          f'Cancelling all jobs on cluster {cluster_name!r}...'
+                          f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         assert job_ids is not None, 'job_ids should not be None'
-        if not _from_serve_core:
-            jobs_str = ', '.join(map(str, job_ids))
-            sky_logging.print(
-                f'{colorama.Fore.YELLOW}'
-                f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+        jobs_str = ', '.join(map(str, job_ids))
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 
@@ -718,12 +712,10 @@ def download_logs(
 
 
 @usage_lib.entrypoint
-def job_status(
-    cluster_name: str,
-    job_ids: Optional[List[int]],
-    silent: bool = False,
-    stream_logs: bool = False
-) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
+def job_status(cluster_name: str,
+               job_ids: Optional[List[int]],
+               stream_logs: bool = False
+              ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -731,7 +723,7 @@ def job_status(
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        Dict[Optional[int], Optional[job_lib.JobStatus]]: A mapping of job_id to
+        Dict[Optional[str], Optional[job_lib.JobStatus]]: A mapping of job_id to
         job statuses. The status will be None if the job does not exist.
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
@@ -760,10 +752,9 @@ def job_status(
     if job_ids is not None and len(job_ids) == 0:
         return {}
 
-    if not silent:
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-                          'Getting job status...'
-                          f'{colorama.Style.RESET_ALL}')
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      'Getting job status...'
+                      f'{colorama.Style.RESET_ALL}')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)

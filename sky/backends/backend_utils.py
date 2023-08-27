@@ -1011,7 +1011,8 @@ def write_cluster_config(
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
+                # SKYPILOT_USER env var (see spot-controller.yaml.j2), also
+                # execution.py::serve_up.
                 'user': get_cleaned_username(os.environ.get(
                     'SKYPILOT_USER', '')),
 
