@@ -1,9 +1,9 @@
 '''
 RunPod library wrapper, formats the input/output of the RunPod library for SkyPilot.
 '''
+import os
 import json
 from typing import Dict
-from pathlib import Path
 
 import runpod
 
@@ -37,7 +37,10 @@ GPU_NAME_MAP = {
 
 
 TAG_FILE = '~/.runpod/skypilot_tags.json'
-Path(TAG_FILE).touch(exist_ok=True)
+
+if not os.path.exists(os.path.expanduser(TAG_FILE)):
+    with open(os.path.expanduser(TAG_FILE), 'w') as tag_file:
+        json.dump({}, tag_file)
 
 
 def list_instances():
