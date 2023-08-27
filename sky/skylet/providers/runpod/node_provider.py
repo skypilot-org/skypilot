@@ -94,8 +94,8 @@ class RunPodNodeProvider(NodeProvider):
         for _ in range(count):
             instance_id = runpod_api.launch(name=self.cluster_name,
                                             instance_type=ttype,
-                                            region=region,
-                                            ssh_key_name=self.ssh_key_name)
+                                            region=region
+                                            )
 
         if instance_id is None:
             raise RunPodError('Failed to launch instance.')
