@@ -3,6 +3,7 @@ RunPod library wrapper, formats the input/output of the RunPod library for SkyPi
 '''
 import json
 from typing import Dict
+from pathlib import Path
 
 import runpod
 
@@ -36,6 +37,7 @@ GPU_NAME_MAP = {
 
 
 TAG_FILE = '~/.runpod/skypilot_tags.json'
+Path(TAG_FILE).touch(exist_ok=True)
 
 
 def list_instances():
