@@ -612,25 +612,17 @@ class KubernetesInstanceType:
         return self.name
 
 
-def _get_proxy_command(network_mode: KubernetesNetworkingMode,
-                       private_key_path: str,
-                       ssh_jump_port: int,
-                       ssh_jump_ip: str,
-                       port_forward_proxy_cmd_path: str = '') -> str:
-    if network_mode == KubernetesNetworkingMode.NODEPORT:
-        ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
-                                  '-o StrictHostKeyChecking=no '
-                                  '-o UserKnownHostsFile=/dev/null '
-                                  f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
-                                  f'-W %h:%p sky@{ssh_jump_ip}')
-    else:  # network_mode == KubernetesNetworkingMode.PORT_FORWARD:
-        ssh_jump_proxy_command = (
-            f'ssh -tt -i {private_key_path} '
-            f'-o ProxyCommand=\'{port_forward_proxy_cmd_path}\' '
-            '-o StrictHostKeyChecking=no '
-            '-o UserKnownHostsFile=/dev/null '
-            f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
-            f'-W %h:%p sky@{ssh_jump_ip}')
+def construct_ssh_jump_command(private_key_path: str,
+                               ssh_jump_port: int,
+                               ssh_jump_ip: str,
+                               proxy_cmd_path: Optional[str] = None) -> str:
+    ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
+                              '-o StrictHostKeyChecking=no '
+                              '-o UserKnownHostsFile=/dev/null '
+                              f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
+                              f'-W %h:%p sky@{ssh_jump_ip}')
+    if proxy_cmd_path is not None:
+        ssh_jump_proxy_command += f' -o ProxyCommand=\'{proxy_cmd_path}\' '
     return ssh_jump_proxy_command
 
 
