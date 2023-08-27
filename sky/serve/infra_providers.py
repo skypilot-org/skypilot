@@ -333,6 +333,8 @@ class SkyPilotInfraProvider(InfraProvider):
         for cluster_name, info in self.replica_info.items():
             if not info.status_property.should_track_status():
                 continue
+            # We use backend API to avoid usage collection in the
+            # core.job_status.
             backend = backends.CloudVmRayBackend()
             handle = info.handle
             assert handle is not None, info
