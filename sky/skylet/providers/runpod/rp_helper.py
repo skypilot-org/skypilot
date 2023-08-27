@@ -82,7 +82,7 @@ def launch(name: str, instance_type: str, region: str):
 
     new_instance = runpod.create_pod(
         name=name,
-        image_name='nvidia/cuda:12.2.0-base-ubuntu20.04',
+        image_name='runpod/pytorch:2.0.1-py3.10-cuda11.8.0-devel',
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         min_vcpu_count=4*gpu_quantity,
