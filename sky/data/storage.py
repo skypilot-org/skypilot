@@ -1289,9 +1289,9 @@ class S3Store(AbstractStore):
         if interval is None:
             interval = 600
         if data_utils.is_cloud_store_url(self.source):
-            dst = self.source
+            dst = self.source.replace('s3://', '')
         else:
-            dst = f's3://{self.bucket.name}'
+            dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {dst} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
@@ -1744,9 +1744,9 @@ class GcsStore(AbstractStore):
         if interval is None:
             interval = 600
         if data_utils.is_cloud_store_url(self.source):
-            dst = self.source
+            dst = self.source.replace('gs://', '')
         else:
-            dst = f'gs://{self.bucket.name}'
+            dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                     f'gcs {dst} --interval {interval} '
                     '--lock --delete --no-follow-symlinks')

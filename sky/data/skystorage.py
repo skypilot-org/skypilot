@@ -1,5 +1,6 @@
 """Skystorage module"""
 import contextlib
+import multiprocessing
 import os
 import subprocess
 import time
@@ -11,7 +12,7 @@ import filelock
 import psutil
 
 CSYNC_FILE_PATH = '~/.skystorage'
-
+LOCKS_PATH = '~/.skystorage/locks'
 
 @click.group()
 def main():
@@ -26,13 +27,13 @@ def update_interval(interval: int, elapsed_time: int):
         return diff
 
 
-def get_s3_upload_cmd(src_path: str, bucketname: str, num_threads: int,
+def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int,
                       delete: bool, no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
     subprocess.check_output(config_cmd, shell=True)
-    sync_cmd = f'aws s3 sync {src_path} s3://{bucketname}'
+    sync_cmd = f'aws s3 sync {src_path} s3://{dst}'
     if delete:
         sync_cmd += ' --delete'
     if no_follow_symlinks:
@@ -40,7 +41,7 @@ def get_s3_upload_cmd(src_path: str, bucketname: str, num_threads: int,
     return sync_cmd
 
 
-def get_gcs_upload_cmd(src_path: str, bucketname: str, num_threads: int,
+def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int,
                        delete: bool, no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
     sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
@@ -49,31 +50,39 @@ def get_gcs_upload_cmd(src_path: str, bucketname: str, num_threads: int,
         sync_cmd += ' -d'
     if no_follow_symlinks:
         sync_cmd += ' -e'
-    sync_cmd += f' {src_path} gs://{bucketname}'
+    sync_cmd += f' {src_path} gs://{dst}'
     return sync_cmd
 
 
 def run_sync(src: str,
              storetype: str,
-             bucketname: str,
+             dst: str,
              num_threads: int,
              interval: int,
              delete: bool,
              no_follow_symlinks: bool,
              max_retries: int = 10):
     """Runs the sync command to from SRC to STORETYPE bucket"""
+
+    # Check if dst is a directory or file and raise if dst is a file
+    # Check if the dst matches the given storetype
+    
+    
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
-        sync_cmd = get_s3_upload_cmd(src, bucketname, num_threads, delete,
+        sync_cmd = get_s3_upload_cmd(src, dst, num_threads, delete,
                                      no_follow_symlinks)
     elif storetype == 'gcs':
-        sync_cmd = get_gcs_upload_cmd(src, bucketname, num_threads, delete,
+        sync_cmd = get_gcs_upload_cmd(src, dst, num_threads, delete,
                                       no_follow_symlinks)
     else:
         raise ValueError(f'Unknown store type: {storetype}')
-
-    log_file_name = f'csync_{storetype}_{bucketname}.log'
+    
+    result = urllib.parse.urlsplit(dst)
+    # the exact mounting point being either the bucket or subdirectory in it
+    sync_point = result.path.split('/')[-1]
+    log_file_name = f'csync_{storetype}_{sync_point}.log'
     base_dir = os.path.expanduser(CSYNC_FILE_PATH)
     log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
 
@@ -88,14 +97,14 @@ def run_sync(src: str,
             if max_retries > 0:
                 #TODO: display the error with remaining # of retries
                 wait_time = interval / 2
-                src_to_bucket = (f'\'{src}\' to \'{bucketname}\' '
+                src_to_bucket = (f'\'{src}\' to \'{dst}\' '
                                  f'at \'{storetype}\'')
                 fout.write('Encountered an error while syncing '
                            f'{src_to_bucket}. Retrying'
                            f' in {wait_time}s. {max_retries} more reattempts '
                            f'remaining. Check {log_path} for details.')
                 time.sleep(wait_time)
-                return run_sync(src, storetype, bucketname, num_threads,
+                return run_sync(src, storetype, dst, num_threads,
                                 interval, delete, no_follow_symlinks,
                                 max_retries - 1)
             else:
@@ -122,12 +131,6 @@ def run_sync(src: str,
               type=bool,
               is_flag=True,
               help='')
-@click.option('--lock',
-              required=False,
-              default=False,
-              type=bool,
-              is_flag=True,
-              help='')
 @click.option('--no-follow-symlinks',
               required=False,
               default=False,
@@ -135,17 +138,12 @@ def run_sync(src: str,
               is_flag=True,
               help='')
 def csync(src: str, storetype: str, dst: str, num_threads: int,
-          interval: int, delete: bool, lock: bool, no_follow_symlinks: bool):
+          interval: int, delete: bool, no_follow_symlinks: bool):
     """Syncs the source to the bucket every INTERVAL seconds. Creates a lock
     file while sync command is runninng and removes it when completed.
     """
-    result = urllib.parse.urlsplit(dst)
-    bucketname = result.netloc
-    #if result.path == '':
-    base_dir = os.path.expanduser(CSYNC_FILE_PATH)
+    base_dir = os.path.expanduser(LOCKS_PATH)
     os.makedirs(base_dir, exist_ok=True)
-    lock_file_name = f'csync_{storetype}_{bucketname}.lock'
-    lock_path = os.path.expanduser(os.path.join(base_dir, lock_file_name))
 
     # When the csync daemon was previously terminated abnormally,
     # it may still be holding the lock. This lock will be reset after removal.
@@ -154,17 +152,18 @@ def csync(src: str, storetype: str, dst: str, num_threads: int,
 
     while True:
         with contextlib.ExitStack() as stack:
-            if lock:
-                stack.enter_context(filelock.FileLock(lock_path))
+            p = multiprocessing.Process(target=run_sync, args=(src, storetype, dst, num_threads, interval, delete, no_follow_symlinks))
             start_time = time.time()
-            # TODO: add try-except block
-            run_sync(src, storetype, bucketname, num_threads, interval, delete,
-                     no_follow_symlinks)
+            p.start()
+            lock_file_name = f'{p.pid}'
+            lock_path = os.path.expanduser(os.path.join(base_dir, lock_file_name))
+            stack.enter_context(filelock.FileLock(lock_path))
+            p.join()
             end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
         elapsed_time = int(end_time - start_time)
         remaining_interval = update_interval(interval, elapsed_time)
-        if lock and os.path.exists(lock_path):
+        if os.path.exists(lock_path):
             os.remove(lock_path)
         time.sleep(remaining_interval)
 
