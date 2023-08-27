@@ -53,7 +53,7 @@ class Lambda(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
