@@ -275,9 +275,9 @@ class RunPod(clouds.Cloud):
         }
         status_list = []
         vms = runpod_api.list_instances()
-        for node in vms:
-            if node['name'] == name:
-                node_status = status_map[node['status']]
+        for id in vms:
+            if vms[id]['name'] == name:
+                node_status = status_map[vms[id]['status']]
                 if node_status is not None:
                     status_list.append(node_status)
         return status_list
