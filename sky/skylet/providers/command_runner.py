@@ -22,9 +22,9 @@ class DockerLoginConfig:
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
         return cls(
-            username=d[constants.DOCKER_USERNAME_ENV_KEY],
-            password=d[constants.DOCKER_PASSWORD_ENV_KEY],
-            server=d[constants.DOCKER_SERVER_ENV_KEY],
+            username=d[constants.DOCKER_USERNAME_ENV_VAR],
+            password=d[constants.DOCKER_PASSWORD_ENV_VAR],
+            server=d[constants.DOCKER_SERVER_ENV_VAR],
         )
 
 
