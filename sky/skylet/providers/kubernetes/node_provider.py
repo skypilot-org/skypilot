@@ -242,7 +242,7 @@ class KubernetesNodeProvider(NodeProvider):
                                     'available in the cluster.')
                     raise config.KubernetesError(
                         f'{timeout_err_msg} '
-                        f'For more details: {event_message}')
+                        f'Error: {event_message}')
                 raise config.KubernetesError(f'{timeout_err_msg}')
             all_ready = True
 
