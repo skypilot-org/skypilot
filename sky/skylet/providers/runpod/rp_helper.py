@@ -63,7 +63,7 @@ def list_instances():
     return instance_list
 
 
-def launch(name: str, instance_type: str, region: str, ssh_key_name: str):
+def launch(name: str, instance_type: str, region: str):
     '''
     Launches an instance with the given parameters.
 
