@@ -1,21 +1,15 @@
 """Utils for managing metadata for provisioning."""
-from typing import Optional
-
 import contextlib
 import functools
-import json
-import os
 import pathlib
 import shutil
 
 from sky import sky_logging
-from sky.provision import common
 
 SKY_METADATA_VERSION = 'v1'
 SKY_METADATA_PATH = (pathlib.Path.home() / '.sky' / 'metadata' /
                      SKY_METADATA_VERSION)
 SKY_CLUSTER_METADATA_PATH = SKY_METADATA_PATH / 'clusters'
-SKY_REMOTE_REFLECTION_METADATA_PATH = '~/.sky/reflection.json'
 logger = sky_logging.init_logger(__name__)
 
 
@@ -97,32 +91,6 @@ def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     path = instance_metadata_dir / 'logs'
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def generate_reflection_metadata(
-        provision_metadata: common.ProvisionMetadata) -> pathlib.Path:
-    """This function generates metadata for instances to 'reflect' its own
-    configuration, including its cloud, region, head instance id etc.
-    The metadata is then mounted to all instances."""
-    cluster_metadata_dir = _get_cluster_metadata_dir(
-        provision_metadata.cluster_name)
-    path = cluster_metadata_dir / 'reflection.json'
-    with open(path, 'w') as f:
-        json.dump(provision_metadata.dict(), f, indent=2)
-    return path
-
-
-def get_reflection_metadata() -> Optional[common.ProvisionMetadata]:
-    """This function attempts to load the 'reflection' metadata.
-    If the metadata file does not exist, it returns None.
-
-    See 'generate_reflection_metadata' for more information."""
-    try:
-        with open(os.path.expanduser(SKY_REMOTE_REFLECTION_METADATA_PATH)) as f:
-            content = json.load(f)
-        return common.ProvisionMetadata.parse_obj(content)
-    except FileNotFoundError:
-        return None
 
 
 def remove_cluster_metadata(cluster_name: str) -> None:

@@ -300,11 +300,8 @@ def _post_provision_setup(
     # (3) all instances need permission to mount storage for all clouds
     # It is possible to have a "smaller" permission model, but we leave that
     # for later.
-    metadata_path = metadata_utils.generate_reflection_metadata(
-        provision_metadata)
     file_mounts = {
         backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash: str(local_wheel_path),
-        metadata_utils.SKY_REMOTE_REFLECTION_METADATA_PATH: str(metadata_path),
         **config_from_yaml.get('file_mounts', {})
     }
 
