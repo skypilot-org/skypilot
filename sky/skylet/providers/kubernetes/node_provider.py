@@ -232,7 +232,7 @@ class KubernetesNodeProvider(NodeProvider):
                                 lack_resource_msg.format(resource='CPUs'))
                         if 'Insufficient memory' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('Memories'))
+                                lack_resource_msg.format('memory'))
                         if 'didn\'t match Pod\'s node affinity/selector' in event_message:
                             node_selector = pod.spec.node_selector
                             if node_selector is not None:
