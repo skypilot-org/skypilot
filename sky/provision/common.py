@@ -1,5 +1,5 @@
 """Common data structure for provisioning"""
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 

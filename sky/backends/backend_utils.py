@@ -36,7 +36,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
-from sky import skypilot_config
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
@@ -1557,7 +1556,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 def _query_cluster_ips(cloud_name: str, region: str, cluster_name: str,
                        expected_num_nodes: int,
                        get_internal_ips: bool) -> List[str]:
-    metadata = provision_lib.get_cluster_metadata(cloud_name, region, cluster_name)
+    metadata = provision_lib.get_cluster_metadata(cloud_name, region,
+                                                  cluster_name)
     if len(metadata.instances) < expected_num_nodes:
         # Simulate the case when Ray head node is not up.
         raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
@@ -2079,7 +2079,8 @@ def _update_cluster_status_no_lock(
                 ready_head, ready_workers = _count_healthy_nodes_from_ray_new_provisioner(
                     output)
             else:
-                ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+                ready_head, ready_workers = _count_healthy_nodes_from_ray(
+                    output)
 
             if ready_head + ready_workers == handle.launched_nodes:
                 return True

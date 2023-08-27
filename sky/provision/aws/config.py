@@ -3,24 +3,24 @@
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
+from distutils import version
 import itertools
 import json
 import logging
 import textwrap
 import time
-from distutils import version
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import botocore
 import boto3
-
-from ray.autoscaler._private.cli_logger import cf, cli_logger
+import botocore
+from ray.autoscaler._private.cli_logger import cf
+from ray.autoscaler._private.cli_logger import cli_logger
 
 from sky import authentication
 from sky import sky_logging
 from sky.adaptors import aws
-from sky.provision.aws import utils
 from sky.provision import common
+from sky.provision.aws import utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -51,7 +51,7 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
 
 
 def bootstrap_instances(region: str, cluster_name: str,
-              config: common.InstanceConfig) -> common.InstanceConfig:
+                        config: common.InstanceConfig) -> common.InstanceConfig:
     """See sky/provision/__init__.py"""
     # create a copy of the input config to modify
     config = copy.deepcopy(config)
@@ -107,13 +107,13 @@ def bootstrap_instances(region: str, cluster_name: str,
         extended_ip_rules = security_group_config.get('IpPermissions', [])
         if extended_ip_rules is None:
             extended_ip_rules = []
-        security_group_ids = _configure_security_group(ec2, vpc_id,
-                                                       expected_sg_name,
-                                                       config.provider_config.get("ports", []),
-                                                       extended_ip_rules)
+        security_group_ids = _configure_security_group(
+            ec2, vpc_id, expected_sg_name,
+            config.provider_config.get("ports", []), extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
-        logger.info(f'Security groups created or updated in {elapsed:.5f} seconds.')
+        logger.info(
+            f'Security groups created or updated in {elapsed:.5f} seconds.')
 
     # store updated subnet and security group configs in node config
     # NOTE: "SubnetIds" is not a real config key for AWS instance.
@@ -345,8 +345,9 @@ def _usable_subnet_ids(
             'on instance launch unless you set `use_internal_ips: true` in '
             'the `provider` config.')
     elif _are_user_subnets_pruned(subnets):
-        _skypilot_log_error_and_exit_for_failover(f'The specified subnets are not '
-                           f'usable: {_get_pruned_subnets(subnets)}')
+        _skypilot_log_error_and_exit_for_failover(
+            f'The specified subnets are not '
+            f'usable: {_get_pruned_subnets(subnets)}')
 
     if azs is not None:
         azs = [az.strip() for az in azs.split(',')]  # type: ignore
@@ -425,8 +426,9 @@ def _get_vpc_id_by_name(ec2, vpc_name: str, region: str) -> str:
     filters = [{'Name': 'tag:Name', 'Values': [vpc_name]}]
     vpcs = list(ec2.vpcs.filter(Filters=filters))
     if not vpcs:
-        _skypilot_log_error_and_exit_for_failover(f'No VPC with name {vpc_name!r} is found in '
-                           f'{region}. To fix: specify a correct VPC name.')
+        _skypilot_log_error_and_exit_for_failover(
+            f'No VPC with name {vpc_name!r} is found in '
+            f'{region}. To fix: specify a correct VPC name.')
     elif len(vpcs) > 1:
         _skypilot_log_error_and_exit_for_failover(
             f'Multiple VPCs with name {vpc_name!r} '
@@ -487,18 +489,19 @@ def _retrieve_user_specified_rules(ports):
             from_port, to_port = port.split("-")
             from_port = int(from_port)
             to_port = int(to_port)
-        rules.append(
-            {
-                "FromPort": from_port,
-                "ToPort": to_port,
-                "IpProtocol": "tcp",
-                "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
-            }
-        )
+        rules.append({
+            "FromPort": from_port,
+            "ToPort": to_port,
+            "IpProtocol": "tcp",
+            "IpRanges": [{
+                "CidrIp": "0.0.0.0/0"
+            }],
+        })
     return rules
 
 
-def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str, ports: List[Union[int, str]],
+def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
+                              ports: List[Union[int, str]],
                               extended_ip_rules: List) -> List[str]:
     security_group = _get_or_create_vpc_security_group(ec2, vpc_id,
                                                        expected_sg_name)

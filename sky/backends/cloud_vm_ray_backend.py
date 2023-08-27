@@ -37,8 +37,8 @@ from sky import spot as spot_lib
 from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.backends import provision_utils
 from sky.backends import onprem_utils
+from sky.backends import provision_utils
 from sky.backends import wheel_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib

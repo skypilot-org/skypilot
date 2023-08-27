@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional
 import botocore
 from botocore import config
 from botocore import exceptions as boto_exceptions
+# We still have to depend on Ray logger, because currently
+# our logger does not support the same coloring schema as Ray.
+# For example, Ray can format the entire message yellow.
+from ray.autoscaler._private.cli_logger import cli_logger
 
 from sky import sky_logging
 from sky import status_lib
@@ -14,12 +18,6 @@ from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
-
-# We still have to depend on Ray logger, because currently
-# our logger does not support the same coloring schema as Ray.
-# For example, Ray can format the entire message yellow.
-from ray.autoscaler._private.cli_logger import cli_logger
-
 
 BOTO_CREATE_MAX_RETRIES = 5
 

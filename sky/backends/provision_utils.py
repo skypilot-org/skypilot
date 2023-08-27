@@ -1,15 +1,15 @@
 """Cloud-neutral VM provision utils."""
-from typing import List, Optional, Dict
 import collections
 import functools
 import json
 import logging
 import os
 import pathlib
-import subprocess
 import socket
+import subprocess
 import time
 import traceback
+from typing import Dict, List, Optional
 
 import botocore.exceptions
 import colorama
@@ -17,11 +17,10 @@ import colorama
 from sky import clouds
 from sky import provision
 from sky import sky_logging
-
 from sky.backends import backend_utils
 from sky.provision import common as provision_comm
-from sky.provision import metadata_utils
 from sky.provision import instance_setup
+from sky.provision import metadata_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils

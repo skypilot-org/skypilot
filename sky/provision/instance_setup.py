@@ -1,14 +1,17 @@
 """Setup dependencies & services for instances."""
+from concurrent import futures
+import hashlib
 import os
 import time
-from typing import List, Dict, Optional
-import hashlib
-from concurrent import futures
+from typing import Dict, List, Optional
 
 from sky import sky_logging
-from sky.utils import command_runner, subprocess_utils, common_utils, ux_utils
 from sky.provision import common
 from sky.provision import metadata_utils
+from sky.utils import command_runner
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 

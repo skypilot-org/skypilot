@@ -1,12 +1,12 @@
 """Utils for AWS provisioner."""
-from typing import Dict, Any
 import threading
+from typing import Any, Dict
 
 import boto3
 from botocore import config
+from ray.autoscaler._private.cli_logger import cf
+from ray.autoscaler._private.cli_logger import cli_logger
 import urllib3
-
-from ray.autoscaler._private.cli_logger import cf, cli_logger
 
 BOTO_MAX_RETRIES = 12
 

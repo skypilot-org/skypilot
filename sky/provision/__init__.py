@@ -35,6 +35,7 @@ def _route_to_cloud_impl(func):
 
 # pylint: disable=unused-argument
 
+
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
