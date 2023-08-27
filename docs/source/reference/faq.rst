@@ -84,6 +84,10 @@ To launch a VS Code tunnel using a SkyPilot task definition, you can use the fol
     
     setup: |
       sudo snap install --classic code
+      # if `snap` is not available, you can try the following commands instead:
+      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
+      # sudo apt install ./vscode.deb -y
+      # rm vscode.deb
     run: |
       code tunnel --accept-server-license-terms
 
