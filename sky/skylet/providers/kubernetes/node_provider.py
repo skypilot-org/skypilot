@@ -224,9 +224,7 @@ class KubernetesNodeProvider(NodeProvider):
                     'Cluster may be out of resources or '
                     'may be too slow to autoscale.')
                 lack_resource_msg = (
-                    'More than available {0} are requested. '
-                    'Run \'sky status\' to see the amount of {0} '
-                    'that are already in use.')
+                    'Insufficient {resource}. Other SkyPilot tasks or pods on the cluster may be using resources. Check resource usage by running `kubectl describe nodes`.'
                 if event_message is not None:
                     if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
