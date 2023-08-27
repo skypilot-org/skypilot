@@ -3,6 +3,7 @@ RunPod library wrapper, formats the input/output of the RunPod library for SkyPi
 '''
 import os
 import json
+import time
 from typing import Dict
 
 import runpod
@@ -57,7 +58,7 @@ def list_instances():
         instance_list[instance['id']]['name'] = instance['name']
 
         for port in instance['ports']:
-            if port['privatePort'] == 22:
+            if int(port['privatePort']) == 22:
                 instance_list[instance['id']]['ip'] = port['ip']
 
         # Set tags
@@ -91,6 +92,8 @@ def launch(name: str, instance_type: str, region: str):
         ports="22/tcp",
         support_public_ip=True,
     )
+
+    time.sleep(30)
 
     return new_instance['id']
 
