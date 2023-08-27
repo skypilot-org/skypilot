@@ -36,10 +36,10 @@ GPU_NAME_MAP = {
 }
 
 
-TAG_FILE = '~/.runpod/skypilot_tags.json'
+TAG_FILE = os.path.expanduser('~/.runpod/skypilot_tags.json')
 
-if not os.path.exists(os.path.expanduser(TAG_FILE)):
-    with open(os.path.expanduser(TAG_FILE), 'w') as tag_file:
+if not os.path.exists(TAG_FILE):
+    with open(TAG_FILE, 'w') as tag_file:
         json.dump({}, tag_file)
 
 
