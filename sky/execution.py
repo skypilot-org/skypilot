@@ -1025,7 +1025,9 @@ def serve_up(
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
+            'SKYPILOT_USER_ID': common_utils.get_user_hash(),
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
+            'SKYPILOT_USER': getpass.getuser(),
             'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
             'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
             'SKYPILOT_DISABLE_USAGE_COLLECTION':
@@ -1065,9 +1067,14 @@ def serve_up(
         def _wait_until_job_is_running(cluster_name: str,
                                        job_id: int,
                                        retry_time: int = 30) -> bool:
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend), backend
             for _ in range(retry_time):
-                job_statuses = core.job_status(cluster_name, [job_id],
-                                               silent=True)
+                job_statuses = backend.get_job_status(handle, [job_id],
+                                                      stream_logs=False)
                 job_status = job_statuses.get(str(job_id), None)
                 if job_status == job_lib.JobStatus.RUNNING:
                     return True
@@ -1231,7 +1238,10 @@ def serve_down(
                 )
 
     try:
-        core.cancel(controller_cluster_name, all=True, _from_serve_core=True)
+        if handle is not None:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            backend = backends.CloudVmRayBackend()
+            backend.cancel_jobs(handle, jobs=None)
     except (ValueError, exceptions.ClusterNotUpError,
             exceptions.CommandError) as e:
         if purge:

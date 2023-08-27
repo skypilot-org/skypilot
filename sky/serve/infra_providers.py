@@ -13,7 +13,6 @@ import psutil
 import requests
 
 from sky import backends
-from sky import core
 from sky import global_user_state
 from sky import status_lib
 from sky.serve import serve_utils
@@ -332,8 +331,14 @@ class SkyPilotInfraProvider(InfraProvider):
         for cluster_name, info in self.replica_info.items():
             if not info.status_property.should_track_status():
                 continue
+            # We use backend API to avoid usage collection in the
+            # core.job_status.
+            backend = backends.CloudVmRayBackend()
+            handle = info.handle
+            assert handle is not None, info
             # Only fetch job 1, which stands for user task job
-            job_statuses = core.job_status(cluster_name, [1])
+            job_statuses = backend.get_job_status(handle, [1],
+                                                  stream_logs=False)
             job_status = job_statuses['1']
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
@@ -341,9 +346,6 @@ class SkyPilotInfraProvider(InfraProvider):
                 info.status_property.user_app_failed = True
                 logger.warning(f'User APP for cluster {cluster_name} FAILED. '
                                'Start streaming logs...')
-                backend = backends.CloudVmRayBackend()
-                handle = info.handle
-                assert handle is not None, info
                 # Always tail the logs of the first job, which represent user
                 # setup & run.
                 try:
