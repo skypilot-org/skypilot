@@ -199,7 +199,8 @@ class InfraProvider:
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         # TODO(tian): make this thread safe
-        self.replica_info: Dict[str, ReplicaInfo] = serve_utils.ThreadSafeDict()
+        self.replica_info: serve_utils.ThreadSafeDict[
+            str, ReplicaInfo] = serve_utils.ThreadSafeDict()
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
@@ -250,9 +251,9 @@ class SkyPilotInfraProvider(InfraProvider):
         self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
         self.next_replica_id: int = 1
-        self.launch_process_pool: Dict[
+        self.launch_process_pool: serve_utils.ThreadSafeDict[
             str, subprocess.Popen] = serve_utils.ThreadSafeDict()
-        self.down_process_pool: Dict[
+        self.down_process_pool: serve_utils.ThreadSafeDict[
             str, subprocess.Popen] = serve_utils.ThreadSafeDict()
 
         self._start_process_pool_refresher()
