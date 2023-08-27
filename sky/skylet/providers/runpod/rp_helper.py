@@ -56,9 +56,10 @@ def list_instances():
         instance_list[instance['id']]['status'] = instance['desiredStatus']
         instance_list[instance['id']]['name'] = instance['name']
 
-        for port in instance['runtime']['ports']:
-            if port['privatePort'] == 22:
-                instance_list[instance['id']]['ip'] = port['ip']
+        if instance['desiredStatus'] == 'running':
+            for port in instance['runtime']['ports']:
+                if port['privatePort'] == 22:
+                    instance_list[instance['id']]['ip'] = port['ip']
 
         # Set tags
         with open(TAG_FILE, 'r') as tag_file:
