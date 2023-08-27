@@ -231,10 +231,10 @@ class KubernetesNodeProvider(NodeProvider):
                     if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('CPUs'))
+                                lack_resource_msg.format(resource='CPUs'))
                         if 'Insufficient memory' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('Memories'))
+                                lack_resource_msg.format('memory'))
                         if 'didn\'t match Pod\'s node affinity/selector' in event_message:
                             node_selector = pod.spec.node_selector
                             if node_selector is not None:
@@ -244,7 +244,7 @@ class KubernetesNodeProvider(NodeProvider):
                                     'available in the cluster.')
                     raise config.KubernetesError(
                         f'{timeout_err_msg} '
-                        f'For more details: {event_message}')
+                        f'Error: {event_message}')
                 raise config.KubernetesError(f'{timeout_err_msg}')
             all_ready = True
 
