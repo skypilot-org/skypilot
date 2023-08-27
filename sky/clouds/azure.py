@@ -147,8 +147,7 @@ class Azure(clouds.Cloud):
             'image_version': '22.04.2023080201'
         }
 
-        # ubuntu-2004 v221.08.30, one image we used to use for K80 before
-        # we change default image to ubuntu-hpc.
+        # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
         acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
