@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 
-import rp_helper as runpod_api
+import sky.skylet.providers.runpod.rp_helper as runpod_api
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.runpod.rp_helper import list_instances as runpod_instances
+import sky.skylet.providers.runpod.rp_helper as runpod_api
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib  # Renaming to avoid shadowing variables.
@@ -274,7 +274,7 @@ class RunPod(clouds.Cloud):
             'TERMINATED': None
         }
         status_list = []
-        vms = runpod_instances()
+        vms = runpod_api.list_instances()
         for node in vms:
             if node['name'] == name:
                 node_status = status_map[node['status']]
