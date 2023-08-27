@@ -137,7 +137,7 @@ class Azure(clouds.Cloud):
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
         # nvidia-driver: 535.54.03, cuda: 12.2
-        # see: https://github.com/Azure/azhpc-images/releases
+        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
         # All A100 instances is of gen2, so it will always use
         # the latest ubuntu-hpc:2204 image.
         image_config = {
