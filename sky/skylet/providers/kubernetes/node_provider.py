@@ -229,7 +229,7 @@ class KubernetesNodeProvider(NodeProvider):
                     if pod_status == 'Pending':
                         if 'Insufficient cpu' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('CPUs'))
+                                lack_resource_msg.format(resource='CPUs'))
                         if 'Insufficient memory' in event_message:
                             raise config.KubernetesError(
                                 lack_resource_msg.format('Memories'))
