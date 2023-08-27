@@ -1289,7 +1289,13 @@ class S3Store(AbstractStore):
         if interval is None:
             interval = 600
         if data_utils.is_cloud_store_url(self.source):
-            dst = self.source.replace('s3://', '')
+            if self.source is not None:
+                if isinstance(self.source, (str, Path)):
+                    dst = str(self.source).replace('s3://', '')
+                elif isinstance(self.source, list):
+                    raise TypeError(
+                        'CSYNC mode does not supprot multiple sources for a single storage.'
+                    )
         else:
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
@@ -1744,12 +1750,18 @@ class GcsStore(AbstractStore):
         if interval is None:
             interval = 600
         if data_utils.is_cloud_store_url(self.source):
-            dst = self.source.replace('gs://', '')
+            if self.source is not None:
+                if isinstance(self.source, (str, Path)):
+                    dst = str(self.source).replace('gs://', '')
+                elif isinstance(self.source, list):
+                    raise TypeError(
+                        'CSYNC mode does not supprot multiple sources for a single storage.'
+                    )
         else:
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
-                    f'gcs {dst} --interval {interval} '
-                    '--lock --delete --no-follow-symlinks')
+                     f'gcs {dst} --interval {interval} '
+                     '--lock --delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path, csync_cmd)
 
