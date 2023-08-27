@@ -418,20 +418,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
         # `kubectl port-forward`.
-
-        # Checks if 'socat' is installed
-        try:
-            subprocess.run(['socat', '-V'],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL,
-                           check=True)
-        except FileNotFoundError:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    '`socat` is required to setup Kubernetes cloud with '
-                    '`port-forward` default networking mode and it is not '
-                    'installed. For Debian/Ubuntu system, install it with:\n'
-                    '  $ sudo apt install socat') from None
+        kubernetes_utils.check_socat_installed()
         network_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
         service_type = 'ClusterIP'
     else:

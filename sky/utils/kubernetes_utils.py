@@ -3,6 +3,7 @@ import enum
 import math
 import os
 import re
+import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
@@ -862,3 +863,18 @@ def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,
                               service_type=service_type)
     content = yaml.safe_load(cont)
     return content
+
+def check_socat_installed() -> bool:
+    """Checks if socat is installed"""
+    try:
+        subprocess.run(['socat', '-V'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=True)
+    except FileNotFoundError:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                '`socat` is required to setup Kubernetes cloud with '
+                '`port-forward` default networking mode and it is not '
+                'installed. For Debian/Ubuntu system, install it with:\n'
+                '  $ sudo apt install socat') from None
