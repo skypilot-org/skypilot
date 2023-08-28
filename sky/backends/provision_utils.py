@@ -67,8 +67,9 @@ def _bulk_provision(
             #  only ~3s, caching it seems over-engineering and could
             #  cause other issues like the cache is not synced
             #  with the cloud configuration.
-            config = provision.bootstrap(provider_name, region_name,
-                                         cluster_name, bootstrap_config)
+            config = provision.bootstrap_instances(provider_name, region_name,
+                                                   cluster_name,
+                                                   bootstrap_config)
     except Exception:
         logger.error('Failed to bootstrap configurations for '
                      f'"{cluster_name}".')

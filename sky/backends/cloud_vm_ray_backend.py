@@ -2875,10 +2875,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # This is a strange trick that our handle uses now.
                     ip_tuples = list(zip(ip_list, ip_list))
                 handle.stable_internal_external_ips = ip_tuples
-
-                self._update_after_cluster_provisioned(handle, task,
-                                                       prev_cluster_status,
-                                                       ip_list, lock_path)
+                self._update_after_cluster_provisioned(
+                    handle, task, prev_cluster_status, ip_list,
+                    handle.external_ssh_ports(), lock_path)
                 return handle
 
             cluster_config_file = config_dict['ray']
