@@ -331,7 +331,7 @@ def stream_logs(service_name: str,
 
     # Notify user here to make sure user won't think the log is finished.
     print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
-          f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
+          f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     backend = backends.CloudVmRayBackend()
     # Always tail the logs of the first job, which represent user setup & run.
