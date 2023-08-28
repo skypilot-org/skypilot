@@ -55,7 +55,7 @@ def query_instances(
 
 @_route_to_cloud_impl
 def bootstrap_instances(provider_name: str, region: str, cluster_name: str,
-              config: common.InstanceConfig) -> common.InstanceConfig:
+                        config: common.InstanceConfig) -> common.InstanceConfig:
     """Bootstrap configurations for a cluster.
 
     This function sets up ancillary resources for an instance

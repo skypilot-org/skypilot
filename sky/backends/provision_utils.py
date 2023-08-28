@@ -164,33 +164,24 @@ def bulk_provision(
         terminate = not is_prev_cluster_healthy
         terminate_str = ('Terminating' if terminate else 'Stopping')
         logger.error(f'*** {terminate_str} the failed cluster. ***')
-        # TODO(suquark): In the future we should not wait for cluster stopping
-        #  or termination. This could speed up fail over quite a lot.
         teardown_cluster(repr(cloud),
-                         region.name,
                          cluster_name,
-                         terminate=terminate)
+                         terminate=terminate,
+                         provider_config=original_config['provider'])
         return None
     finally:
         logger.removeHandler(fh)
         fh.close()
 
 
-def teardown_cluster(cloud_name: str, region: str, cluster_name: str,
-                     terminate: bool) -> None:
+def teardown_cluster(cloud_name: str, cluster_name: str, terminate: bool,
+                     provider_config: Dict) -> None:
     """Deleting or stopping a cluster."""
     if terminate:
-        provision.terminate_instances(cloud_name, region, cluster_name)
+        provision.terminate_instances(cloud_name, cluster_name, provider_config)
         metadata_utils.remove_cluster_metadata(cluster_name)
     else:
-        provision.stop_instances(cloud_name, region, cluster_name)
-
-    # TODO(suquark): In theory, users do not need to wait for the cluster
-    #  to be taken down completely and can interrupt the CLI at any time.
-    #  However, we cannot notify users this fact because there is a
-    #  progress bar currently running.
-    status_to_wait = 'terminated' if terminate else 'stopped'
-    provision.wait_instances(cloud_name, region, cluster_name, status_to_wait)
+        provision.stop_instances(cloud_name, cluster_name, provider_config)
 
 
 def _wait_ssh_connection_direct(ip: str) -> bool:
