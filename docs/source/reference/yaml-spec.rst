@@ -81,6 +81,8 @@ Available fields:
       disk_tier: 'medium'
 
       # Ports to expose (optional).
+      # All ports specified here will be exposed to the public internet. Under the hood.
+      # we add a firewall rule / inbound rule to allow traffic to these ports.
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
       ports:
