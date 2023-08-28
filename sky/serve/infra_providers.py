@@ -198,7 +198,6 @@ class InfraProvider:
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
-        # TODO(tian): make this thread safe
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
         self.readiness_suffix: str = readiness_suffix
