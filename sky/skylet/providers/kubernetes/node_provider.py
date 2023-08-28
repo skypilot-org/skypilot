@@ -1,6 +1,5 @@
 import copy
 import logging
-import os
 import time
 from typing import Dict
 from uuid import uuid4
@@ -210,8 +209,9 @@ class KubernetesNodeProvider(NodeProvider):
         start = time.time()
         while True:
             if time.time() - start > self.timeout:
-                pod_status = new_nodes[0].status.phase
-                pod_name = new_nodes[0]._metadata._name
+                pod = new_nodes[0]
+                pod_status = pod.status.phase
+                pod_name = pod._metadata._name
                 events = kubernetes.core_api().list_namespaced_event(
                     self.namespace,
                     field_selector=f"involvedObject.name={pod_name}")
@@ -234,14 +234,15 @@ class KubernetesNodeProvider(NodeProvider):
                                 lack_resource_msg.format(resource='CPUs'))
                         if 'Insufficient memory' in event_message:
                             raise config.KubernetesError(
-                                lack_resource_msg.format('memory'))
-                        if 'didn\'t match Pod\'s node affinity/selector' in event_message:
-                            node_selector = pod.spec.node_selector
-                            if node_selector is not None:
-                                raise config.KubernetesError(
-                                    f'{lack_resource_msg.format("GPUs")}'
-                                    f'Please confirm if {node_selector} is '
-                                    'available in the cluster.')
+                                lack_resource_msg.format(resource='memory'))
+                        if 'Insufficient nvidia.com/gpu' in event_message:
+                            gpu_lf_keys = [lf.get_label_key() for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY]
+                            for label_key in pod.spec.node_selector.keys():
+                                if label_key in gpu_lf_keys:
+                                    raise config.KubernetesError(
+                                        f'{lack_resource_msg.format(resource="GPUs")} '
+                                        f'Please confirm if {pod.spec.node_selector[label_key]} is '
+                                        'available in the cluster.')
                     raise config.KubernetesError(
                         f'{timeout_err_msg} '
                         f'Error: {event_message}')
