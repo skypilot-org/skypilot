@@ -81,8 +81,9 @@ Available fields:
       disk_tier: 'medium'
 
       # Ports to expose (optional).
-      # All ports specified here will be exposed to the public internet. Under the hood.
-      # we add a firewall rule / inbound rule to allow traffic to these ports.
+      # All ports specified here will be exposed to the public Internet. Under the hood,
+      # a firewall rule / inbound rule is automatically added to allow inbound traffic to 
+      # these ports. Applies to all VMs of a cluster created with this field set. 
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
       ports:
