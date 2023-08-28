@@ -24,10 +24,6 @@ from sky.utils import env_options
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.serve.controller')
 
-# Generate ssh key pair to avoid race condition when multiple sky.launch
-# are executed at the same time.
-authentication.get_or_generate_keys()
-
 
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
@@ -133,6 +129,10 @@ if __name__ == '__main__':
                         help='Port to run the controller',
                         required=True)
     args = parser.parse_args()
+
+    # Generate ssh key pair to avoid race condition when multiple sky.launch
+    # are executed at the same time.
+    authentication.get_or_generate_keys()
 
     # ======= Infra Provider =========
     service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)

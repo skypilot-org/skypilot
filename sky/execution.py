@@ -972,6 +972,7 @@ def serve_up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
+        controller_resources: The resources requirement for the controller.
         controller_best_resources: The optimized resources for the controller.
     """
     controller_cluster_name = serve.generate_controller_cluster_name(
