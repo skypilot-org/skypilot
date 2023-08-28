@@ -4,9 +4,11 @@ import os
 import pickle
 import re
 import shlex
+import threading
 import time
 import typing
-from typing import Any, Callable, Dict, Iterator, List, Optional, TextIO
+from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
+                    TextIO, TypeVar)
 
 import colorama
 import requests
@@ -39,6 +41,45 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+
+KeyType = TypeVar('KeyType')
+ValueType = TypeVar('ValueType')
+
+
+class ThreadSafeDict(Generic[KeyType, ValueType]):
+    """A thread-safe dict."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
+        self._lock = threading.Lock()
+
+    def __getitem__(self, key: KeyType) -> ValueType:
+        with self._lock:
+            return self._dict.__getitem__(key)
+
+    def __setitem__(self, key: KeyType, value: ValueType) -> None:
+        with self._lock:
+            return self._dict.__setitem__(key, value)
+
+    def __delitem__(self, key: KeyType) -> None:
+        with self._lock:
+            return self._dict.__delitem__(key)
+
+    def __len__(self) -> int:
+        with self._lock:
+            return self._dict.__len__()
+
+    def __contains__(self, key: KeyType) -> bool:
+        with self._lock:
+            return self._dict.__contains__(key)
+
+    def items(self):
+        with self._lock:
+            return self._dict.items()
+
+    def values(self):
+        with self._lock:
+            return self._dict.values()
 
 
 def generate_controller_cluster_name(service_name: str) -> str:
@@ -287,6 +328,10 @@ def stream_logs(service_name: str,
     ) == status_lib.ReplicaStatus.PROVISIONING:
         # Early exit if not following the logs.
         return ''
+
+    # Notify user here to make sure user won't think the log is finished.
+    print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
+          f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     backend = backends.CloudVmRayBackend()
     # Always tail the logs of the first job, which represent user setup & run.
