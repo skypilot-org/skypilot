@@ -78,11 +78,6 @@ install_requires = [
     # `add_rows` method.
     'PrettyTable >= 2.0.0',
     'python-dotenv',
-    # Lower version of ray will cause dependency conflict for
-    # click/grpcio/protobuf.
-    # Excluded 2.6.0 as it has a bug in the cluster launcher:
-    # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
     'rich',
     'tabulate',
     # Light weight requirement, can be replaced with "typing" once
@@ -116,6 +111,13 @@ install_requires = [
     'pyyaml > 3.13, <= 5.3.1'
 ]
 
+local_ray = [  # Lower version of ray will cause dependency conflict for
+    # click/grpcio/protobuf.
+    # Excluded 2.6.0 as it has a bug in the cluster launcher:
+    # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
+    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
+]
+
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
@@ -143,16 +145,16 @@ extras_require: Dict[str, List[str]] = {
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
     ],
-    'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'gcp': ['google-api-python-client', 'google-cloud-storage'] + local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
-    ],
-    'docker': ['docker'],
-    'lambda': [],
+    ] + local_ray,
+    'docker': ['docker'] + local_ray,
+    'lambda': local_ray,
     'cloudflare': aws_dependencies,
-    'scp': [],
-    'oci': ['oci'],
-    'kubernetes': ['kubernetes'],
+    'scp': [] + local_ray,
+    'oci': ['oci'] + local_ray,
+    'kubernetes': ['kubernetes'] + local_ray,
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
