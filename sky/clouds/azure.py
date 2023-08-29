@@ -253,24 +253,16 @@ class Azure(clouds.Cloud):
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
-        # Also, add default user to docker group. All groups specified in the
-        # cloud-init-setup-commands is groups if not using cloud-init, and
-        # docker.
+        # Also, add default user to docker group.
         # pylint: disable=line-too-long
         cloud_init_setup_commands = base64.b64encode(
             textwrap.dedent("""\
             #cloud-config
-            users:
-              - name: skypilot:ssh_user
-                shell: /bin/bash
-                groups: [docker]
-                sudo: ALL=(ALL) NOPASSWD:ALL
-                ssh_authorized_keys:
-                  - |
-                    skypilot:ssh_public_key_content
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
-              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/skypilot:ssh_user/.bashrc
+              - usermod -aG docker skypilot:ssh_user
+              - groups skypilot:ssh_user >> /tmp/g.txt
             write_files:
               - path: /etc/apt/apt.conf.d/20auto-upgrades
                 content: |
