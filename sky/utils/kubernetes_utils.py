@@ -35,8 +35,17 @@ logger = sky_logging.init_logger(__name__)
 
 
 class KubernetesNetworkingMode(enum.Enum):
-    NODEPORT = 'NODEPORT'
-    PORT_FORWARD = 'PORT_FORWARD'
+    """Enum for the different types of networking modes for accessing
+    jump pods.
+    """
+    NODEPORT = 'NodePort'
+    PORT_FORWARD = 'Port_Forward'
+
+
+class KubernetesServiceType(enum.Enum):
+    """Enum for the different types of services."""
+    NODEPORT = 'NodePort'
+    CLUSTERIP = 'ClusterIP'
 
 
 class GPULabelFormatter:
@@ -701,7 +710,8 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     return ssh_jump_proxy_command
 
 
-def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
+def setup_sshjump_svc(ssh_jump_name: str, namespace: str,
+                      service_type: KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -715,7 +725,7 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
     """
     # Fill in template - ssh_key_secret and sshjump_image are not required for
     # the service spec, so we pass in empty strs.
-    content = fill_sshjump_template('', '', ssh_jump_name, service_type)
+    content = fill_sshjump_template('', '', ssh_jump_name, service_type.value)
     # Create service
     try:
         kubernetes.core_api().create_namespaced_service(namespace,
@@ -726,7 +736,7 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
             ssh_jump_service = kubernetes.core_api().read_namespaced_service(
                 name=ssh_jump_name, namespace=namespace)
             curr_svc_type = ssh_jump_service.spec.type
-            if service_type == curr_svc_type:
+            if service_type.value == curr_svc_type:
                 # If the currently existing SSH Jump service's type is identical
                 # to user's configuration for networking mode
                 logger.warning(
@@ -742,8 +752,8 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str, service_type: str):
                     namespace, content['service_spec'])
                 port_forward_mode = KubernetesNetworkingMode.PORT_FORWARD.value
                 nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
-                clusterip_svc = 'ClusterIP'
-                nodeport_svc = 'NodePort'
+                clusterip_svc = KubernetesServiceType.CLUSTERIP.value
+                nodeport_svc = KubernetesServiceType.NODEPORT.value
                 curr_network_mode = port_forward_mode \
                     if curr_svc_type == clusterip_svc else nodeport_mode
                 new_network_mode = nodeport_mode \
@@ -855,17 +865,19 @@ def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,
     return content
 
 
-def check_socat_installed() -> None:
-    """Checks if socat is installed"""
-    try:
-        subprocess.run(['socat', '-V'],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL,
-                       check=True)
-    except FileNotFoundError:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                '`socat` is required to setup Kubernetes cloud with '
-                '`port-forward` default networking mode and it is not '
-                'installed. For Debian/Ubuntu system, install it with:\n'
-                '  $ sudo apt install socat') from None
+def check_port_forward_mode_dependencies() -> None:
+    """Checks if 'socat' and 'lsof' is installed"""
+    for name, option in [('socat', '-V'), ('lsof', '-v')]:
+        try:
+            subprocess.run([name, option],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
+                           check=True)
+        except FileNotFoundError:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'`{name}` is required to setup Kubernetes cloud with '
+                    f'`{KubernetesNetworkingMode.PORT_FORWARD.value}` default '
+                    'networking mode and it is not installed. '
+                    'For Debian/Ubuntu system, install it with:\n'
+                    f'  $ sudo apt install {name}') from None
