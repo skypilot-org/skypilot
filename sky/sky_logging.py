@@ -40,6 +40,8 @@ _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
 
+FORMATTER = logging.Formatter(_FORMAT, datefmt=_DATE_FORMAT)
+
 # All code inside the library should use sky_logging.print()
 # rather than print().
 # This is to make controlled logging via is_silent() possible:
@@ -59,8 +61,7 @@ def _setup_logger():
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
-    _default_handler.setFormatter(fmt)
+    _default_handler.setFormatter(FORMATTER)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False

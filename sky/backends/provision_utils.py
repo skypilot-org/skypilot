@@ -143,6 +143,7 @@ def bulk_provision(
         resume_stopped_nodes=True)
 
     fh = logging.FileHandler(log_abs_path)
+    fh.setFormatter(sky_logging.FORMATTER)
     fh.setLevel(logging.DEBUG)
     try:
         logger.addHandler(fh)
@@ -379,6 +380,7 @@ def post_provision_setup(cloud_name: str, cluster_name: str, cluster_yaml: str,
     log_path = os.path.join(log_dir, 'provision.log')
     log_abs_path = os.path.abspath(os.path.expanduser(log_path))
     fh = logging.FileHandler(log_abs_path)
+    fh.setFormatter(sky_logging.FORMATTER)
     fh.setLevel(logging.DEBUG)
     try:
         logger.addHandler(fh)
