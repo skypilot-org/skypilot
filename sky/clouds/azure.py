@@ -263,7 +263,7 @@ class Azure(clouds.Cloud):
             users:
               - name: skypilot:ssh_user
                 shell: /bin/bash
-                groups: [skypilot:ssh_user adm dialout cdrom floppy sudo audio dip video plugdev netdev lxd docker]
+                groups: [docker]
                 sudo: ALL=(ALL) NOPASSWD:ALL
                 ssh_authorized_keys:
                   - |
