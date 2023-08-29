@@ -193,7 +193,6 @@ class KubernetesNodeProvider(NodeProvider):
                         '(count={}).'.format(count))
 
             for new_node in new_nodes:
-
                 metadata = service_spec.get('metadata', {})
                 metadata['name'] = new_node.metadata.name
                 service_spec['metadata'] = metadata
@@ -205,47 +204,49 @@ class KubernetesNodeProvider(NodeProvider):
         # Wait for all pods to be ready, and if it exceeds the timeout, raise an
         # exception. If pod's container is ContainerCreating, then we can assume
         # that resources have been allocated and we can exit.
-
         start = time.time()
         while True:
             if time.time() - start > self.timeout:
-                pod = new_nodes[0]
-                pod_status = pod.status.phase
-                pod_name = pod._metadata._name
-                events = kubernetes.core_api().list_namespaced_event(
-                    self.namespace,
-                    field_selector=f"involvedObject.name={pod_name}")
-                for event in events.items:
-                    if event.reason == 'FailedScheduling':
-                        event_message = event.message
-                        break
-                timeout_err_msg = (
-                    'Timed out while waiting for nodes to start. '
-                    'Cluster may be out of resources or '
-                    'may be too slow to autoscale.')
-                lack_resource_msg = (
-                    'Insufficient {resource}. Other SkyPilot tasks or pods on '
-                    'the cluster may be using resources. Check resource usage '
-                    'by running `kubectl describe nodes`.')
-                if event_message is not None:
-                    if pod_status == 'Pending':
-                        if 'Insufficient cpu' in event_message:
-                            raise config.KubernetesError(
-                                lack_resource_msg.format(resource='CPUs'))
-                        if 'Insufficient memory' in event_message:
-                            raise config.KubernetesError(
-                                lack_resource_msg.format(resource='memory'))
-                        if 'Insufficient nvidia.com/gpu' in event_message:
-                            gpu_lf_keys = [lf.get_label_key() for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY]
-                            for label_key in pod.spec.node_selector.keys():
+                for new_node in new_nodes:
+                    pod_status = new_node.status.phase
+                    pod_name = new_node._metadata._name
+                    events = kubernetes.core_api().list_namespaced_event(
+                        self.namespace,
+                        field_selector=f"involvedObject.name={pod_name}")
+                    for event in events.items:
+                        if event.reason == 'FailedScheduling':
+                            event_message = event.message
+                            break
+                    timeout_err_msg = (
+                        'Timed out while waiting for nodes to start. '
+                        'Cluster may be out of resources or '
+                        'may be too slow to autoscale.')
+                    lack_resource_msg = (
+                        'Insufficient {resource}. Other SkyPilot tasks or pods on '
+                        'the cluster may be using resources. Check resource usage '
+                        'by running `kubectl describe nodes`.')
+                    if event_message is not None:
+                        if pod_status == 'Pending':
+                            if 'Insufficient cpu' in event_message:
+                                raise config.KubernetesError(
+                                    lack_resource_msg.format(resource='CPUs'))
+                            if 'Insufficient memory' in event_message:
+                                raise config.KubernetesError(
+                                    lack_resource_msg.format(resource='memory'))
+                            gpu_lf_keys = [lf.get_label_key() \
+                                for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY]
+                            # Confirms if the nodeSelector in the pod spec is
+                            # used for GPU scheduling.
+                            for label_key in new_node.spec.node_selector.keys():
                                 if label_key in gpu_lf_keys:
-                                    raise config.KubernetesError(
-                                        f'{lack_resource_msg.format(resource="GPUs")} '
-                                        f'Please confirm if {pod.spec.node_selector[label_key]} is '
-                                        'available in the cluster.')
-                    raise config.KubernetesError(
-                        f'{timeout_err_msg} '
-                        f'Error: {event_message}')
+                                    if 'Insufficient nvidia.com/gpu' in event_message or \
+                                        'didn\'t match Pod\'s node affinity/selector' in event_message:
+                                        raise config.KubernetesError(
+                                            f'{lack_resource_msg.format(resource="GPUs")} '
+                                            f'Please confirm if {new_node.spec.node_selector[label_key]} is '
+                                            'available in the cluster.')
+                        raise config.KubernetesError(f'{timeout_err_msg} '
+                                                     f'Error: {event_message}')
                 raise config.KubernetesError(f'{timeout_err_msg}')
             all_ready = True
 
