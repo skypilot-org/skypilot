@@ -3846,6 +3846,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # To avoid undefined local variables error.
             stdout = stderr = ''
+        elif terminate and isinstance(cloud, clouds.Kubernetes):
+            # Here we handle termination of Kubernetes by ourselves instead of Ray
+            # autoscaler.
+            # pylint: disable=import-outside-toplevel
+            from sky.skylet.providers.kubernetes import node_provider as \
+                kubernetes_node_provider
+            config['provider']['cache_stopped_nodes'] = not terminate
+            provider = kubernetes_node_provider.KubernetesNodeProvider(
+                config['provider'], cluster_name_on_cloud)
+            provider.terminate_node(cluster_name_on_cloud + '-ray-head')
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',

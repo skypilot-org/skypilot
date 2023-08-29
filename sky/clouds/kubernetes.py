@@ -357,7 +357,7 @@ class Kubernetes(clouds.Cloud):
         for pod in pods:
             if pod.status.phase == 'Running':
                 cluster_status.append(status_lib.ClusterStatus.UP)
-            elif pod.status.phase == 'Pending':
+            else:
                 cluster_status.append(status_lib.ClusterStatus.INIT)
         # If pods are not found, we don't add them to the return list
         return cluster_status
