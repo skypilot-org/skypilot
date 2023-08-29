@@ -26,7 +26,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
@@ -114,7 +114,8 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r') as f:
         public_key = f.read().strip()
     config_str = common_utils.dump_yaml_str(config)
-    config_str = config_str.replace('skypilot:ssh_user', config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_user',
+                                    config['auth']['ssh_user'])
     config_str = config_str.replace('skypilot:ssh_public_key_content',
                                     public_key)
     config = yaml.safe_load(config_str)
@@ -130,8 +131,6 @@ def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
 @common_utils.retry
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read().strip()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -260,7 +259,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
-
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
 
@@ -345,6 +343,7 @@ def setup_ibm_authentication(config):
     config['file_mounts'] = file_mounts
 
     return config
+
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()

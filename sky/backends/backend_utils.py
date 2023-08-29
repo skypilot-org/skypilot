@@ -2054,8 +2054,8 @@ def _update_cluster_status_no_lock(
                                                        handle.docker_user)
             assert handle.head_ssh_port is not None, handle
             runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     **ssh_credentials,
-                                                     port=handle.head_ssh_port)
+                                                     port=handle.head_ssh_port,
+                                                     **ssh_credentials)
             rc, output, stderr = runner.run(
                 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,

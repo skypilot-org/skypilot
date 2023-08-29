@@ -1583,12 +1583,13 @@ class RetryingVmProvisioner(object):
                 # NOTE: We handle the logic of '_ensure_cluster_ray_started'
                 # in '_post_provision_setup()'.
                 if provision_metadata is not None:
+                    handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+                    handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, region, zones))
                     config_dict['provision_metadata'] = provision_metadata
                     config_dict['resources_vars'] = resources_vars
-                    # We ship the cluster handle to reuse some configurations.
                     config_dict['handle'] = handle
                     return config_dict
 

@@ -35,7 +35,7 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
-    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
     raise RuntimeError(prefix + error)
 
 
@@ -50,7 +50,9 @@ def bootstrap_instances(region: str, cluster_name: str,
 
     subnet_ids = node_cfg.get('SubnetIds')  # type: ignore
     security_group_ids = node_cfg.get('SecurityGroupIds')  # type: ignore
-    assert 'NetworkInterfaces' not in node_cfg, 'SkyPilot: NetworkInterfaces is not supported in node config'
+    assert 'NetworkInterfaces' not in node_cfg, (
+        'SkyPilot: NetworkInterfaces is not supported in '
+        'node config')
     assert subnet_ids is None, 'SkyPilot: SubnetIds is not supported.'
 
     # The head node needs to have an IAM role that allows it to create further
@@ -86,14 +88,14 @@ def bootstrap_instances(region: str, cluster_name: str,
             extended_ip_rules = []
         security_group_ids = _configure_security_group(
             ec2, vpc_id, expected_sg_name,
-            config.provider_config.get("ports", []), extended_ip_rules)
+            config.provider_config.get('ports', []), extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
         logger.debug(
             f'Security groups created or updated in {elapsed:.5f} seconds.')
 
     # store updated subnet and security group configs in node config
-    # NOTE: "SubnetIds" is not a real config key for AWS instance.
+    # NOTE: 'SubnetIds' is not a real config key for AWS instance.
     node_cfg['SubnetIds'] = [s.subnet_id for s in subnets]
     node_cfg['SecurityGroupIds'] = security_group_ids
 
@@ -255,14 +257,14 @@ def _usable_subnets(
                     #
                     # Reason: the first two checks alone are not enough. For
                     # example, the VPC creation helper from AWS will create a
-                    # "public" and a "private" subnet per AZ. However, the
-                    # created "public" subnet by default has
+                    # 'public' and a 'private' subnet per AZ. However, the
+                    # created 'public' subnet by default has
                     # map_public_ip_on_launch set to False as well. This means
                     # we could've launched in that subnet, which will make any
                     # instances not able to send outbound traffic to the
                     # Internet, due to the way route tables/gateways are set up
-                    # for that public subnet. The "public" subnets are NOT
-                    # intended to host data plane VMs, while the "private"
+                    # for that public subnet. The 'public' subnets are NOT
+                    # intended to host data plane VMs, while the 'private'
                     # subnets are.
                     #
                     # An alternative to the subnet name hack is to ensure
@@ -320,7 +322,7 @@ def _usable_subnets(
                 'creating an instance in your specified region to populate '
                 'the list of subnets and trying this again. If you have set '
                 '`use_internal_ips`, check that this zone has a subnet that '
-                '(1) has the substring "private" in its name tag and '
+                '(1) has the substring \'private\' in its name tag and '
                 '(2) does not assign public IPs (`map_public_ip_on_launch` '
                 'is False).')
         elif _are_user_subnets_pruned(subnets):
@@ -425,15 +427,15 @@ def _retrieve_user_specified_rules(ports):
         if isinstance(port, int):
             from_port = to_port = port
         else:
-            from_port, to_port = port.split("-")
+            from_port, to_port = port.split('-')
             from_port = int(from_port)
             to_port = int(to_port)
         rules.append({
-            "FromPort": from_port,
-            "ToPort": to_port,
-            "IpProtocol": "tcp",
-            "IpRanges": [{
-                "CidrIp": "0.0.0.0/0"
+            'FromPort': from_port,
+            'ToPort': to_port,
+            'IpProtocol': 'tcp',
+            'IpRanges': [{
+                'CidrIp': '0.0.0.0/0'
             }],
         })
     return rules

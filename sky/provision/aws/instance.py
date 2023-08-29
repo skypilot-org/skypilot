@@ -4,9 +4,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-import botocore
-from botocore import config
-from botocore import exceptions as boto_exceptions
 # We still have to depend on Ray logger, because currently
 # our logger does not support the same coloring schema as Ray.
 # For example, Ray can format the entire message yellow.
@@ -52,10 +49,10 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
 
 
 def _default_ec2_resource(region: str) -> Any:
-    return aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    return aws.resource('ec2',
+                        region_name=region,
+                        config=aws.botocore_config().Config(
+                            retries={'max_attempts': BOTO_MAX_RETRIES}))
 
 
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
@@ -154,7 +151,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                 try:
                     instances = ec2_fail_fast.create_instances(**conf)
                     break
-                except boto_exceptions.ClientError as e:
+                except aws.botocore_exceptions().ClientError as e:
                     if e.response['Error']['Code'] == 'RequestLimitExceeded':
                         time.sleep(backoff.current_backoff())
                         cli_logger.warning(
@@ -166,7 +163,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                     'Failed to launch instances due to RequestLimitExceeded. '
                     'Max attempts exceeded.')
             return instances
-        except botocore.exceptions.ClientError as exc:
+        except aws.botocore_exceptions().ClientError as exc:
             if (i + 1) >= max_tries:
                 raise RuntimeError(
                     'Failed to launch instances. Max attempts exceeded.'
@@ -496,10 +493,10 @@ def cleanup_ports(
     if 'ports' not in provider_config:
         return
     region = provider_config['region']
-    ec2 = aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    ec2 = aws.resource('ec2',
+                       region_name=region,
+                       config=aws.botocore_config().Config(
+                           retries={'max_attempts': BOTO_MAX_RETRIES}))
     sg_name = provider_config['security_group']['GroupName']
     # GroupNames will only filter SGs in the default VPC, so we need to use
     # Filters here. Ref:
