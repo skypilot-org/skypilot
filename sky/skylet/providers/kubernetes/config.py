@@ -273,8 +273,8 @@ def _configure_ssh_jump(namespace, config):
 
     volumes = pod_cfg['spec']['volumes']
     # find 'secret-volume' and get the secret name
-    secret_volume = next(
-        filter(lambda x: x['name'] == 'secret-volume', volumes))
+    secret_volume = next(filter(lambda x: x['name'] == 'secret-volume',
+                                volumes))
     ssh_key_secret_name = secret_volume['secret']['secretName']
 
     # TODO(romilb): We currently split SSH jump pod and svc creation. Service
