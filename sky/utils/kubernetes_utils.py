@@ -681,12 +681,12 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.info(
-                'SSH Jump ServiceAcount already exists in the cluster, using '
+                'SSH Jump ServiceAccount already exists in the cluster, using '
                 'it.')
         else:
             raise
     else:
-        logger.info('Created SSH Jump ServiceAcount.')
+        logger.info('Created SSH Jump ServiceAccount.')
     # Role
     try:
         kubernetes.auth_api().create_namespaced_role(namespace, content['role'])

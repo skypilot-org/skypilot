@@ -266,10 +266,16 @@ def _configure_ssh_jump(namespace, config):
     Also updates config['auth']['ssh_proxy_command'] to use the newly created
     jump pod.
     """
-    # TODO(romilb): These variables should be moved and fetched from config
-    sshjump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    sshjump_image = clouds.Kubernetes.IMAGE_CPU
-    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    pod_cfg = config['available_node_types']['ray_head_default']['node_config']
+
+    sshjump_name = pod_cfg['metadata']['labels']['skypilot-sshjump']
+    sshjump_image = config['provider']['sshjump_image']
+
+    volumes = pod_cfg['spec']['volumes']
+    # find 'secret-volume' and get the secret name
+    secret_volume = next(
+        filter(lambda x: x['name'] == 'secret-volume', volumes))
+    ssh_key_secret_name = secret_volume['secret']['secretName']
 
     # TODO(romilb): We currently split SSH jump pod and svc creation. Service
     #  is first created in authentication.py::setup_kubernetes_authentication
@@ -283,8 +289,8 @@ def _configure_ssh_jump(namespace, config):
     #  and available before we create the SSH jump pod. If for any reason the
     #  service is missing, we should raise an error.
 
-    kubernetes_utils.setup_sshjump_pod(sshjump_name, sshjump_image, key_label,
-                                       namespace)
+    kubernetes_utils.setup_sshjump_pod(sshjump_name, sshjump_image,
+                                       ssh_key_secret_name, namespace)
     return config
 
 
