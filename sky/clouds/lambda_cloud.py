@@ -280,7 +280,7 @@ class Lambda(clouds.Cloud):
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return
         raise exceptions.NotSupportedError(
-            f'Lambda does not support disk tier {disk_tier}.')
+            f'Lambda does not support disk tier {disk_tier.value}.')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

@@ -428,7 +428,7 @@ class IBM(clouds.Cloud):
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return
         raise exceptions.NotSupportedError(
-            f'IBM does not support disk tier {disk_tier}.')
+            f'IBM does not support disk tier {disk_tier.value}.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping
