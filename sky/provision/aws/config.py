@@ -3,17 +3,14 @@
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
-import itertools
 import json
 import logging
-import textwrap
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from ray.autoscaler._private.cli_logger import cf
 from ray.autoscaler._private.cli_logger import cli_logger
 
-from sky import authentication
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
@@ -77,7 +74,7 @@ def bootstrap_instances(region: str, cluster_name: str,
     # the group, and also SSH access from outside.
     if security_group_ids is None:
         start_time = time.time()
-        logger.info('Creating or updating security groups...')
+        logger.debug('Creating or updating security groups...')
 
         # Generate the name of the security group we're looking for...
         security_group_config = config.provider_config.get('security_group', {})
@@ -92,7 +89,7 @@ def bootstrap_instances(region: str, cluster_name: str,
             config.provider_config.get("ports", []), extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
-        logger.info(
+        logger.debug(
             f'Security groups created or updated in {elapsed:.5f} seconds.')
 
     # store updated subnet and security group configs in node config

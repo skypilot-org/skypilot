@@ -146,6 +146,7 @@ def bulk_provision(
     fh.setLevel(logging.DEBUG)
     try:
         logger.addHandler(fh)
+        logging.getLogger('sky.provision').addHandler(fh)
         logger.debug(_TITLE.format('Provisioning'))
         logger.debug('Provision config:\n'
                      f'{json.dumps(bootstrap_config.dict(), indent=2)}')
