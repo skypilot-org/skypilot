@@ -83,6 +83,9 @@ Available fields:
       disk_tier: 'medium'
 
       # Ports to expose (optional).
+      # All ports specified here will be exposed to the public Internet. Under the hood,
+      # a firewall rule / inbound rule is automatically added to allow inbound traffic to 
+      # these ports. Applies to all VMs of a cluster created with this field set. 
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
       ports:
@@ -120,6 +123,9 @@ Available fields:
       # `docker:<image name>` for Azure, AWS and GCP. For example,
       #   image_id: docker:ubuntu:latest
       # Currently, only debian and ubuntu images are supported.
+      # If you want to use a docker image in a private registry, you can specify your
+      # username, password, and registry server as task environment variable. For
+      # details, please refer to the `envs` section below.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
@@ -155,6 +161,19 @@ Available fields:
     #
     # Values set here can be overridden by a CLI flag:
     # `sky launch/exec --env ENV=val` (if ENV is present).
+    #
+    # If you want to use a docker image in a private registry, you can specify your
+    # username, password, and registry server as task environment variable. For example:
+    #   envs:
+    #     SKYPILOT_DOCKER_USERNAME: <username>
+    #     SKYPILOT_DOCKER_PASSWORD: <password>
+    #     SKYPILOT_DOCKER_SERVER: <registry server>
+    # SkyPilot will execute `docker login --username <username> --password <password> <registry server>`
+    # before pulling the docker image. For `docker login`, see https://docs.docker.com/engine/reference/commandline/login/
+    # You could also specify any of them through the CLI flag if you don't want to store them in
+    # your yaml file or if you want to generate them for constantly changing password. For example:
+    #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+    # For more information about docker support in SkyPilot, please refer to the `image_id` section above.
     envs:
       MY_BUCKET: skypilot-temp-gcs-test
       MY_LOCAL_PATH: tmp-workdir

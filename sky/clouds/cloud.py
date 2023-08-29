@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -76,7 +77,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
         This method is used by check_cluster_name_is_valid() to check if the
@@ -481,8 +482,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_length()
-        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
@@ -490,14 +490,6 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if (max_cluster_name_len_limit is not None and
-                len(cluster_name) > max_cluster_name_len_limit):
-            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -649,8 +641,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.
 
@@ -659,7 +651,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def maybe_move_image(cls, image_name: str, source_region: str,
+    def maybe_move_image(cls, image_id: str, source_region: str,
                          target_region: str, source_zone: Optional[str],
                          target_zone: Optional[str]) -> str:
         """Move an image if required.

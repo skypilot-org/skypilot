@@ -886,15 +886,19 @@ def write_cluster_config(
     Raises:
         exceptions.ResourcesUnavailableError: if the region/zones requested does
             not appear in the catalog, or an ssh_proxy_command is specified but
-            not for the given region.
+            not for the given region, or GPUs are requested in a Kubernetes
+            cluster but the cluster does not have nodes labeled with GPU types.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    # This can raise a ResourcesUnavailableError, when the region/zones
-    # requested does not appear in the catalog. It can be triggered when the
-    # user changed the catalog file, while there is a cluster in the removed
-    # region/zone.
+    assert cloud is not None, to_provision
+    # This can raise a ResourcesUnavailableError when:
+    #  * The region/zones requested does not appear in the catalog. It can be
+    #    triggered if the user changed the catalog file while there is a cluster
+    #    in the removed region/zone.
+    #  * GPUs are requested in a Kubernetes cluster but the cluster does not
+    #    have nodes labeled with GPU types.
     #
     # TODO(zhwu): We should change the exception type to a more specific one, as
     # the ResourcesUnavailableError is overly used. Also, it would be better to
@@ -982,10 +986,14 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
+    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=cloud.max_cluster_name_length())
+
     # Only using new security group names for clusters with ports specified.
     default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
     if ports is not None:
-        default_aws_sg_name += f'-{common_utils.truncate_and_hash_cluster_name(cluster_name)}'
+        default_aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -994,7 +1002,7 @@ def write_cluster_config(
         dict(
             resources_vars,
             **{
-                'cluster_name': cluster_name,
+                'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
                 'ports': ports,
                 'disk_size': to_provision.disk_size,
@@ -1082,6 +1090,12 @@ def write_cluster_config(
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
+
+    # Read the cluster name from the tmp yaml file, to take the backward
+    # compatbility restortion above into account.
+    # TODO: remove this after 2 minor releases, 0.5.0.
+    yaml_config = common_utils.read_yaml(tmp_yaml_path)
+    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Optimization: copy the contents of source files in file_mounts to a
     # special dir, and upload that as the only file_mount instead. Delay
@@ -1809,7 +1823,9 @@ def _query_cluster_status_via_cloud_api(
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
-    cluster_name = handle.cluster_name
+    cluster_name_on_cloud = handle.cluster_name_on_cloud
+    cluster_name_in_hint = common_utils.cluster_name_in_hint(
+        handle.cluster_name, cluster_name_on_cloud)
     # Use region and zone from the cluster config, instead of the
     # handle.launched_resources, because the latter may not be set
     # correctly yet.
@@ -1827,18 +1843,22 @@ def _query_cluster_status_via_cloud_api(
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
-                cloud_name, cluster_name, provider_config)
-            logger.debug(f'Querying {cloud_name} cluster {cluster_name!r} '
+                cloud_name, cluster_name_on_cloud, provider_config)
+            logger.debug(f'Querying {cloud_name} cluster '
+                         f'{cluster_name_in_hint} '
                          f'status:\n{pprint.pformat(node_status_dict)}')
             node_statuses = list(node_status_dict.values())
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query {cloud_name} cluster {cluster_name!r} '
-                    f'status: {e}')
+                    f'Failed to query {cloud_name} cluster '
+                    f'{cluster_name_in_hint} '
+                    f'status: {common_utils.format_exception(e, use_bracket=True)}'
+                )
     else:
         node_statuses = handle.launched_resources.cloud.query_status(
-            cluster_name, tag_filter_for_cluster(cluster_name), region, zone,
+            cluster_name_on_cloud,
+            tag_filter_for_cluster(cluster_name_on_cloud), region, zone,
             **kwargs)
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
@@ -1846,7 +1866,8 @@ def _query_cluster_status_via_cloud_api(
     # the cluster termination, as the preempted TPU VM should always be
     # removed.
     if kwargs.get('use_tpu_vm', False) and len(node_statuses) == 0:
-        logger.debug(f'Terminating preempted TPU VM cluster {cluster_name}')
+        logger.debug(
+            f'Terminating preempted TPU VM cluster {cluster_name_in_hint}')
         backend = backends.CloudVmRayBackend()
         # Do not use refresh cluster status during teardown, as that will
         # cause infinite recursion by calling cluster status refresh

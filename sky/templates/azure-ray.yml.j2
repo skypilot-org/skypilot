@@ -1,4 +1,4 @@
-cluster_name: {{cluster_name}}
+cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
@@ -30,6 +30,15 @@ provider:
 {%- for port in ports %}
       - {{port}}
 {%- endfor %}
+{%- endif %}
+{%- if docker_login_config is not none %}
+  # We put docker login config in provider section because ray's schema disabled
+  # additionalProperties for docker config.
+  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
+  docker_login_config:
+    username: {{docker_login_config.username}}
+    password: {{docker_login_config.password}}
+    server: {{docker_login_config.server}}
 {%- endif %}
     # Keep (otherwise cannot reuse when re-provisioning).
     # teardown(terminate=True) will override this.
@@ -130,6 +139,8 @@ setup_commands:
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'sudo systemctl stop jupyter ..': stop jupyter service to avoid port conflict on 8888
+  # Line 'sudo systemctl stop jupyterhub ..': stop jupyterhub service to avoid port conflict on 8081
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
@@ -144,6 +155,10 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    sudo systemctl stop jupyter > /dev/null 2>&1 || true;
+    sudo systemctl disable jupyter > /dev/null 2>&1 || true;
+    sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;
+    sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;
     {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;

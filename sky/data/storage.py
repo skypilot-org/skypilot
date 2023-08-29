@@ -1318,7 +1318,7 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    GCSFUSE_VERSION = '0.42.3'
+    GCSFUSE_VERSION = '1.0.1'
 
     def __init__(self,
                  name: str,
