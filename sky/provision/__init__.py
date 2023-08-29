@@ -8,8 +8,14 @@ import importlib
 import inspect
 from typing import Any, Dict, Optional
 
+from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
+
+logger = sky_logging.init_logger(__name__)
+# Disable propagation to avoid streaming logs to the console, which is set up
+# for sky root logger.
+logger.propagate = False
 
 
 def _route_to_cloud_impl(func):

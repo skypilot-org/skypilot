@@ -526,8 +526,7 @@ def cleanup_ports(
             list(sgs)[0].delete()
         except aws.botocore_exceptions().ClientError as e:
             if _DEPENDENCY_VIOLATION_PATTERN.findall(str(e)):
-                logger.info(
-                    f'Security group {sg_name} is still in use. Retry.')
+                logger.info(f'Security group {sg_name} is still in use. Retry.')
                 time.sleep(backoff.current_backoff())
                 continue
             raise

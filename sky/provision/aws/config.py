@@ -493,8 +493,8 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     security_group = security_group[0]
 
     logger.info(f'Created new security group {colorama.Style.BRIGHT}'
-                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
-                 f'[id={security_group.id}]')
+                f'{security_group.group_name}{colorama.Style.RESET_ALL} '
+                f'[id={security_group.id}]')
     return security_group
 
 

@@ -1,6 +1,8 @@
 """Cloud-neutral VM provision utils."""
 import collections
 import dataclasses
+import contextlib
+import functools
 import json
 import logging
 import os
@@ -39,6 +41,25 @@ class ClusterName:
 
     def __repr__(self) -> str:
         return self.display_name
+
+@contextlib.contextmanager
+def _add_file_handler_for_logger(logger: logging.Logger, log_path: str):
+    """Add file handler for logger."""
+    try:
+        log_abs_path = os.path.abspath(os.path.expanduser(log_path))
+        fh = logging.FileHandler(log_abs_path)
+        fh.setFormatter(sky_logging.FORMATTER)
+        fh.setLevel(logging.DEBUG)
+        logger.addHandler(fh)
+
+        # Redirect underlying provision logs to file.
+        provision_logger = logging.getLogger('sky.provision')
+        provision_logger.addHandler(fh)
+        yield
+    finally:
+        logger.removeHandler(fh)
+        provision_logger.removeHandler(fh)
+        fh.close()
 
 
 def _bulk_provision(
@@ -154,41 +175,31 @@ def bulk_provision(
         tags={},
         resume_stopped_nodes=True)
 
-    fh = logging.FileHandler(log_abs_path)
-    fh.setFormatter(sky_logging.FORMATTER)
-    fh.setLevel(logging.DEBUG)
-    try:
-        logger.addHandler(fh)
-        # Redirect underlying provision logs to file.
-        provision_logger = logging.getLogger('sky.provision')
-        provision_logger.handlers = []
-        provision_logger.addHandler(fh)
-        logger.debug(_TITLE.format('Provisioning'))
-        logger.debug('Provision config:\n'
-                     f'{json.dumps(bootstrap_config.dict(), indent=2)}')
-        return _bulk_provision(cloud, region, zones, cluster_name,
-                               bootstrap_config)
-    except Exception:  # pylint: disable=broad-except
-        logger.error(
-            f'*** Failed provisioning the cluster ({cluster_name}). ***')
-        logger.debug(f'Starting instances for "{cluster_name}" '
-                     f'failed. Stacktrace:\n{traceback.format_exc()}')
-        # If cluster was previously UP or STOPPED, stop it; otherwise
-        # terminate.
-        # FIXME(zongheng): terminating a potentially live cluster is
-        # scary. Say: users have an existing cluster that got into INIT, do
-        # sky launch, somehow failed, then we may be terminating it here.
-        terminate = not is_prev_cluster_healthy
-        terminate_str = ('Terminating' if terminate else 'Stopping')
-        logger.error(f'*** {terminate_str} the failed cluster. ***')
-        teardown_cluster(repr(cloud),
-                         cluster_name,
-                         terminate=terminate,
-                         provider_config=original_config['provider'])
-        return None
-    finally:
-        logger.removeHandler(fh)
-        fh.close()
+    with _add_file_handler_for_logger(logger, log_abs_path):
+        try:
+            logger.debug(_TITLE.format('Provisioning'))
+            logger.debug('Provision config:\n'
+                         f'{json.dumps(bootstrap_config.dict(), indent=2)}')
+            return _bulk_provision(cloud, region, zones, cluster_name,
+                                   bootstrap_config)
+        except Exception:  # pylint: disable=broad-except
+            logger.error(
+                f'*** Failed provisioning the cluster ({cluster_name}). ***')
+            logger.debug(f'Starting instances for "{cluster_name}" '
+                         f'failed. Stacktrace:\n{traceback.format_exc()}')
+            # If cluster was previously UP or STOPPED, stop it; otherwise
+            # terminate.
+            # FIXME(zongheng): terminating a potentially live cluster is
+            # scary. Say: users have an existing cluster that got into INIT, do
+            # sky launch, somehow failed, then we may be terminating it here.
+            terminate = not is_prev_cluster_healthy
+            terminate_str = ('Terminating' if terminate else 'Stopping')
+            logger.error(f'*** {terminate_str} the failed cluster. ***')
+            teardown_cluster(repr(cloud),
+                             cluster_name,
+                             terminate=terminate,
+                             provider_config=original_config['provider'])
+            return None
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
@@ -412,30 +423,25 @@ def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
     user setup."""
     log_path = os.path.join(log_dir, 'provision.log')
     log_abs_path = os.path.abspath(os.path.expanduser(log_path))
-    fh = logging.FileHandler(log_abs_path)
-    fh.setFormatter(sky_logging.FORMATTER)
-    fh.setLevel(logging.DEBUG)
-    try:
-        logger.addHandler(fh)
-        logger.debug(_TITLE.format('System Setup After Provision'))
-        per_instance_log_dir = metadata_utils.get_instance_log_dir(
-            cluster_name.display_name, '*')
-        logger.debug(f'For per-instance logs, see: "{per_instance_log_dir}".\n'
-                     f'  Or run: tail -n 100 -f {per_instance_log_dir}/*.log')
-        return _post_provision_setup(cloud_name,
-                                     cluster_name,
-                                     cluster_yaml=cluster_yaml,
-                                     local_wheel_path=local_wheel_path,
-                                     wheel_hash=wheel_hash,
-                                     provision_metadata=provision_metadata,
-                                     custom_resource=custom_resource)
-    except Exception:  # pylint: disable=broad-except
-        logger.error(
-            f'*** Failed setting up cluster {cluster_name!r} after provision. '
-            '***')
-        logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
-        with ux_utils.print_exception_no_traceback():
-            raise
-    finally:
-        logger.removeHandler(fh)
-        fh.close()
+
+    with _add_file_handler_for_logger(logger, log_abs_path):
+        try:
+            logger.debug(_TITLE.format('System Setup After Provision'))
+            per_instance_log_dir = metadata_utils.get_instance_log_dir(
+                cluster_name, '*')
+            logger.debug(
+                f'For per-instance logs, see "{str(per_instance_log_dir)}".')
+            return _post_provision_setup(cloud_name,
+                                         cluster_name,
+                                         cluster_yaml=cluster_yaml,
+                                         local_wheel_path=local_wheel_path,
+                                         wheel_hash=wheel_hash,
+                                         provision_metadata=provision_metadata,
+                                         custom_resource=custom_resource)
+        except Exception:  # pylint: disable=broad-except
+            logger.error(
+                f'*** Failed setting up cluster {cluster_name!r} after '
+                'provision. ***')
+            logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+            with ux_utils.print_exception_no_traceback():
+                raise
