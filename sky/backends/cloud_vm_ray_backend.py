@@ -1570,13 +1570,12 @@ class RetryingVmProvisioner(object):
                 #  the new provisioner once they are ready.
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
-                cluster_name = handle.cluster_name
                 num_nodes = handle.launched_nodes
                 provision_metadata = provision_utils.bulk_provision(
                     to_provision.cloud,
                     region,
                     zones,
-                    cluster_name,
+                    handle.cluster_name_on_cloud,
                     num_nodes=num_nodes,
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
@@ -2856,7 +2855,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 cluster_metadata = provision_utils.post_provision_setup(
                     repr(handle.launched_resources.cloud),
-                    cluster_name,
+                    handle.cluster_name_on_cloud,
                     handle.cluster_yaml,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
