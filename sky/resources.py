@@ -957,6 +957,9 @@ class Resources:
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
 
+        # TODO(tian): How to only check this on cloud that not support update
+        # ports? And maybe still check this when using `sky exec`?
+        return True
         if self.ports is not None:
             if other.ports is None:
                 return False

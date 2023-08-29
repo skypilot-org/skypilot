@@ -2861,6 +2861,34 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                    ssh_port_list, lock_path)
             return handle
 
+    def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
+                               ports: List[Union[int, str]]) -> None:
+        cloud = handle.launched_resources.cloud
+        config = common_utils.read_yaml(handle.cluster_yaml)
+        provider_config = config['provider']
+        if 'ports' not in provider_config:
+            existing_ports = []
+        else:
+            existing_ports = provider_config['ports']
+        new_ports = []
+        for port in ports:
+            if port not in existing_ports:
+                new_ports.append(port)
+                existing_ports.append(port)
+        if new_ports:
+            if not isinstance(cloud, (clouds.AWS, clouds.GCP)):
+                logger.warning(
+                    f'Cannot open ports for {cloud} that not support '
+                    'new provisioner API.')
+                return
+            logger.debug(f'Opening new ports {new_ports} for {cloud}')
+            provider_config['ports'] = existing_ports
+            common_utils.dump_yaml(handle.cluster_yaml, config)
+            provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
+                                     new_ports, provider_config)
+            handle.launched_resources = handle.launched_resources.copy(
+                ports=existing_ports)
+
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
@@ -2906,6 +2934,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode, cmd,
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
+
+        assert len(task.resources) == 1
+        ports = list(task.resources)[0].ports
+        if ports is not None:
+            self._open_inexistent_ports(handle, ports)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(

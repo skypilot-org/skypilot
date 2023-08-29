@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import importlib
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import status_lib
 
@@ -73,6 +73,17 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """Terminate running or stopped instances."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def open_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[Union[int, str]],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Open ports for inbound traffic."""
     raise NotImplementedError
 
 

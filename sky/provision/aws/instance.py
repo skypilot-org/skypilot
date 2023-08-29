@@ -1,7 +1,7 @@
 """AWS instance provisioning."""
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from botocore import config
 
@@ -161,6 +161,54 @@ def terminate_instances(
     #  of most cloud implementations (including AWS).
 
 
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[Union[int, str]],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    region = provider_config['region']
+    ec2 = _default_ec2_resource(region)
+
+    ip_permissions = []
+    for port in ports:
+        if isinstance(port, int):
+            from_port = to_port = port
+        else:
+            from_to_port = port.split('-')
+            from_port = int(from_to_port[0])
+            to_port = int(from_to_port[1])
+        ip_permissions.append({
+            'FromPort': from_port,
+            'ToPort': to_port,
+            'IpProtocol': 'tcp',
+            'IpRanges': [{
+                'CidrIp': '0.0.0.0/0'
+            }],
+        })
+
+    sg_name = provider_config['security_group']['GroupName']
+    sgs = ec2.security_groups.filter(Filters=[{
+        'Name': 'group-name',
+        'Values': [sg_name]
+    }])
+    num_sg = len(list(sgs))
+    if num_sg == 0:
+        logger.warning(f'Expected security group {sg_name} not found. '
+                       'Skip open ports.')
+        return
+    if num_sg > 1:
+        # TODO(tian): Better handle this case. Maybe we can check when creating
+        # the SG and throw an error if there is already an existing SG with the
+        # same name.
+        logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
+                       'Skip open ports. Please open them manually.')
+        return
+    sg = list(sgs)[0]
+    sg.authorize_ingress(IpPermissions=ip_permissions)
+
+
 def cleanup_ports(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -170,10 +218,7 @@ def cleanup_ports(
     if 'ports' not in provider_config:
         return
     region = provider_config['region']
-    ec2 = aws.resource(
-        'ec2',
-        region_name=region,
-        config=config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}))
+    ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
     # GroupNames will only filter SGs in the default VPC, so we need to use
     # Filters here. Ref:
