@@ -50,7 +50,7 @@ def _auto_retry(func):
                 if retry_cnt >= _MAX_RETRY - 1:
                     raise e
                 sleep = backoff.current_backoff()
-                logger.info('Retrying in {:.1f} seconds.'.format(sleep))
+                logger.info(f'Retrying in {sleep:.1f} seconds.')
                 time.sleep(sleep)
 
     return retry
