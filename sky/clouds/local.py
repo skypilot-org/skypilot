@@ -207,4 +207,4 @@ class Local(clouds.Cloud):
         if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
             return
         raise exceptions.NotSupportedError(
-            f'Local does not support disk tier {disk_tier}.')
+            f'Local does not support disk tier {disk_tier.value}.')
