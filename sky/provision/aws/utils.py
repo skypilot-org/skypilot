@@ -87,7 +87,7 @@ def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:
         )
 
         logger.error(generic_message)
-        logger.debug(vars(exc))
+        logger.info(vars(exc))
 
         logger.fatal(
             'Your AWS session has expired.\n'

@@ -90,7 +90,7 @@ def bootstrap_instances(region: str, cluster_name: str,
             config.provider_config.get('ports', []), extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
-        logger.debug(
+        logger.info(
             f'Security groups created or updated in {elapsed:.5f} seconds.')
 
     # store updated subnet and security group configs in node config
@@ -144,7 +144,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     profile = _get_instance_profile(instance_profile_name)
 
     if profile is None:
-        logger.debug(
+        logger.info(
             f'Creating new IAM instance profile {colorama.Style.BRIGHT}{instance_profile_name}{colorama.Style.RESET_ALL} for '
             'use as the default.')
         iam.meta.client.create_instance_profile(
@@ -157,7 +157,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
         role_name = DEFAULT_SKYPILOT_IAM_ROLE
         role = _get_role(role_name)
         if role is None:
-            logger.debug(
+            logger.info(
                 f'Creating new IAM role {colorama.Style.BRIGHT}{role_name}'
                 f'{colorama.Style.RESET_ALL} for use as the default instance '
                 'role.')
@@ -492,7 +492,7 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     assert security_group, 'Failed to create security group'
     security_group = security_group[0]
 
-    logger.debug(f'Created new security group {colorama.Style.BRIGHT}'
+    logger.info(f'Created new security group {colorama.Style.BRIGHT}'
                  f'{security_group.group_name}{colorama.Style.RESET_ALL} '
                  f'[id={security_group.id}]')
     return security_group
