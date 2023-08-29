@@ -4,11 +4,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-# We still have to depend on Ray logger, because currently
-# our logger does not support the same coloring schema as Ray.
-# For example, Ray can format the entire message yellow.
-from ray.autoscaler._private.cli_logger import cli_logger
-
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
@@ -154,7 +149,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                 except aws.botocore_exceptions().ClientError as e:
                     if e.response['Error']['Code'] == 'RequestLimitExceeded':
                         time.sleep(backoff.current_backoff())
-                        cli_logger.warning(
+                        logger.warning(
                             'create_instances: RequestLimitExceeded, retrying.')
                         continue
                     raise
@@ -169,7 +164,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                     'Failed to launch instances. Max attempts exceeded.'
                 ) from exc
             else:
-                cli_logger.warning(
+                logger.warning(
                     f'create_instances: Attempt failed with {exc}, retrying.')
     assert False, 'This code should not be reachable'
 
@@ -184,7 +179,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
         for t in inst.tags:
             if (t['Key'], t['Value']) in head_node_markers:
                 if head_instance_id is not None:
-                    cli_logger.warning(
+                    logger.warning(
                         'There are multiple head nodes in the cluster '
                         f'(current head instance id: {head_instance_id}, '
                         f'newly discovered id: {inst.id}). It is likely '
@@ -319,9 +314,8 @@ def start_instances(region: str, cluster_name: str,
         if zone is None:
             zone = placement_zone
         elif zone != placement_zone:
-            cli_logger.warning(
-                f'Resumed instances are in zone {placement_zone}, '
-                f'while previous instances are in zone {zone}.')
+            logger.warning(f'Resumed instances are in zone {placement_zone}, '
+                           f'while previous instances are in zone {zone}.')
         to_start_count -= len(resumed_instances)
 
         if head_instance_id is None:
@@ -345,9 +339,9 @@ def start_instances(region: str, cluster_name: str,
         if zone is None:
             zone = placement_zone
         elif zone != placement_zone:
-            cli_logger.warning('Newly created instances are in zone '
-                               f'{placement_zone}, '
-                               f'while previous instances are in zone {zone}.')
+            logger.warning('Newly created instances are in zone '
+                           f'{placement_zone}, '
+                           f'while previous instances are in zone {zone}.')
 
         # NOTE: we only create worker tags for newly started nodes, because
         # the worker tag is a legacy feature, so we would not care about

@@ -4,9 +4,12 @@ from typing import Any, Dict
 
 import boto3
 from botocore import config
-from ray.autoscaler._private.cli_logger import cf
-from ray.autoscaler._private.cli_logger import cli_logger
+import colorama
 import urllib3
+
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
 
 BOTO_MAX_RETRIES = 12
 
@@ -43,11 +46,8 @@ def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:
     if error_info is not None:
         error_code = error_info.get('Code', None)
 
-    generic_message_args = [
-        '{}\nError code: {}',
-        msg.format(*args, **kwargs),
-        cf.bold(error_code),
-    ]
+    generic_message = (f'{msg}\nError code: {colorama.Style.BRIGHT}{error_code}'
+                       f'{colorama.Style.RESET_ALL}')
 
     # apparently
     # ExpiredTokenException
@@ -69,19 +69,15 @@ def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:
         # DescribeKeyPairs operation: Request has expired.'
 
         token_command = ('aws sts get-session-token '
-                         '--serial-number arn:aws:iam::' +
-                         cf.underlined('ROOT_ACCOUNT_ID') + ':mfa/' +
-                         cf.underlined('AWS_USERNAME') + ' --token-code ' +
-                         cf.underlined('TWO_FACTOR_AUTH_CODE'))
+                         '--serial-number arn:aws:iam::' + 'ROOT_ACCOUNT_ID' +
+                         ':mfa/' + 'AWS_USERNAME' + ' --token-code ' +
+                         'TWO_FACTOR_AUTH_CODE')
 
-        secret_key_var = ('export AWS_SECRET_ACCESS_KEY = ' +
-                          cf.underlined('REPLACE_ME') +
+        secret_key_var = ('export AWS_SECRET_ACCESS_KEY = ' + 'REPLACE_ME' +
                           ' # found at Credentials.SecretAccessKey')
-        session_token_var = ('export AWS_SESSION_TOKEN = ' +
-                             cf.underlined('REPLACE_ME') +
+        session_token_var = ('export AWS_SESSION_TOKEN = ' + 'REPLACE_ME' +
                              ' # found at Credentials.SessionToken')
-        access_key_id_var = ('export AWS_ACCESS_KEY_ID = ' +
-                             cf.underlined('REPLACE_ME') +
+        access_key_id_var = ('export AWS_ACCESS_KEY_ID = ' + 'REPLACE_ME' +
                              ' # found at Credentials.AccessKeyId')
 
         # fixme: replace with a Github URL that points
@@ -90,32 +86,28 @@ def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:
             'https://gist.github.com/maximsmol/a0284e1d97b25d417bd9ae02e5f450cf'
         )
 
-        cli_logger.verbose_error(*generic_message_args)
-        cli_logger.verbose(vars(exc))
+        logger.error(generic_message)
+        logger.debug(vars(exc))
 
-        cli_logger.panic('Your AWS session has expired.')
-        cli_logger.newline()
-        cli_logger.panic('You can request a new one using')
-        cli_logger.panic(cf.bold(token_command))
-        cli_logger.panic('then expose it to Ray by setting')
-        cli_logger.panic(cf.bold(secret_key_var))
-        cli_logger.panic(cf.bold(session_token_var))
-        cli_logger.panic(cf.bold(access_key_id_var))
-        cli_logger.newline()
-        cli_logger.panic('You can find a script that automates this at:')
-        cli_logger.panic(cf.underlined(aws_session_script_url))
+        logger.fatal(
+            'Your AWS session has expired.\n'
+            f'You can request a new one using {colorama.Style.BRIGHT}'
+            f'{token_command}{colorama.Style.RESET_ALL} then expose it '
+            f'to SkyPilot by setting {colorama.Style.BRIGHT}'
+            f'{secret_key_var} {session_token_var} {access_key_id_var}'
+            f'{colorama.Style.RESET_ALL}\n'
+            f'You can find a script that automates this at:'
+            f'{aws_session_script_url}')
         # Do not re-raise the exception here because it looks awful
         # and we already print all the info in verbose
-        cli_logger.abort()
+        raise SystemExit(1)
 
     # todo: any other errors that we should catch separately?
 
-    cli_logger.panic(*generic_message_args)
-    cli_logger.newline()
-    with cli_logger.verbatim_error_ctx('Boto3 error:'):
-        cli_logger.verbose('{}', str(vars(exc)))
-        cli_logger.panic('{}', str(exc))
-    cli_logger.abort()
+    logger.fatal(generic_message)
+    logger.fatal('')
+    logger.error(f'Boto3 error: {vars(exc)} {exec}')
+    raise SystemExit(1)
 
 
 def get_self_instance_metadata() -> Dict[str, str]:

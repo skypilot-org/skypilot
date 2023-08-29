@@ -8,8 +8,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from ray.autoscaler._private.cli_logger import cf
-from ray.autoscaler._private.cli_logger import cli_logger
+import colorama
 
 from sky import sky_logging
 from sky.adaptors import aws
@@ -121,11 +120,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                 return None
             else:
                 utils.handle_boto_error(
-                    exc,
-                    'Failed to fetch IAM instance profile data for '
-                    '{} from AWS.',
-                    cf.bold(profile_name),
-                )
+                    exc, 'Failed to fetch IAM instance profile data for '
+                    f'{colorama.Style.BRIGHT}{profile_name}'
+                    f'{colorama.Style.RESET_ALL} from AWS.')
                 raise exc
 
     def _get_role(role_name: str):
@@ -139,37 +136,31 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             else:
                 utils.handle_boto_error(
                     exc,
-                    'Failed to fetch IAM role data for {} from AWS.',
-                    cf.bold(role_name),
-                )
+                    f'Failed to fetch IAM role data for {colorama.Style.BRIGHT}'
+                    f'{role_name}{colorama.Style.RESET_ALL} from AWS.')
                 raise exc
 
     instance_profile_name = DEFAULT_SKYPILOT_INSTANCE_PROFILE
     profile = _get_instance_profile(instance_profile_name)
 
     if profile is None:
-        cli_logger.verbose(
-            'Creating new IAM instance profile {} for use as the default.',
-            cf.bold(instance_profile_name),
-        )
+        logger.debug(
+            f'Creating new IAM instance profile {colorama.Style.BRIGHT}{instance_profile_name}{colorama.Style.RESET_ALL} for '
+            'use as the default.')
         iam.meta.client.create_instance_profile(
             InstanceProfileName=instance_profile_name)
         profile = _get_instance_profile(instance_profile_name)
         time.sleep(15)  # wait for propagation
-
-    cli_logger.doassert(profile is not None,
-                        'Failed to create instance profile.')  # todo: err msg
     assert profile is not None, 'Failed to create instance profile'
 
     if not profile.roles:
         role_name = DEFAULT_SKYPILOT_IAM_ROLE
         role = _get_role(role_name)
         if role is None:
-            cli_logger.verbose(
-                'Creating new IAM role {} for use as the default '
-                'instance role.',
-                cf.bold(role_name),
-            )
+            logger.debug(
+                f'Creating new IAM role {colorama.Style.BRIGHT}{role_name}'
+                f'{colorama.Style.RESET_ALL} for use as the default instance '
+                'role.')
             policy_doc = {
                 'Statement': [{
                     'Effect': 'Allow',
@@ -187,9 +178,6 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             iam.create_role(RoleName=role_name,
                             AssumeRolePolicyDocument=json.dumps(policy_doc))
             role = _get_role(role_name)
-            cli_logger.doassert(role is not None,
-                                'Failed to create role.')  # todo: err msg
-
             assert role is not None, 'Failed to create role'
 
             for policy_arn in attach_policy_arns:
@@ -364,12 +352,10 @@ def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]) -> Any:
                         'should belong to the same VPC.\n'
                         f'Security group IDs: {sg_ids}\n'
                         f'Their VPC IDs (expected 1 element): {vpc_ids}\n')
-    cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
     assert len(vpc_ids) <= 1, multiple_vpc_msg
 
     no_sg_msg = ('Failed to detect a security group with id equal to any of '
                  'the configured SecurityGroupIds.')
-    cli_logger.doassert(len(vpc_ids) > 0, no_sg_msg)
     assert len(vpc_ids) > 0, no_sg_msg
 
     return vpc_ids[0]
@@ -506,16 +492,9 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     assert security_group, 'Failed to create security group'
     security_group = security_group[0]
 
-    cli_logger.doassert(security_group,
-                        'Failed to create security group')  # err msg
-
-    cli_logger.verbose(
-        'Created new security group {}',
-        cf.bold(security_group.group_name),
-        _tags=dict(id=security_group.id),
-    )
-    cli_logger.doassert(security_group,
-                        'Failed to create security group')  # err msg
+    logger.debug(f'Created new security group {colorama.Style.BRIGHT}'
+                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
+                 f'[id={security_group.id}]')
     return security_group
 
 
