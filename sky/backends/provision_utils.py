@@ -397,8 +397,7 @@ def post_provision_setup(cloud_name: str, cluster_name: str, cluster_yaml: str,
     except Exception:  # pylint: disable=broad-except
         logger.error(
             f'*** Failed setting up cluster {cluster_name!r} after provision. '
-            '***'
-        )
+            '***')
         logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
         with ux_utils.print_exception_no_traceback():
             raise
