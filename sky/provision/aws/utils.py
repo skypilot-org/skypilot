@@ -36,7 +36,7 @@ def create_resource(resource: str,
             **credentials)
 
 
-def handle_boto_error(exc: Exception, msg: str, *args, **kwargs) -> None:
+def handle_boto_error(exc: Exception, msg: str) -> None:
     """Handle boto3 error properly."""
     error_code = None
     error_info = None

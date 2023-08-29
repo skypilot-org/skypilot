@@ -145,8 +145,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 
     if profile is None:
         logger.info(
-            f'Creating new IAM instance profile {colorama.Style.BRIGHT}{instance_profile_name}{colorama.Style.RESET_ALL} for '
-            'use as the default.')
+            f'Creating new IAM instance profile {colorama.Style.BRIGHT}'
+            f'{instance_profile_name}{colorama.Style.RESET_ALL} for use as the '
+            'default.')
         iam.meta.client.create_instance_profile(
             InstanceProfileName=instance_profile_name)
         profile = _get_instance_profile(instance_profile_name)
