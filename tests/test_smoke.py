@@ -1567,6 +1567,12 @@ def test_azure_start_stop():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Launching and starting Azure clusters can take a long time too. e.g., restart
+    # a stopped Azure cluster can take 7m. So we set the total timeout to 70m.
+    total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
     test = Test(
         'autostop',
         [
@@ -1581,7 +1587,7 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -1599,7 +1605,7 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
@@ -1610,11 +1616,11 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1624,6 +1630,10 @@ def test_autostop(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_kubernetes_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
+    # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
+    # the VM is terminated.
+    autodown_timeout = 900 if generic_cloud == 'azure' else 240
+    total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
     test = Test(
         'autodown',
         [
@@ -1635,23 +1645,23 @@ def test_autodown(generic_cloud: str):
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
-            'sleep 200',
+            f'sleep {autodown_timeout}',
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 240',
+            f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
-            'sleep 240',
+            f'sleep {autodown_timeout}',
             # Ensure the cluster is still UP.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
