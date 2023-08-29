@@ -311,7 +311,7 @@ def _post_provision_setup(
             cluster_name, config_from_yaml['setup_commands'], cluster_metadata,
             ssh_credentials)
 
-    head_runner = command_runner.SSHCommandRunner(ip_list[0], **ssh_credentials)
+    head_runner = command_runner.SSHCommandRunner(ip_list[0], port=22, **ssh_credentials)
 
     with log_utils.safe_rich_status(
             f'[bold cyan]Checking and starting Skylet for '
@@ -391,9 +391,10 @@ def post_provision_setup(cloud_name: str, cluster_name: str, cluster_yaml: str,
                                      wheel_hash=wheel_hash,
                                      provision_metadata=provision_metadata,
                                      custom_resource=custom_resource)
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(
-            f'*** Failed setting up cluster {cluster_name} after provision. ***'
+            f'*** Failed setting up cluster {cluster_name!r} after provision. ***\n'
+            f'{common_utils.format_exception(e)}'
         )
         logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
         with ux_utils.print_exception_no_traceback():

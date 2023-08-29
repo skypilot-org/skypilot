@@ -3,7 +3,6 @@
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
-from distutils import version
 import itertools
 import json
 import logging
@@ -11,8 +10,6 @@ import textwrap
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import boto3
-import botocore
 from ray.autoscaler._private.cli_logger import cf
 from ray.autoscaler._private.cli_logger import cli_logger
 
@@ -30,11 +27,6 @@ SECURITY_GROUP_TEMPLATE = RAY + '-{}'
 SKYPILOT = 'skypilot'
 DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + '-v1'
 DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + '-v1'
-
-# todo: cli_logger should handle this assert properly
-# this should probably also happens somewhere else
-assert version.StrictVersion(boto3.__version__) >= version.StrictVersion(
-    '1.4.8'), 'Boto3 version >= 1.4.8 required, try `pip install -U boto3`'
 
 # Suppress excessive connection dropped logs from boto
 logging.getLogger('botocore').setLevel(logging.WARNING)
@@ -59,14 +51,10 @@ def bootstrap_instances(region: str, cluster_name: str,
     node_cfg = config.node_config
     aws_credentials = config.provider_config.get('aws_credentials', {})
 
-    # If NetworkInterfaces are provided, extract the necessary fields for the
-    # config stages below.
-    if 'NetworkInterfaces' in node_cfg:
-        subnet_ids, security_group_ids = (
-            _configure_subnets_and_groups_from_network_interfaces(node_cfg))
-    else:
-        subnet_ids = node_cfg.get('SubnetIds')  # type: ignore
-        security_group_ids = node_cfg.get('SecurityGroupIds')  # type: ignore
+    subnet_ids = node_cfg.get('SubnetIds')  # type: ignore
+    security_group_ids = node_cfg.get('SecurityGroupIds')  # type: ignore
+    assert 'NetworkInterfaces' not in node_cfg, 'SkyPilot: NetworkInterfaces is not supported in node config'
+    assert subnet_ids is None, 'SkyPilot: SubnetIds is not supported.'
 
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
@@ -74,24 +62,16 @@ def bootstrap_instances(region: str, cluster_name: str,
         iam = aws.resource('iam', region_name=region, **aws_credentials)
         node_cfg['IamInstanceProfile'] = _configure_iam_role(iam)
 
-    # Configure SSH access, using an existing key pair if possible.
-    node_cfg['UserData'] = _configure_ssh_keypair(
-        config.authentication_config['ssh_user'])
-
     ec2 = aws.resource('ec2', region_name=region, **aws_credentials)
 
-    if subnet_ids is not None:
-        subnets, vpc_id = _validate_subnet(ec2, subnet_ids, security_group_ids)
-    else:
-        # Pick a reasonable subnet if not specified by the user.
-        subnets, vpc_id = _create_subnet(
-            ec2,
-            security_group_ids,
-            config.provider_config['region'],
-            availability_zone=config.provider_config.get('availability_zone'),
-            use_internal_ips=config.provider_config.get('use_internal_ips',
-                                                        False),
-            vpc_name=config.provider_config.get('vpc_name'))
+    # Pick a reasonable subnet if not specified by the user.
+    subnets, vpc_id = _get_subnet_and_vpc_id(
+        ec2,
+        security_group_ids,
+        config.provider_config['region'],
+        availability_zone=config.provider_config.get('availability_zone'),
+        use_internal_ips=config.provider_config.get('use_internal_ips', False),
+        vpc_name=config.provider_config.get('vpc_name'))
 
     # Cluster workers should be in a security group that permits traffic within
     # the group, and also SSH access from outside.
@@ -121,32 +101,13 @@ def bootstrap_instances(region: str, cluster_name: str,
     node_cfg['SecurityGroupIds'] = security_group_ids
 
     # Provide helpful message for missing ImageId for node configuration.
-    # NOTE(skypilot): skypilot uses the default AMIs in aws.py.
+    # NOTE(skypilot): skypilot uses the default AMIs in sky/clouds/aws.py.
     node_ami = config.node_config.get('ImageId')
     if not node_ami:
         _skypilot_log_error_and_exit_for_failover(
             'No ImageId found in the node_config. '
             'ImageId will need to be set manually in your cluster config.')
-
     return config
-
-
-def _configure_ssh_keypair(ssh_user: str) -> str:
-    """Configure SSH access for AWS, using an existing key pair if possible"""
-    _, public_key_path = authentication.get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    # Use cloud init in UserData to set up the authorized_keys to get
-    # around the number of keys limit and permission issues with
-    # ec2.describe_key_pairs.
-    # https://aws.amazon.com/premiumsupport/knowledge-center/ec2-user-account-cloud-init-user-data/
-    return textwrap.dedent(f"""\
-        #cloud-config
-        users:
-        - name: {ssh_user}
-          ssh-authorized-keys:
-            - {public_key}
-        """)
 
 
 def _configure_iam_role(iam) -> Dict[str, Any]:
@@ -156,7 +117,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
         try:
             profile.load()
             return profile
-        except botocore.exceptions.ClientError as exc:
+        except aws.botocore_exceptions().ClientError as exc:
             if exc.response.get('Error', {}).get('Code') == 'NoSuchEntity':
                 return None
             else:
@@ -173,7 +134,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
         try:
             role.load()
             return role
-        except botocore.exceptions.ClientError as exc:
+        except aws.botocore_exceptions().ClientError as exc:
             if exc.response.get('Error', {}).get('Code') == 'NoSuchEntity':
                 return None
             else:
@@ -240,7 +201,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
-def _usable_subnet_ids(
+def _usable_subnets(
     user_specified_subnets: Optional[List[Any]],
     all_subnets: List[Any],
     azs: Optional[str],
@@ -331,7 +292,7 @@ def _usable_subnet_ids(
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
         )
-    except botocore.exceptions.ClientError as exc:
+    except aws.botocore_exceptions().ClientError as exc:
         utils.handle_boto_error(exc,
                                 'Failed to fetch available subnets from AWS.')
         raise exc
@@ -439,29 +400,10 @@ def _get_vpc_id_by_name(ec2, vpc_name: str, region: str) -> str:
     return vpcs[0].id
 
 
-def _validate_subnet(ec2, subnet_ids: List[str],
-                     security_group_ids: List[str]) -> Tuple[List, str]:
-    if security_group_ids:
-        _vpc_id_from_security_group_ids(ec2, security_group_ids)
-    subnet_ids = tuple(subnet_ids)
-    subnets = list(
-        ec2.subnets.filter(Filters=[{
-            'Name': 'subnet-id',
-            'Values': list(subnet_ids)
-        }]))
-
-    # TODO: better error message
-    cli_logger.doassert(
-        len(subnets) == len(subnet_ids), 'Not all subnet IDs found: {}',
-        subnet_ids)
-    assert len(subnets) == len(subnet_ids), 'Subnet ID not found: {}'.format(
-        subnet_ids)
-    return subnets, subnets[0].vpc_id
-
-
-def _create_subnet(ec2, security_group_ids: List[str], region: str,
-                   availability_zone: str, use_internal_ips: bool,
-                   vpc_name: Optional[str]) -> Tuple[Any, str]:
+def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
+                           region: str, availability_zone: Optional[str],
+                           use_internal_ips: bool,
+                           vpc_name: Optional[str]) -> Tuple[Any, str]:
     if vpc_name is not None:
         vpc_id_of_sg = _get_vpc_id_by_name(ec2, vpc_name, region)
     elif security_group_ids:
@@ -470,7 +412,7 @@ def _create_subnet(ec2, security_group_ids: List[str], region: str,
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
-    subnets, vpc_id = _usable_subnet_ids(
+    subnets, vpc_id = _usable_subnets(
         None,
         all_subnets,
         azs=availability_zone,
@@ -561,7 +503,9 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     )
     security_group = _get_security_groups_from_vpc_ids(ec2, [vpc_id],
                                                        [expected_sg_name])
-    security_group = security_group[0] if security_group else None
+
+    assert security_group, 'Failed to create security group'
+    security_group = security_group[0]
 
     cli_logger.doassert(security_group,
                         'Failed to create security group')  # err msg
@@ -573,7 +517,6 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     )
     cli_logger.doassert(security_group,
                         'Failed to create security group')  # err msg
-    assert security_group, 'Failed to create security group'
     return security_group
 
 
@@ -591,41 +534,3 @@ def _get_security_groups_from_vpc_ids(ec2, vpc_ids: List[str],
         sg for sg in existing_groups if sg.group_name in unique_group_names
     ]
     return filtered_groups
-
-
-def _configure_subnets_and_groups_from_network_interfaces(
-        node_cfg: Dict[str, Any]) -> Tuple[List, List]:
-    """
-    Copies all network interface subnet and security group IDs into their
-    parent node config.
-
-    Args:
-        node_cfg (Dict[str, Any]): node config to bootstrap
-    Raises:
-        ValueError: If [1] subnet and security group IDs exist at both the
-        node config and network interface levels, [2] any network interface
-        doesn't have a subnet defined, or [3] any network interface doesn't
-        have a security group defined.
-    """
-    net_ifs = node_cfg['NetworkInterfaces']
-    # If NetworkInterfaces are defined, SubnetId and SecurityGroupIds
-    # can't be specified in the same node type config.
-    conflict_keys = ['SubnetId', 'SubnetIds', 'SecurityGroupIds']
-    if any(conflict in node_cfg for conflict in conflict_keys):
-        raise ValueError(
-            'If NetworkInterfaces are defined, subnets and security groups '
-            'must ONLY be given in each NetworkInterface.')
-
-    subnets = [ni.get('SubnetId', '') for ni in net_ifs]
-    if not all(subnets):
-        raise ValueError(
-            'NetworkInterfaces are defined but at least one is missing a '
-            'subnet. Please ensure all interfaces have a subnet assigned.')
-    security_groups = [ni.get('Groups', []) for ni in net_ifs]
-    if not all(security_groups):
-        raise ValueError(
-            'NetworkInterfaces are defined but at least one is missing a '
-            'security group. Please ensure all interfaces have a security '
-            'group assigned.')
-
-    return subnets, list(itertools.chain(*security_groups))

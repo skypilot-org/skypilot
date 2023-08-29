@@ -26,7 +26,7 @@ import re
 import socket
 import subprocess
 import sys
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 import uuid
 
 import colorama
@@ -109,22 +109,15 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def _replace_ssh_info_in_config(config: Dict[str, Any],
-                                public_key: str) -> Dict[str, Any]:
-    config_str = common_utils.dump_yaml_str(config)
-    config_str = config_str.replace('skypilot:ssh_user',
-                                    config['auth']['ssh_user'])
-    config_str = config_str.replace('skypilot:ssh_public_key_content',
-                                    public_key)
-    config = yaml.safe_load(config_str)
-    return config
-
-
-def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+def configure_ssh_info(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read().strip()
-    config = _replace_ssh_info_in_config(config, public_key)
+    config_str = common_utils.dump_yaml_str(config)
+    config_str = config_str.replace('skypilot:ssh_user', config['auth']['ssh_user'])
+    config_str = config_str.replace('skypilot:ssh_public_key_content',
+                                    public_key)
+    config = yaml.safe_load(config_str)
     return config
 
 
@@ -264,14 +257,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-    return _replace_ssh_info_in_config(config, public_key)
+    return configure_ssh_info(config)
 
-
-def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read().strip()
-    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -358,23 +345,6 @@ def setup_ibm_authentication(config):
     config['file_mounts'] = file_mounts
 
     return config
-
-
-# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read().strip()
-
-    return _replace_ssh_info_in_config(config, public_key)
-
-
-def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read().strip()
-    return _replace_ssh_info_in_config(config, public_key)
-
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()

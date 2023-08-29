@@ -18,7 +18,7 @@ docker:
 
 provider:
   type: external
-  module: sky.skylet.providers.aws.AWSNodeProviderV2
+  module: sky.provision.aws
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -124,61 +124,6 @@ available_node_types:
             - Key: {{ tag_key }}
               Value: {{ tag_value }}
 {%- endfor %}
-
-{% if num_nodes > 1 %}
-  ray.worker.default:
-    min_workers: {{num_nodes - 1}}
-    max_workers: {{num_nodes - 1}}
-    resources: {}
-    node_config:
-      InstanceType: {{instance_type}}
-      ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
-      BlockDeviceMappings:
-        - DeviceName: /dev/sda1
-          Ebs:
-            VolumeSize: {{disk_size}}
-            VolumeType: {{disk_tier}}
-            {% if custom_disk_perf %}
-            Iops: {{disk_iops}}
-            Throughput: {{disk_throughput}}
-            {% endif %}
-      {% if use_spot %}
-      InstanceMarketOptions:
-          MarketType: spot
-          # Additional options can be found in the boto docs, e.g.
-          #   SpotOptions:
-          #       MaxPrice: MAX_HOURLY_PRICE
-      {% endif %}
-      UserData: |
-        #cloud-config
-        users:
-          - name: skypilot:ssh_user
-            shell: /bin/bash
-            sudo: ALL=(ALL) NOPASSWD:ALL
-            ssh_authorized_keys:
-              - |
-                skypilot:ssh_public_key_content
-        write_files:
-          - path: /etc/apt/apt.conf.d/20auto-upgrades
-            content: |
-              APT::Periodic::Update-Package-Lists "0";
-              APT::Periodic::Download-Upgradeable-Packages "0";
-              APT::Periodic::AutocleanInterval "0";
-              APT::Periodic::Unattended-Upgrade "0";
-          - path: /etc/apt/apt.conf.d/10cloudinit-disable
-            content: |
-              APT::Periodic::Enable "0";
-      TagSpecifications:
-        - ResourceType: instance
-          Tags:
-            - Key: skypilot-user
-              Value: {{ user }}
-{%- for tag_key, tag_value in instance_tags.items() %}
-            - Key: {{ tag_key }}
-              Value: {{ tag_value }}
-{%- endfor %}
-
-{%- endif %}
 
 head_node_type: ray.head.default
 

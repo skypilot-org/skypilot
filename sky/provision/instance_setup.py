@@ -49,6 +49,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
         results = []
         for instance_id, metadata in cluster_metadata.instances.items():
             runner = command_runner.SSHCommandRunner(metadata.get_feasible_ip(),
+                                                     port=22,
                                                      **ssh_credentials)
             wrapper = metadata_utils.cache_func(cluster_name, instance_id,
                                                 stage_name, digest)

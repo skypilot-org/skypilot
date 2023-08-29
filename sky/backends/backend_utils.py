@@ -1160,22 +1160,16 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, clouds.AWS):
-        config = auth.setup_aws_authentication(config)
+    if isinstance(cloud, (clouds.AWS, clouds.Azure, clouds.OCI, clouds.SCP)):
+        config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    elif isinstance(cloud, clouds.Azure):
-        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
-    elif isinstance(cloud, clouds.SCP):
-        config = auth.setup_scp_authentication(config)
-    elif isinstance(cloud, clouds.OCI):
-        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1596,7 +1590,7 @@ def get_node_ips(cluster_yaml: str,
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
-    if ray_config['provider']['module'].startswith('sky.skylet.providers.aws'):
+    if '.aws' in ray_config['provider']['module']:
         return _query_cluster_ips('aws', ray_config['provider']['region'],
                                   ray_config['cluster_name'],
                                   expected_num_nodes, get_internal_ips)
