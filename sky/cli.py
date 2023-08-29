@@ -83,6 +83,7 @@ logger = sky_logging.init_logger(__name__)
 
 _CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
+_IGNORE_OPTION_WARNING = 'WARNING: {OPT}={VAL} is ignored.'
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
 provision a new cluster with that name. Otherwise provision a new cluster with
@@ -1521,7 +1522,11 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
-    del cpus, memory, disk_size, disk_tier  # Unused.
+    for opt, val in zip(['--cpus', '--memory', '--disk-size', '--disk-tier'],
+                        [cpus, memory, disk_size, disk_tier]):
+        if val is not None:
+            click.secho(_IGNORE_OPTION_WARNING.format(OPT=opt, VAL=val),
+                        fg='yellow')
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -3968,7 +3973,10 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
-    del cpus, memory  # Unused.
+    for opt, val in zip(['--cpus', '--memory'], [cpus, memory]):
+        if val is not None:
+            click.secho(_IGNORE_OPTION_WARNING.format(OPT=opt, VAL=val),
+                        fg='yellow')
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
