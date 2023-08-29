@@ -40,7 +40,7 @@ _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
 
-FORMATTER = logging.Formatter(_FORMAT, datefmt=_DATE_FORMAT)
+FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
 
 # All code inside the library should use sky_logging.print()
 # rather than print().
