@@ -296,15 +296,13 @@ class Optimizer:
                     fuzzy_candidates_str = ''
                     if fuzzy_candidates:
                         fuzzy_candidates_str = (
-                            f'\nTry one of these fuzzy matches: {cyan}'
+                            f'\nTry one of these offered accelerators: {cyan}'
                             f'{fuzzy_candidates}{reset}')
                     error_msg = (
-                        'No launchable resource found for task '
-                        f'{node}.{location_hint}\nThis means the '
-                        f'{source_hint} does not contain any resources that '
-                        'satisfy this request.\n\n'
-                        'To fix: relax or change the resource requirements.'
-                        f'{fuzzy_candidates_str}\n\n'
+                        f'{source_hint.capitalize()} does not contain any '
+                        f'instances satisfying the request:\n{node}.'
+                        f'{location_hint}\n\nTo fix: relax or change the '
+                        f'resource requirements.{fuzzy_candidates_str}\n\n'
                         f'Hint: {bold}sky show-gpus{reset} '
                         'to list available accelerators.\n'
                         f'      {bold}sky check{reset} to check the enabled '
@@ -862,11 +860,9 @@ class Optimizer:
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
-        node_to_cost_map, node_to_candidate_map = \
-            Optimizer._estimate_nodes_cost_or_time(
-                topo_order,
-                minimize_cost,
-                blocked_resources)
+        node_to_cost_map, node_to_candidate_map = (
+            Optimizer._estimate_nodes_cost_or_time(topo_order, minimize_cost,
+                                                   blocked_resources))
 
         if dag.is_chain():
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
@@ -978,6 +974,15 @@ def _fill_in_launchable_resources(
     try_fix_with_sky_check: bool = True,
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str]]:
+    """Fills in the launchable resources for the task.
+
+    Returns:
+      A tuple of:
+        Dict mapping the task's requested Resources to a list of launchable
+          Resources,
+        Dict mapping Cloud to a list of feasible Resources (for printing),
+        Sorted list of fuzzy candidates (alternative GPU names).
+    """
     backend_utils.check_public_cloud_enabled()
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
