@@ -352,7 +352,7 @@ def _post_provision_setup(
         runtime_preparation_str = ('[bold cyan]Preparing - Setting up SkyPilot '
                                    'runtime ({step}/3 - {step_name})')
         status.update(
-            runtime_preparation_str.format(step=1, step_name='mounting'))
+            runtime_preparation_str.format(step=1, step_name='files'))
         logger.debug('\nMounting internal files...')
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
@@ -373,7 +373,7 @@ def _post_provision_setup(
                                                       port=22,
                                                       **ssh_credentials)
 
-        status.update(runtime_preparation_str.format(step=3, step_name='ray'))
+        status.update(runtime_preparation_str.format(step=3, step_name='ray cluster'))
         logger.debug('\nSetting up Ray cluster...')
         full_ray_setup = True
         if not provision_metadata.is_instance_just_booted(
