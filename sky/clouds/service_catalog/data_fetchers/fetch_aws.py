@@ -136,7 +136,7 @@ def _get_availability_zones(region: str) -> pd.DataFrame:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.AWSAzFetchingError(
                     region,
-                    reason=exceptions.AWSAzFetchingError.Reason.CREDENTIAL
+                    reason=exceptions.AWSAzFetchingError.Reason.AUTHENTICATION
                 ) from None
         elif e.response['Error']['Code'] == 'UnauthorizedOperation':
             with ux_utils.print_exception_no_traceback():
@@ -416,14 +416,14 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
     """
     regions = list(get_enabled_regions())
 
-    errored_regions = collections.defaultdict(list)
+    errored_region_reasons = []
 
     def _get_availability_zones_with_error_handling(
             region: str) -> Optional[pd.DataFrame]:
         try:
             azs = _get_availability_zones(region)
         except exceptions.AWSAzFetchingError as e:
-            errored_regions[e.reason].append(region)
+            errored_region_reasons.append((region, e.reason))
             return None
         return azs
 
@@ -434,10 +434,14 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
                                regions)
     # Remove the regions that the user does not have access to.
     az_mappings = [m for m in az_mappings if m is not None]
+    errored_regions = collections.defaultdict(set)
+    for region, reason in errored_region_reasons:
+        errored_regions[reason].add(region)
     if errored_regions:
-        # This could happen if a AWS API glitch happens, it is to make sure
-        # that the availability zone does not get lost silently.
-        table = log_utils.create_table(['Regions', 'Reason'])
+        # This could happen if (1) an AWS API glitch happens, (2) permission
+        # error happens for specific availability zones. We print those zones to
+        # make sure that those zone does not get lost silently.
+        table = log_utils.create_table(['Region', 'Reason'])
         for reason, regions in errored_regions.items():
             reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
             region_str = '\n'.join(textwrap.wrap(str(regions), 60))
