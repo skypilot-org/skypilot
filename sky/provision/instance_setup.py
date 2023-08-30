@@ -113,17 +113,18 @@ def start_ray_head_node(ssh_runner: command_runner.SSHCommandRunner,
                         custom_resource: Optional[str]) -> None:
     """Start Ray on the head node."""
     ray_options = (f'--port={constants.SKY_REMOTE_RAY_PORT} '
-                   f'--object-manager-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT}'
+                   f'--object-manager-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
                    f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(
         'ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
         'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
         'ray start --disable-usage-stats --head '
         f'{ray_options};' + _RAY_PRLIMIT + _DUMP_RAY_PORTS,
-        stream_logs=False,
+        stream_logs=True,
         require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
@@ -140,7 +141,7 @@ def start_ray_worker_nodes(ssh_runners: List[command_runner.SSHCommandRunner],
     if not ssh_runners:
         return
 
-    ray_options = (f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT}'
+    ray_options = (f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
                    f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
