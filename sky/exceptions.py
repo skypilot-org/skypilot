@@ -223,12 +223,12 @@ class AWSAzFetchingError(Exception):
     class Reason(enum.Enum):
         """Reason for fetching availability zone failure."""
 
-        AUTHENTICATION = 'AUTHENTICATION'
+        AUTH_FAILURE = 'AUTH_FAILURE'
         AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
 
         @property
         def message(self) -> str:
-            if self == self.AUTHENTICATION:
+            if self == self.AUTH_FAILURE:
                 return ('Failed to access AWS services. Please check your AWS '
                         'credentials.')
             elif self == self.AZ_PERMISSION_DENIED:

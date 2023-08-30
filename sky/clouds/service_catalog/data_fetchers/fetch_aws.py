@@ -136,7 +136,7 @@ def _get_availability_zones(region: str) -> pd.DataFrame:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.AWSAzFetchingError(
                     region,
-                    reason=exceptions.AWSAzFetchingError.Reason.AUTHENTICATION
+                    reason=exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
                 ) from None
         elif e.response['Error']['Code'] == 'UnauthorizedOperation':
             with ux_utils.print_exception_no_traceback():
