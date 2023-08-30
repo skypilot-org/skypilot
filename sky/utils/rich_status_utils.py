@@ -50,7 +50,7 @@ def force_update_rich_status(msg: str):
 @contextlib.contextmanager
 def rich_safe_logger():
     if (threading.current_thread() is threading.main_thread() and
-            _status is not None and _status._live.is_started):
+            _status is not None and _status._live.is_started):  # pylint: disable=protected-access
         _status.stop()
         yield
         _status.start()
