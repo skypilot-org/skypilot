@@ -240,6 +240,34 @@ class KubernetesNodeProvider(NodeProvider):
             if all_ready:
                 break
             time.sleep(1)
+            
+        # Kubernetes automatically populates containers with critical
+        # environment variables, such as those for discovering services running
+        # in the cluster and CUDA/nvidia environment variables. We need to
+        # update task environment variables with these env vars. This is needed
+        # for GPU support and service discovery.
+        # See https://github.com/skypilot-org/skypilot/issues/2287 for
+        # more details.
+        # Capturing env. var. from the pod's runtime and writes them to
+        # /etc/profile.d/ making them available for all users in future
+        # shell sessions.
+        set_k8s_env_var_cmd = [
+            '/bin/sh',
+            '-c',
+            'printenv | awk \'{print "export " $0}\' > ~/k8s_env_var.sh && sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh'
+        ]
+        for new_node in new_nodes:
+            kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_env_var_cmd,
+                stderr=True,
+                stdin=False,    
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+        
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')

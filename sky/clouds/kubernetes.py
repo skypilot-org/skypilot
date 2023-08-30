@@ -379,7 +379,7 @@ class Kubernetes(clouds.Cloud):
             namespace,
             command=['env'],
             stderr=True,
-            stdin=False,
+            stdin=False,    
             stdout=True,
             tty=False,
             _request_timeout=kubernetes.API_TIMEOUT)
