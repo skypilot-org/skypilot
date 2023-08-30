@@ -111,8 +111,6 @@ def read_catalog(filename: str,
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
-                    ux_utils.console_newline()
-                    status.stop()
                     error_str = (f'Failed to fetch {cloud} catalog '
                                  f'{filename}. ')
                     if os.path.exists(catalog_path):
