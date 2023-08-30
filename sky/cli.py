@@ -4083,6 +4083,8 @@ def serve_up(
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
         assert controller_record is not None
+        if controller_record['status'] != status_lib.ClusterStatus.UP:
+            continue
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         # TODO(tian): Why less_demanding_than not comparing cpus and memory?
