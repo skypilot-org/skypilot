@@ -47,7 +47,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.utils import rich_status_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -1283,7 +1283,7 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(head_ip,
                                              port=22,
                                              **ssh_credentials)
-    with rich_status_utils.safe_rich_status(
+    with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
@@ -1436,7 +1436,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with rich_status_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
+    with rich_utils.safe_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 

@@ -14,7 +14,7 @@ from sky import sky_logging
 from sky.clouds import cloud as cloud_lib
 from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
-from sky.utils import rich_status_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -104,10 +104,9 @@ def read_catalog(filename: str,
             update_frequency_str = ''
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with rich_status_utils.safe_rich_status(
-                (f'Updating {cloud} catalog: '
-                 f'{filename}'
-                 f'{update_frequency_str}')) as status:
+            with rich_utils.safe_status((f'Updating {cloud} catalog: '
+                                         f'{filename}'
+                                         f'{update_frequency_str}')) as status:
                 try:
                     r = requests.get(url)
                     r.raise_for_status()

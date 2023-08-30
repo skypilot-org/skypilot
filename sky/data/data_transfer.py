@@ -27,7 +27,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.data import data_utils
-from sky.utils import rich_status_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -97,7 +97,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
-    with rich_status_utils.safe_rich_status('Transferring'):
+    with rich_utils.safe_status('Transferring'):
         for _ in range(MAX_POLLS):
             result = (storagetransfer.transferOperations().get(
                 name=operation['name']).execute())

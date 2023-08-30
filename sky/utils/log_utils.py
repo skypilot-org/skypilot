@@ -7,7 +7,7 @@ import pendulum
 import prettytable
 
 from sky import sky_logging
-from sky.utils import rich_status_utils
+from sky.utils import rich_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -36,8 +36,7 @@ class RayUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = rich_status_utils.safe_rich_status(
-            '[bold cyan]Launching')
+        self.status_display = rich_utils.safe_status('[bold cyan]Launching')
         self.status_display.start()
 
     def process_line(self, log_line):

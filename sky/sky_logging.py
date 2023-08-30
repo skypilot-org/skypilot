@@ -6,7 +6,7 @@ import sys
 import threading
 
 from sky.utils import env_options
-from sky.utils import rich_status_utils
+from sky.utils import rich_utils
 
 # If the SKYPILOT_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
@@ -32,7 +32,7 @@ class NewLineFormatter(logging.Formatter):
 class RichSafeStreamHandler(logging.StreamHandler):
 
     def emit(self, record: logging.LogRecord) -> None:
-        with rich_status_utils.rich_safe_logger():
+        with rich_utils.safe_logger():
             return super().emit(record)
 
 
