@@ -42,15 +42,15 @@ def safe_rich_status(msg: str):
 
 def force_update_rich_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
-    if threading.current_thread() is threading.main_thread():
-        if _status is not None:
-            _status.update(msg)
+    if (threading.current_thread() is threading.main_thread() and
+            _status is not None):
+        _status.update(msg)
 
 
 @contextlib.contextmanager
 def rich_safe_logger():
-    if threading.current_thread() is threading.main_thread(
-    ) and _status is not None:
+    if (threading.current_thread() is threading.main_thread() and
+            _status is not None and _status._live.is_started):
         _status.stop()
         yield
         _status.start()
