@@ -718,6 +718,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_kubernetes  # K8s does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
     test = Test(
         'env_check',
         [
@@ -725,6 +726,7 @@ def test_env_check(generic_cloud: str):
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1125,6 +1127,7 @@ def test_scp_job_queue():
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = Test(
         'job_queue_multinode',
         [
@@ -1155,6 +1158,7 @@ def test_job_queue_multinode(generic_cloud: str):
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1421,6 +1425,7 @@ def test_tpu_vm_pod():
 @pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 node yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
     test = Test(
         'multi_hostname',
         [
@@ -1431,6 +1436,7 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
