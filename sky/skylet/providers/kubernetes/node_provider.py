@@ -214,10 +214,12 @@ class KubernetesNodeProvider(NodeProvider):
                     'Cluster may be out of resources or '
                     'may be too slow to autoscale.')
             all_ready = True
-
+            pods_and_containers_running = False
+            pods = []
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
+                pods.append(pod)
                 if pod.status.phase == 'Pending':
                     # Iterate over each pod to check their status
                     if pod.status.container_statuses is not None:
@@ -237,10 +239,16 @@ class KubernetesNodeProvider(NodeProvider):
                         # If container_statuses is None, then the pod hasn't
                         # been scheduled yet.
                         all_ready = False
-            if all_ready:
+
+            # check if all the pods and containers within the pods are running
+            if  all([ pod.status.phase == "Running" for pod in pods]) \
+                and all([container.state.running for pod in pods for container in pod.status.container_statuses]):
+                pods_and_containers_running = True
+
+            if all_ready and pods_and_containers_running:
                 break
             time.sleep(1)
-            
+
         # Kubernetes automatically populates containers with critical
         # environment variables, such as those for discovering services running
         # in the cluster and CUDA/nvidia environment variables. We need to
@@ -252,8 +260,7 @@ class KubernetesNodeProvider(NodeProvider):
         # /etc/profile.d/ making them available for all users in future
         # shell sessions.
         set_k8s_env_var_cmd = [
-            '/bin/sh',
-            '-c',
+            '/bin/sh', '-c',
             'printenv | awk \'{print "export " $0}\' > ~/k8s_env_var.sh && sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh'
         ]
         for new_node in new_nodes:
@@ -263,11 +270,10 @@ class KubernetesNodeProvider(NodeProvider):
                 self.namespace,
                 command=set_k8s_env_var_cmd,
                 stderr=True,
-                stdin=False,    
+                stdin=False,
                 stdout=True,
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
-        
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
