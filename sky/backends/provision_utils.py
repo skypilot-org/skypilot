@@ -108,11 +108,12 @@ def _bulk_provision(
                                                    bootstrap_config)
         except Exception:
             logger.error('Failed to bootstrap configurations for '
-                        f'"{cluster_name}".')
+                         f'"{cluster_name}".')
             raise
 
         plural = '' if config.count == 1 else 's'
-        status.update(f'[bold cyan]Launching - Starting {config.count} instance{plural}')
+        status.update(
+            f'[bold cyan]Launching - Starting {config.count} instance{plural}')
         try:
             provision_metadata = provision.start_instances(
                 provider_name,
@@ -121,16 +122,16 @@ def _bulk_provision(
                 config=config)
         except Exception:  # pylint: disable=broad-except
             logger.debug(f'Starting instances for {cluster_name!r} '
-                        f'failed. Stacktrace:\n{traceback.format_exc()}')
+                         f'failed. Stacktrace:\n{traceback.format_exc()}')
             logger.error(f'Failed to provision {cluster_name!r} after '
-                        'maximum retries.')
+                         'maximum retries.')
             raise
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-        logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update(
-                '[bold cyan]Launching - Waiting for '
-                f'[green]{cluster_name}[bold cyan] to be ready')
+        logger.debug(
+            f'\nWaiting for instances of {cluster_name!r} to be ready...')
+        status.update('[bold cyan]Launching - Waiting for '
+                      f'[green]{cluster_name}[bold cyan] to be ready')
         # AWS would take a very short time (<<1s) updating the state of
         # the instance. Wait 4 seconds should be enough.
         time.sleep(3)
@@ -141,8 +142,9 @@ def _bulk_provision(
                 break
             except aws.botocore_exceptions().WaiterError:
                 time.sleep(backoff.current_backoff())
-        logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-                    'retries.')
+        logger.debug(
+            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+            'retries.')
 
     logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
                  f'seconds.')
@@ -327,7 +329,8 @@ def _post_provision_setup(
 
     with rich_status_utils.safe_rich_status(
             '[bold cyan]Preparing - Waiting for SSH to be available') as status:
-        logger.debug(f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
+        logger.debug(
+            f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
         wait_for_ssh(cluster_metadata, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
 
@@ -341,13 +344,15 @@ def _post_provision_setup(
         # It is possible to have a "smaller" permission model, but we leave that
         # for later.
         file_mounts = {
-            backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash: str(local_wheel_path),
+            backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
+                str(local_wheel_path),
             **config_from_yaml.get('file_mounts', {})
         }
 
         runtime_preparation_str = ('[bold cyan]Preparing - Setting up SkyPilot '
                                    'runtime ({step}/3 - {step_name})')
-        status.update(runtime_preparation_str.format(step=1, step_name='mounting'))
+        status.update(
+            runtime_preparation_str.format(step=1, step_name='mounting'))
         logger.debug('\nMounting internal files...')
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
@@ -356,7 +361,8 @@ def _post_provision_setup(
                                             wheel_hash=wheel_hash)
         logger.debug('Internal files: done.')
 
-        status.update(runtime_preparation_str.format(step=2, step_name='dependencies'))
+        status.update(
+            runtime_preparation_str.format(step=2, step_name='dependencies'))
         logger.debug('\nSetting up SkyPilot dependencies...')
         instance_setup.internal_dependencies_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
