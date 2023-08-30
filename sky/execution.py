@@ -1031,7 +1031,7 @@ def serve_up(
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
-            'SKYPILOT_USER_ID': common_utils.get_user_hash(),
+            'SKYPILOT_USAGE_USER_ID': common_utils.get_user_hash(),
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
             'SKYPILOT_USER': getpass.getuser(),
             'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
