@@ -48,7 +48,8 @@ service_spec:
     kind: Service
     metadata:
         name: {{ name }}
-        parent: skypilot
+        labels:
+            parent: skypilot
     spec:
         type: NodePort
         selector:
