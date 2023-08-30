@@ -1136,7 +1136,6 @@ def serve_up(
 
         console = rich_console.Console()
 
-        # TODO(tian): fetch job id from execute?
         def _wait_until_job_is_running(cluster_name: str,
                                        job_id: int,
                                        retry_time: int = 30) -> bool:
