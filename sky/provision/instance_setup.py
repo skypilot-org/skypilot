@@ -129,7 +129,8 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
     log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
     ray_options = (
         f'--port={constants.SKY_REMOTE_RAY_PORT} '
-        f'--object-manager-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+        f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
+        f'--object-manager-port=8076 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
@@ -172,6 +173,7 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
 
     ray_options = (
         f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
+        f'--object-manager-port=8076 '
         f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
