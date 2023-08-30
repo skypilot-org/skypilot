@@ -2434,9 +2434,11 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
-        error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
-                     'provider.')
-        if previous_cluster_status is not None:
+        if previous_cluster_status is None:
+            error_msg = f'Cluster {cluster_name!r} does not exist.'
+        else:
+            error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
+                        'provider.')
             assert record is not None, previous_cluster_status
             actions = []
             if record['handle'].launched_resources.use_spot:
