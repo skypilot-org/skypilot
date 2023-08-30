@@ -3852,10 +3852,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # pylint: disable=import-outside-toplevel
             from sky.skylet.providers.kubernetes import node_provider as \
                 kubernetes_node_provider
-            config['provider']['cache_stopped_nodes'] = not terminate
+            from ray.autoscaler.tags import TAG_RAY_NODE_KIND, NODE_KIND_HEAD
             provider = kubernetes_node_provider.KubernetesNodeProvider(
                 config['provider'], cluster_name_on_cloud)
-            provider.terminate_node(cluster_name_on_cloud + '-ray-head')
+            head = provider.non_terminated_nodes(
+                tag_filters={TAG_RAY_NODE_KIND: NODE_KIND_HEAD},
+                override_all_nodes=True)
+            provider.terminate_nodes(head)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',

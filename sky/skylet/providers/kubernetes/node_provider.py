@@ -61,24 +61,29 @@ class KubernetesNodeProvider(NodeProvider):
         # kubernetes setups.
         self.timeout = provider_config['timeout']
 
-    def non_terminated_nodes(self, tag_filters):
+    def non_terminated_nodes(self, tag_filters, override_all_nodes=False):
         # Match pods that are in the 'Pending' or 'Running' phase.
         # Unfortunately there is no OR operator in field selectors, so we
         # have to match on NOT any of the other phases.
-        field_selector = ','.join([
-            'status.phase!=Failed',
-            'status.phase!=Unknown',
-            'status.phase!=Succeeded',
-            'status.phase!=Terminating',
-        ])
+        if override_all_nodes is False:
+            field_selector = ','.join([
+                'status.phase!=Failed',
+                'status.phase!=Unknown',
+                'status.phase!=Succeeded',
+                'status.phase!=Terminating',
+            ])
 
         tag_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         label_selector = to_label_selector(tag_filters)
-        pod_list = kubernetes.core_api().list_namespaced_pod(
-            self.namespace,
-            field_selector=field_selector,
-            label_selector=label_selector)
-
+        if override_all_nodes is False:
+            pod_list = kubernetes.core_api().list_namespaced_pod(
+                self.namespace,
+                field_selector=field_selector,
+                label_selector=label_selector)
+        else:
+            pod_list = kubernetes.core_api().list_namespaced_pod(
+                self.namespace,
+                label_selector=label_selector)
         # Don't return pods marked for deletion,
         # i.e. pods with non-null metadata.DeletionTimestamp.
         return [
