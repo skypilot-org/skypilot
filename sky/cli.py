@@ -480,6 +480,22 @@ def _complete_service_name(ctx: click.Context, param: click.Parameter,
     return global_user_state.get_service_names_start_with(incomplete)
 
 
+def _complete_serve_controller_name(ctx: click.Context, param: click.Parameter,
+                                    incomplete: str) -> List[str]:
+    """Handle shell completion for cluster names."""
+    del ctx, param  # Unused.
+    if serve_lib.CONTROLLER_PREFIX not in incomplete:
+        incomplete = serve_lib.CONTROLLER_PREFIX
+    names = global_user_state.get_cluster_names_start_with(incomplete)
+    up_controllers = []
+    for name in names:
+        record = global_user_state.get_cluster_from_name(name)
+        assert record is not None
+        if record['status'] == status_lib.ClusterStatus.UP:
+            up_controllers.append(name)
+    return up_controllers
+
+
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
@@ -3948,7 +3964,12 @@ def serve():
               help='Controller name to use. If not specified, select an '
               'existing controller that match the service requirements; if no '
               'such controller exists, provision a new controller.',
-              **_get_shell_complete_args(_complete_cluster_name))
+              **_get_shell_complete_args(_complete_serve_controller_name))
+@click.option('--new-controller',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Launching a new controller.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3959,6 +3980,7 @@ def serve_up(
     entrypoint: str,
     service_name: Optional[str],
     controller: Optional[str],
+    new_controller: bool,
     yes: bool,
 ):
     """Launch a SkyServe service.
@@ -3971,6 +3993,10 @@ def serve_up(
 
         sky serve up service.yaml
     """
+    if new_controller and controller is not None:
+        raise click.UsageError(
+            'Cannot specify both --new-controller and --controller '
+            'in the same time.')
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
@@ -4079,17 +4105,19 @@ def serve_up(
     existing_controllers = global_user_state.get_cluster_names_start_with(
         serve_lib.CONTROLLER_PREFIX)
     useable_controllers = []
-    for controller_name in existing_controllers:
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        assert controller_record is not None
-        if controller_record['status'] != status_lib.ClusterStatus.UP:
-            continue
-        handle = controller_record['handle']
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        # TODO(tian): Why less_demanding_than not comparing cpus and memory?
-        if controller_resources.less_demanding_than(handle.launched_resources):
-            useable_controllers.append(controller_name)
+    if not new_controller:
+        for controller_name in existing_controllers:
+            controller_record = global_user_state.get_cluster_from_name(
+                controller_name)
+            assert controller_record is not None
+            if controller_record['status'] != status_lib.ClusterStatus.UP:
+                continue
+            handle = controller_record['handle']
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            # TODO(tian): Why less_demanding_than not comparing cpus and memory?
+            if controller_resources.less_demanding_than(
+                    handle.launched_resources):
+                useable_controllers.append(controller_name)
 
     if len(useable_controllers) > 1:
         if controller is None:
@@ -4120,9 +4148,9 @@ def serve_up(
             controller_best_resources = dummy_controller_task.best_resources
             useable_controller = None
         else:
-            controller_best_resources = None
             useable_controller = useable_controllers[0]
     if useable_controller is not None:
+        controller_best_resources = None
         click.secho(f'Using existing controller {useable_controller!r}.\n',
                     fg='cyan')
 
