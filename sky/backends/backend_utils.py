@@ -2438,7 +2438,7 @@ def check_cluster_available(
             error_msg = f'Cluster {cluster_name!r} does not exist.'
         else:
             error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
-                        'provider.')
+                         'provider.')
             assert record is not None, previous_cluster_status
             actions = []
             if record['handle'].launched_resources.use_spot:

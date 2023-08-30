@@ -55,7 +55,7 @@ def _add_file_handler(log_path: str):
 
         # Redirect underlying provision logs to file.
         provision_logger = logging.getLogger('sky.provision')
-        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.FORMATTER)
         stream_handler.setLevel(logging.WARNING)
@@ -435,9 +435,10 @@ def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
             per_instance_log_dir = metadata_utils.get_instance_log_dir(
-                cluster_name, '*')
+                cluster_name.display_name, '*')
             logger.debug(
-                f'For per-instance logs, see "{str(per_instance_log_dir)}".')
+                f'For per-instance logs, see: "{per_instance_log_dir}".\n'
+                f'  Or run: tail -n 100 -f {per_instance_log_dir}/*.log')
             return _post_provision_setup(cloud_name,
                                          cluster_name,
                                          cluster_yaml=cluster_yaml,
