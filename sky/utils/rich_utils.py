@@ -9,6 +9,7 @@ _status = None
 
 _logging_lock = threading.RLock()
 
+
 class _NoOpConsoleStatus:
     """An empty class for multi-threaded console.status."""
 
