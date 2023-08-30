@@ -720,13 +720,13 @@ class SSHConfigHelper(object):
         start_line_idx = None
         # Scan the config for the cluster name.
         for i, line in enumerate(config):
-            next_line = config[i + 1] if i + 1 < len(config) else ''
+            next2_line = config[i + 2] if i + 2 < len(config) else ''
             if docker_user is None:
-                found = (line.strip() == f'HostName {ip}' and
-                         next_line.strip() == f'User {username}')
+                found = (line.strip() == f'Host {cluster_name}' and
+                         next2_line.strip() == f'User {username}')
             else:
-                found = (line.strip() == 'HostName localhost' and
-                         next_line.strip() == f'User {docker_user}')
+                found = (line.strip() == f'Host {cluster_name}' and
+                         next2_line.strip() == f'User {docker_user}')
                 if found:
                     # Find the line starting with ProxyCommand and contains the ip
                     found = False
@@ -740,7 +740,7 @@ class SSHConfigHelper(object):
                                 found = True
                                 break
             if found:
-                start_line_idx = i - 1
+                start_line_idx = i
                 break
 
         if start_line_idx is None:  # No config to remove.
