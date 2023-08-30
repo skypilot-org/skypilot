@@ -44,7 +44,7 @@ class ClusterName:
         return self.display_name
 
 @contextlib.contextmanager
-def _add_file_handler(log_path: str):
+def _add_logger_handlers(log_path: str):
     """Add file handler for logger."""
     try:
         log_abs_path = os.path.abspath(os.path.expanduser(log_path))
@@ -182,7 +182,7 @@ def bulk_provision(
         tags={},
         resume_stopped_nodes=True)
 
-    with _add_file_handler(log_abs_path):
+    with _add_logger_handlers(log_abs_path):
         try:
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug('Provision config:\n'
@@ -431,7 +431,7 @@ def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
     log_path = os.path.join(log_dir, 'provision.log')
     log_abs_path = os.path.abspath(os.path.expanduser(log_path))
 
-    with _add_file_handler(log_abs_path):
+    with _add_logger_handlers(log_abs_path):
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
             per_instance_log_dir = metadata_utils.get_instance_log_dir(
