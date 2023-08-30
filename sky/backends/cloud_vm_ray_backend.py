@@ -3852,13 +3852,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # pylint: disable=import-outside-toplevel
             from sky.skylet.providers.kubernetes import node_provider as \
                 kubernetes_node_provider
-            from ray.autoscaler.tags import TAG_RAY_NODE_KIND, NODE_KIND_HEAD
+            from ray.autoscaler.tags import TAG_RAY_NODE_KIND, NODE_KIND_HEAD, \
+                NODE_KIND_WORKER
             provider = kubernetes_node_provider.KubernetesNodeProvider(
                 config['provider'], cluster_name_on_cloud)
+            # NOTE: this code is inspired from: https://github.com/ray-project/ray/blob/ray-2.4.0/python/ray/autoscaler/_private/commands.py#L438
+            workers = provider.non_terminated_nodes(
+                {TAG_RAY_NODE_KIND: NODE_KIND_WORKER},
+                override_all_nodes=True)
             head = provider.non_terminated_nodes(
                 tag_filters={TAG_RAY_NODE_KIND: NODE_KIND_HEAD},
                 override_all_nodes=True)
-            provider.terminate_nodes(head)
+            provider.terminate_nodes(head + workers)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
