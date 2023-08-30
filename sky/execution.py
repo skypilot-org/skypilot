@@ -78,11 +78,6 @@ The command can then be run as:
   sky.spot_launch(task, ...)
 """.strip()
 
-_SERVICE_CONTROLLER_LOCK_PATH = os.path.expanduser('~/.sky/.{}.service.lock')
-# core.down could take a long time to finish (especially for Azure), so we set
-# a long timeout.
-_SERVICE_CONTROLLER_LOCK_TIMEOUT_SECONDS = 360
-
 
 def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
     """Convert the entrypoint to a sky.Dag.
@@ -1089,6 +1084,8 @@ def serve_up(
                 stream_logs=True,
                 cluster_name=controller_cluster_name,
                 retry_until_up=True,
+                down=True,
+                idle_minutes_to_autostop=20,
             )
 
         cluster_record = global_user_state.get_cluster_from_name(
@@ -1336,29 +1333,6 @@ def serve_down(
                            f'redirector jobs of service {service_name}: {e}')
         else:
             raise RuntimeError(e) from e
-
-    # When we down multiple services sharing the same controller, we want to
-    # make sure the controller is correctly terminated. In case two services
-    # are downing at the same time, we use a file lock to make sure only one
-    # service is counting the number of services sharing the same controller
-    # at the same time, so that the controller cluster will and only will be
-    # terminated when the last service is down.
-    with filelock.FileLock(
-            _SERVICE_CONTROLLER_LOCK_PATH.format(controller_cluster_name),
-            _SERVICE_CONTROLLER_LOCK_TIMEOUT_SECONDS):
-        services_with_same_controller = (
-            global_user_state.get_services_from_controller_name(
-                controller_cluster_name))
-        if len(services_with_same_controller) == 1:
-            try:
-                core.down(controller_cluster_name, purge=purge)
-            except (RuntimeError, ValueError) as e:
-                if purge:
-                    logger.warning(
-                        'Ignoring error when terminating controller VM of '
-                        f'service {service_name}: {e}')
-                else:
-                    raise RuntimeError(e) from e
 
     # TODO(tian): Maybe add a post_cleanup function?
     controller_yaml_path = serve.generate_controller_yaml_file_name(
