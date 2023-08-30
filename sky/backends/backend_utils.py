@@ -2014,17 +2014,24 @@ def _update_cluster_status_no_lock(
             # triggered.
             if external_ips is None or len(external_ips) == 0:
                 logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
-                             f'IPs found. External IPs: {external_ips}')
+                             f'IPs found. Handle: {handle}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+
+            if handle.head_ssh_port is None:
+                # Refresh the ssh ports. It is ok to refresh as it is fast.
+                handle.external_ssh_ports()
+                if handle.head_ssh_port is None:
+                    logger.debug(
+                        f'Refreshing status ({cluster_name!r}): failed '
+                        f'to get the ssh ports. Handle: {handle}')
+                    raise exceptions.FetchIPError(
+                        reason=exceptions.FetchIPError.Reason.HEAD)
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
-            # Potentially, refresh the ports if they are not cached in handle.
-            # It is ok, as the refreshing of ports is fast.
-            handle.external_ssh_ports()
-            assert handle.head_ssh_port is not None, handle
+
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
                                                      port=handle.head_ssh_port)
