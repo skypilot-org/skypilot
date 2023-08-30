@@ -1524,9 +1524,10 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
-            prev_cluster_ips = None
+            prev_cluster_ips, prev_ssh_ports = None, None
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
+                prev_ssh_ports = prev_handle.stable_ssh_ports
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1543,10 +1544,11 @@ class RetryingVmProvisioner(object):
                 launched_resources=launched_resources,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'),
-                # Use the previous cluster's IPs if available to optimize
-                # the case where the cluster is restarted, i.e., no need to
-                # query the IPs from the cloud provider.
-                stable_internal_external_ips=prev_cluster_ips)
+                # Use the previous cluster's IPs and ports if available to
+                # optimize the case where the cluster is restarted, i.e., no
+                # need to query the IPs from the cloud provider.
+                stable_internal_external_ips=prev_cluster_ips,
+                stable_ssh_ports=prev_ssh_ports)
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.INIT)
 
