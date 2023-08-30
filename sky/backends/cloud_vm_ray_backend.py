@@ -2971,7 +2971,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
-
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
