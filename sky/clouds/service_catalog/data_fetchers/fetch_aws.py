@@ -442,9 +442,9 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         # error happens for specific availability zones. We print those zones to
         # make sure that those zone does not get lost silently.
         table = log_utils.create_table(['Region', 'Reason'])
-        for reason, regions in errored_regions.items():
+        for reason, region_set in errored_regions.items():
             reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
-            region_str = '\n'.join(textwrap.wrap(str(regions), 60))
+            region_str = '\n'.join(textwrap.wrap(', '.join(region_set), 60))
             table.add_row([region_str, reason_str])
         if not az_mappings:
             raise RuntimeError('Failed to fetch availability zone mappings for '
