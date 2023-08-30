@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from sky import sky_logging
 from sky.provision import common
 from sky.provision import metadata_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -23,6 +24,13 @@ _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); '
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
+_DUMP_RAY_PORTS = (
+    f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
+)
+
+# Restart skylet when the version does not match to keep the skylet up-to-date.
+_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
 def _auto_retry(func):
 
@@ -104,13 +112,17 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
 def start_ray_head_node(ssh_runner: command_runner.SSHCommandRunner,
                         custom_resource: Optional[str]) -> None:
     """Start Ray on the head node."""
-    ray_options = '--port=6379 --object-manager-port=8076'
+    ray_options = (f'--port={constants.SKY_REMOTE_RAY_PORT} '
+                   f'--object-manager-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT}'
+                   f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
     returncode, stdout, stderr = ssh_runner.run(
-        'ray stop; ray start --disable-usage-stats --head '
-        f'{ray_options};' + _RAY_PRLIMIT,
+        'ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        'ray start --disable-usage-stats --head '
+        f'{ray_options};' + _RAY_PRLIMIT + _DUMP_RAY_PORTS,
         stream_logs=False,
         require_outputs=True)
     if returncode:
@@ -128,11 +140,14 @@ def start_ray_worker_nodes(ssh_runners: List[command_runner.SSHCommandRunner],
     if not ssh_runners:
         return
 
-    ray_options = f'--address={head_private_ip}:6379'
+    ray_options = (f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT}'
+                   f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
-    cmd = f'ray start --disable-usage-stats {ray_options};' + _RAY_PRLIMIT
+    cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+            f'ray start --disable-usage-stats {ray_options};' + _RAY_PRLIMIT)
     if no_restart:
         cmd = 'ray status || ' + cmd
     else:
@@ -161,11 +176,7 @@ def start_skylet(ssh_runner: command_runner.SSHCommandRunner) -> None:
     # https://stackoverflow.com/questions/29709790/scripts-with-nohup-inside-dont-exit-correctly
     # This side effects blocks SSH from exiting. We address it by nesting
     # bash commands.
-    returncode, stdout, stderr = ssh_runner.run(
-        '(ps aux | grep -v nohup | grep -v grep | grep -q '
-        '-- "python3 -m sky.skylet.skylet") || (bash -c \'source ~/.bashrc '
-        '&& nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &\' '
-        '&> /dev/null &)',
+    returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
         stream_logs=False,
         require_outputs=True)
     if returncode:
