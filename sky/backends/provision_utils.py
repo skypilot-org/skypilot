@@ -131,7 +131,6 @@ def bulk_provision(
 
     original_config = common_utils.read_yaml(cluster_yaml)
     bootstrap_config = provision_comm.InstanceConfig(
-        cluster_name=cluster_name,
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         # NOTE: (might be a legacy issue) we call it
@@ -317,18 +316,15 @@ def _post_provision_setup(
                                                   port=22,
                                                   **ssh_credentials)
 
-    with log_utils.safe_rich_status(
-            f'[bold cyan]Checking and starting Skylet for '
-            f'[green]{cluster_name}[white] ...'):
-        instance_setup.start_skylet(head_runner)
-
     full_ray_setup = True
     if not provision_metadata.is_instance_just_booted(
             head_instance.instance_id):
         # Check if head node Ray is alive
         with log_utils.safe_rich_status(f'[bold cyan]Checking Ray status for '
                                         f'[green]{cluster_name}[white] ...'):
-            returncode = head_runner.run('ray status', stream_logs=False)
+            returncode = head_runner.run(
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                stream_logs=False)
         if returncode:
             logger.error('Check result: Head node Ray is not up.')
         else:
@@ -336,12 +332,15 @@ def _post_provision_setup(
         full_ray_setup = bool(returncode)
 
     if full_ray_setup:
-        logger.debug('Start Ray on the whole cluster.')
+        logger.debug('\nStart Ray on the whole cluster.')
         with log_utils.safe_rich_status(
                 f'[bold cyan]Starting Ray on the head node for '
                 f'[green]{cluster_name}[white] ...'):
-            instance_setup.start_ray_head_node(head_runner,
-                                               custom_resource=custom_resource)
+            instance_setup.start_ray_head_node(
+                cluster_name,
+                custom_resource=custom_resource,
+                cluster_metadata=cluster_metadata,
+                ssh_credentials=ssh_credentials)
     else:
         logger.debug('Start Ray only on worker nodes.')
 
@@ -354,18 +353,22 @@ def _post_provision_setup(
     #     if provision_metadata.is_instance_just_booted(inst.instance_id):
     #         worker_ips.append(inst.public_ip)
 
-    runners = command_runner.SSHCommandRunner.make_runner_list(
-        ip_list[1:], port_list=None, **ssh_credentials)
-
-    if runners:
+    if len(ip_list) > 1:
         with log_utils.safe_rich_status(
                 f'[bold cyan]Starting Ray on the worker nodes for '
                 f'[green]{cluster_name}[white] ...'):
             instance_setup.start_ray_worker_nodes(
-                runners,
-                head_instance.private_ip,
+                cluster_name,
                 no_restart=not full_ray_setup,
-                custom_resource=custom_resource)
+                custom_resource=custom_resource,
+                cluster_metadata=cluster_metadata,
+                ssh_credentials=ssh_credentials)
+
+    with log_utils.safe_rich_status(
+            f'[bold cyan]Checking and starting Skylet for '
+            f'[green]{cluster_name}[white] ...'):
+        instance_setup.start_skylet(cluster_name, cluster_metadata,
+                                    ssh_credentials)
 
     return cluster_metadata
 

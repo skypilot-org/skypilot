@@ -42,6 +42,7 @@ from sky.backends import provision_utils
 from sky.backends import wheel_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -2064,7 +2065,7 @@ class RetryingVmProvisioner(object):
 
         returncode, output, _ = backend.run_on_head(
             handle,
-            backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             require_outputs=True)
         while returncode == 0 and 'No cluster status' in output:
             # Retry until ray status is ready. This is to avoid the case where
@@ -2073,7 +2074,7 @@ class RetryingVmProvisioner(object):
             time.sleep(1)
             returncode, output, _ = backend.run_on_head(
                 handle,
-                backend_utils.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 require_outputs=True)
         if returncode == 0:
             return

@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
+from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
@@ -139,12 +140,6 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
-
-# Command that calls `ray status` with SkyPilot's Ray port set.
-RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
 
 def is_ip(s: str) -> bool:
@@ -1301,14 +1296,14 @@ def wait_until_ray_cluster_ready(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 log_path=log_path,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
             subprocess_utils.handle_returncode(
-                rc, 'ray status', 'Failed to run ray status on head node.',
-                stderr)
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                'Failed to run ray status on head node.', stderr)
             logger.debug(output)
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(
@@ -2057,7 +2052,7 @@ def _update_cluster_status_no_lock(
                                                      port=handle.head_ssh_port,
                                                      **ssh_credentials)
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
@@ -2065,7 +2060,7 @@ def _update_cluster_status_no_lock(
                 raise RuntimeError(
                     f'Refreshing status ({cluster_name!r}): Failed to check '
                     f'ray cluster\'s healthiness with '
-                    f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
