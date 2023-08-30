@@ -423,7 +423,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         try:
             azs = _get_availability_zones(region)
         except exceptions.AWSAzFetchingError as e:
-            errored_region_reasons.append((region, e.reason))
+            errored_region_reasons.append((region, e.reason))  # GIL means it's thread-safe.
             return None
         return azs
 
