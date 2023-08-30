@@ -252,14 +252,14 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready."""
     ips = cluster_metadata.get_feasible_ips()
-    if (cluster_metadata.has_public_ips() and 'ssh_proxy_command' not in ssh_credentials):
+    if (cluster_metadata.has_public_ips() and
+            'ssh_proxy_command' not in ssh_credentials):
         # If we can access public IPs, then it is more efficient to test SSH
         # connection with raw sockets.
         waiter = _wait_ssh_connection_direct
     else:
         # See https://github.com/skypilot-org/skypilot/pull/1512
-        waiter = functools.partial(_wait_ssh_connection_indirect,
-                                   **ssh_credentials)
+        waiter = _wait_ssh_connection_indirect
 
     timeout = 60 * 10  # 10-min maximum timeout
     start = time.time()
@@ -267,7 +267,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
     ips = collections.deque(ips)
     while ips:
         ip = ips.popleft()
-        if not waiter(ip):
+        if not waiter(ip, **ssh_credentials):
             ips.append(ip)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
@@ -282,9 +282,8 @@ def _post_provision_setup(
         local_wheel_path: pathlib.Path, wheel_hash: str,
         provision_metadata: provision_comm.ProvisionMetadata,
         custom_resource: Optional[str]) -> provision_comm.ClusterMetadata:
-    cluster_metadata = provision.get_cluster_metadata(cloud_name,
-                                                      provision_metadata.region,
-                                                      cluster_name.name_on_cloud)
+    cluster_metadata = provision.get_cluster_metadata(
+        cloud_name, provision_metadata.region, cluster_name.name_on_cloud)
 
     logger.debug(f'Provision metadata: {repr(provision_metadata)}\n'
                  f'Cluster metadata: {repr(cluster_metadata)}')
@@ -389,12 +388,12 @@ def _post_provision_setup(
         logger.debug('Ray cluster: done.')
 
         logger.debug('\nSetting up Skylet...')
-        instance_setup.start_skylet(cluster_name.name_on_cloud, cluster_metadata,
-                                    ssh_credentials)
+        instance_setup.start_skylet(cluster_name.name_on_cloud,
+                                    cluster_metadata, ssh_credentials)
         logger.debug('Skylet: done.')
 
-        logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
-                    f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
+                f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
