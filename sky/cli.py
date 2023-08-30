@@ -4103,8 +4103,10 @@ def serve_up(
         if not useable_controllers:
             if controller is not None:
                 raise click.UsageError(
-                    f'Controller {controller!r} not found or resources not match.')
-            dummy_controller_task = sky.Task().set_resources(controller_resources)
+                    f'Controller {controller!r} not found or resources not '
+                    'match.')
+            dummy_controller_task = sky.Task().set_resources(
+                controller_resources)
             click.secho('Launching a new controller.', fg='cyan')
             click.secho('The controller will use the following resource:',
                         fg='cyan')
