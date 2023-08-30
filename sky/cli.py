@@ -4099,20 +4099,25 @@ def serve_up(
                 f'Controller {controller!r} not found. Available controllers: '
                 f'{useable_controllers!r}.')
         useable_controller = controller
-    elif not useable_controllers:
-        dummy_controller_task = sky.Task().set_resources(controller_resources)
-        click.secho('Launching a new controller.', fg='cyan')
-        click.secho('The controller will use the following resource:',
-                    fg='cyan')
-        with sky.Dag() as dag:
-            dag.add(dummy_controller_task)
-        sky.optimize(dag)
-        click.echo()
-        dummy_controller_task: sky.Task = dag.tasks[0]
-        controller_best_resources = dummy_controller_task.best_resources
-        useable_controller = None
     else:
-        controller_best_resources = None
+        if controller is not None:
+            raise click.UsageError(
+                f'Controller {controller!r} not found or resources not match.'
+                f' Available controllers: {existing_controllers!r}.')
+        if not useable_controllers:
+            dummy_controller_task = sky.Task().set_resources(controller_resources)
+            click.secho('Launching a new controller.', fg='cyan')
+            click.secho('The controller will use the following resource:',
+                        fg='cyan')
+            with sky.Dag() as dag:
+                dag.add(dummy_controller_task)
+            sky.optimize(dag)
+            click.echo()
+            dummy_controller_task: sky.Task = dag.tasks[0]
+            controller_best_resources = dummy_controller_task.best_resources
+            useable_controller = None
+        else:
+            controller_best_resources = None
         useable_controller = useable_controllers[0]
     if useable_controller is not None:
         click.secho(f'Using existing controller {useable_controller!r}.\n',
