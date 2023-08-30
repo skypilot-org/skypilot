@@ -373,7 +373,9 @@ def get_port(svc_name: str, namespace: str) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def get_external_ip():
+def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
+    if network_mode == KubernetesNetworkingMode.PORT_FORWARD:
+        return '127.0.0.1'
     # Return the IP address of the first node with an external IP
     nodes = kubernetes.core_api().list_node().items
     for node in nodes:
@@ -688,7 +690,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
             'kubectl port-forward' Proxycommand
     """
     # Fetch IP to connect to for the jump svc
-    ssh_jump_ip = get_external_ip()
+    ssh_jump_ip = get_external_ip(network_mode)
     if network_mode == KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
