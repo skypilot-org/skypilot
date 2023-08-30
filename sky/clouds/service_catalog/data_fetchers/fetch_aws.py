@@ -441,7 +441,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         # This could happen if (1) an AWS API glitch happens, (2) permission
         # error happens for specific availability zones. We print those zones to
         # make sure that those zone does not get lost silently.
-        table = log_utils.create_table(['Region', 'Reason'])
+        table = log_utils.create_table(['Regions', 'Reason'])
         for reason, region_set in errored_regions.items():
             reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
             region_str = '\n'.join(
