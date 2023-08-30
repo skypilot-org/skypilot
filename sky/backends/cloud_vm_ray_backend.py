@@ -3847,19 +3847,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # To avoid undefined local variables error.
             stdout = stderr = ''
         elif terminate and isinstance(cloud, clouds.Kubernetes):
-            # Here we handle termination of Kubernetes by ourselves instead of Ray
-            # autoscaler.
+            # Here we handle termination of Kubernetes by ourselves instead of
+            # Ray autoscaler.
             # pylint: disable=import-outside-toplevel
-            from sky.skylet.providers.kubernetes import node_provider as \
-                kubernetes_node_provider
-            from ray.autoscaler.tags import TAG_RAY_NODE_KIND, NODE_KIND_HEAD, \
-                NODE_KIND_WORKER
+            from ray.autoscaler.tags import NODE_KIND_HEAD
+            from ray.autoscaler.tags import NODE_KIND_WORKER
+            from ray.autoscaler.tags import TAG_RAY_NODE_KIND
+
+            from sky.skylet.providers.kubernetes import (
+                node_provider as kubernetes_node_provider)
             provider = kubernetes_node_provider.KubernetesNodeProvider(
                 config['provider'], cluster_name_on_cloud)
-            # NOTE: this code is inspired from: https://github.com/ray-project/ray/blob/ray-2.4.0/python/ray/autoscaler/_private/commands.py#L438
             workers = provider.non_terminated_nodes(
-                {TAG_RAY_NODE_KIND: NODE_KIND_WORKER},
-                override_all_nodes=True)
+                {TAG_RAY_NODE_KIND: NODE_KIND_WORKER}, override_all_nodes=True)
             head = provider.non_terminated_nodes(
                 tag_filters={TAG_RAY_NODE_KIND: NODE_KIND_HEAD},
                 override_all_nodes=True)

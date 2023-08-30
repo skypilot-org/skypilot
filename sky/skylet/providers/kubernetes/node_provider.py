@@ -82,8 +82,7 @@ class KubernetesNodeProvider(NodeProvider):
                 label_selector=label_selector)
         else:
             pod_list = kubernetes.core_api().list_namespaced_pod(
-                self.namespace,
-                label_selector=label_selector)
+                self.namespace, label_selector=label_selector)
         # Don't return pods marked for deletion,
         # i.e. pods with non-null metadata.DeletionTimestamp.
         return [
