@@ -1,7 +1,6 @@
 """Cloud-neutral VM provision utils."""
 import collections
 import dataclasses
-import functools
 import json
 import logging
 import os
@@ -273,7 +272,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
                 with ux_utils.print_exception_no_traceback():
                     raise TimeoutError(
                         f'Failed to SSH to {ip} after timeout {timeout}s.')
-            logger.debug(f'Retrying in 1 second...')
+            logger.debug('Retrying in 1 second...')
             time.sleep(1)
 
 
