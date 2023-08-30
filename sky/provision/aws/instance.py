@@ -238,7 +238,7 @@ def start_instances(region: str, cluster_name: str,
         else:
             raise RuntimeError(f'Impossible state "{state}".')
 
-    def _create_head_node_tag(target_instance, is_head: bool = True) -> str:
+    def _create_node_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
             node_tag = [{
                 'Key': TAG_SKYPILOT_HEAD_NODE,
@@ -246,9 +246,18 @@ def start_instances(region: str, cluster_name: str,
             }, {
                 'Key': TAG_RAY_NODE_KIND,
                 'Value': 'head'
+            }, {
+                'Key': 'Name',
+                'Value': f'{cluster_name}-head'
             }]
         else:
-            node_tag = [{'Key': TAG_RAY_NODE_KIND, 'Value': 'worker'}]
+            node_tag = [{
+                'Key': TAG_RAY_NODE_KIND,
+                'Value': 'worker'
+            }, {
+                'Key': 'Name',
+                'Value': f'{cluster_name}-worker'
+            }]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
             Tags=target_instance.tags + node_tag,
@@ -257,9 +266,9 @@ def start_instances(region: str, cluster_name: str,
 
     if head_instance_id is None:
         if running_instances:
-            head_instance_id = _create_head_node_tag(running_instances[0])
+            head_instance_id = _create_node_tag(running_instances[0])
         elif pending_instances:
-            head_instance_id = _create_head_node_tag(pending_instances[0])
+            head_instance_id = _create_node_tag(pending_instances[0])
 
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
@@ -316,7 +325,7 @@ def start_instances(region: str, cluster_name: str,
         to_start_count -= len(resumed_instances)
 
         if head_instance_id is None:
-            head_instance_id = _create_head_node_tag(resumed_instances[0])
+            head_instance_id = _create_node_tag(resumed_instances[0])
 
     if to_start_count > 0:
         # TODO(suquark): If there are existing instances (already running or
@@ -344,12 +353,12 @@ def start_instances(region: str, cluster_name: str,
         # the worker tag is a legacy feature, so we would not care about
         # more corner cases.
         if head_instance_id is None:
-            head_instance_id = _create_head_node_tag(created_instances[0])
+            head_instance_id = _create_node_tag(created_instances[0])
             for inst in created_instances[1:]:
-                _create_head_node_tag(inst, is_head=False)
+                _create_node_tag(inst, is_head=False)
         else:
             for inst in created_instances:
-                _create_head_node_tag(inst, is_head=False)
+                _create_node_tag(inst, is_head=False)
 
     assert head_instance_id is not None
     return common.ProvisionMetadata(provider_name='aws',
