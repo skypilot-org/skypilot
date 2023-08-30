@@ -8,7 +8,7 @@ resources:
 
 # The setup command.  Will be run under the working directory.
 setup: |
-  git clone https://github.com/google/flax.git
+  git clone https://github.com/google/flax.git --branch v0.6.11
 
   conda activate flax
   if [ $? -eq 0 ]; then

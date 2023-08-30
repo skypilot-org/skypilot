@@ -40,7 +40,7 @@ def _route_to_cloud_impl(func):
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
@@ -57,7 +57,7 @@ def query_instances(
 @_route_to_cloud_impl
 def stop_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
@@ -68,7 +68,7 @@ def stop_instances(
 @_route_to_cloud_impl
 def terminate_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
@@ -79,7 +79,7 @@ def terminate_instances(
 @_route_to_cloud_impl
 def cleanup_ports(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
