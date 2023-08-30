@@ -7,6 +7,7 @@ import rich.console as rich_console
 console = rich_console.Console()
 _status = None
 
+_logging_lock = threading.RLock()
 
 class _NoOpConsoleStatus:
     """An empty class for multi-threaded console.status."""
@@ -49,10 +50,10 @@ def force_update_status(msg: str):
 
 @contextlib.contextmanager
 def safe_logger():
-    if (threading.current_thread() is threading.main_thread() and
-            _status is not None and _status._live.is_started):  # pylint: disable=protected-access
-        _status.stop()
-        yield
-        _status.start()
-    else:
-        yield
+    with _logging_lock:
+        if _status is not None and _status._live.is_started:  # pylint: disable=protected-access
+            _status.stop()
+            yield
+            _status.start()
+        else:
+            yield
