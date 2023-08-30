@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
+from sky.adaptors import kubernetes
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -710,6 +711,12 @@ class SSHConfigHelper(object):
             docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']
+        port_forward_proxy_cmd_path = os.path.expanduser(
+            kubernetes.PORT_FORWARD_PROXY_CMD_PATH.format(
+                cluster_name=cluster_name))
+        if os.path.exists(port_forward_proxy_cmd_path):
+            os.remove(port_forward_proxy_cmd_path)
+
         config_path = os.path.expanduser(cls.ssh_conf_path)
         if not os.path.exists(config_path):
             return
