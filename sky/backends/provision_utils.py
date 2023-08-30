@@ -2,13 +2,14 @@
 import collections
 import dataclasses
 import contextlib
-import functools
+import dataclasses
 import json
 import logging
 import os
 import pathlib
 import socket
 import subprocess
+import sys
 import time
 import traceback
 from typing import Dict, List, Optional
@@ -54,7 +55,13 @@ def _add_file_handler(log_path: str):
 
         # Redirect underlying provision logs to file.
         provision_logger = logging.getLogger('sky.provision')
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.flush = sys.stdout.flush  # type: ignore
+        stream_handler.setFormatter(sky_logging.FORMATTER)
+        stream_handler.setLevel(logging.WARNING)
+
         provision_logger.addHandler(fh)
+        provision_logger.addHandler(stream_handler)
         yield
     finally:
         logger.removeHandler(fh)
