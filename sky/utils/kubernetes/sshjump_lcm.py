@@ -36,19 +36,19 @@ label_selector = f'skypilot-sshjump={current_name}'
 
 
 def poll():
-    sys.stdout.write('enter poll()\n')
+    sys.stdout.write('Starting polling.\n')
 
     alert_delta = datetime.timedelta(seconds=alert_threshold)
 
     # Set delay for each retry
     retry_interval_delta = datetime.timedelta(seconds=retry_interval)
 
-    # Accumulated time of where no Ray pod exist. Used to compare against
-    # alert_threshold
-    noray_delta = datetime.timedelta()
+    # Accumulated time of where no SkyPilot cluster exists. Used to compare
+    # against alert_threshold
+    nocluster_delta = datetime.timedelta()
 
     while True:
-        sys.stdout.write(f'Sleep {retry_interval} seconds..\n')
+        sys.stdout.write(f'Sleeping {retry_interval} seconds..\n')
         time.sleep(retry_interval)
 
         # List the pods in the current namespace
@@ -60,36 +60,36 @@ def poll():
             raise
 
         if len(ret.items) == 0:
+            sys.stdout.write(f'Did not pods with label "{label_selector}" in '
+                             f'namespace {current_namespace}\n')
+            nocluster_delta = nocluster_delta + retry_interval_delta
             sys.stdout.write(
-                f'DID NOT FIND pods with label "{label_selector}" in '
-                f'namespace: "{current_namespace}"\n')
-            noray_delta = noray_delta + retry_interval_delta
-            sys.stdout.write(
-                f'noray_delta after time increment: {noray_delta}, alert '
+                f'Time since no pods found: {nocluster_delta}, alert '
                 f'threshold: {alert_delta}\n')
         else:
             sys.stdout.write(
-                f'FOUND pods with label "{label_selector}" in namespace: '
-                f'"{current_namespace}"\n')
+                f'Found pods with label "{label_selector}" in namespace '
+                f'{current_namespace}\n')
             # reset ..
-            noray_delta = datetime.timedelta()
-            sys.stdout.write(f'noray_delta is reset: {noray_delta}\n')
+            nocluster_delta = datetime.timedelta()
+            sys.stdout.write(f'noray_delta is reset: {nocluster_delta}\n')
 
-        if noray_delta >= alert_delta:
+        if nocluster_delta >= alert_delta:
             sys.stdout.write(
-                f'noray_delta: {noray_delta} crossed alert threshold: '
-                f'{alert_delta}. Time to terminate myself\n')
+                f'nocluster_delta: {nocluster_delta} crossed alert threshold: '
+                f'{alert_delta}. Time to terminate myself and my service.\n')
             try:
                 # sshjump resources created under same name
                 v1.delete_namespaced_service(current_name, current_namespace)
                 v1.delete_namespaced_pod(current_name, current_namespace)
             except Exception as e:
-                sys.stdout.write(f'[ERROR] exit poll() with error: {e}\n')
+                sys.stdout.write('[ERROR] Deletion failed. Exiting '
+                                 f'poll() with error: {e}\n')
                 raise
 
             break
 
-    sys.stdout.write('exit poll()\n')
+    sys.stdout.write('Done polling.\n')
 
 
 def main():
@@ -101,8 +101,9 @@ def main():
     sys.stdout.write(f'label_selector: {label_selector}\n')
 
     if not current_name or not current_namespace:
-        raise Exception('One or more environment variables is missing '
-                        'with an actual value.')
+        # Raise Exception with message to terminate pod
+        raise Exception('Missing environment variables MY_POD_NAME or '
+                        'MY_POD_NAMESPACE')
     poll()
 
 

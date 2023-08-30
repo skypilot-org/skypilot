@@ -1,4 +1,4 @@
-cluster_name: {{cluster_name}}
+cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head
 # node.
@@ -20,6 +20,8 @@ provider:
     use_internal_ips: true
 
     timeout: {{timeout}}
+
+    sshjump_image: {{k8s_sshjump_image}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -75,11 +77,11 @@ provider:
         metadata:
           labels:
             parent: skypilot
-            skypilot-cluster: {{cluster_name}}
-          name: {{cluster_name}}-ray-head-ssh
+            skypilot-cluster: {{cluster_name_on_cloud}}
+          name: {{cluster_name_on_cloud}}-ray-head-ssh
         spec:
           selector:
-            component: {{cluster_name}}-ray-head
+            component: {{cluster_name_on_cloud}}-ray-head
           ports:
             - protocol: TCP
               port: 22
@@ -90,15 +92,15 @@ provider:
         metadata:
             labels:
               parent: skypilot
-              skypilot-cluster: {{cluster_name}}
+              skypilot-cluster: {{cluster_name_on_cloud}}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
             # names.
-            name: {{cluster_name}}-ray-head
+            name: {{cluster_name_on_cloud}}-ray-head
         spec:
             # This selector must match the head node pod's selector below.
             selector:
-                component: {{cluster_name}}-ray-head
+                component: {{cluster_name_on_cloud}}-ray-head
             ports:
                 - name: client
                   protocol: TCP
@@ -118,15 +120,15 @@ available_node_types:
       apiVersion: v1
       kind: Pod
       metadata:
-        name: {{cluster_name}}-ray-head
+        name: {{cluster_name_on_cloud}}-ray-head
         # Must match the head node service selector above if a head node
         # service is required.
         labels:
             parent: skypilot
-            component: {{cluster_name}}-ray-head
-            skypilot-cluster: {{cluster_name}}
-            # This label is being used by the life cycle management of the ssh jump pod
-            skypilot-sshjump: {{sshjump}}
+            component: {{cluster_name_on_cloud}}-ray-head
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+            skypilot-sshjump: {{k8s_sshjump_name}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
@@ -205,9 +207,9 @@ available_node_types:
       metadata:
         labels:
           parent: skypilot
-          skypilot-cluster: {{cluster_name}}
+          skypilot-cluster: {{cluster_name_on_cloud}}
         # Automatically generates a name for the pod with this prefix.
-        generateName: {{cluster_name}}-ray-worker-
+        generateName: {{cluster_name_on_cloud}}-ray-worker-
       spec:
         serviceAccountName: skypilot-service-account
         restartPolicy: Never

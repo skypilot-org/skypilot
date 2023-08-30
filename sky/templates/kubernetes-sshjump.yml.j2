@@ -5,7 +5,7 @@ pod_spec:
         name: {{ name }}
         labels:
             component: {{ name }}
-            app: skypilot
+            parent: skypilot
     spec:
         serviceAccountName: sky-sshjump-sa
         volumes:
@@ -48,7 +48,7 @@ service_spec:
     kind: Service
     metadata:
         name: {{ name }}
-        app: skypilot
+        parent: skypilot
     spec:
         type: {{ service_type }}
         selector:
@@ -64,7 +64,7 @@ service_account:
     kind: ServiceAccount
     metadata:
         name: sky-sshjump-sa
-        app: skypilot
+        parent: skypilot
 role:
     kind: Role
     apiVersion: rbac.authorization.k8s.io/v1
@@ -79,7 +79,7 @@ role_binding:
     kind: RoleBinding
     metadata:
         name: sky-sshjump-rb
-        app: skypilot
+        parent: skypilot
     subjects:
     - kind: ServiceAccount
       name: sky-sshjump-sa

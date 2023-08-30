@@ -71,7 +71,7 @@ class Azure(clouds.Cloud):
         }
 
     @classmethod
-    def _max_cluster_name_length(cls) -> int:
+    def max_cluster_name_length(cls) -> int:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,

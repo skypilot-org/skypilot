@@ -278,17 +278,10 @@ class KubernetesNodeProvider(NodeProvider):
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
         try:
-            kubernetes.core_api().delete_namespaced_pod(
-                node_id,
-                self.namespace,
-                _request_timeout=config.DELETION_TIMEOUT)
-        except kubernetes.api_exception() as e:
-            if e.status == 404:
-                logger.warning(config.log_prefix +
-                               f'Tried to delete pod {node_id},'
-                               ' but the pod was not found (404).')
-            else:
-                raise
+            kubernetes_utils.clean_zombie_sshjump_pod(self.namespace, node_id)
+        except Exception as e:
+            logger.warning(config.log_prefix +
+                           f'Error occurred when analyzing SSH Jump pod: {e}')
         try:
             kubernetes.core_api().delete_namespaced_service(
                 node_id,
@@ -300,6 +293,21 @@ class KubernetesNodeProvider(NodeProvider):
                 _request_timeout=config.DELETION_TIMEOUT)
         except kubernetes.api_exception():
             pass
+        # Note - delete pod after all other resources are deleted.
+        # This is to ensure there are no leftover resources if this down is run
+        # from within the pod, e.g., for autodown.
+        try:
+            kubernetes.core_api().delete_namespaced_pod(
+                node_id,
+                self.namespace,
+                _request_timeout=config.DELETION_TIMEOUT)
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                logger.warning(config.log_prefix +
+                               f'Tried to delete pod {node_id},'
+                               ' but the pod was not found (404).')
+            else:
+                raise
 
     def terminate_nodes(self, node_ids):
         # TODO(romilb): terminate_nodes should be include optimizations for
