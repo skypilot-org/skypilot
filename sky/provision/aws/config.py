@@ -76,7 +76,7 @@ def bootstrap_instances(region: str, cluster_name: str,
     # the group, and also SSH access from outside.
     if security_group_ids is None:
         start_time = time.time()
-        logger.debug('Creating or updating security groups...')
+        logger.debug('\nCreating or updating security groups...')
 
         # Generate the name of the security group we're looking for...
         security_group_config = config.provider_config.get('security_group', {})

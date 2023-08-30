@@ -1,5 +1,6 @@
 """Cloud-neutral VM provision utils."""
 import collections
+import dataclasses
 import functools
 import json
 import logging
@@ -32,11 +33,20 @@ _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 
 
+@dataclasses.dataclass
+class ClusterName:
+    display_name: str
+    name_on_cloud: str
+
+    def __repr__(self) -> str:
+        return self.display_name
+
+
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: str,
+    cluster_name: ClusterName,
     bootstrap_config: provision_comm.InstanceConfig,
 ) -> provision_comm.ProvisionMetadata:
     provider_name = repr(cloud)
@@ -68,7 +78,7 @@ def _bulk_provision(
             #  cause other issues like the cache is not synced
             #  with the cloud configuration.
             config = provision.bootstrap_instances(provider_name, region_name,
-                                                   cluster_name,
+                                                   cluster_name.name_on_cloud,
                                                    bootstrap_config)
     except Exception:
         logger.error('Failed to bootstrap configurations for '
@@ -78,10 +88,11 @@ def _bulk_provision(
     try:
         with log_utils.safe_rich_status(f'[bold cyan]Starting instances for '
                                         f'[green]{cluster_name}[white] ...'):
-            provision_metadata = provision.start_instances(provider_name,
-                                                           region_name,
-                                                           cluster_name,
-                                                           config=config)
+            provision_metadata = provision.start_instances(
+                provider_name,
+                region_name,
+                cluster_name.name_on_cloud,
+                config=config)
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Starting instances for {cluster_name!r} '
                      f'failed. Stacktrace:\n{traceback.format_exc()}')
@@ -92,7 +103,7 @@ def _bulk_provision(
     backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
     logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
     with log_utils.safe_rich_status(
-            f'[bold cyan]Waiting for'
+            f'[bold cyan]Waiting for '
             f'[green]{cluster_name}[bold cyan] to be ready...'):
         # AWS would take a very short time (<<1s) updating the state of
         # the instance. Wait 4 seconds should be enough.
@@ -100,12 +111,12 @@ def _bulk_provision(
         for retry_cnt in range(_MAX_RETRY):
             try:
                 provision.wait_instances(provider_name, region_name,
-                                         cluster_name, 'running')
+                                         cluster_name.name_on_cloud, 'running')
                 break
             except aws.botocore_exceptions().WaiterError:
                 time.sleep(backoff.current_backoff())
     logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-                'retries.')
+                 'retries.')
 
     logger.debug(f'\nLaunching {cluster_name!r} took {time.time() - start} '
                  f'seconds.')
@@ -121,7 +132,7 @@ def bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
-    cluster_name: str,
+    cluster_name: ClusterName,
     num_nodes: int,
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
@@ -178,17 +189,26 @@ def bulk_provision(
         fh.close()
 
 
-def teardown_cluster(cloud_name: str, cluster_name: str, terminate: bool,
-                     provider_config: Dict) -> None:
+def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
+                     terminate: bool, provider_config: Dict) -> None:
     """Deleting or stopping a cluster."""
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name, provider_config)
-        metadata_utils.remove_cluster_metadata(cluster_name)
+        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
+                                      provider_config)
+        metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
     else:
-        provision.stop_instances(cloud_name, cluster_name, provider_config)
+        provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
+                                 provider_config)
 
 
-def _wait_ssh_connection_direct(ip: str) -> bool:
+def _wait_ssh_connection_direct(
+        ip: str,
+        ssh_user: str,
+        ssh_private_key: str,
+        ssh_control_name: Optional[str] = None,
+        ssh_proxy_command: Optional[str] = None) -> bool:
+    del ssh_control_name
+    assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         with socket.create_connection((ip, 22), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
@@ -197,6 +217,9 @@ def _wait_ssh_connection_direct(ip: str) -> bool:
         pass
     except Exception:  # pylint: disable=broad-except
         pass
+    logger.debug(f'Failed SSH to {ip}. Try: ssh -i {ssh_private_key} '
+                 '-o StrictHostKeyChecking=no -o ConnectTimeout=20s -o '
+                 f'{ssh_user}@{ip} echo')
     return False
 
 
@@ -221,7 +244,7 @@ def _wait_ssh_connection_indirect(
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
     if proc.returncode != 0:
-        logger.debug(f'SSH to {ip} with command: {" ".join(command)}')
+        logger.debug(f'Failed SSH to {ip} with command: {" ".join(command)}')
     return proc.returncode == 0
 
 
@@ -229,7 +252,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready."""
     ips = cluster_metadata.get_feasible_ips()
-    if cluster_metadata.has_public_ips():
+    if (cluster_metadata.has_public_ips() and 'ssh_proxy_command' not in ssh_credentials):
         # If we can access public IPs, then it is more efficient to test SSH
         # connection with raw sockets.
         waiter = _wait_ssh_connection_direct
@@ -249,19 +272,19 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise TimeoutError(
-                        f'Wait SSH timeout ({timeout}s) exceeded.')
-            logger.debug(f'Failed to SSH to {ip}. Retrying in 1 second...')
+                        f'Failed to SSH to {ip} after timeout {timeout}s.')
+            logger.debug(f'Retrying in 1 second...')
             time.sleep(1)
 
 
 def _post_provision_setup(
-        cloud_name: str, cluster_name: str, cluster_yaml: str,
+        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         local_wheel_path: pathlib.Path, wheel_hash: str,
         provision_metadata: provision_comm.ProvisionMetadata,
         custom_resource: Optional[str]) -> provision_comm.ClusterMetadata:
     cluster_metadata = provision.get_cluster_metadata(cloud_name,
                                                       provision_metadata.region,
-                                                      cluster_name)
+                                                      cluster_name.name_on_cloud)
 
     logger.debug(f'Provision metadata: {repr(provision_metadata)}\n'
                  f'Cluster metadata: {repr(cluster_metadata)}')
@@ -304,92 +327,80 @@ def _post_provision_setup(
         **config_from_yaml.get('file_mounts', {})
     }
 
-    logger.debug('\nMounting internal files...')
-    with log_utils.safe_rich_status(f'[bold cyan]Mounting internal files for '
-                                    f'[green]{cluster_name}[white] ...'):
-        instance_setup.internal_file_mounts(cluster_name,
+    with log_utils.safe_rich_status(
+            f'[bold cyan]Setting up SkyPilot runtime for '
+            f'[green]{cluster_name}[white] ...'):
+        logger.debug('\nMounting internal files...')
+        instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
                                             cluster_metadata,
                                             ssh_credentials,
                                             wheel_hash=wheel_hash)
-    logger.debug('Internal files: done.')
+        logger.debug('Internal files: done.')
 
-    logger.debug('\nSetting up SkyPilot runtime...')
-    with log_utils.safe_rich_status(
-            f'[bold cyan]Setting up SkyPilot runtime for '
-            f'[green]{cluster_name}[white] ...'):
+        logger.debug('\nSetting up SkyPilot dependencies...')
         instance_setup.internal_dependencies_setup(
-            cluster_name, config_from_yaml['setup_commands'], cluster_metadata,
-            ssh_credentials)
-    logger.debug('\nSkyPilot Runtime: done...')
+            cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
+            cluster_metadata, ssh_credentials)
+        logger.debug('SkyPilot dependencies: done...')
 
-    head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                  port=22,
-                                                  **ssh_credentials)
+        head_runner = command_runner.SSHCommandRunner(ip_list[0],
+                                                      port=22,
+                                                      **ssh_credentials)
 
-    logger.debug('\nSetting up Ray cluster...')
-    full_ray_setup = True
-    if not provision_metadata.is_instance_just_booted(
-            head_instance.instance_id):
-        # Check if head node Ray is alive
-        with log_utils.safe_rich_status(f'[bold cyan]Checking Ray status for '
-                                        f'[green]{cluster_name}[white] ...'):
+        logger.debug('\nSetting up Ray cluster...')
+        full_ray_setup = True
+        if not provision_metadata.is_instance_just_booted(
+                head_instance.instance_id):
+            # Check if head node Ray is alive
             returncode = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False)
-        if returncode:
-            logger.info('Ray cluster on head is not up. Restarting...')
-        else:
-            logger.debug('Ray cluster on head is up.')
-        full_ray_setup = bool(returncode)
+            if returncode:
+                logger.info('Ray cluster on head is not up. Restarting...')
+            else:
+                logger.debug('Ray cluster on head is up.')
+            full_ray_setup = bool(returncode)
 
-    if full_ray_setup:
-        logger.debug('\nStart Ray on the whole cluster.')
-        with log_utils.safe_rich_status(
-                f'[bold cyan]Starting Ray Cluster on the head node for '
-                f'[green]{cluster_name}[white] ...'):
+        if full_ray_setup:
+            logger.debug('\nStarting Ray on the whole cluster.')
             instance_setup.start_ray_head_node(
-                cluster_name,
+                cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
 
-    # NOTE: We have to check all worker nodes to make sure they are all
-    #  healthy, otherwise we can only start Ray on newly started worker
-    #  nodes like this:
-    #
-    # worker_ips = []
-    # for inst in cluster_metadata.instances.values():
-    #     if provision_metadata.is_instance_just_booted(inst.instance_id):
-    #         worker_ips.append(inst.public_ip)
+        # NOTE: We have to check all worker nodes to make sure they are all
+        #  healthy, otherwise we can only start Ray on newly started worker
+        #  nodes like this:
+        #
+        # worker_ips = []
+        # for inst in cluster_metadata.instances.values():
+        #     if provision_metadata.is_instance_just_booted(inst.instance_id):
+        #         worker_ips.append(inst.public_ip)
 
-    if len(ip_list) > 1:
-        with log_utils.safe_rich_status(
-                f'[bold cyan]Starting Ray on the worker nodes for '
-                f'[green]{cluster_name}[white] ...'):
+        if len(ip_list) > 1:
             instance_setup.start_ray_worker_nodes(
-                cluster_name,
+                cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
-    logger.debug('Ray cluster: done.')
+        logger.debug('Ray cluster: done.')
 
-    logger.debug('\nSetting up Skylet...')
-    with log_utils.safe_rich_status(
-            f'[bold cyan]Checking and starting Skylet for '
-            f'[green]{cluster_name}[white] ...'):
-        instance_setup.start_skylet(cluster_name, cluster_metadata,
+        logger.debug('\nSetting up Skylet...')
+        instance_setup.start_skylet(cluster_name.name_on_cloud, cluster_metadata,
                                     ssh_credentials)
-    logger.debug('Skylet: done.')
+        logger.debug('Skylet: done.')
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
-                f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
+        logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
+                    f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
-def post_provision_setup(cloud_name: str, cluster_name: str, cluster_yaml: str,
-                         local_wheel_path: pathlib.Path, wheel_hash: str,
+def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
+                         cluster_yaml: str, local_wheel_path: pathlib.Path,
+                         wheel_hash: str,
                          provision_metadata: provision_comm.ProvisionMetadata,
                          custom_resource: Optional[str],
                          log_dir: str) -> provision_comm.ClusterMetadata:
@@ -404,7 +415,7 @@ def post_provision_setup(cloud_name: str, cluster_name: str, cluster_yaml: str,
         logger.addHandler(fh)
         logger.debug(_TITLE.format('System Setup After Provision'))
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
-            cluster_name, '*')
+            cluster_name.display_name, '*')
         logger.debug(f'For per-instance logs, see: "{per_instance_log_dir}".\n'
                      f'  Or run: tail -n 100 -f {per_instance_log_dir}/*.log')
         return _post_provision_setup(cloud_name,

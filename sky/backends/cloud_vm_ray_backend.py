@@ -1576,7 +1576,8 @@ class RetryingVmProvisioner(object):
                     to_provision.cloud,
                     region,
                     zones,
-                    handle.cluster_name_on_cloud,
+                    provision_utils.ClusterName(cluster_name,
+                                                handle.cluster_name_on_cloud),
                     num_nodes=num_nodes,
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
@@ -2858,7 +2859,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 cluster_metadata = provision_utils.post_provision_setup(
                     repr(handle.launched_resources.cloud),
-                    handle.cluster_name_on_cloud,
+                    provision_utils.ClusterName(handle.cluster_name,
+                                                handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
@@ -3826,7 +3828,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             try:
                 provision_utils.teardown_cluster(
                     repr(cloud),
-                    cluster_name_on_cloud,
+                    provision_utils.ClusterName(cluster_name,
+                                                cluster_name_on_cloud),
                     terminate=terminate,
                     provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
