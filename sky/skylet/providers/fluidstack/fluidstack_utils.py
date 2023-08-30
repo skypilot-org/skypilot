@@ -6,13 +6,11 @@ from functools import lru_cache
 import uuid
 
 
-
-
 def get_key_suffix():
     return str(uuid.uuid4()).replace("-", "")[:8]
 
 
-ENDPOINT = "http://localhost:5001/" # TODO(mjibril) change to live endpoint when ready
+ENDPOINT = "https://console.fluidstack.io/"
 FLUIDSTACK_API_KEY_PATH = "~/.fluidstack/api_key"
 FLUIDSTACK_API_TOKEN_PATH = "~/.fluidstack/api_token"
 
@@ -38,14 +36,18 @@ def raise_fluidstack_error(response: requests.Response) -> None:
         resp_json = response.json()
         message = resp_json.get("error", response.text)
     except (KeyError, json.decoder.JSONDecodeError):
-        raise FluidstackAPIError(f"Unexpected error. Status code: {status_code}")
+        raise FluidstackAPIError(
+            f"Unexpected error. Status code: {status_code}")
     raise FluidstackAPIError(f"{message}")
 
 
 class FluidstackClient:
+
     def __init__(self):
-        self.api_key = read_contents(os.path.expanduser(FLUIDSTACK_API_KEY_PATH))
-        self.api_token = read_contents(os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
+        self.api_key = read_contents(
+            os.path.expanduser(FLUIDSTACK_API_KEY_PATH))
+        self.api_token = read_contents(
+            os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
 
     def list_instances(self) -> List[Dict[str, Any]]:
         response = requests.get(
@@ -72,25 +74,28 @@ class FluidstackClient:
             ssh_keys=[ssh_key["id"]],
         )
 
-        response = requests.post(
-            ENDPOINT + "api2/deploy", auth=(self.api_key, self.api_token), json=body
-        )
+        response = requests.post(ENDPOINT + "api2/deploy",
+                                 auth=(self.api_key, self.api_token),
+                                 json=body)
         raise_fluidstack_error(response)
         return response.json().get("server", {}).get("id")
 
     def list_ssh_keys(self):
-        response = requests.get(
-            ENDPOINT + "api/ssh_key", auth=(self.api_key, self.api_token)
-        )
+        response = requests.get(ENDPOINT + "api/ssh_key",
+                                auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()["ssh_keys"]
 
-    def get_or_add_ssh_key(self, ssh_pub_key: str = None) -> None:
+    def get_or_add_ssh_key(self, ssh_pub_key: str = "") -> Dict[str, str]:
         """Add ssh key if not already added."""
         ssh_keys = self.list_ssh_keys()
         for key in ssh_keys:
             if key["Public_Key"].strip() == ssh_pub_key.strip():
-                return {"id": key["id"], "name": key["Name"], "ssh_key": ssh_pub_key}
+                return {
+                    "id": key["id"],
+                    "name": key["Name"],
+                    "ssh_key": ssh_pub_key
+                }
         ssh_key_name = "skypilot-" + get_key_suffix()
         response = requests.post(
             ENDPOINT + "api/ssh_key",
@@ -107,11 +112,8 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         plans = response.json()
         plans = [
-            plan
-            for plan in plans
-            if plan["minimum_commitment"] == "hourly"
-            and plan["type"] in ["preconfigured"]
-            and plan["gpu_type"] != "NO GPU"
+            plan for plan in plans if plan["minimum_commitment"] == "hourly" and
+            plan["type"] in ["preconfigured"] and plan["gpu_type"] != "NO GPU"
         ]
 
         def get_regions(plans: List) -> dict:
@@ -153,9 +155,8 @@ class FluidstackClient:
         return response.json()
 
     def info(self, instance_id: str):
-        response = requests.get(
-            ENDPOINT + f"api2/list/{instance_id}", auth=(self.api_key, self.api_token)
-        )
+        response = requests.get(ENDPOINT + f"api2/list/{instance_id}",
+                                auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
@@ -170,7 +171,7 @@ class FluidstackClient:
 
     def add_tags(self, instance_id: str, tags: Dict[str, str]):
         response = requests.post(
-            ENDPOINT + f"api2/tag",
+            ENDPOINT + "api2/tag",
             auth=(self.api_key, self.api_token),
             json=dict(instance_id=instance_id, tags=json.dumps(tags)),
         )

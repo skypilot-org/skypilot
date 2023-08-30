@@ -38,7 +38,7 @@ _ACCELERATORS = [
     'Radeon MI25',
     'P4',
     'RTX6000',
-    'A4500', 
+    'A4500',
     'RTX3060Ti',
     'RTX4000',
     'P5000',
@@ -50,7 +50,8 @@ _ACCELERATORS = [
     'A6000',
     'RTX3080',
     'A5000',
-
+    'A100-80GB-NVLink',
+    'A100_NVLINK',
 ]
 
 

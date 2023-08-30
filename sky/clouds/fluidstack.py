@@ -17,7 +17,7 @@ from sky.skylet.providers.fluidstack.fluidstack_utils import (
 import os
 
 _CREDENTIAL_FILES = [
-    # credential files for Fluidstack,
+    # credential files for FluidStack,
     FLUIDSTACK_API_KEY_PATH,
     FLUIDSTACK_API_TOKEN_PATH,
 ]
@@ -26,10 +26,9 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-
 @clouds.CLOUD_REGISTRY.register
 class Fluidstack(clouds.Cloud):
-    """Fluidstack Labs GPU Cloud."""
+    """FluidStack Labs GPU Cloud."""
 
     _REPR = 'Fluidstack'
 
@@ -41,8 +40,8 @@ class Fluidstack(clouds.Cloud):
     # for Fluidstack Cloud.
     # STOP/AUTOSTOP: The Fluidstack cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Fluidstack cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Fluidstack cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.STOP: 'FluidStack cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'FluidStack cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
@@ -63,7 +62,7 @@ class Fluidstack(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        assert zone is None, 'Fluidstack does not support zones.'
+        assert zone is None, 'FluidStack does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
@@ -148,8 +147,8 @@ class Fluidstack(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='fluidstack')
+        return service_catalog.get_vcpus_mem_from_instance_type(
+            instance_type, clouds='fluidstack')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -158,7 +157,7 @@ class Fluidstack(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources', region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        assert zones is None, 'Fluidstack does not support zones.'
+        assert zones is None, 'FluidStack does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -235,17 +234,17 @@ class Fluidstack(clouds.Cloud):
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_KEY_PATH))
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
         except AssertionError:
-            return False, ('Failed to access Fluidstack Cloud with credentials. '
-                           'To configure credentials, go to:\n    '
-                           '  https://console.fluidstack.io \n    '
-                           'to obtain an API key and API Token, then add save the contents\n' 
-                            'to ~/.fluidstack/api_key and ~/.fluidstack/api_token \n')
+            return False, (
+                'Failed to access FluidStack Cloud with credentials. '
+                'To configure credentials, go to:\n    '
+                '  https://console.fluidstack.io \n    '
+                'to obtain an API key and API Token, then add save the contents\n'
+                'to ~/.fluidstack/api_key and ~/.fluidstack/api_token \n')
         except requests.exceptions.ConnectionError:
-            return False, ('Failed to verify Fluidstack Cloud credentials. '
+            return False, ('Failed to verify FluidStack Cloud credentials. '
                            'Check your network connection '
                            'and try again.')
         return True, None
-
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         ########
@@ -254,8 +253,6 @@ class Fluidstack(clouds.Cloud):
         # Return dictionary of credential file paths. This may look
         # something like:
         return {filename: filename for filename in _CREDENTIAL_FILES}
-
-    
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
@@ -286,7 +283,7 @@ class Fluidstack(clouds.Cloud):
     def check_disk_tier_enabled(cls, instance_type: str,
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
-            'Fluidstack does not support disk tiers.')
+            'FluidStack does not support disk tiers.')
 
     @classmethod
     def query_status(
@@ -301,7 +298,7 @@ class Fluidstack(clouds.Cloud):
             "Provisioning": status_lib.ClusterStatus.INIT,
             "Starting Up": status_lib.ClusterStatus.INIT,
             "Running": status_lib.ClusterStatus.UP,
-            "Error Creating": status_lib.ClusterStatus.INIT,#should be error
+            "Error Creating": status_lib.ClusterStatus.INIT,  #should be error
         }
         status_list = []
         vms = FluidstackClient().list_instances()

@@ -1,7 +1,7 @@
 """Fluidstack Cloud Catalog.
 
 This module loads the service catalog file and can be used to query
-instance types and pricing information for Fluidstack.
+instance types and pricing information for FluidStack.
 """
 import typing
 from typing import Dict, List, Optional, Tuple
@@ -28,7 +28,7 @@ def validate_region_zone(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Fluidstack Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.validate_region_zone_impl('fluidstack', _df, region, zone)
 
 
@@ -38,7 +38,7 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   zone: Optional[str] = None) -> bool:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Fluidstack Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
                                                      region, zone)
 
@@ -48,10 +48,10 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'Fluidstack Cloud does not support spot.'
+    assert not use_spot, 'FluidStack Cloud does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Fluidstack Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -94,7 +94,7 @@ def get_instance_type_for_accelerator(
     """
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Fluidstack Cloud does not support zones.')
+            raise ValueError('FluidStack Cloud does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
@@ -132,6 +132,6 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Fluidstack offering GPUs."""
-    return common.list_accelerators_impl('fluidstack', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
-                                         case_sensitive)
+    return common.list_accelerators_impl('fluidstack', _df, gpus_only,
+                                         name_filter, region_filter,
+                                         quantity_filter, case_sensitive)
