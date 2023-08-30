@@ -105,7 +105,7 @@ Available fields and semantics:
   gcp:
     # Reserved capacity (optional).
     #
-    # The specific reservation to be considered when provisioning clusters.
+    # The specific reservation to be considered when provisioning clusters on GCP.
     # SkyPilot will automatically prioritize this reserved capacity (considered as
     # zero cost) if the requested resources matches the reservation.
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
