@@ -11,12 +11,12 @@ import time
 import traceback
 from typing import Dict, List, Optional
 
-import botocore.exceptions
 import colorama
 
 from sky import clouds
 from sky import provision
 from sky import sky_logging
+from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_comm
 from sky.provision import instance_setup
@@ -83,29 +83,32 @@ def _bulk_provision(
                                                            cluster_name,
                                                            config=config)
     except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Starting instances for "{cluster_name}" '
+        logger.debug(f'Starting instances for {cluster_name!r} '
                      f'failed. Stacktrace:\n{traceback.format_exc()}')
-        logger.error(f'Failed to provision "{cluster_name}" after '
+        logger.error(f'Failed to provision {cluster_name!r} after '
                      'maximum retries.')
         raise e
 
     backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-    logger.debug(f'Waiting "{cluster_name}" to be started...')
+    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
     with log_utils.safe_rich_status(
-            f'[bold cyan]Waiting '
-            f'[green]{cluster_name}[bold cyan] to be started...'):
+            f'[bold cyan]Waiting for'
+            f'[green]{cluster_name}[bold cyan] to be ready...'):
         # AWS would take a very short time (<<1s) updating the state of
-        # the instance. Wait 3 seconds should be enough.
+        # the instance. Wait 4 seconds should be enough.
         time.sleep(3)
         for retry_cnt in range(_MAX_RETRY):
             try:
                 provision.wait_instances(provider_name, region_name,
                                          cluster_name, 'running')
-            except botocore.exceptions.WaiterError:
+                break
+            except aws.botocore_exceptions().WaiterError:
                 time.sleep(backoff.current_backoff())
+    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+                'retries.')
 
-    logger.debug(f'Cluster up takes {time.time() - start} seconds with '
-                 f'{retry_cnt} retries.')
+    logger.debug(f'\nLaunching {cluster_name!r} took {time.time() - start} '
+                 f'seconds.')
 
     plural = '' if config.count == 1 else 's'
     if not isinstance(cloud, clouds.Local):
@@ -217,6 +220,8 @@ def _wait_ssh_connection_indirect(
                           check=False,
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        logger.debug(f'SSH to {ip} with command: {" ".join(command)}')
     return proc.returncode == 0
 
 
@@ -245,6 +250,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
                 with ux_utils.print_exception_no_traceback():
                     raise TimeoutError(
                         f'Wait SSH timeout ({timeout}s) exceeded.')
+            logger.debug(f'Failed to SSH to {ip}. Retrying in 1 second...')
             time.sleep(1)
 
 
@@ -278,10 +284,11 @@ def _post_provision_setup(
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    logger.debug(f'Waiting SSH connection for "{cluster_name}" ...')
+    logger.debug(f'\nWaiting SSH connection for "{cluster_name}" ...')
     with log_utils.safe_rich_status(f'[bold cyan]Waiting SSH connection for '
                                     f'[green]{cluster_name}[white] ...'):
         wait_for_ssh(cluster_metadata, ssh_credentials)
+    logger.debug(f'SSH Conection ready for {cluster_name!r}')
 
     # We mount the metadata with sky wheel for speedup.
     # NOTE: currently we mount all credentials for all nodes, because
@@ -297,6 +304,7 @@ def _post_provision_setup(
         **config_from_yaml.get('file_mounts', {})
     }
 
+    logger.debug('\nMounting internal files...')
     with log_utils.safe_rich_status(f'[bold cyan]Mounting internal files for '
                                     f'[green]{cluster_name}[white] ...'):
         instance_setup.internal_file_mounts(cluster_name,
@@ -304,18 +312,22 @@ def _post_provision_setup(
                                             cluster_metadata,
                                             ssh_credentials,
                                             wheel_hash=wheel_hash)
+    logger.debug('Internal files: done.')
 
+    logger.debug('\nSetting up SkyPilot runtime...')
     with log_utils.safe_rich_status(
             f'[bold cyan]Setting up SkyPilot runtime for '
             f'[green]{cluster_name}[white] ...'):
         instance_setup.internal_dependencies_setup(
             cluster_name, config_from_yaml['setup_commands'], cluster_metadata,
             ssh_credentials)
+    logger.debug('\nSkyPilot Runtime: done...')
 
     head_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                   port=22,
                                                   **ssh_credentials)
 
+    logger.debug('\nSetting up Ray cluster...')
     full_ray_setup = True
     if not provision_metadata.is_instance_just_booted(
             head_instance.instance_id):
@@ -326,23 +338,21 @@ def _post_provision_setup(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False)
         if returncode:
-            logger.error('Check result: Head node Ray is not up.')
+            logger.info('Ray cluster on head is not up. Restarting...')
         else:
-            logger.debug('Check result: Head node Ray is up.')
+            logger.debug('Ray cluster on head is up.')
         full_ray_setup = bool(returncode)
 
     if full_ray_setup:
         logger.debug('\nStart Ray on the whole cluster.')
         with log_utils.safe_rich_status(
-                f'[bold cyan]Starting Ray on the head node for '
+                f'[bold cyan]Starting Ray Cluster on the head node for '
                 f'[green]{cluster_name}[white] ...'):
             instance_setup.start_ray_head_node(
                 cluster_name,
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
-    else:
-        logger.debug('Start Ray only on worker nodes.')
 
     # NOTE: We have to check all worker nodes to make sure they are all
     #  healthy, otherwise we can only start Ray on newly started worker
@@ -363,13 +373,18 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
+    logger.debug('Ray cluster: done.')
 
+    logger.debug('\nSetting up Skylet...')
     with log_utils.safe_rich_status(
             f'[bold cyan]Checking and starting Skylet for '
             f'[green]{cluster_name}[white] ...'):
         instance_setup.start_skylet(cluster_name, cluster_metadata,
                                     ssh_credentials)
+    logger.debug('Skylet: done.')
 
+    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
+                f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
