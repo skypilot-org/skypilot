@@ -305,8 +305,9 @@ def _post_provision_setup(
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    logger.debug(f'\nWaiting SSH connection for "{cluster_name}" ...')
-    with log_utils.safe_rich_status(f'[bold cyan]Waiting SSH connection for '
+    logger.debug(f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
+    with log_utils.safe_rich_status(f'[bold cyan]Waiting for SSH to be '
+                                    'available for '
                                     f'[green]{cluster_name}[white] ...'):
         wait_for_ssh(cluster_metadata, ssh_credentials)
     logger.debug(f'SSH Conection ready for {cluster_name!r}')
@@ -327,7 +328,7 @@ def _post_provision_setup(
 
     with log_utils.safe_rich_status(
             f'[bold cyan]Setting up SkyPilot runtime for '
-            f'[green]{cluster_name}[white] ...'):
+            f'[green]{cluster_name}[white] ...') as status:
         logger.debug('\nMounting internal files...')
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
@@ -355,13 +356,15 @@ def _post_provision_setup(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False)
             if returncode:
+                status.stop()
                 logger.info('Ray cluster on head is not up. Restarting...')
+                status.start()
             else:
                 logger.debug('Ray cluster on head is up.')
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:
-            logger.debug('\nStarting Ray on the whole cluster.')
+            logger.debug('Starting Ray on the whole cluster.')
             instance_setup.start_ray_head_node(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
