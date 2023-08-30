@@ -2658,7 +2658,9 @@ def _refresh_service_record_no_lock(
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_lib.ServeCodeGen.get_latest_info()
+    assert service_handle.controller_port is not None
+    code = serve_lib.ServeCodeGen.get_latest_info(
+        service_handle.controller_port)
     returncode, latest_info_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -2700,6 +2702,8 @@ def _refresh_service_record(
         return global_user_state.get_service_from_name(service_name), msg
 
 
+# TODO(tian): Maybe aggregate services using same controller to reduce SSH
+# overhead?
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
         service_names = [

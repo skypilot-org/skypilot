@@ -24,11 +24,12 @@ class SkyServeRedirector:
     to the appropriate endpoint replica.
     """
 
-    def __init__(self, controller_url: str, port: int,
+    def __init__(self, controller_url: str, port: int, app_port: int,
                  load_balancer: load_balancers.LoadBalancer):
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
         self.port = port
+        self.app_port = app_port
         self.load_balancer = load_balancer
 
         for i in range(3):
@@ -79,7 +80,7 @@ class SkyServeRedirector:
                                         'Use "sky serve status [SERVICE_ID]" '
                                         'to check the replica status.')
 
-        path = f'http://{replica_ip}:{self.port}{request.url.path}'
+        path = f'http://{replica_ip}:{self.app_port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -110,6 +111,10 @@ if __name__ == '__main__':
                         type=int,
                         help='Port to run the redirector on.',
                         required=True)
+    parser.add_argument('--app-port',
+                        type=int,
+                        help='Port that runs app on replica.',
+                        required=True)
     parser.add_argument('--controller-addr',
                         type=str,
                         help='Controller address (ip:port).',
@@ -122,5 +127,6 @@ if __name__ == '__main__':
     # ======= Redirector =========
     redirector = SkyServeRedirector(controller_url=args.controller_addr,
                                     port=args.port,
+                                    app_port=args.app_port,
                                     load_balancer=_load_balancer)
     redirector.run()

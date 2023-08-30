@@ -34,7 +34,7 @@ sudo systemctl stop jupyter > /dev/null 2>&1 || true
 sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
 """
 
-_CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
+_CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -134,6 +134,10 @@ class ServiceHandle(object):
     - (required) All replica info.
     - (optional) Service uptime.
     - (optional) Service endpoint URL.
+    - (optional) Controller port to use.
+    - (optional) Redirector port to use.
+    - (optional) Controller job id.
+    - (optional) Redirector job id.
     - (optional) Epemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.
@@ -141,15 +145,20 @@ class ServiceHandle(object):
     _VERSION = 1
 
     def __init__(
-            self,
-            *,
-            controller_cluster_name: str,
-            policy: str,
-            requested_resources: 'sky.Resources',
-            replica_info: List[Dict[str, Any]],
-            uptime: Optional[int] = None,
-            endpoint: Optional[str] = None,
-            ephemeral_storage: Optional[List[Dict[str, Any]]] = None) -> None:
+        self,
+        *,
+        controller_cluster_name: str,
+        policy: str,
+        requested_resources: 'sky.Resources',
+        replica_info: List[Dict[str, Any]],
+        uptime: Optional[int] = None,
+        endpoint: Optional[str] = None,
+        controller_port: Optional[int] = None,
+        redirector_port: Optional[int] = None,
+        controller_job_id: Optional[int] = None,
+        redirector_job_id: Optional[int] = None,
+        ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self._version = self._VERSION
         self.controller_cluster_name = controller_cluster_name
         self.replica_info = replica_info
@@ -157,6 +166,10 @@ class ServiceHandle(object):
         self.endpoint = endpoint
         self.policy = policy
         self.requested_resources = requested_resources
+        self.controller_port = controller_port
+        self.redirector_port = redirector_port
+        self.controller_job_id = controller_job_id
+        self.redirector_job_id = redirector_job_id
         self.ephemeral_storage = ephemeral_storage
 
     def __repr__(self):
@@ -167,6 +180,8 @@ class ServiceHandle(object):
                 f'\n\tendpoint={self.endpoint},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
+                f'\n\tcontroller_port={self.controller_port},'
+                f'\n\tredirector_port={self.redirector_port},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
     def cleanup_ephemeral_storage(self) -> None:
@@ -181,8 +196,10 @@ class ServiceHandle(object):
         self.__dict__.update(state)
 
 
-def get_latest_info() -> str:
-    resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
+def get_latest_info(controller_port: int) -> str:
+    resp = requests.get(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())
@@ -196,8 +213,10 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
     return latest_info
 
 
-def terminate_service() -> str:
-    resp = requests.post(_CONTROLLER_URL + '/controller/terminate')
+def terminate_service(controller_port: int) -> str:
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
@@ -268,6 +287,7 @@ def _follow_logs(file: TextIO,
 
 
 def stream_logs(service_name: str,
+                controller_port: int,
                 replica_id: int,
                 follow: bool,
                 skip_local_log_file_check: bool = False) -> str:
@@ -300,7 +320,9 @@ def stream_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
+        resp = requests.get(
+            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+            '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '
@@ -346,24 +368,24 @@ class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_latest_info()
+      >> code = ServeCodeGen.get_latest_info(controller_port)
     """
     _PREFIX = [
         'from sky.serve import serve_utils',
     ]
 
     @classmethod
-    def get_latest_info(cls) -> str:
+    def get_latest_info(cls, controller_port: int) -> str:
         code = [
-            'msg = serve_utils.get_latest_info()',
+            f'msg = serve_utils.get_latest_info({controller_port})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def terminate_service(cls) -> str:
+    def terminate_service(cls, controller_port: int) -> str:
         code = [
-            'msg = serve_utils.terminate_service()',
+            f'msg = serve_utils.terminate_service({controller_port})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -371,13 +393,15 @@ class ServeCodeGen:
     @classmethod
     def stream_logs(cls,
                     service_name: str,
+                    controller_port: int,
                     replica_id: int,
                     follow: bool,
                     skip_local_log_file_check: bool = False) -> str:
         code = [
-            f'msg = serve_utils.stream_logs({service_name!r}, {replica_id!r}, '
-            f'follow={follow}, skip_local_log_file_check='
-            f'{skip_local_log_file_check})', 'print(msg, flush=True)'
+            f'msg = serve_utils.stream_logs({service_name!r}, '
+            f'{controller_port}, {replica_id!r}, follow={follow}, '
+            f'skip_local_log_file_check={skip_local_log_file_check})',
+            'print(msg, flush=True)'
         ]
         return cls._build(code)
 

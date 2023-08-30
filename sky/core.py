@@ -11,6 +11,7 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import serve
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
@@ -127,7 +128,8 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')
-    controller_cluster_name = service_record['handle'].controller_cluster_name
+    service_handle: serve.ServiceHandle = service_record['handle']
+    controller_cluster_name = service_handle.controller_cluster_name
     handle = global_user_state.get_handle_from_cluster_name(
         controller_cluster_name)
     if handle is None:
@@ -135,7 +137,12 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle, service_name, replica_id, follow=follow)
+    assert service_handle.controller_port is not None
+    backend.tail_serve_logs(handle,
+                            service_name,
+                            service_handle.controller_port,
+                            replica_id,
+                            follow=follow)
 
 
 @usage_lib.entrypoint

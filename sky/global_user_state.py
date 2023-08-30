@@ -629,6 +629,19 @@ def get_service_from_name(
     return None
 
 
+def get_services_from_controller_name(
+        controller_name: str) -> List[Dict[str, Any]]:
+    # TODO(tian): Maybe we should move controller_name to the DB
+    # and optimize it.
+    rows = _DB.cursor.execute('SELECT * FROM services').fetchall()
+    records = []
+    for row in rows:
+        record = _get_service_from_row(row)
+        if record['handle'].controller_cluster_name == controller_name:
+            records.append(record)
+    return records
+
+
 def get_handle_from_service_name(
         service_name: Optional[str]) -> Optional['serve.ServiceHandle']:
     rows = _DB.cursor.execute('SELECT handle FROM services WHERE name=(?)',

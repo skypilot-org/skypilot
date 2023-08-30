@@ -3180,10 +3180,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task: task_lib.Task,
         detach_run: bool,
         dryrun: bool = False,
-    ) -> None:
+    ) -> Optional[int]:
         if task.run is None:
             logger.info('Run commands not specified or empty.')
-            return
+            return None
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
@@ -3192,7 +3192,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if dryrun:
             logger.info(f'Dryrun complete. Would have run:\n{task}')
-            return
+            return None
 
         job_id = self._add_job(handle, task.name, resources_str)
 
@@ -3203,6 +3203,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task, job_id, detach_run)
+        return job_id
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
@@ -3489,10 +3490,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         )
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
-                        service_name: str, replica_id: int,
-                        follow: bool) -> None:
-        code = serve_lib.ServeCodeGen.stream_logs(service_name, replica_id,
-                                                  follow)
+                        service_name: str, controller_port: int,
+                        replica_id: int, follow: bool) -> None:
+        code = serve_lib.ServeCodeGen.stream_logs(service_name, controller_port,
+                                                  replica_id, follow)
 
         signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
         signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
