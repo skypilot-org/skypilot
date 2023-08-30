@@ -59,8 +59,8 @@ class FluidstackClient:
 
     def create_instance(
         self,
-        instance_type: str = "1xRTX_A6000_RAM-55GB_Disk-500GB_nCPU-6_C4F9D7",
-        region: str = "norway_2_eu",
+        instance_type: str = "",
+        region: str = "",
         ssh_pub_key: str = "",
     ) -> List[str]:
         """Launch new instances."""

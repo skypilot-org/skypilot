@@ -28,7 +28,7 @@ if typing.TYPE_CHECKING:
 
 @clouds.CLOUD_REGISTRY.register
 class Fluidstack(clouds.Cloud):
-    """FluidStack Labs GPU Cloud."""
+    """FluidStack GPU Cloud."""
 
     _REPR = 'Fluidstack'
 
@@ -226,10 +226,7 @@ class Fluidstack(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        ########
-        # TODO #
-        ########
-        # Verify locally stored credentials are correct.
+    
         try:
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_KEY_PATH))
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
@@ -247,11 +244,6 @@ class Fluidstack(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        ########
-        # TODO #
-        ########
-        # Return dictionary of credential file paths. This may look
-        # something like:
         return {filename: filename for filename in _CREDENTIAL_FILES}
 
     @classmethod
