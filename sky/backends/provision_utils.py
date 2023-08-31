@@ -23,7 +23,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -68,7 +68,7 @@ def _bulk_provision(
 
     start = time.time()
     try:
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Bootstrapping configurations for '
                 f'[green]{cluster_name}[white] ...'):
             # TODO(suquark): Should we cache the bootstrapped result?
@@ -85,7 +85,7 @@ def _bulk_provision(
         raise
 
     try:
-        with log_utils.safe_rich_status(f'[bold cyan]Starting instances for '
+        with rich_utils.safe_status(f'[bold cyan]Starting instances for '
                                         f'[green]{cluster_name}[white] ...'):
             provision_metadata = provision.start_instances(
                 provider_name,
@@ -101,7 +101,7 @@ def _bulk_provision(
 
     backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
     logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
-    with log_utils.safe_rich_status(
+    with rich_utils.safe_status(
             f'[bold cyan]Waiting for '
             f'[green]{cluster_name}[bold cyan] to be ready...'):
         # AWS would take a very short time (<<1s) updating the state of
@@ -306,7 +306,7 @@ def _post_provision_setup(
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
     logger.debug(f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
-    with log_utils.safe_rich_status(f'[bold cyan]Waiting for SSH to be '
+    with rich_utils.safe_status(f'[bold cyan]Waiting for SSH to be '
                                     'available for '
                                     f'[green]{cluster_name}[white] ...'):
         wait_for_ssh(cluster_metadata, ssh_credentials)
@@ -326,7 +326,7 @@ def _post_provision_setup(
         **config_from_yaml.get('file_mounts', {})
     }
 
-    with log_utils.safe_rich_status(
+    with rich_utils.safe_status(
             f'[bold cyan]Setting up SkyPilot runtime for '
             f'[green]{cluster_name}[white] ...') as status:
         logger.debug('\nMounting internal files...')
