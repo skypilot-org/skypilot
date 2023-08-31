@@ -70,6 +70,7 @@ from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1745,7 +1746,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+            with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
                 try:
                     num_in_progress_jobs, msg = spot_jobs_future.get()
                 except KeyboardInterrupt:
@@ -1906,7 +1907,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except (RuntimeError, exceptions.NotSupportedError,
+        except (RuntimeError, ValueError, exceptions.NotSupportedError,
                 exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
@@ -2598,7 +2599,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
     if cluster_status == status_lib.ClusterStatus.UP:
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
@@ -3688,7 +3689,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+    with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
                                 show_all=all,
@@ -4482,7 +4483,7 @@ def local_up():
                 f'Current context in kube config: {curr_context}'
                 '\nWill automatically switch to kind-skypilot after the local '
                 'cluster is created.')
-    with log_utils.safe_rich_status('Creating local cluster...'):
+    with rich_utils.safe_status('Creating local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                       'create_cluster.sh')
@@ -4505,7 +4506,7 @@ def local_up():
                     click.echo(f'Logs:\n{stdout}')
                 sys.exit(1)
     # Run sky check
-    with log_utils.safe_rich_status('Running sky check...'):
+    with rich_utils.safe_status('Running sky check...'):
         sky_check.check(quiet=True)
     if cluster_created:
         # Get number of CPUs
@@ -4529,7 +4530,7 @@ def local_up():
 def local_down():
     """Deletes a local cluster."""
     cluster_removed = False
-    with log_utils.safe_rich_status('Removing local cluster...'):
+    with rich_utils.safe_status('Removing local cluster...'):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                         'delete_cluster.sh')
@@ -4548,7 +4549,7 @@ def local_down():
                     click.echo(f'Logs:\n{stdout}')
     if cluster_removed:
         # Run sky check
-        with log_utils.safe_rich_status('Running sky check...'):
+        with rich_utils.safe_status('Running sky check...'):
             sky_check.check(quiet=True)
         click.echo('Local cluster removed.')
 

@@ -19,7 +19,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -798,12 +798,11 @@ def spot_queue(refresh: bool,
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        log_utils.force_update_rich_status(
-            '[cyan] Checking spot jobs - restarting '
-            'controller[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+                                       'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
-        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as

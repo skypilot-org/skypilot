@@ -26,6 +26,7 @@ from sky.spot import constants as spot_constants
 from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -280,8 +281,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
-    status_display = log_utils.safe_rich_status(
-        status_msg.format(status_str=''))
+    status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = spot_state.get_num_tasks(job_id)
 
     with status_display:
