@@ -2764,7 +2764,7 @@ def test_skyserve_llm():
 
 
 @pytest.mark.gcp
-def test_skyserve_interrupt():
+def test_skyserve_replica_failure():
     """Test skyserve with manually interrupting some replica"""
     name = _get_service_name()
     zone = 'us-central1-a'
@@ -2779,28 +2779,28 @@ def test_skyserve_interrupt():
                 f' --quiet $({query_cmd})')
 
     test = Test(
-        f'test-skyserve-interrupt',
+        f'test-skyserve-replica-failure',
         [
-            f'sky serve up -n {name} -y tests/skyserve/interrupt/service.yaml',
+            f'sky serve up -n {name} -y tests/skyserve/replica_failure/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
             f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/interrupt/test_round_robin.py '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
-            terminate_cmd(1),
+            terminate_replica(1),
             f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
             f'sky serve status {name} | grep 2/3',
             f'{_get_replica_line(name, 1)} | grep NOT_READY',
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
             f'{_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/interrupt/test_round_robin.py '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
-            terminate_cmd(2),
+            terminate_replica(2),
             f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
             f'sky serve status {name} | grep 1/3',
             f'{_get_replica_line(name, 2)} | grep NOT_READY',
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/interrupt/test_round_robin.py '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
         ],
         f'sky serve down -y {name}',
