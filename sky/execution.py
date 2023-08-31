@@ -1133,17 +1133,13 @@ def serve_up(
                 if job_status == job_lib.JobStatus.PENDING:
                     pending_cnt += 1
                     logger.debug(f'SkyServe job is pending. cnt: {pending_cnt}')
-                    # TODO(tian): use a constant here
-                    if pending_cnt > 5:
+                    if pending_cnt > serve.JOB_PENDING_THRESHOLD:
                         backend.cancel_jobs(handle, jobs=[job_id])
                         return False
                 time.sleep(1)
             return False
 
-        # NOTICE: The job submission order cannot be changed since the
-        # `sky serve logs` CLI will identify the controller job with
-        # the first job submitted and the load balancer job with the second
-        # job submitted.
+        # TODO(tian): Maybe merge this to sky-serve-controller.yaml.j2?
         with console.status('[yellow]Launching controller process...[/yellow]'):
             controller_job_id = _execute(
                 entrypoint=sky.Task(

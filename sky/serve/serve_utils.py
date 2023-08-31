@@ -134,7 +134,8 @@ def get_ports_for_controller_and_load_balancer(
         # We opened 30000-40000 for controller VM, so load balancer port
         # should be in this range and controller port should not be in
         # this range.
-        controller_port, load_balancer_port = 20001, 30001
+        controller_port, load_balancer_port = (
+            constants.CONTROLLER_PORT_START, constants.LOAD_BALANCER_PORT_START)
     else:
         controller_port = max(existing_controller_ports) + 1
         load_balancer_port = max(existing_load_balancer_ports) + 1

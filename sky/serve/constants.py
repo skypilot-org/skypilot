@@ -8,6 +8,8 @@ SERVE_PREFIX = '~/.sky/serve'
 
 CONTROLLER_SYNC_INTERVAL = 20
 
+JOB_PENDING_THRESHOLD = 5
+
 # We need 200GB disk space to enable using Azure as controller, since its image
 # size is 150GB.
 CONTROLLER_RESOURCES = {'disk_size': 200, 'cpus': '4+'}
@@ -16,3 +18,7 @@ CONTROLLER_RESOURCES = {'disk_size': 200, 'cpus': '4+'}
 # during this period will be ignored.
 DEFAULT_INITIAL_DELAY_SECONDS = 1200
 DEFAULT_MIN_REPLICAS = 1
+
+CONTROLLER_PORT_START = 20001
+LOAD_BALANCER_PORT_START = 30001
+LOAD_BALANCER_PORT_RANGE = '30000-40000'

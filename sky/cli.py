@@ -4113,10 +4113,10 @@ def serve_up(
         serve_lib.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:
         controller_resources_config.update(task.service.controller_resources)
-    # TODO(tian): We might need a thorough design on this.
     if 'ports' not in controller_resources_config:
         controller_resources_config['ports'] = []
-    controller_resources_config['ports'].append('30000-40000')
+    controller_resources_config['ports'].append(
+        serve_lib.LOAD_BALANCER_PORT_RANGE)
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
