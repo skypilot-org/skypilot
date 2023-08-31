@@ -2770,7 +2770,7 @@ def test_skyserve_interrupt():
     zone = 'us-central1-a'
 
     # Reference: test_spot_recovery_gcp
-    def terminate_cmd(replica_id: int) -> str:
+    def terminate_replica(replica_id: int) -> str:
         cluster_name = serve.generate_replica_cluster_name(name, replica_id)
         query_cmd = (f'gcloud compute instances list --filter='
                      f'"(labels.ray-cluster-name:{cluster_name})" '
