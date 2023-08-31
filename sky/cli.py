@@ -1108,7 +1108,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             acc, _ = list(res.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster is not supported. '
-                                f'Got num_nodes={task.num_nodes}.')
+                                 f'Got num_nodes={task.num_nodes}.')
 
     if num_nodes is not None:
         task.num_nodes = num_nodes

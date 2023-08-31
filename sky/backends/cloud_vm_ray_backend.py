@@ -2608,18 +2608,32 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
-        
+
         If multiple resources are specified, this will pass only when
-        there exists an exact match to the cluster.                
+        there exists an exact match to the cluster.
         """
-        
+
         # If the task has multiple resources, it should be an exact match
         # to the cluster.
-        
+
         launched_resources = handle.launched_resources
-        
+        cluster_name = handle.cluster_name
+
+        # Backward compatibility: the old launched_resources without region info
+        # was handled by ResourceHandle._update_cluster_region.
+        assert launched_resources.region is not None, handle
+
+        mismatch_str = (f'To fix: specify a new cluster name, or down the '
+                        f'existing cluster first: sky down {cluster_name}')
+        if hasattr(handle, 'local_handle') and handle.local_handle is not None:
+            launched_resources = handle.local_handle['cluster_resources']
+            usage_lib.messages.usage.update_local_cluster_resources(
+                launched_resources)
+            mismatch_str = ('To fix: use accelerators/number of nodes that can '
+                            'be satisfied by the local cluster')
+
         if len(task.resources) > 1:
-            
+
             valid_resource = None
             requested_resource_list = []
             for resource in task.resources:
@@ -2632,8 +2646,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     break
                 else:
                     requested_resource_list.append(
-                        f'{task.num_nodes}x {resource}'
-                    )
+                        f'{task.num_nodes}x {resource}')
             requested_resource_str = ', '.join(requested_resource_list)
             if valid_resource is None:
                 with ux_utils.print_exception_no_traceback():
@@ -2644,46 +2657,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
                         f'{mismatch_str}')
-            task.resources = [valid_resource]
+            task.resources = {valid_resource}
 
         else:
             assert len(task.resources) == 1, task.resources
 
             task_resources = list(task.resources)[0]
-            cluster_name = handle.cluster_name
             usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, launched_resources)
             record = global_user_state.get_cluster_from_name(cluster_name)
             if record is not None:
                 usage_lib.messages.usage.update_cluster_status(record['status'])
 
-            # Backward compatibility: the old launched_resources without region info
-            # was handled by ResourceHandle._update_cluster_region.
-            assert launched_resources.region is not None, handle
-
-            mismatch_str = (f'To fix: specify a new cluster name, or down the '
-                            f'existing cluster first: sky down {cluster_name}')
-            if hasattr(handle, 'local_handle') and handle.local_handle is not None:
-                launched_resources = handle.local_handle['cluster_resources']
-                usage_lib.messages.usage.update_local_cluster_resources(
-                    launched_resources)
-                mismatch_str = ('To fix: use accelerators/number of nodes that can '
-                                'be satisfied by the local cluster')
             # If only one reasource is specified
             # Requested_resources <= actual_resources.
             # Special handling for local cloud case, which assumes a cluster can
             # be heterogeneous. Here, launched_resources is a list of custom
-            # accelerators per node, and Resources.less_demanding_than determines
+            # accelerators per node, and
+            # Resources.less_demanding_than determines
             # how many nodes satisfy task resource requirements.
             if not (task.num_nodes <= handle.launched_nodes and
                     task_resources.less_demanding_than(
-                        launched_resources, requested_num_nodes=task.num_nodes)):
+                        launched_resources,
+                        requested_num_nodes=task.num_nodes)):
                 if (task_resources.region is not None and
                         task_resources.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in region '
-                            f'{task_resources.region!r}, but the existing cluster '
+                            'Task requested resources in region '  # pylint: disable=line-too-long
+                            f'{task_resources.region!r}, but the existing cluster '  # pylint: disable=line-too-long
                             f'is in region {launched_resources.region!r}.')
                 if (task_resources.zone is not None and
                         task_resources.zone != launched_resources.zone):
@@ -2692,12 +2694,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'does not have zone specified.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in zone '
-                            f'{task_resources.zone!r}, but the existing cluster '
+                            'Task requested resources in zone '  # pylint: disable=line-too-long
+                            f'{task_resources.zone!r}, but the existing cluster '  # pylint: disable=line-too-long
                             f'{zone_str}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing cluster.\n'
+                        'Requested resources do not match the existing cluster.\n'  # pylint: disable=line-too-long
                         f'  Requested:\t{task.num_nodes}x {task_resources} \n'
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
@@ -4224,9 +4226,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
         resources = task.best_resources
-        
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
+
+        if resources is not None:
+            task_cloud = resources.cloud
+        else:
+            task_cloud = clouds.Cloud
         task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:

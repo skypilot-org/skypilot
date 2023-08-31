@@ -16,8 +16,8 @@ task.set_resources([
 ])
 
 sky.launch(task,
-        cluster_name=f'my-cluster',
-        stream_logs=False,
-        down=False,
-        dryrun=True)
+           cluster_name=f'my-cluster',
+           stream_logs=False,
+           down=False,
+           dryrun=True)
 #sky.exec(task, cluster_name='my-cluster', stream_logs=True)

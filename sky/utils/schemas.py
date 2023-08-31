@@ -52,9 +52,9 @@ def get_resources_schema():
                     }
                 }, {
                     'type': 'array',
-                     'items': {
-                         'type': 'string',
-                     }                    
+                    'items': {
+                        'type': 'string',
+                    }
                 }]
             },
             'instance_type': {

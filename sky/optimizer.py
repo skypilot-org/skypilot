@@ -55,6 +55,7 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     }
     return log_utils.create_table(field_names, **table_kwargs)
 
+
 def _is_dag_with_res_list(dag: 'dag_lib.Dag') -> bool:
     import networkx as nx  # pylint: disable=import-outside-toplevel
     graph = dag.get_graph()
@@ -63,6 +64,7 @@ def _is_dag_with_res_list(dag: 'dag_lib.Dag') -> bool:
         if node.resources_pref_list is not None:
             return True
     return False
+
 
 class Optimizer:
     """Optimizer: assigns best resources to user tasks."""
@@ -121,15 +123,15 @@ class Optimizer:
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
         try:
-            
+
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
                 logger.info('Using user-specified resource list.')
                 _ = Optimizer._set_resources_by_user_order(
-                     dag, blocked_resources) 
+                    dag=dag, blocked_resources=blocked_resources, quiet=quiet)
             else:
                 _ = Optimizer._optimize_objective(
-                    dag,
+                    dag=dag,
                     minimize_cost=minimize == OptimizeTarget.COST,
                     blocked_resources=blocked_resources,
                     quiet=quiet)
@@ -272,7 +274,7 @@ class Optimizer:
                         blocked_resources
                     )
                 node_to_candidate_map[node] = cloud_candidates
-                
+
                 # Remove candidate that is not launchable.
                 launchable_resources = {
                     k: v for k, v in launchable_resources.items() if v
@@ -280,16 +282,15 @@ class Optimizer:
 
                 if len(launchable_resources) == 0:
                     error_msg = (
-                         f'No launchable resource found for task {node}. '
-                         'To fix: relax its resource requirements.\n'
-                         ' \'sky check\' to check the enabled clouds.')
+                        f'No launchable resource found for task {node}. '
+                        'To fix: relax its resource requirements.\n'
+                        ' \'sky check\' to check the enabled clouds.')
                     with ux_utils.print_exception_no_traceback():
-                         raise exceptions.ResourcesUnavailableError(error_msg)
+                        raise exceptions.ResourcesUnavailableError(error_msg)
             else:
                 # Dummy sink node.
-                launchable_resources = node.get_resources()
                 launchable_resources = {
-                    list(node.get_resources())[0]: launchable_resources
+                    list(node.get_resources())[0]: node.get_resources()
                 }
 
             num_resources = len(node.get_resources())
@@ -814,11 +815,13 @@ class Optimizer:
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
             chosen_resources = best_plan[task]
-            chosen_cost = None
+            chosen_cost = 0.0
             for resources, cost in v.items():
-                if resources.to_yaml_config() == chosen_resources.to_yaml_config():
+                if resources.to_yaml_config(
+                ) == chosen_resources.to_yaml_config():
                     chosen_cost = cost
                     break
+            assert chosen_cost > 0.0, f'chosen_cost: {chosen_cost}'
             best_per_cloud[str(chosen_resources.cloud)] = (chosen_resources,
                                                            chosen_cost)
 
@@ -926,28 +929,27 @@ class Optimizer:
     @staticmethod
     def _set_resources_by_user_order(
         dag: 'dag_lib.Dag',
-        blocked_resources: Optional[List[
-            resources_lib.Resources]] = None,
+        blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False,
-     ) -> Dict[task_lib.Task, resources_lib.Resources]:
-        
-        import networkx as nx # pylint: disable=import-outside-toplevel
+    ) -> Dict[task_lib.Task, resources_lib.Resources]:
+
+        import networkx as nx  # pylint: disable=import-outside-toplevel
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
-        
+
         node_to_cost_map, node_to_candidate_map = \
             Optimizer._estimate_nodes_cost_or_time(
                 topo_order=topo_order,
                 minimize_cost=True,
                 blocked_resources=blocked_resources)
-        
+
         best_plan = {}
         best_plan[topo_order[0]] = DummyResources(DummyCloud(), None)
         best_plan[topo_order[-1]] = DummyResources(DummyCloud(), None)
 
         for node_i, node in enumerate(topo_order):
             if 0 < node_i < len(topo_order) - 1:
-                
+
                 # Convert partial resource labels to launchable resources.
                 launchable_resources_map, _ = \
                     _fill_in_launchable_resources(
@@ -962,7 +964,7 @@ class Optimizer:
                 for res in node.resources_pref_list:
                     launchable_resources = launchable_resources_map.get(res)
                     if launchable_resources is not None and len(
-                        launchable_resources) > 0:
+                            launchable_resources) > 0:
                         # Choose the cheapest launchable resource.
                         launchable_res_sorted = sorted(
                             launchable_resources,
@@ -971,27 +973,28 @@ class Optimizer:
                         break
                 if best_resource is None:
                     error_msg = (
-                         f'No launchable resource found for task {node}. '
-                         'To fix: relax its resource requirements.\n'
-                         'Hint: \'sky show-gpus --all\' '
-                         'to list available accelerators.\n'
-                         '      \'sky check\' to check the enabled clouds.')
+                        f'No launchable resource found for task {node}. '
+                        'To fix: relax its resource requirements.\n'
+                        'Hint: \'sky show-gpus --all\' '
+                        'to list available accelerators.\n'
+                        '      \'sky check\' to check the enabled clouds.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(error_msg)
                 node.best_resources = best_resource
-                best_plan[node] = best_resource    
-                
+                best_plan[node] = best_resource
+
         total_time = Optimizer._compute_total_time(graph, topo_order, best_plan)
         total_cost = Optimizer._compute_total_cost(graph, topo_order, best_plan)
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
-                                        total_time, total_cost,
-                                        node_to_cost_map, True)
+                                           total_time, total_cost,
+                                           node_to_cost_map, True)
         if not env_options.Options.MINIMIZE_LOGGING.get():
             Optimizer._print_candidates(node_to_candidate_map)
-            
+
         return best_plan
-            
+
+
 class DummyResources(resources_lib.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 

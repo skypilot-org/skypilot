@@ -229,7 +229,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self.resources_pref_list = None
+        self.resources_pref_list: List[sky.Resources] = []
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -402,7 +402,7 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources_config = config.pop('resources', None)
-        
+
         # Translate accelerators field to potential multiple resources.
         if resources_config.get('accelerators') is not None:
             accelerators = resources_config.get('accelerators')
@@ -419,14 +419,14 @@ class Task:
                     sky.Resources.from_yaml_config(tmp_resource))
 
             if isinstance(accelerators, set):
-                final_resources = set(tmp_resources_list)
+                task.set_resources(set(tmp_resources_list))
             elif isinstance(accelerators, list):
-                final_resources = tmp_resources_list
+                task.set_resources(tmp_resources_list)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
         else:
-            final_resources = {sky.Resources.from_yaml_config(resources_config)}
-        task.set_resources(final_resources)
+            task.set_resources(
+                {sky.Resources.from_yaml_config(resources_config)})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -581,12 +581,12 @@ class Task:
           self: The current task, with resources set.
         """
         # Reset the preference list.
-        self.resources_pref_list = None
+        self.resources_pref_list = []
         if isinstance(resources, sky.Resources):
             resources = {resources}
         if isinstance(resources, list):
-             self.resources_pref_list = resources
-             resources = set(resources)
+            self.resources_pref_list = resources
+            resources = set(resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
@@ -608,7 +608,7 @@ class Task:
         else:
             self.set_resources(set(new_resources_list))
         return self
-     
+
     def get_resources(self):
         return self.resources
 
