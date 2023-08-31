@@ -51,14 +51,13 @@ service_spec:
         labels:
             parent: skypilot
     spec:
-        type: NodePort
+        type: {{ service_type }}
         selector:
             component: {{ name }}
         ports:
           - protocol: TCP
             port: 22
             targetPort: 22
-
 # The following ServiceAccount/Role/RoleBinding sets up an RBAC for life cycle
 # management of the jump pod/service
 service_account:

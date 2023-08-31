@@ -1355,7 +1355,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str,
                              docker_user: Optional[str] = None
-                            ) -> Dict[str, str]:
+                            ) -> Dict[str, Any]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -1371,6 +1371,10 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     }
     if docker_user is not None:
         credentials['docker_user'] = docker_user
+    ssh_provider_module = config['provider']['module']
+    # If we are running ssh command on kubernetes node.
+    if 'kubernetes' in ssh_provider_module:
+        credentials['disable_control_master'] = True
     return credentials
 
 

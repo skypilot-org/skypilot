@@ -19,7 +19,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_CREDENTIAL_PATH = '~/.kube/config'
+CREDENTIAL_PATH = '~/.kube/config'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -28,7 +28,9 @@ class Kubernetes(clouds.Cloud):
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-sshjump-{common_utils.get_user_hash()}'
-
+    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
+        'kubernetes-port-forward-proxy-command.sh.j2'
+    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler
@@ -296,7 +298,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Test using python API
             try:
                 return kubernetes_utils.check_credentials()
@@ -305,10 +307,10 @@ class Kubernetes(clouds.Cloud):
                         f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '
-                    f'check if {_CREDENTIAL_PATH} exists.')
+                    f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
+        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -365,36 +367,3 @@ class Kubernetes(clouds.Cloud):
                 cluster_status.append(status_lib.ClusterStatus.INIT)
         # If pods are not found, we don't add them to the return list
         return cluster_status
-
-    @classmethod
-    def query_env_vars(cls, name: str) -> Dict[str, str]:
-        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-        pod = kubernetes.core_api().list_namespaced_pod(
-            namespace,
-            label_selector=f'skypilot-cluster={name},ray-node-type=head'
-        ).items[0]
-        response = kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            pod.metadata.name,
-            namespace,
-            command=['env'],
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
-        # Split response by newline and filter lines containing '='
-        raw_lines = response.split('\n')
-        filtered_lines = [line for line in raw_lines if '=' in line]
-
-        # Split each line at the first '=' occurrence
-        lines = [line.split('=', 1) for line in filtered_lines]
-
-        # Construct the dictionary using only valid environment variable names
-        env_vars = {}
-        for line in lines:
-            key = line[0]
-            if common_utils.is_valid_env_var(key):
-                env_vars[key] = line[1]
-
-        return env_vars
