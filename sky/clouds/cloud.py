@@ -254,10 +254,10 @@ class Cloud:
         memory.  If 'memory=4+', this method returns the default instance
         type with 4GB or more memory.
 
-        If disk_tier == DiskTier.MEDIUM, this method returns the default
-        instance type that support medium disk tier.
+        If disk_tier=DiskTier.MEDIUM, this method returns the default instance
+        type that support medium disk tier.
 
-        When cpus is None, memory is None or disk tier is None, this method will
+        When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
         instance family does not have a VM with the given number of vCPUs
         (e.g., when cpus='7') or does not have a VM with the give disk tier
