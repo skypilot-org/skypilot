@@ -22,14 +22,12 @@ from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
-import filelock
 import requests
 from rich import console as rich_console
 
 import sky
 from sky import backends
 from sky import clouds
-from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer

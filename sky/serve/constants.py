@@ -6,7 +6,6 @@ CONTROLLER_TEMPLATE = 'skyserve-controller.yaml.j2'
 
 SERVE_PREFIX = '~/.sky/serve'
 
-CONTROLLER_PORT = 31001
 CONTROLLER_SYNC_INTERVAL = 20
 
 # We need 200GB disk space to enable using Azure as controller, since its image

@@ -182,6 +182,8 @@ class ServiceHandle(object):
                 f'\n\trequested_resources={self.requested_resources},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tredirector_port={self.redirector_port},'
+                f'\n\tcontroller_job_id={self.controller_job_id},'
+                f'\n\tredirector_job_id={self.redirector_job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
     def cleanup_ephemeral_storage(self) -> None:
