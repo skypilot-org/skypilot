@@ -126,7 +126,9 @@ class Optimizer:
 
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
-                logger.info('Using user-specified resource list.')
+                logger.info(
+                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list (will be tried in the listed order).{colorama.Style.RESET_ALL}'  # pylint: disable=line-too-long
+                )
                 _ = Optimizer._set_resources_by_user_order(
                     dag=dag, blocked_resources=blocked_resources, quiet=quiet)
             else:
@@ -953,8 +955,10 @@ class Optimizer:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources_map, _ = \
                     _fill_in_launchable_resources(
-                        node,
-                        blocked_resources
+                        task = node,
+                        blocked_resources = blocked_resources,
+                        try_fix_with_sky_check = True,
+                        print_logger = False
                 )
                 # Remove candidate that is not launchable.
                 launchable_resources_map = {
@@ -1078,6 +1082,7 @@ def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
+    print_logger: bool = True
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
     backend_utils.check_public_cloud_enabled()
@@ -1132,6 +1137,10 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
+                
+                if not print_logger:
+                    continue
+                
                 logger.info(f'No resource satisfying {resources} '
                             f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
