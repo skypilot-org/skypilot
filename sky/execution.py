@@ -1113,12 +1113,16 @@ def serve_up(
         ]
         if not existing_controller_ports:
             assert not existing_redirector_ports
-            controller_port, redirector_port = 30001, 30002
+            # Cannot expose controller to public internet.
+            # We opened 30000-40000 for controller VM, so redirector port
+            # should be in this range and controller port should not be in
+            # this range.
+            controller_port, redirector_port = 20001, 30001
         else:
             # Use `is None`` to filter out self and all services with
             # initialize status
-            controller_port = max(existing_controller_ports) + 2
-            redirector_port = max(existing_redirector_ports) + 2
+            controller_port = max(existing_controller_ports) + 1
+            redirector_port = max(existing_redirector_ports) + 1
         service_handle.controller_port = controller_port
         service_handle.redirector_port = redirector_port
 
