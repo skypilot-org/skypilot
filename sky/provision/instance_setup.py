@@ -71,6 +71,8 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
             log_dir_abs = metadata_utils.get_instance_log_dir(
                 cluster_name, instance_id)
             log_path_abs = str(log_dir_abs / (stage_name + '.log'))
+            logger.info(f'Running {stage_name} on {instance_id} - logging to '
+                        f'{log_path_abs}')
             results.append(
                 pool.submit(wrapper(func), runner, metadata, log_path_abs))
 
