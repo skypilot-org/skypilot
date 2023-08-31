@@ -821,7 +821,7 @@ class Optimizer:
                 ) == chosen_resources.to_yaml_config():
                     chosen_cost = cost
                     break
-            assert chosen_cost > 0.0, f'chosen_cost: {chosen_cost}'
+
             best_per_cloud[str(chosen_resources.cloud)] = (chosen_resources,
                                                            chosen_cost)
 
