@@ -195,11 +195,13 @@ class InfraProvider:
 
     def __init__(
             self,
+            controller_port: int,
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
+        self.controller_port = controller_port
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
@@ -244,12 +246,11 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, service_name: str,
-                 controller_port: int, *args, **kwargs) -> None:
+    def __init__(self, task_yaml_path: str, service_name: str, *args,
+                 **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
-        self.controller_port = controller_port
         self.next_replica_id: int = 1
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             str, subprocess.Popen] = serve_utils.ThreadSafeDict()
