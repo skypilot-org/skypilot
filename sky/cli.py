@@ -4137,6 +4137,11 @@ def serve_up(
                 controller_name)
             assert controller_record is not None
             if controller_record['status'] != status_lib.ClusterStatus.UP:
+                # TODO(tian): Maybe warning user there is a controller
+                # is launching/unhealthy? This is common when user want to
+                # launch 2 new services in the same time, where we should
+                # inform user maybe you want to use the same controller
+                # and please wait for a while.
                 continue
             handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
