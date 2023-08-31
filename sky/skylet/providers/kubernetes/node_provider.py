@@ -268,7 +268,7 @@ class KubernetesNodeProvider(NodeProvider):
         # shell sessions.
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',
-            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh;'
+            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
              'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
              'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
         ]
