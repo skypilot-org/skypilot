@@ -17,8 +17,8 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-_START_TITLE = '-' * 20 + 'Start: {} ' + '-' * 20
-_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20
+_START_TITLE = '\n' + '-' * 20 + 'Start: {} ' + '-' * 20
+_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20 + '\n'
 
 _MAX_RETRY = 5
 
@@ -249,10 +249,7 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
 def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
                  ssh_credentials: Dict[str, str]) -> None:
     """Start skylet on the header node."""
-    # "source ~/.bashrc" has side effects similar to
-    # https://stackoverflow.com/questions/29709790/scripts-with-nohup-inside-dont-exit-correctly
-    # This side effects blocks SSH from exiting. We address it by nesting
-    # bash commands.
+    del cluster_name
     ssh_runner = command_runner.SSHCommandRunner(
         cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, cluster_metadata
