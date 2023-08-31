@@ -300,21 +300,27 @@ class Azure(clouds.Cloud):
                 configuration is not a valid combination, and should not be used
                 for launching a VM.
             """
-            if disk_tier is not None:
+            if (disk_tier is not None and
+                    disk_tier != resources_utils.DiskTier.BEST):
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
                 return (True, disk_tier) if ok else (False, None)
-            disk_tier = clouds.Cloud._DEFAULT_DISK_TIER
-            all_tiers = set(resources_utils.DiskTier)
-            while not Azure.check_disk_tier(instance_type, disk_tier)[0]:
-                all_tiers.remove(disk_tier)
-                if not all_tiers:
-                    # No available disk_tier found the specified instance_type
-                    return (False, None)
-                disk_tier = list(all_tiers)[0]
-            if disk_tier != clouds.Cloud._DEFAULT_DISK_TIER:
-                return True, disk_tier
+            # All tiers in reversed order, i.e. from best to worst.
+            # We will failover along this order.
+            all_tiers = list(reversed(resources_utils.DiskTier))
+            if disk_tier is None:
+                # Start failover from the default disk tier.
+                start_index = all_tiers.index(clouds.Cloud._DEFAULT_DISK_TIER)
             else:
-                return True, None
+                # Start failover from the best disk tier.
+                start_index = all_tiers.index(
+                    Azure.translate_disk_tier(disk_tier))
+            while start_index < len(all_tiers):
+                disk_tier = all_tiers[start_index]
+                ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
+                if ok:
+                    return (True, disk_tier)
+                start_index += 1
+            return False, None
 
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
