@@ -1,17 +1,17 @@
 resources:
-  cloud: gcp
+  cloud: azure
   cpus: 2+
 
 workdir: sky/serve/examples/http_server
 
-# Use 8080 to test our prehook commands normally execute
-run: python3 server.py --port 8080
+# Use 8081 to test jupyterhub service is terminated
+run: python3 server.py --port 8081
 
 service:
-  port: 8080
+  port: 8081
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
   replicas: 2
   controller_resources:
-    cloud: gcp
+    cloud: azure

@@ -3246,7 +3246,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
             elif not name.startswith(serve_lib.CONTROLLER_PREFIX):
-                # Skip logging for submit controller & redirector jobs
+                # Skip logging for submit controller & load balancer jobs
                 # to skyserve controller cluster
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
@@ -3483,7 +3483,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
-                    cancel_all: bool = False) -> None:
+                    cancel_all: bool = False,
+                    silent: bool = False) -> None:
         """Cancels jobs.
 
         CloudVMRayBackend specific method.
@@ -3515,6 +3516,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
         cancelled_ids = common_utils.decode_payload(stdout)
+
+        if silent:
+            return
+
         if cancelled_ids:
             logger.info(
                 f'Cancelled job ID(s): {", ".join(map(str, cancelled_ids))}')

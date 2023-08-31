@@ -23,17 +23,6 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import sky
 
-# A series of pre-hook commands that will be insert to the beginning of each
-# serve-related task, Including controller and replcias.
-# Shutdown jupyter service that is default enabled on our GCP Deep
-# Learning Image. This is to avoid port conflict on 8080.
-# Shutdown jupyterhub service that is default enabled on our Azure Deep
-# Learning Image. This is to avoid port conflict on 8081.
-SERVE_PREHOOK_COMMANDS = """\
-sudo systemctl stop jupyter > /dev/null 2>&1 || true
-sudo systemctl stop jupyterhub > /dev/null 2>&1 || true
-"""
-
 _CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
@@ -129,12 +118,12 @@ class ServiceHandle(object):
     """A pickle-able tuple of:
 
     - (required) Controller cluster name.
-    - (required) Service autoscaling policy descriotion str.
+    - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
     - (required) All replica info.
     - (optional) Service uptime.
     - (optional) Service endpoint URL.
-    - (optional) Epemeral storage generated for the service.
+    - (optional) Ephemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.
     """
@@ -176,7 +165,7 @@ class ServiceHandle(object):
             storage = storage_lib.Storage.from_yaml_config(storage_config)
             storage.delete(silent=True)
 
-    def __setsate__(self, state):
+    def __setstate__(self, state):
         self._version = self._VERSION
         self.__dict__.update(state)
 
@@ -212,6 +201,7 @@ def _follow_logs(file: TextIO,
                  cluster_name: str,
                  *,
                  finish_stream: Callable[[], bool],
+                 exit_if_stream_end: bool = False,
                  no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
     line = ''
     log_file = None
@@ -250,15 +240,17 @@ def _follow_logs(file: TextIO,
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
-                            for l in _follow_logs(f,
-                                                  cluster_name,
-                                                  finish_stream=cluster_is_up,
-                                                  no_new_content_timeout=10):
+                            for l in _follow_logs(
+                                    f,
+                                    cluster_name,
+                                    finish_stream=cluster_is_up,
+                                    exit_if_stream_end=exit_if_stream_end,
+                                    no_new_content_timeout=10):
                                 yield l
                         log_file = None
                 line = ''
         else:
-            if finish_stream():
+            if exit_if_stream_end or finish_stream():
                 break
             if no_new_content_timeout is not None:
                 if no_new_content_cnt >= no_new_content_timeout:
@@ -317,12 +309,13 @@ def stream_logs(service_name: str,
                 _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
         return target_info['status']
 
-    finish_stream = (lambda: not follow or _get_replica_status() != status_lib.
-                     ReplicaStatus.PROVISIONING)
+    finish_stream = (
+        lambda: _get_replica_status() != status_lib.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
         for line in _follow_logs(f,
                                  replica_cluster_name,
-                                 finish_stream=finish_stream):
+                                 finish_stream=finish_stream,
+                                 exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:

@@ -1,4 +1,4 @@
-"""Redirector: redirect any incoming request to an endpoint replica."""
+"""LoadBalancer: redirect any incoming request to an endpoint replica."""
 import argparse
 import threading
 import time
@@ -9,39 +9,42 @@ import uvicorn
 
 from sky import sky_logging
 from sky.serve import constants
-from sky.serve import load_balancers
+from sky.serve import load_balancing_policies
 
 # Use the explicit logger name so that the logger is under the
-# `sky.serve.redirector` namespace when executed directly, so as
+# `sky.serve.load_balancer` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.serve.redirector')
+logger = sky_logging.init_logger('sky.serve.load_balancer')
 
 
-class SkyServeRedirector:
-    """Redirector: redirect incoming traffic.
+class SkyServeLoadBalancer:
+    """SkyServeLoadBalancer: redirect incoming traffic.
 
     This class accept any traffic to the controller and redirect it
-    to the appropriate endpoint replica.
+    to the appropriate endpoint replica according to the load balancing
+    policy.
     """
 
-    def __init__(self, controller_url: str, port: int,
-                 load_balancer: load_balancers.LoadBalancer):
+    def __init__(
+        self, controller_url: str, port: int,
+        load_balancing_policy: load_balancing_policies.LoadBalancingPolicy
+    ) -> None:
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
         self.port = port
-        self.load_balancer = load_balancer
+        self.load_balancing_policy = load_balancing_policy
 
         for i in range(3):
             resp = requests.get(self.controller_url +
                                 '/controller/get_autoscaler_query_interval')
             if resp.status_code == 200:
-                self.load_balancer.set_query_interval(
+                self.load_balancing_policy.set_query_interval(
                     resp.json()['query_interval'])
                 break
             if i == 2:
                 logger.error('Failed to get autoscaler query interval. '
                              'Use default interval instead.')
-                self.load_balancer.set_query_interval(None)
+                self.load_balancing_policy.set_query_interval(None)
             time.sleep(10)
 
     def _sync_with_controller(self):
@@ -52,8 +55,8 @@ class SkyServeRedirector:
                     response = session.post(
                         self.controller_url + '/controller/update_num_requests',
                         json={
-                            'num_requests':
-                                self.load_balancer.deprecate_old_requests()
+                            'num_requests': self.load_balancing_policy.
+                                            deprecate_old_requests()
                         },
                         timeout=5)
                     response.raise_for_status()
@@ -66,12 +69,13 @@ class SkyServeRedirector:
                     print(f'An error occurred: {e}')
                 else:
                     logger.info(f'Available Replica IPs: {ready_replicas}')
-                    self.load_balancer.set_ready_replicas(ready_replicas)
+                    self.load_balancing_policy.set_ready_replicas(
+                        ready_replicas)
             time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
 
-    async def _redirector_handler(self, request: fastapi.Request):
-        self.load_balancer.increment_request_count(1)
-        replica_ip = self.load_balancer.select_replica(request)
+    async def _redirect_handler(self, request: fastapi.Request):
+        self.load_balancing_policy.increment_request_count(1)
+        replica_ip = self.load_balancing_policy.select_replica(request)
 
         if replica_ip is None:
             raise fastapi.HTTPException(status_code=503,
@@ -85,7 +89,7 @@ class SkyServeRedirector:
 
     def run(self):
         self.app.add_api_route('/{path:path}',
-                               self._redirector_handler,
+                               self._redirect_handler,
                                methods=['GET', 'POST', 'PUT', 'DELETE'])
 
         sync_controller_thread = threading.Thread(
@@ -93,14 +97,14 @@ class SkyServeRedirector:
         sync_controller_thread.start()
 
         logger.info(
-            f'SkyServe Redirector started on http://0.0.0.0:{self.port}')
+            f'SkyServe Load Balancer started on http://0.0.0.0:{self.port}')
 
         uvicorn.run(self.app, host='0.0.0.0', port=self.port)
 
 
 if __name__ == '__main__':
     # Add argparse
-    parser = argparse.ArgumentParser(description='SkyServe Redirector')
+    parser = argparse.ArgumentParser(description='SkyServe Load Balancer')
     parser.add_argument('--task-yaml',
                         type=str,
                         help='Task YAML file',
@@ -108,7 +112,7 @@ if __name__ == '__main__':
     parser.add_argument('--port',
                         '-p',
                         type=int,
-                        help='Port to run the redirector on.',
+                        help='Port to run the load balancer on.',
                         required=True)
     parser.add_argument('--controller-addr',
                         type=str,
@@ -116,11 +120,12 @@ if __name__ == '__main__':
                         required=True)
     args = parser.parse_args()
 
-    # ======= Load Balancer =========
-    _load_balancer = load_balancers.RoundRobinLoadBalancer()
+    # ======= Load Balancing Policy =========
+    _load_balancing_policy = load_balancing_policies.RoundRobinPolicy()
 
-    # ======= Redirector =========
-    redirector = SkyServeRedirector(controller_url=args.controller_addr,
-                                    port=args.port,
-                                    load_balancer=_load_balancer)
-    redirector.run()
+    # ======= SkyServeLoadBalancer =========
+    load_balancer = SkyServeLoadBalancer(
+        controller_url=args.controller_addr,
+        port=args.port,
+        load_balancing_policy=_load_balancing_policy)
+    load_balancer.run()

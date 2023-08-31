@@ -123,7 +123,7 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
             raise ValueError(
                 f'Service {service_name!r} is still initializing its '
                 'controller. Please try again later.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTRLLER_FAILED:
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')

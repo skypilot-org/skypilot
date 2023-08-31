@@ -2127,9 +2127,9 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
-        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
-        # id>'.
         if cluster == spot_lib.SPOT_CONTROLLER_NAME:
+            # Friendly message for usage like 'sky cancel <spot controller>
+            # -a/<jobid>'.
             error_str = (
                 'Cancelling the spot controller\'s jobs is not allowed.'
                 f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
@@ -3995,7 +3995,7 @@ def serve_up(
         service_name)
     if previous_service_record is not None:
         if previous_service_record['status'] in [
-                status_lib.ServiceStatus.CONTRLLER_FAILED,
+                status_lib.ServiceStatus.CONTROLLER_FAILED,
                 status_lib.ServiceStatus.FAILED
         ]:
             prompt = (f'Service {service_name!r} has failed. '
@@ -4142,11 +4142,11 @@ def serve_status(all: bool, service_name: Optional[str]):
     - ``CONTROLLER_INIT``: The controller is initializing.
 
     - ``REPLICA_INIT``: The controller provisioning have succeeded; controller
-      and redirector process is alive, and there are no available replicas for
-      now. This also indicates that no replica failure has been detected.
+      and load balancer process is alive, and there are no available replicas
+      for now. This also indicates that no replica failure has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or in an abnormal
-      state; or the controller and redirector process is not alive.
+      state; or the controller and load balancer process is not alive.
 
     - ``READY``: The controller is ready to serve requests. This means that
       at least one replica have passed the readiness probe.
@@ -4352,11 +4352,11 @@ def serve_down(
               default=False,
               required=False,
               help='Show the controller logs of this service.')
-@click.option('--redirector',
+@click.option('--load-balancer',
               is_flag=True,
               default=False,
               required=False,
-              help='Show the redirector logs of this service.')
+              help='Show the load balancer logs of this service.')
 @click.argument('service_name',
                 required=True,
                 type=str,
@@ -4367,7 +4367,7 @@ def serve_logs(
     service_name: str,
     follow: bool,
     controller: bool,
-    redirector: bool,
+    load_balancer: bool,
     replica_id: Optional[int],
 ):
     """Tail the log of a service.
@@ -4379,16 +4379,16 @@ def serve_logs(
         # Tail the controller logs of a service
         sky serve logs --controller [SERVICE_ID]
         \b
-        # Print the redirector logs so far and exit
-        sky serve logs --redirector --no-follow [SERVICE_ID]
+        # Print the load balancer logs so far and exit
+        sky serve logs --load-balancer --no-follow [SERVICE_ID]
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_ID] 1
     """
     have_replica_id = replica_id is not None
-    if (controller + redirector + have_replica_id) != 1:
+    if (controller + load_balancer + have_replica_id) != 1:
         raise click.UsageError(
-            'One and only one of --controller, --redirector, '
+            'One and only one of --controller, --load-balancer, '
             '[REPLICA_ID] can be specified.')
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
@@ -4397,7 +4397,7 @@ def serve_logs(
     controller_cluster_name = service_record['handle'].controller_cluster_name
     if controller:
         core.tail_logs(controller_cluster_name, job_id=1, follow=follow)
-    elif redirector:
+    elif load_balancer:
         core.tail_logs(controller_cluster_name, job_id=2, follow=follow)
     else:
         core.serve_tail_logs(service_record, replica_id, follow=follow)

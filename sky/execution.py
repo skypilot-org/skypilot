@@ -1002,8 +1002,6 @@ def serve_up(
     service_handle.ephemeral_storage = ephemeral_storage
     global_user_state.set_service_handle(service_name, service_handle)
 
-    task.add_skyserve_prehook()
-
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -1025,13 +1023,12 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.add_skyserve_prehook()
         # This is for the case when the best resources failed to provision.
         controller_task.set_resources(controller_resources)
         controller_task.best_resources = controller_best_resources
 
         controller_envs = {
-            'SKYPILOT_USAGE_USER_ID': common_utils.get_user_hash(),
+            'SKYPILOT_USER_ID': common_utils.get_user_hash(),
             'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
             'SKYPILOT_USER': getpass.getuser(),
             'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
@@ -1057,7 +1054,7 @@ def serve_up(
         if (cluster_record is None or
                 cluster_record['status'] != status_lib.ClusterStatus.UP):
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs above.{colorama.Style.RESET_ALL}')
             return
@@ -1089,7 +1086,7 @@ def serve_up(
 
         # NOTICE: The job submission order cannot be changed since the
         # `sky serve logs` CLI will identify the controller job with
-        # the first job submitted and the redirector job with the second
+        # the first job submitted and the load balancer job with the second
         # job submitted.
         with console.status('[yellow]Launching controller process...[/yellow]'):
             _execute(
@@ -1109,7 +1106,7 @@ def serve_up(
                 controller_cluster_name, 1)
         if not controller_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--controller{colorama.Style.RESET_ALL}')
@@ -1117,13 +1114,14 @@ def serve_up(
         print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
 
-        with console.status('[yellow]Launching redirector process...[/yellow]'):
+        with console.status(
+                '[yellow]Launching load balancer process...[/yellow]'):
             controller_addr = f'http://localhost:{serve.CONTROLLER_PORT}'
             _execute(
                 entrypoint=sky.Task(
-                    name='run-redirector',
+                    name='run-load-balancer',
                     envs=controller_envs,
-                    run='python -m sky.serve.redirector --task-yaml '
+                    run='python -m sky.serve.load_balancer --task-yaml '
                     f'{remote_task_yaml_path} --port {app_port} '
                     f'--controller-addr {controller_addr}'),
                 stream_logs=False,
@@ -1132,16 +1130,16 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            redirector_job_is_running = _wait_until_job_is_running(
+            load_balancer_job_is_running = _wait_until_job_is_running(
                 controller_cluster_name, 2)
-        if not redirector_job_is_running:
+        if not load_balancer_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
-            print(f'{colorama.Fore.RED}Redirector failed to launch. '
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+            print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
-                  f'--redirector{colorama.Style.RESET_ALL}')
+                  f'--load-balancer{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
+        print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
               f'{colorama.Style.RESET_ALL}')
 
         global_user_state.set_service_status(
@@ -1152,15 +1150,15 @@ def serve_up(
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
-              '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --controller '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of redirector:'
-              f'\t{backend_utils.BOLD}sky serve logs --redirector '
-              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo see logs of one replica:'
               f'\t{backend_utils.BOLD}sky serve logs {service_name} '
               f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
+              '\nTo see logs of load balancer:'
+              f'\t{backend_utils.BOLD}sky serve logs --load-balancer '
+              f'{service_name}{backend_utils.RESET_BOLD}'
+              '\nTo see logs of controller:'
+              f'\t{backend_utils.BOLD}sky serve logs --controller '
+              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
               f'\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}'
@@ -1189,7 +1187,7 @@ def serve_down(
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
-    # Already filered all inexist service in cli.py
+    # Already filtered all inexistent service in cli.py
     assert service_record is not None, service_name
     controller_cluster_name = service_record['handle'].controller_cluster_name
     global_user_state.set_service_status(service_name,
@@ -1247,12 +1245,12 @@ def serve_down(
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backends.CloudVmRayBackend()
-            backend.cancel_jobs(handle, jobs=None)
+            backend.cancel_jobs(handle, jobs=None, cancel_all=True, silent=True)
     except (ValueError, exceptions.ClusterNotUpError,
             exceptions.CommandError) as e:
         if purge:
             logger.warning('Ignoring error when stopping controller and '
-                           f'redirector jobs of service {service_name}: {e}')
+                           f'load balancer jobs of service {service_name}: {e}')
         else:
             raise RuntimeError(e) from e
 

@@ -60,9 +60,9 @@ class ServiceStatus(enum.Enum):
     # Replica is initializing and no failure
     REPLICA_INIT = 'REPLICA_INIT'
 
-    # Controller failed to initialize / controller or redirector process
+    # Controller failed to initialize / controller or load balancer process
     # status abnormal
-    CONTRLLER_FAILED = 'CONTROLLER_FAILED'
+    CONTROLLER_FAILED = 'CONTROLLER_FAILED'
 
     # At least one replica is ready
     READY = 'READY'
@@ -81,7 +81,7 @@ class ServiceStatus(enum.Enum):
 _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
     ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
-    ServiceStatus.CONTRLLER_FAILED: colorama.Fore.RED,
+    ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,

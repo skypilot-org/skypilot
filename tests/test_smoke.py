@@ -23,8 +23,10 @@
 # > pytest tests/test_smoke.py --generic-cloud aws
 
 import inspect
+import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -40,6 +42,7 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky import serve
 from sky import spot
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
@@ -2636,15 +2639,59 @@ def test_gcp_zero_quota_failover():
 # ---------- Testing skyserve ----------
 
 
-def _get_skyserve_test_task(name: str, suffix: str,
+def _get_service_name() -> str:
+    """Returns a user-unique service name for each test_skyserve_<name>().
+
+    Must be called from each test_skyserve_<name>().
+    """
+    caller_func_name = inspect.stack()[1][3]
+    test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
+    test_name = test_name.replace('skyserve-', 'ss-')
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
+    return f'{test_name}-{test_id}'
+
+
+# We check the output of the skyserve service to see if it is ready. Output of
+# `REPLICAS` is in the form of `1/2` where the first number is the number of
+# ready replicas and the second number is the number of total replicas. We
+# grep such format to ensure that the service is ready, and early exit if any
+# failure detected. In the end we sleep for serve.CONTROLLER_SYNC_INTERVAL to
+# make sure load balancer have enough time to sync with the controller and get
+# all ready replica IPs.
+_SERVE_WAIT_UNTIL_READY = (
+    '(while true; do'
+    '     output=$(sky serve status {name});'
+    '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
+    '     echo "$output" | grep -q "FAILED" && exit 1;'
+    '     sleep 10;'
+    f' done); sleep {serve.CONTROLLER_SYNC_INTERVAL};')
+_IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
+_ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
+_AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
+
+
+def _get_serve_endpoint(name: str) -> str:
+    return f'endpoint=$(sky serve status {name} | grep -Eo "{_ENDPOINT_REGEX}")'
+
+
+def _get_replica_line(name: str, replica_id: int) -> str:
+    return (f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
+            f' | grep -E "{name}\s+{replica_id}"')
+
+
+def _get_replica_ip(name: str, replica_id: int) -> str:
+    return (f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
+            f' | grep -Eo "{_IP_REGEX}")')
+
+
+def _get_skyserve_http_test(name: str, cloud: str,
                             timeout_minutes: int) -> Test:
-    url_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
     test = Test(
-        f'test-skyserve-{suffix.replace("_", "-")}',
+        f'test-skyserve-{cloud.replace("_", "-")}',
         [
-            f'sky serve up -n {name} -y tests/skyserve/http_{suffix}.yaml',
-            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
-            f'url=$(sky serve status {name} | grep -Eo "{url_regex}"); curl -L http://$url | grep "Hi, SkyPilot here"',
+            f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         f'sky serve down -y {name}',
         timeout=timeout_minutes * 60,
@@ -2653,35 +2700,112 @@ def _get_skyserve_test_task(name: str, suffix: str,
 
 
 @pytest.mark.gcp
-def test_skyserve_gcp():
+def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'gcp', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'gcp', 20)
     run_one_test(test)
 
 
 @pytest.mark.aws
-def test_skyserve_aws():
+def test_skyserve_aws_http():
     """Test skyserve on AWS"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'aws', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'aws', 20)
     run_one_test(test)
 
 
 @pytest.mark.azure
-def test_skyserve_azure():
+def test_skyserve_azure_http():
     """Test skyserve on Azure"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'azure', 30)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'azure', 30)
     run_one_test(test)
 
 
 @pytest.mark.gcp
 @pytest.mark.aws
-def test_skyserve_mixed_cloud():
+def test_skyserve_mixed_cloud_http():
     """Test skyserve on mixed cloud"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'mixed_cloud', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'mixed_cloud', 20)
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_skyserve_llm():
+    """Test skyserve with real LLM usecase"""
+    name = _get_service_name()
+
+    def generate_llm_test_command(prompt: str, expected_output: str) -> str:
+        prompt = shlex.quote(prompt)
+        expected_output = shlex.quote(expected_output)
+        return (
+            f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
+            f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
+
+    with open('tests/skyserve/llm/prompt_output.json', 'r') as f:
+        prompt2output = json.load(f)
+
+    test = Test(
+        f'test-skyserve-llm',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/llm/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            *[
+                generate_llm_test_command(prompt, output)
+                for prompt, output in prompt2output.items()
+            ],
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_skyserve_replica_failure():
+    """Test skyserve with manually interrupting some replica"""
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    # Reference: test_spot_recovery_gcp
+    def terminate_replica(replica_id: int) -> str:
+        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+        query_cmd = (f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{cluster_name})" '
+                     f'--zones={zone} --format="value(name)"')
+        return (f'gcloud compute instances delete --zone={zone}'
+                f' --quiet $({query_cmd})')
+
+    test = Test(
+        f'test-skyserve-replica-failure',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/replica_failure/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
+            f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
+            terminate_replica(1),
+            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sky serve status {name} | grep 2/3',
+            f'{_get_replica_line(name, 1)} | grep NOT_READY',
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
+            f'{_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
+            terminate_replica(2),
+            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sky serve status {name} | grep 1/3',
+            f'{_get_replica_line(name, 2)} | grep NOT_READY',
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
     run_one_test(test)
 
 

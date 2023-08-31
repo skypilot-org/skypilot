@@ -832,13 +832,6 @@ class Task:
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
 
-    def add_skyserve_prehook(self) -> None:
-        """(INTERNAL) Add prehook functions for skyserve task."""
-        if self.setup is None:
-            self.setup = ''
-        assert isinstance(self.setup, str)
-        self.setup = serve_lib.SERVE_PREHOOK_COMMANDS + self.setup
-
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
