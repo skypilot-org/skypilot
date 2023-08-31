@@ -2022,11 +2022,9 @@ def _update_cluster_status_no_lock(
                 # Refresh the ssh ports. It is ok to refresh as it is fast.
                 handle.external_ssh_ports()
                 if handle.head_ssh_port is None:
-                    logger.debug(
+                    raise RuntimeError(
                         f'Refreshing status ({cluster_name!r}): failed '
                         f'to get the ssh ports. Handle: {handle}')
-                    raise exceptions.FetchIPError(
-                        reason=exceptions.FetchIPError.Reason.HEAD)
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
