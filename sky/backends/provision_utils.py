@@ -277,7 +277,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
     """Wait until SSH is ready."""
     ips = cluster_metadata.get_feasible_ips()
     if (cluster_metadata.has_public_ips() and
-            ssh_credentials.get('ssh_proxy_command') is not None):
+            ssh_credentials.get('ssh_proxy_command') is None):
         # If we can access public IPs, then it is more efficient to test SSH
         # connection with raw sockets.
         waiter = _wait_ssh_connection_direct
