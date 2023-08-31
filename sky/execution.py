@@ -1149,6 +1149,12 @@ def serve_up(
                 job_status = job_statuses.get(str(job_id), None)
                 if job_status == job_lib.JobStatus.RUNNING:
                     return True
+                # This indicate job number is reached the upper bound since
+                # each job is occupying 0.5 vCPU. We early exit and cancel the
+                # job here.
+                if job_status == job_lib.JobStatus.PENDING:
+                    backend.cancel_jobs(handle, jobs=[job_id])
+                    return False
                 time.sleep(1)
             return False
 
