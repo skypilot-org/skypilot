@@ -49,6 +49,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -2598,8 +2599,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def check_resources_fit_cluster(self, handle: CloudVmRayResourceHandle,
-                                    task: task_lib.Task):
+    def check_resources_fit_cluster(
+        self,
+        handle: CloudVmRayResourceHandle,
+        task: task_lib.Task,
+        check_ports: bool = False,
+    ):
         """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
@@ -2639,7 +2644,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # how many nodes satisfy task resource requirements.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(
-                    launched_resources, requested_num_nodes=task.num_nodes)):
+                    launched_resources,
+                    requested_num_nodes=task.num_nodes,
+                    check_ports=check_ports)):
             if (task_resources.region is not None and
                     task_resources.region != launched_resources.region):
                 with ux_utils.print_exception_no_traceback():
@@ -2863,31 +2870,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
                                ports: List[Union[int, str]]) -> None:
-        cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
         provider_config = config['provider']
-        if 'ports' not in provider_config:
-            existing_ports = []
-        else:
-            existing_ports = provider_config['ports']
-        new_ports = []
-        for port in ports:
-            if port not in existing_ports:
-                new_ports.append(port)
-                existing_ports.append(port)
-        if new_ports:
+        existing_ports = provider_config.get('ports', [])
+        ports_to_open = resources_utils.parse_port_set(
+            resources_utils.parse_ports(ports) -
+            resources_utils.parse_ports(existing_ports))
+        if ports_to_open:
+            cloud = handle.launched_resources.cloud
             if not isinstance(cloud, (clouds.AWS, clouds.GCP)):
                 logger.warning(
                     f'Cannot open ports for {cloud} that not support '
                     'new provisioner API.')
                 return
-            logger.debug(f'Opening new ports {new_ports} for {cloud}')
-            provider_config['ports'] = existing_ports
-            common_utils.dump_yaml(handle.cluster_yaml, config)
+            logger.debug(f'Opening new ports {ports_to_open} for {cloud}')
             provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
-                                     new_ports, provider_config)
+                                     ports_to_open, provider_config)
+            new_ports = existing_ports + ports_to_open
+            provider_config['ports'] = new_ports
+            common_utils.dump_yaml(handle.cluster_yaml, config)
             handle.launched_resources = handle.launched_resources.copy(
-                ports=existing_ports)
+                ports=new_ports)
+        else:
+            logger.debug('No new ports to open.')
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
@@ -3369,7 +3374,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self.check_resources_fit_cluster(handle, task)
+        # We need to check ports here since sky.exec shouldn't change resources
+        self.check_resources_fit_cluster(handle, task, check_ports=True)
         self._update_envs_for_k8s(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)

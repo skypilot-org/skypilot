@@ -15,6 +15,7 @@ from sky.clouds import service_catalog
 from sky.skylet import constants
 from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -884,9 +885,12 @@ class Resources:
             self._instance_type, self._region, self._zone,
             specific_reservations)
 
-    def less_demanding_than(self,
-                            other: Union[List['Resources'], 'Resources'],
-                            requested_num_nodes: int = 1) -> bool:
+    def less_demanding_than(
+        self,
+        other: Union[List['Resources'], 'Resources'],
+        requested_num_nodes: int = 1,
+        check_ports: bool = False,
+    ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
         Args:
@@ -894,6 +898,7 @@ class Resources:
               heterogeneous, it is represented as a list of Resource objects.
             requested_num_nodes: Number of nodes that the current task
               requests from the cluster.
+            check_ports: Whether to check the ports field.
         """
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
@@ -957,25 +962,14 @@ class Resources:
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
 
-        # TODO(tian): How to only check this on cloud that not support update
-        # ports? And maybe still check this when using `sky exec`?
-        return True
-        if self.ports is not None:
-            if other.ports is None:
-                return False
-
-            def parse_ports(ports):
-                port_set = set()
-                for p in ports:
-                    if isinstance(p, int):
-                        port_set.add(p)
-                    else:
-                        from_port, to_port = p.split('-')
-                        port_set.update(range(int(from_port), int(to_port) + 1))
-                return port_set
-
-            if not parse_ports(self.ports) <= parse_ports(other.ports):
-                return False
+        if check_ports:
+            if self.ports is not None:
+                if other.ports is None:
+                    return False
+                self_ports = resources_utils.parse_ports(self.ports)
+                other_ports = resources_utils.parse_ports(other.ports)
+                if not self_ports <= other_ports:
+                    return False
 
         # self <= other
         return True

@@ -1,5 +1,5 @@
 """Utilities for GCP instances."""
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -56,7 +56,7 @@ class GCPInstance:
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -77,6 +77,25 @@ class GCPInstance:
         project_id: str,
         firewall_rule_name: str,
     ) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance_name: str,
+    ) -> Optional[str]:
+        raise NotImplementedError
+
+    @classmethod
+    def create_firewall_rule(
+        cls,
+        project_id: str,
+        cluster_name_on_cloud: str,
+        port: Union[int, str],
+        vpc_name: str,
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
 
@@ -175,17 +194,25 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
-        result = (cls.load_resource().zoneOperations().get(
-            project=project_id,
-            operation=operation['name'],
-            zone=zone,
-        ).execute())
+                           zone: Optional[str]) -> bool:
+        if zone is not None:
+            op_type = 'zone'
+            result = (cls.load_resource().zoneOperations().get(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            ).execute())
+        else:
+            op_type = 'global'
+            result = (cls.load_resource().globalOperations().get(
+                project=project_id,
+                operation=operation['name'],
+            ).execute())
         if 'error' in result:
             raise Exception(result['error'])
 
         if result['status'] == 'DONE':
-            logger.debug('wait_for_compute_zone_operation: '
+            logger.debug(f'wait_for_compute_{op_type}_operation: '
                          f'Operation {operation["name"]} finished.')
             return True
         return False
@@ -208,6 +235,51 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             firewall=firewall_rule_name,
         ).execute()
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance_name: str,
+    ) -> Optional[str]:
+        instance = cls.load_resource().instances().get(
+            project=project_id,
+            zone=zone,
+            instance=instance_name,
+        ).execute()
+        # Format: projects/PROJECT_ID/global/networks/VPC_NAME
+        vpc_link = instance['networkInterfaces'][0]['network']
+        return vpc_link.split('/')[-1]
+
+    @classmethod
+    def create_firewall_rule(
+        cls,
+        project_id: str,
+        cluster_name_on_cloud: str,
+        port: Union[int, str],
+        vpc_name: str,
+    ) -> dict:
+        name = f'user-ports-{cluster_name_on_cloud}-{port}'
+        body = {
+            'name': name,
+            'description': f'Allow user-specified port {port} for cluster {cluster_name_on_cloud}',
+            'network': f'projects/{project_id}/global/networks/{vpc_name}',
+            'selfLink': f'projects/{project_id}/global/firewalls/' + name,
+            'direction': 'INGRESS',
+            'priority': 65534,
+            'allowed': [{
+                'IPProtocol': 'tcp',
+                'ports': [str(port)],
+            },],
+            'sourceRanges': ['0.0.0.0/0'],
+            'targetTags': [cluster_name_on_cloud],
+        }
+        operation = cls.load_resource().firewalls().insert(
+            project=project_id,
+            body=body,
+        ).execute()
+        return operation
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -232,7 +304,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
         result = (cls.load_resource().projects().locations().operations().get(

@@ -188,6 +188,8 @@ def open_ports(
             }],
         })
 
+    # TODO(tian): Check if the SG is the default SG. If so, change to a new
+    # SG instead of modifying the default SG.
     sg_name = provider_config['security_group']['GroupName']
     sgs = ec2.security_groups.filter(Filters=[{
         'Name': 'group-name',
