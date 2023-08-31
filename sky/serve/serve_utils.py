@@ -201,7 +201,7 @@ def _follow_logs(file: TextIO,
                  cluster_name: str,
                  *,
                  finish_stream: Callable[[], bool],
-                 exit_when_no_new_content: bool = False,
+                 exit_if_stream_end: bool = False,
                  no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
     line = ''
     log_file = None
@@ -240,17 +240,17 @@ def _follow_logs(file: TextIO,
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
-                            for l in _follow_logs(f,
-                                                  cluster_name,
-                                                  finish_stream=cluster_is_up,
-                                                  exit_when_no_new_content=
-                                                  exit_when_no_new_content,
-                                                  no_new_content_timeout=10):
+                            for l in _follow_logs(
+                                    f,
+                                    cluster_name,
+                                    finish_stream=cluster_is_up,
+                                    exit_if_stream_end=exit_if_stream_end,
+                                    no_new_content_timeout=10):
                                 yield l
                         log_file = None
                 line = ''
         else:
-            if exit_when_no_new_content or finish_stream():
+            if exit_if_stream_end or finish_stream():
                 break
             if no_new_content_timeout is not None:
                 if no_new_content_cnt >= no_new_content_timeout:
@@ -315,7 +315,7 @@ def stream_logs(service_name: str,
         for line in _follow_logs(f,
                                  replica_cluster_name,
                                  finish_stream=finish_stream,
-                                 exit_when_no_new_content=not follow):
+                                 exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:

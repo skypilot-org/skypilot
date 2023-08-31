@@ -27,7 +27,4 @@ if __name__ == '__main__':
                              'temperature': 0,
                          })
 
-    if 'choices' not in resp.json():
-        with open('/home/txia/skypilot/@temp/temp.py', 'a') as f:
-            f.write(f'Failed: {resp.json()}\n')
     print(resp.json()['choices'][0]['message']['content'])
