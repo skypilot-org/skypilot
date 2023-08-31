@@ -1111,8 +1111,10 @@ def serve_up(
         console = rich_console.Console()
 
         def _wait_until_job_is_running(cluster_name: str,
-                                       job_id: int,
+                                       job_id: Optional[int],
                                        retry_time: int = 30) -> bool:
+            if job_id is None:
+                return False
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
@@ -1156,10 +1158,8 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            assert controller_job_id is not None
             controller_job_is_running = _wait_until_job_is_running(
                 controller_cluster_name, controller_job_id)
-            service_handle.controller_job_id = controller_job_id
         if not controller_job_is_running:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
@@ -1169,6 +1169,8 @@ def serve_up(
             return
         print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
+        service_handle.controller_job_id = controller_job_id
+        global_user_state.set_service_handle(service_name, service_handle)
 
         with console.status(
                 '[yellow]Launching load balancer process...[/yellow]'):
@@ -1187,10 +1189,8 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            assert load_balancer_job_id is not None
             load_balancer_job_is_running = _wait_until_job_is_running(
                 controller_cluster_name, load_balancer_job_id)
-            service_handle.load_balancer_job_id = load_balancer_job_id
         if not load_balancer_job_is_running:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
@@ -1200,10 +1200,11 @@ def serve_up(
             return
         print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
               f'{colorama.Style.RESET_ALL}')
+        service_handle.load_balancer_job_id = load_balancer_job_id
+        global_user_state.set_service_handle(service_name, service_handle)
 
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.REPLICA_INIT)
-        global_user_state.set_service_handle(service_name, service_handle)
 
         print(f'\n{colorama.Fore.CYAN}Service name: '
               f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
