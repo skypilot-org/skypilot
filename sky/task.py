@@ -404,7 +404,8 @@ class Task:
         resources_config = config.pop('resources', None)
 
         # Translate accelerators field to potential multiple resources.
-        if resources_config and resources_config.get('accelerators') is not None:
+        if resources_config and resources_config.get(
+                'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
