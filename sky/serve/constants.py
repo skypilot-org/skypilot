@@ -8,8 +8,8 @@ SERVE_PREFIX = '~/.sky/serve'
 
 CONTROLLER_SYNC_INTERVAL = 20
 
-JOB_PENDING_THRESHOLD = 5
-JOB_WAITING_TIMEOUT = 30
+JOB_PENDING_THRESHOLD = 30
+JOB_WAITING_TIMEOUT = 120
 
 # We need 200GB disk space to enable using Azure as controller, since its image
 # size is 150GB.
