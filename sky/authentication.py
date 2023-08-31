@@ -386,6 +386,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'),
                                                 port_forward_mode.value)
     get_or_generate_keys()
+
     # Run kubectl command to add the public key to the cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
