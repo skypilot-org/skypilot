@@ -1139,7 +1139,7 @@ def serve_up(
         with console.status('[yellow]Launching controller process...[/yellow]'):
             controller_job_id = _execute(
                 entrypoint=sky.Task(
-                    name='run-controller',
+                    name=f'run-{service_name}-controller',
                     envs=controller_envs,
                     run='python -m sky.serve.controller --service-name '
                     f'{service_name} --task-yaml {remote_task_yaml_path} '
@@ -1168,7 +1168,7 @@ def serve_up(
             controller_addr = f'http://localhost:{controller_port}'
             load_balancer_job_id = _execute(
                 entrypoint=sky.Task(
-                    name='run-load-balancer',
+                    name=f'run-{service_name}-load-balancer',
                     envs=controller_envs,
                     run='python -m sky.serve.load_balancer --task-yaml '
                     f'{remote_task_yaml_path} --port {load_balancer_port} '
