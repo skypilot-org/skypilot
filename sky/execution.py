@@ -1150,13 +1150,14 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-        if not _wait_until_job_is_running_on_controller(controller_job_id):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}Controller failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--controller{colorama.Style.RESET_ALL}')
-            return
+            if not _wait_until_job_is_running_on_controller(controller_job_id):
+                global_user_state.set_service_status(
+                    service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+                print(
+                    f'{colorama.Fore.RED}Controller failed to launch. '
+                    f'Please check the logs with sky serve logs {service_name} '
+                    f'--controller{colorama.Style.RESET_ALL}')
+                return
         print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
         service_handle.controller_job_id = controller_job_id
@@ -1179,13 +1180,15 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-        if not _wait_until_job_is_running_on_controller(load_balancer_job_id):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--load-balancer{colorama.Style.RESET_ALL}')
-            return
+            if not _wait_until_job_is_running_on_controller(
+                    load_balancer_job_id):
+                global_user_state.set_service_status(
+                    service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+                print(
+                    f'{colorama.Fore.RED}LoadBalancer failed to launch. '
+                    f'Please check the logs with sky serve logs {service_name} '
+                    f'--load-balancer{colorama.Style.RESET_ALL}')
+                return
         print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
               f'{colorama.Style.RESET_ALL}')
         service_handle.load_balancer_job_id = load_balancer_job_id
