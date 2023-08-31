@@ -41,7 +41,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -120,15 +120,15 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     assert original_cloud is not None, handle.launched_resources
     task_resources = list(task.resources)[0]
 
-    with log_utils.safe_rich_status('Creating image from source cluster '
-                                    f'{clone_disk_from!r}'):
+    with rich_utils.safe_status('Creating image from source cluster '
+                                f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
             clone_disk_from,
             handle.cluster_name_on_cloud,
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Migrating image {image_id} to target region '
             f'{task_resources.region}...')
         source_region = handle.launched_resources.region
