@@ -61,7 +61,7 @@ def _is_dag_with_res_list(dag: 'dag_lib.Dag') -> bool:
     graph = dag.get_graph()
     topo_order = list(nx.topological_sort(graph))
     for node in topo_order:
-        if node.resources_pref_list is not None:
+        if len(node.resources_pref_list) >= 1:
             return True
     return False
 

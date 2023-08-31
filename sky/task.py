@@ -593,17 +593,17 @@ class Task:
 
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
-        if self.resources_pref_list is not None:
+        if len(self.resources_pref_list) >= 1:
             res_ord = self.resources_pref_list
         else:
-            res_ord = self.resources
+            res_ord = list(self.resources)  # pylint
 
         new_resources_list = []
         for res in res_ord:
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        if self.resources_pref_list is not None:
+        if len(self.resources_pref_list) >= 1:
             self.set_resources(new_resources_list)
         else:
             self.set_resources(set(new_resources_list))

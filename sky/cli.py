@@ -1101,6 +1101,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         override_params['spot_recovery'] = spot_recovery
 
     task.set_resources_override(override_params)
+    print(task)
 
     for res in task.resources:
         # TODO(wei-lin): move this validation into Python API.
