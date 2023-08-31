@@ -8,7 +8,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, TypeVar)
+                    TextIO, Tuple, TypeVar)
 
 import colorama
 import requests
@@ -112,6 +112,33 @@ def generate_replica_local_log_file_name(cluster_name: str) -> str:
     cluster_name = cluster_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVE_PREFIX)
     return os.path.join(prefix, f'{cluster_name}_local.log')
+
+
+def get_ports_for_controller_and_load_balancer(
+        controller_cluster_name: str) -> Tuple[int, int]:
+    services = global_user_state.get_services_from_controller_name(
+        controller_cluster_name)
+    # Use `is None`` to filter out self and all services with
+    # initialize status
+    existing_controller_ports, existing_load_balancer_ports = [], []
+    for service in services:
+        service_handle: ServiceHandle = service['handle']
+        if service_handle.controller_port is not None:
+            existing_controller_ports.append(service_handle.controller_port)
+        if service_handle.load_balancer_port is not None:
+            existing_load_balancer_ports.append(
+                service_handle.load_balancer_port)
+    if not existing_controller_ports:
+        assert not existing_load_balancer_ports
+        # Cannot expose controller to public internet.
+        # We opened 30000-40000 for controller VM, so load balancer port
+        # should be in this range and controller port should not be in
+        # this range.
+        controller_port, load_balancer_port = 20001, 30001
+    else:
+        controller_port = max(existing_controller_ports) + 1
+        load_balancer_port = max(existing_load_balancer_ports) + 1
+    return controller_port, load_balancer_port
 
 
 class ServiceHandle(object):

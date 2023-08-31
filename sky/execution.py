@@ -1093,31 +1093,9 @@ def serve_up(
                   f'Please check the logs above.{colorama.Style.RESET_ALL}')
             return
 
-        services = global_user_state.get_services_from_controller_name(
-            controller_cluster_name)
-        # TODO(tian): Move this to serve_utils?
-        existing_controller_ports = [
-            service['handle'].controller_port
-            for service in services
-            if service['handle'].controller_port is not None
-        ]
-        existing_load_balancer_ports = [
-            service['handle'].load_balancer_port
-            for service in services
-            if service['handle'].load_balancer_port is not None
-        ]
-        if not existing_controller_ports:
-            assert not existing_load_balancer_ports
-            # Cannot expose controller to public internet.
-            # We opened 30000-40000 for controller VM, so load balancer port
-            # should be in this range and controller port should not be in
-            # this range.
-            controller_port, load_balancer_port = 20001, 30001
-        else:
-            # Use `is None`` to filter out self and all services with
-            # initialize status
-            controller_port = max(existing_controller_ports) + 1
-            load_balancer_port = max(existing_load_balancer_ports) + 1
+        controller_port, load_balancer_port = (
+            serve.get_ports_for_controller_and_load_balancer(
+                controller_cluster_name))
         service_handle.controller_port = controller_port
         service_handle.load_balancer_port = load_balancer_port
 
