@@ -1143,6 +1143,7 @@ def serve_up(
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             backend = backend_utils.get_backend_from_handle(handle)
             assert isinstance(backend, backends.CloudVmRayBackend), backend
+            pending_cnt = 0
             for _ in range(retry_time):
                 job_statuses = backend.get_job_status(handle, [job_id],
                                                       stream_logs=False)
@@ -1153,8 +1154,12 @@ def serve_up(
                 # each job is occupying 0.5 vCPU. We early exit and cancel the
                 # job here.
                 if job_status == job_lib.JobStatus.PENDING:
-                    backend.cancel_jobs(handle, jobs=[job_id])
-                    return False
+                    pending_cnt += 1
+                    logger.debug(f'SkyServe job is pending. cnt: {pending_cnt}')
+                    # TODO(tian): use a constant here
+                    if pending_cnt > 5:
+                        backend.cancel_jobs(handle, jobs=[job_id])
+                        return False
                 time.sleep(1)
             return False
 
