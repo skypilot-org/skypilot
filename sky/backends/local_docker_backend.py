@@ -104,7 +104,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     }
 
     def __init__(self, use_gpu: Union[bool, str] = 'auto'):
-        """
+        """Local docker backend.
+
         Args:
             use_gpu: Whether to use GPUs. Either of True, False or 'auto'.
               Sets container runtime to 'nvidia' if set to True, else uses the
@@ -138,8 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             cluster_name: str,
             retry_until_up: bool = False
     ) -> Optional[LocalDockerResourceHandle]:
-        """
-        Builds docker image for the task and returns the cluster name as handle.
+        """Builds docker image for the task and returns cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
@@ -340,8 +340,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     # --- Utilities ---
 
     def _update_state(self):
-        """
-        Updates local state of the backend object.
+        """Updates local state of the backend object.
 
         Queries the docker daemon to get the list of running containers, and
         populates the self.images and self.containers attributes from metadata

@@ -109,7 +109,7 @@ class AWS(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -223,7 +223,8 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -440,7 +441,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            cls.get_current_user_identity()
+            identity_str = cls.get_current_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -481,7 +482,16 @@ class AWS(clouds.Cloud):
         from sky.clouds.service_catalog import aws_catalog
 
         # Trigger the fetch of the availability zones mapping.
-        aws_catalog.get_default_instance_type()
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
 
     @classmethod
@@ -759,20 +769,22 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (tag_filters, region)
-        del tag_filters, zone  # unused
+        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        del zone  # unused
 
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name,
+        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to find the source cluster on AWS.')
+                raise RuntimeError(
+                    f'Failed to find the source cluster {cluster_name!r} on '
+                    'AWS.')
 
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():

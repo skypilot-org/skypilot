@@ -22,10 +22,11 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
-import hashlib
 import inspect
+import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,7 +35,6 @@ import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 import urllib.parse
 import uuid
-import warnings
 
 import colorama
 import jinja2
@@ -42,6 +42,8 @@ import pytest
 
 import sky
 from sky import global_user_state
+from sky import serve
+from sky import spot
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import AWS
@@ -53,11 +55,6 @@ from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-
-# For uniquefying users on shared-account cloud providers. Used as part of the
-# cluster names.
-_smoke_test_hash = hashlib.md5(
-    common_utils.user_and_hostname_hash().encode()).hexdigest()[:4]
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_spot_recovery to make sure the manual
@@ -124,10 +121,8 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    if len(test_name) > 16:
-        test_name = test_name[:16] + hashlib.md5(
-            test_name.encode()).hexdigest()[:3]
-    return f'{test_name}-{_smoke_test_hash}-{test_id}'
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
+    return f'{test_name}-{test_id}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -662,6 +657,8 @@ def test_stale_job(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.AWS.max_cluster_name_length())
     region = 'us-west-2'
     test = Test(
         'aws_stale_job_manual_restart',
@@ -670,7 +667,7 @@ def test_aws_stale_job_manual_restart():
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             f'id=`aws ec2 describe-instances --region {region} --filters '
-            f'Name=tag:ray-cluster-name,Values={name} '
+            f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text`; '
             f'aws ec2 stop-instances --region {region} '
@@ -691,9 +688,11 @@ def test_aws_stale_job_manual_restart():
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.GCP.max_cluster_name_length())
     zone = 'us-west2-a'
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name={name})" '
+                 f'"(labels.ray-cluster-name={name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     stop_cmd = (f'gcloud compute instances stop --zone={zone}'
                 f' --quiet $({query_cmd})')
@@ -989,11 +988,10 @@ def test_scp_logs():
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
-@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
-@pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
-@pytest.mark.no_oci  # OCI does not have K80 gpus
-@pytest.mark.no_kubernetes  # Kubernetes not have gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
+@pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
+@pytest.mark.no_oci  # OCI does not have T4 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1010,8 +1008,8 @@ def test_job_queue(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
-            f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
         ],
@@ -1025,6 +1023,7 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
+@pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 def test_job_queue_with_docker(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1126,7 +1125,7 @@ def test_scp_job_queue():
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
-@pytest.mark.no_kubernetes  # Kubernetes not have gpus
+@pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1268,6 +1267,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
+@pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 def test_docker_preinstalled_package(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1283,11 +1283,11 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
-@pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
+@pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_oci  # OCI Cloud does not have K80 gpus
-@pytest.mark.no_kubernetes  # Kubernetes not have gpus
+@pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1311,7 +1311,6 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
-@pytest.mark.no_kubernetes  # Kubernetes not have gpus
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1625,7 +1624,7 @@ def test_autostop(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_scp_kubernetes instead.
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_kubernetes_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1782,7 +1781,7 @@ def test_cancel_azure():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not support GPU yet
+@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1983,6 +1982,8 @@ def test_spot_pipeline_failed_setup(generic_cloud: str):
 def test_spot_recovery_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_aws',
@@ -1994,7 +1995,7 @@ def test_spot_recovery_aws(aws_config_region):
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 100',
@@ -2014,16 +2015,20 @@ def test_spot_recovery_aws(aws_config_region):
 def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-east4-b'
-    query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name})" '
-                 f'--zones={zone} --format="value(name)"')
+    query_cmd = (
+        f'gcloud compute instances list --filter='
+        # `:` means prefix match.
+        f'"(labels.ray-cluster-name:{name_on_cloud})" '
+        f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
         'spot_recovery_gcp',
         [
-            f'sky spot launch --cloud gcp --zone {zone} -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -2046,6 +2051,8 @@ def test_spot_recovery_gcp():
 def test_spot_pipeline_recovery_aws(aws_config_region):
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
     if region != 'us-west-2':
         pytest.skip('Only run spot pipeline recovery test in us-west-2')
@@ -2061,13 +2068,16 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
             # The `cat ...| rev` is to retrieve the job_id from the
             # SKYPILOT_TASK_ID, which gets the second to last field
             # separated by `-`.
-            (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
-             'cut -d\'-\' -f2 | rev`;'
-             f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID} '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            (
+                f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
+                'cut -d\'-\' -f2 | rev`;'
+                f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                f'aws ec2 describe-instances --region {region} '
+                # TODO(zhwu): fix the name for spot cluster.
+                '--filters Name=tag:ray-cluster-name,Values=*-${SPOT_JOB_ID}'
+                f'-{user_hash} '
+                f'--query Reservations[].Instances[].InstanceId '
+                '--output text)'),
             'sleep 100',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
@@ -2089,8 +2099,10 @@ def test_spot_pipeline_recovery_gcp():
     """Test managed spot recovery for a pipeline."""
     name = _get_cluster_name()
     zone = 'us-east4-b'
+    user_hash = common_utils.get_user_hash()
+    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     query_cmd = ('gcloud compute instances list --filter='
-                 '"(labels.ray-cluster-name:*-${SPOT_JOB_ID})" '
+                 f'"(labels.ray-cluster-name:*-${{SPOT_JOB_ID}}-{user_hash})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -2149,6 +2161,8 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 def test_spot_recovery_multi_node_aws(aws_config_region):
     """Test managed spot recovery."""
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_recovery_multi_node_aws',
@@ -2160,7 +2174,7 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
             # Terminate the worker manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
              'Name=tag:ray-node-type,Values=worker '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
@@ -2181,12 +2195,14 @@ def test_spot_recovery_multi_node_aws(aws_config_region):
 def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west2-a'
     # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
-        f'"(labels.ray-cluster-name:{name} AND labels.ray-node-type=worker)" '
-        f'--zones={zone} --format="value(name)"')
+        f'"(labels.ray-cluster-name:{name_on_cloud} AND '
+        f'labels.ray-node-type=worker)" --zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
@@ -2214,6 +2230,12 @@ def test_spot_recovery_multi_node_gcp():
 @pytest.mark.managed_spot
 def test_spot_cancellation_aws(aws_config_region):
     name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_2_on_cloud = common_utils.make_cluster_name_on_cloud(
+        f'{name}-2', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
+        f'{name}-3', spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     region = aws_config_region
     test = Test(
         'spot_cancellation_aws',
@@ -2228,7 +2250,7 @@ def test_spot_cancellation_aws(aws_config_region):
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
@@ -2241,7 +2263,7 @@ def test_spot_cancellation_aws(aws_config_region):
             'sleep 120',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-2-* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_2_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
@@ -2252,7 +2274,7 @@ def test_spot_cancellation_aws(aws_config_region):
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 120',
@@ -2265,7 +2287,7 @@ def test_spot_cancellation_aws(aws_config_region):
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
+             f'--filters Name=tag:ray-cluster-name,Values={name_3_on_cloud}-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
@@ -2278,12 +2300,16 @@ def test_spot_cancellation_aws(aws_config_region):
 @pytest.mark.managed_spot
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
+    name_3 = f'{name}-3'
+    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name_3, spot.SPOT_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
-    query_state_cmd = ('gcloud compute instances list '
-                       f'--filter="(labels.ray-cluster-name:{name})" '
-                       '--format="value(status)"')
+    query_state_cmd = (
+        'gcloud compute instances list '
+        f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
+        '--format="value(status)"')
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{name})" '
+                 f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -2490,6 +2516,8 @@ def test_aws_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         specs = AWS._get_disk_specs(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.AWS.max_cluster_name_length())
         region = 'us-west-2'
         test = Test(
             'aws-disk-tier',
@@ -2497,7 +2525,7 @@ def test_aws_disk_tier():
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
                 f'id=`aws ec2 describe-instances --region {region} --filters '
-                f'Name=tag:ray-cluster-name,Values={name} --query '
+                f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
                 f'Reservations[].Instances[].InstanceId --output text`; ' +
                 _get_aws_query_command(region, '$id', 'VolumeType',
                                        specs['disk_tier']) +
@@ -2518,6 +2546,8 @@ def test_gcp_disk_tier():
     for disk_tier in ['low', 'medium', 'high']:
         type = GCP._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.GCP.max_cluster_name_length())
         region = 'us-west2'
         test = Test(
             'gcp-disk-tier',
@@ -2525,7 +2555,8 @@ def test_gcp_disk_tier():
                 f'sky launch -y -c {name} --cloud gcp --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
                 f'name=`gcloud compute instances list --filter='
-                f'"labels.ray-cluster-name:{name}" --format="value(name)"`; '
+                f'"labels.ray-cluster-name:{name_on_cloud}" '
+                '--format="value(name)"`; '
                 f'gcloud compute disks list --filter="name=$name" '
                 f'--format="value(type)" | grep {type} '
             ],
@@ -2540,13 +2571,15 @@ def test_azure_disk_tier():
     for disk_tier in ['low', 'medium']:
         type = Azure._get_disk_type(disk_tier)
         name = _get_cluster_name() + '-' + disk_tier
+        name_on_cloud = common_utils.make_cluster_name_on_cloud(
+            name, sky.Azure.max_cluster_name_length())
         region = 'westus2'
         test = Test(
             'azure-disk-tier',
             [
                 f'sky launch -y -c {name} --cloud azure --region {region} '
                 f'--disk-tier {disk_tier} echo "hello sky"',
-                f'az resource list --tag ray-cluster-name={name} --query '
+                f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
                 f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
                 f'--output tsv | grep {type}'
             ],
@@ -2606,15 +2639,59 @@ def test_gcp_zero_quota_failover():
 # ---------- Testing skyserve ----------
 
 
-def _get_skyserve_test_task(name: str, suffix: str,
+def _get_service_name() -> str:
+    """Returns a user-unique service name for each test_skyserve_<name>().
+
+    Must be called from each test_skyserve_<name>().
+    """
+    caller_func_name = inspect.stack()[1][3]
+    test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
+    test_name = test_name.replace('skyserve-', 'ss-')
+    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
+    return f'{test_name}-{test_id}'
+
+
+# We check the output of the skyserve service to see if it is ready. Output of
+# `REPLICAS` is in the form of `1/2` where the first number is the number of
+# ready replicas and the second number is the number of total replicas. We
+# grep such format to ensure that the service is ready, and early exit if any
+# failure detected. In the end we sleep for serve.CONTROLLER_SYNC_INTERVAL to
+# make sure load balancer have enough time to sync with the controller and get
+# all ready replica IPs.
+_SERVE_WAIT_UNTIL_READY = (
+    '(while true; do'
+    '     output=$(sky serve status {name});'
+    '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
+    '     echo "$output" | grep -q "FAILED" && exit 1;'
+    '     sleep 10;'
+    f' done); sleep {serve.CONTROLLER_SYNC_INTERVAL};')
+_IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
+_ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
+_AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
+
+
+def _get_serve_endpoint(name: str) -> str:
+    return f'endpoint=$(sky serve status {name} | grep -Eo "{_ENDPOINT_REGEX}")'
+
+
+def _get_replica_line(name: str, replica_id: int) -> str:
+    return (f'sky serve status {name} | awk "{_AWK_ALL_LINES_BELOW_REPLICAS}"'
+            f' | grep -E "{name}\s+{replica_id}"')
+
+
+def _get_replica_ip(name: str, replica_id: int) -> str:
+    return (f'ip{replica_id}=$({_get_replica_line(name, replica_id)}'
+            f' | grep -Eo "{_IP_REGEX}")')
+
+
+def _get_skyserve_http_test(name: str, cloud: str,
                             timeout_minutes: int) -> Test:
-    url_regex = r'([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}'
     test = Test(
-        f'test-skyserve-{suffix.replace("_", "-")}',
+        f'test-skyserve-{cloud.replace("_", "-")}',
         [
-            f'sky serve up -n {name} -y tests/skyserve/http_{suffix}.yaml',
-            f'(while true; do output=$(sky serve status {name}); echo "$output" | grep -q "2/2" && break; echo "$output" | grep -q "FAILED" && exit 1; sleep 10; done)',
-            f'url=$(sky serve status {name} | grep -Eo "{url_regex}"); curl -L http://$url | grep "Hi, SkyPilot here"',
+            f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         f'sky serve down -y {name}',
         timeout=timeout_minutes * 60,
@@ -2623,35 +2700,112 @@ def _get_skyserve_test_task(name: str, suffix: str,
 
 
 @pytest.mark.gcp
-def test_skyserve_gcp():
+def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'gcp', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'gcp', 20)
     run_one_test(test)
 
 
 @pytest.mark.aws
-def test_skyserve_aws():
+def test_skyserve_aws_http():
     """Test skyserve on AWS"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'aws', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'aws', 20)
     run_one_test(test)
 
 
 @pytest.mark.azure
-def test_skyserve_azure():
+def test_skyserve_azure_http():
     """Test skyserve on Azure"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'azure', 30)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'azure', 30)
     run_one_test(test)
 
 
 @pytest.mark.gcp
 @pytest.mark.aws
-def test_skyserve_mixed_cloud():
+def test_skyserve_mixed_cloud_http():
     """Test skyserve on mixed cloud"""
-    name = _get_cluster_name()
-    test = _get_skyserve_test_task(name, 'mixed_cloud', 20)
+    name = _get_service_name()
+    test = _get_skyserve_http_test(name, 'mixed_cloud', 20)
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_skyserve_llm():
+    """Test skyserve with real LLM usecase"""
+    name = _get_service_name()
+
+    def generate_llm_test_command(prompt: str, expected_output: str) -> str:
+        prompt = shlex.quote(prompt)
+        expected_output = shlex.quote(expected_output)
+        return (
+            f'{_get_serve_endpoint(name)}; python tests/skyserve/llm/get_response.py'
+            f' --endpoint $endpoint --prompt {prompt} | grep {expected_output}')
+
+    with open('tests/skyserve/llm/prompt_output.json', 'r') as f:
+        prompt2output = json.load(f)
+
+    test = Test(
+        f'test-skyserve-llm',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/llm/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            *[
+                generate_llm_test_command(prompt, output)
+                for prompt, output in prompt2output.items()
+            ],
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_skyserve_replica_failure():
+    """Test skyserve with manually interrupting some replica"""
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    # Reference: test_spot_recovery_gcp
+    def terminate_replica(replica_id: int) -> str:
+        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+        query_cmd = (f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{cluster_name})" '
+                     f'--zones={zone} --format="value(name)"')
+        return (f'gcloud compute instances delete --zone={zone}'
+                f' --quiet $({query_cmd})')
+
+    test = Test(
+        f'test-skyserve-replica-failure',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/replica_failure/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
+            f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
+            terminate_replica(1),
+            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sky serve status {name} | grep 2/3',
+            f'{_get_replica_line(name, 1)} | grep NOT_READY',
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
+            f'{_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
+            terminate_replica(2),
+            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sky serve status {name} | grep 1/3',
+            f'{_get_replica_line(name, 2)} | grep NOT_READY',
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/replica_failure/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
     run_one_test(test)
 
 

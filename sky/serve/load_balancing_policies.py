@@ -1,4 +1,4 @@
-"""LoadBalancer: select endpoint by load balancing algorithm."""
+"""LoadBalancingPolicy: Policy to select endpoint."""
 from collections import deque
 import logging
 import time
@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_QUERY_INTERVAL = 60
 
 
-class LoadBalancer:
-    """Abstract class for load balancers."""
+class LoadBalancingPolicy:
+    """Abstract class for load balancing policies."""
 
     def __init__(self) -> None:
         self.ready_replicas: Set[str] = set()
@@ -49,8 +49,8 @@ class LoadBalancer:
         raise NotImplementedError
 
 
-class RoundRobinLoadBalancer(LoadBalancer):
-    """Round-robin load balancer."""
+class RoundRobinPolicy(LoadBalancingPolicy):
+    """Round-robin load balancing policy."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

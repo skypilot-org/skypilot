@@ -1,8 +1,9 @@
-"""Controller: the central controller of SkyServe.
+"""SkyServeController: the central controller of SkyServe.
 
 Responsible for autoscaling and replica management.
 """
 import argparse
+import asyncio
 import base64
 import logging
 import pickle
@@ -31,8 +32,8 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
         return not ('GET' in message and '200' in message)
 
 
-class Controller:
-    """Controller: control everything about replica.
+class SkyServeController:
+    """SkyServeController: control everything about replica.
 
     This class is responsible for:
         - Starting and terminating the replica monitor and autoscaler.
@@ -51,9 +52,9 @@ class Controller:
     def run(self) -> None:
 
         @self.app.post('/controller/update_num_requests')
-        async def update_num_requests(request: fastapi.Request):
+        def update_num_requests(request: fastapi.Request):
             # await request
-            request_data = await request.json()
+            request_data = asyncio.run(request.json())
             # get request data
             num_requests = request_data['num_requests']
             logger.info(f'Received request: {request_data}')
@@ -101,7 +102,7 @@ class Controller:
         if self.autoscaler is not None:
             self.autoscaler.start()
 
-        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflood
+        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflowing
         # the controller logs.
         if not env_options.Options.SHOW_DEBUG_INFO.get():
             logging.getLogger('uvicorn.access').addFilter(
@@ -154,6 +155,6 @@ if __name__ == '__main__':
         cooldown=60,
         query_interval=60)
 
-    # ======= Controller =========
-    controller = Controller(args.port, _infra_provider, _autoscaler)
+    # ======= SkyServeController =========
+    controller = SkyServeController(args.port, _infra_provider, _autoscaler)
     controller.run()

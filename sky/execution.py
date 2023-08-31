@@ -130,7 +130,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
                                     f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
             clone_disk_from,
-            backend_utils.tag_filter_for_cluster(clone_disk_from),
+            handle.cluster_name_on_cloud,
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )
@@ -1015,8 +1015,6 @@ def serve_up(
     service_handle.ephemeral_storage = ephemeral_storage
     global_user_state.set_service_handle(service_name, service_handle)
 
-    task.add_skyserve_prehook()
-
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
@@ -1038,7 +1036,6 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        controller_task.add_skyserve_prehook()
         # This is for the case when the best resources failed to provision.
         controller_task.set_resources(controller_resources)
         controller_task.best_resources = controller_best_resources
@@ -1104,32 +1101,32 @@ def serve_up(
             for service in services
             if service['handle'].controller_port is not None
         ]
-        existing_redirector_ports = [
-            service['handle'].redirector_port
+        existing_load_balancer_ports = [
+            service['handle'].load_balancer_port
             for service in services
-            if service['handle'].redirector_port is not None
+            if service['handle'].load_balancer_port is not None
         ]
         if not existing_controller_ports:
-            assert not existing_redirector_ports
+            assert not existing_load_balancer_ports
             # Cannot expose controller to public internet.
-            # We opened 30000-40000 for controller VM, so redirector port
+            # We opened 30000-40000 for controller VM, so load balancer port
             # should be in this range and controller port should not be in
             # this range.
-            controller_port, redirector_port = 20001, 30001
+            controller_port, load_balancer_port = 20001, 30001
         else:
             # Use `is None`` to filter out self and all services with
             # initialize status
             controller_port = max(existing_controller_ports) + 1
-            redirector_port = max(existing_redirector_ports) + 1
+            load_balancer_port = max(existing_load_balancer_ports) + 1
         service_handle.controller_port = controller_port
-        service_handle.redirector_port = redirector_port
+        service_handle.load_balancer_port = load_balancer_port
 
         handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         # TODO(tian): endpoint is redundant now. We could fetch head ip of
-        # controller cluster and concat with redirector port to get the
+        # controller cluster and concat with load balancer port to get the
         # endpoint.
-        endpoint = f'{handle.head_ip}:{redirector_port}'
+        endpoint = f'{handle.head_ip}:{load_balancer_port}'
         service_handle.endpoint = endpoint
         global_user_state.set_service_handle(service_name, service_handle)
 
@@ -1165,7 +1162,7 @@ def serve_up(
 
         # NOTICE: The job submission order cannot be changed since the
         # `sky serve logs` CLI will identify the controller job with
-        # the first job submitted and the redirector job with the second
+        # the first job submitted and the load balancer job with the second
         # job submitted.
         with console.status('[yellow]Launching controller process...[/yellow]'):
             controller_job_id = _execute(
@@ -1195,14 +1192,15 @@ def serve_up(
         print(f'{colorama.Fore.GREEN}Launching controller process...done.'
               f'{colorama.Style.RESET_ALL}')
 
-        with console.status('[yellow]Launching redirector process...[/yellow]'):
+        with console.status(
+                '[yellow]Launching load balancer process...[/yellow]'):
             controller_addr = f'http://localhost:{controller_port}'
-            redirector_job_id = _execute(
+            load_balancer_job_id = _execute(
                 entrypoint=sky.Task(
-                    name='run-redirector',
+                    name='run-load-balancer',
                     envs=controller_envs,
-                    run='python -m sky.serve.redirector --task-yaml '
-                    f'{remote_task_yaml_path} --port {redirector_port} '
+                    run='python -m sky.serve.load_balancer --task-yaml '
+                    f'{remote_task_yaml_path} --port {load_balancer_port} '
                     f'--app-port {app_port} '
                     f'--controller-addr {controller_addr}'),
                 stream_logs=False,
@@ -1211,18 +1209,18 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            assert redirector_job_id is not None
-            redirector_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, redirector_job_id)
-            service_handle.redirector_job_id = redirector_job_id
-        if not redirector_job_is_running:
+            assert load_balancer_job_id is not None
+            load_balancer_job_is_running = _wait_until_job_is_running(
+                controller_cluster_name, load_balancer_job_id)
+            service_handle.load_balancer_job_id = load_balancer_job_id
+        if not load_balancer_job_is_running:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}Redirector failed to launch. '
+            print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
-                  f'--redirector{colorama.Style.RESET_ALL}')
+                  f'--load-balancer{colorama.Style.RESET_ALL}')
             return
-        print(f'{colorama.Fore.GREEN}Launching redirector process...done.'
+        print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
               f'{colorama.Style.RESET_ALL}')
 
         global_user_state.set_service_status(
@@ -1234,15 +1232,15 @@ def serve_up(
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
-              '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --controller '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of redirector:'
-              f'\t{backend_utils.BOLD}sky serve logs --redirector '
-              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo see logs of one replica:'
               f'\t{backend_utils.BOLD}sky serve logs {service_name} '
               f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
+              '\nTo see logs of load balancer:'
+              f'\t{backend_utils.BOLD}sky serve logs --load-balancer '
+              f'{service_name}{backend_utils.RESET_BOLD}'
+              '\nTo see logs of controller:'
+              f'\t{backend_utils.BOLD}sky serve logs --controller '
+              f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo teardown the service:'
               f'\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}'
@@ -1271,7 +1269,7 @@ def serve_down(
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
-    # Already filered all inexist service in cli.py
+    # Already filtered all inexistent service in cli.py
     assert service_record is not None, service_name
     service_handle: serve.ServiceHandle = service_record['handle']
     controller_cluster_name = service_handle.controller_cluster_name
@@ -1332,18 +1330,18 @@ def serve_down(
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backends.CloudVmRayBackend()
-            # For the case when controller/redirector job failed to submit.
+            # For the case when controller / load_balancer job failed to submit.
             jobs = []
             if service_handle.controller_job_id is not None:
                 jobs.append(service_handle.controller_job_id)
-            if service_handle.redirector_job_id is not None:
-                jobs.append(service_handle.redirector_job_id)
-            backend.cancel_jobs(handle, jobs=jobs)
+            if service_handle.load_balancer_job_id is not None:
+                jobs.append(service_handle.load_balancer_job_id)
+            backend.cancel_jobs(handle, jobs=jobs, silent=True)
     except (ValueError, exceptions.ClusterNotUpError,
             exceptions.CommandError) as e:
         if purge:
             logger.warning('Ignoring error when stopping controller and '
-                           f'redirector jobs of service {service_name}: {e}')
+                           f'load balancer jobs of service {service_name}: {e}')
         else:
             raise RuntimeError(e) from e
 

@@ -61,7 +61,7 @@ class SkyServiceSpec:
             return None
 
         backend_utils.validate_schema(config, schemas.get_service_schema(),
-                                      'Invalid service YAML:')
+                                      'Invalid service YAML: ')
         if 'replicas' in config and 'replica_policy' in config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

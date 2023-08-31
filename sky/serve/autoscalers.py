@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
 # TODO(tian): determine this value based on controller resources.
-_MAX_BOOTSTRAPING_NUM = 5
+_MAX_BOOTSTRAPPING_NUM = 5
 
 
 class Autoscaler:
@@ -66,9 +66,10 @@ class Autoscaler:
 
 
 class RequestRateAutoscaler(Autoscaler):
-    """
-    Autoscaler that scales  when the number of requests in the given
-    interval is above or below the upper threshold.
+    """RequestRateAutoscaler: Autoscale according to request rate.
+
+    Scales when the number of requests in the given interval is above or below
+    the threshold.
     """
 
     def __init__(self, *args, upper_threshold: Optional[float],
@@ -77,9 +78,9 @@ class RequestRateAutoscaler(Autoscaler):
         super().__init__(*args, **kwargs)
         # Cooldown between two scaling operations in seconds.
         self.cooldown: int = cooldown
-        # Quesy interval for requests num. Every `query_interval` seconds,
+        # Query interval for requests num. Every `query_interval` seconds,
         # Autoscaler will received an update for number of requests from
-        # redirector.
+        # load balancer.
         self.query_interval: int = query_interval
         # Time of last scale operation
         self.last_scale_operation: float = 0.
@@ -124,8 +125,8 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Number of nodes: {num_nodes}')
         if num_nodes < self.min_nodes:
             logger.info('Bootstrapping service.')
-            self.scale_up(min(self.min_nodes - num_nodes,
-                              _MAX_BOOTSTRAPING_NUM))
+            self.scale_up(
+                min(self.min_nodes - num_nodes, _MAX_BOOTSTRAPPING_NUM))
             self.last_scale_operation = current_time
         elif (self.upper_threshold is not None and
               requests_per_node > self.upper_threshold):
