@@ -5,7 +5,7 @@ resources:
 
 workdir: tests/skyserve/interrupt
 
-setup: pip install fastapi[all] httpx uvicorn
+setup: pip install fastapi[all] uvicorn
 
 run: python3 server.py --port 8080
 
