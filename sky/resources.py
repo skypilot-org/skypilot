@@ -949,21 +949,17 @@ class Resources:
         if self.disk_tier is not None:
             if other.disk_tier is None:
                 return False
-            if self.disk_tier != other.disk_tier:
-                if self.cloud is not None:
-                    self_tier = self.cloud.translate_disk_tier(self.disk_tier)
-                else:
-                    self_tier = self.disk_tier
-                if other.cloud is not None:
-                    other_tier = other.cloud.translate_disk_tier(
-                        other.disk_tier)
-                else:
-                    other_tier = other.disk_tier
-                # best disk tier without knowledge of cloud cannot be compared
-                if resources_utils.DiskTier.BEST in [self_tier, other_tier]:
-                    return False
-                types = list(resources_utils.DiskTier)
-                return types.index(self_tier) < types.index(other_tier)
+            if other.disk_tier == resources_utils.DiskTier.BEST:
+                return True
+            # Here, BEST tier means the best we can get; for a launched
+            # cluster, the best (and only) tier we can get is the launched
+            # cluster's tier.
+            if self.disk_tier == resources_utils.DiskTier.BEST:
+                return True
+            # resources_utils.DiskTier is listed in the order of increasing
+            # disk performance
+            types = list(resources_utils.DiskTier)
+            return types.index(self.disk_tier) < types.index(other.disk_tier)
 
         if self.ports is not None:
             if other.ports is None:
