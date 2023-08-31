@@ -2872,8 +2872,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatibility and robustness of skylet, it is restarted
-        with rich_utils.safe_status('Updating remote skylet'):
+        # For backward compatibility and robustness of skylet, it is checked
+        # and restarted if necessary.
+        with rich_utils.safe_status(
+                '[bold cyan]Launching - Preparing SkyPilot runtime'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
@@ -2885,7 +2887,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                    handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
-            with rich_utils.safe_status('[bold cyan]Preparing Job Queue'):
+            with rich_utils.safe_status(
+                    '[bold cyan]Launching - Preparing Job Queue'):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)

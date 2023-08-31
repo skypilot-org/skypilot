@@ -52,12 +52,11 @@ def force_update_status(msg: str):
 @contextlib.contextmanager
 def safe_logger():
     logged = False
-    if _status is not None:
-        with _logging_lock:
-            if _status._live.is_started:  # pylint: disable=protected-access
-                _status.stop()
-                yield
-                logged = True
-                _status.start()
+    with _logging_lock:
+        if _status is not None and _status._live.is_started:  # pylint: disable=protected-access
+            _status.stop()
+            yield
+            logged = True
+            _status.start()
     if not logged:
         yield
