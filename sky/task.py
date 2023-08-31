@@ -229,6 +229,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
+        self.resources_pref_list = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -400,10 +401,32 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.pop('resources', None)
-        resources = sky.Resources.from_yaml_config(resources)
+        resources_config = config.pop('resources', None)
+        
+        # Translate accelerators field to potential multiple resources.
+        if resources_config.get('accelerators') is not None:
+            accelerators = resources_config.get('accelerators')
+            if isinstance(accelerators, str):
+                accelerators = {accelerators}
+            elif isinstance(accelerators, dict):
+                accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
 
-        task.set_resources({resources})
+            tmp_resources_list = []
+            for acc in accelerators:
+                tmp_resource = resources_config.copy()
+                tmp_resource['accelerators'] = acc
+                tmp_resources_list.append(
+                    sky.Resources.from_yaml_config(tmp_resource))
+
+            if isinstance(accelerators, set):
+                final_resources = set(tmp_resources_list)
+            elif isinstance(accelerators, list):
+                final_resources = tmp_resources_list
+            else:
+                raise RuntimeError('Accelerators must be a list or a set.')
+        else:
+            final_resources = {sky.Resources.from_yaml_config(resources_config)}
+        task.set_resources(final_resources)
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -541,7 +564,8 @@ class Task:
 
     def set_resources(
         self, resources: Union['resources_lib.Resources',
-                               Set['resources_lib.Resources']]
+                               Set['resources_lib.Resources'],
+                               List['resources_lib.Resources']]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -556,12 +580,35 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
+        # Reset the preference list.
+        self.resources_pref_list = None
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        if isinstance(resources, list):
+             self.resources_pref_list = resources
+             resources = set(resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
+    def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
+        """Sets the override parameters for the resources."""
+        if self.resources_pref_list is not None:
+            res_ord = self.resources_pref_list
+        else:
+            res_ord = self.resources
+
+        new_resources_list = []
+        for res in res_ord:
+            new_resources = res.copy(**override_params)
+            new_resources_list.append(new_resources)
+
+        if self.resources_pref_list is not None:
+            self.set_resources(new_resources_list)
+        else:
+            self.set_resources(set(new_resources_list))
+        return self
+     
     def get_resources(self):
         return self.resources
 
@@ -930,9 +977,8 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
+        if self.best_resources is not None:
+            resources = self.best_resources
             add_if_not_none('resources', resources.to_yaml_config())
         add_if_not_none('num_nodes', self.num_nodes)
 

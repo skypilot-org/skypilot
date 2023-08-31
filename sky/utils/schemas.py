@@ -50,6 +50,11 @@ def get_resources_schema():
                     'additionalProperties': {
                         'type': 'number'
                     }
+                }, {
+                    'type': 'array',
+                     'items': {
+                         'type': 'string',
+                     }                    
                 }]
             },
             'instance_type': {
