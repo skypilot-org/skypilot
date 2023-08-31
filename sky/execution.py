@@ -1091,7 +1091,7 @@ def serve_up(
         if (cluster_record is None or
                 cluster_record['status'] != status_lib.ClusterStatus.UP):
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs above.{colorama.Style.RESET_ALL}')
             return
@@ -1182,7 +1182,7 @@ def serve_up(
             service_handle.controller_job_id = controller_job_id
         if not controller_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--controller{colorama.Style.RESET_ALL}')
@@ -1212,7 +1212,7 @@ def serve_up(
             service_handle.redirector_job_id = redirector_job_id
         if not redirector_job_is_running:
             global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTRLLER_FAILED)
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Redirector failed to launch. '
                   f'Please check the logs with sky serve logs {service_name} '
                   f'--redirector{colorama.Style.RESET_ALL}')
