@@ -49,6 +49,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -1356,8 +1357,8 @@ class RetryingVmProvisioner(object):
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
-            with log_utils.safe_rich_status('[bold cyan]Provisioning TPU '
-                                            f'[green]{tpu_name}[/]'):
+            with rich_utils.safe_status('[bold cyan]Provisioning TPU '
+                                        f'[green]{tpu_name}[/]'):
                 subprocess_utils.run(f'bash {config_dict["tpu-create-script"]}',
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)
@@ -2911,8 +2912,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatibility and robustness of skylet, it is restarted
-        with log_utils.safe_rich_status('Updating remote skylet'):
+        # For backward compatibility and robustness of skylet, it is checked
+        # and restarted if necessary.
+        with rich_utils.safe_status(
+                '[bold cyan]Launching - Preparing SkyPilot runtime'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
@@ -2924,7 +2927,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                    handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
-            with log_utils.safe_rich_status('[bold cyan]Preparing Job Queue'):
+            with rich_utils.safe_status(
+                    '[bold cyan]Launching - Preparing Job Queue'):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
@@ -3025,7 +3029,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
+        with rich_utils.safe_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     def _sync_file_mounts(
@@ -3798,8 +3802,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # autoscaler.
             resource_group = config['provider']['resource_group']
             terminate_cmd = f'az group delete -y --name {resource_group}'
-            with log_utils.safe_rich_status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
+            with rich_utils.safe_status(f'[bold cyan]Terminating '
+                                        f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(
                     terminate_cmd,
                     log_abs_path,
@@ -3896,8 +3900,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
-                with log_utils.safe_rich_status(f'[bold cyan]{teardown_verb} '
-                                                f'[green]{cluster_name}'):
+                with rich_utils.safe_status(f'[bold cyan]{teardown_verb} '
+                                            f'[green]{cluster_name}'):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.
@@ -3970,7 +3974,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
-            with log_utils.safe_rich_status('[bold cyan]Terminating TPU...'):
+            with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
                 tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
                     ['bash', handle.tpu_delete_script],
                     log_abs_path,
