@@ -95,7 +95,7 @@ def _bulk_provision(
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
-    with rich_status_utils.safe_rich_status(
+    with rich_utils.safe_status(
             '[bold cyan]Launching - Bootstrapping configurations') as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
@@ -327,7 +327,7 @@ def _post_provision_setup(
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    with rich_status_utils.safe_rich_status(
+    with rich_utils.safe_status(
             '[bold cyan]Preparing - Waiting for SSH to be available') as status:
         logger.debug(
             f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
