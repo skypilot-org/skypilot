@@ -1,5 +1,6 @@
 """Setup dependencies & services for instances."""
 from concurrent import futures
+import functools
 import hashlib
 import os
 import time
@@ -7,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
+from sky.provision import config as provision_config
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -15,6 +17,8 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+_START_TITLE = '-' * 20 + 'Start: {} ' + '-' * 20
+_END_TITLE = '-' * 20 + 'End:   {} ' + '-' * 20
 
 _MAX_RETRY = 5
 
@@ -41,6 +45,7 @@ _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
 def _auto_retry(func):
 
+    @functools.wraps(func)
     def retry(*args, **kwargs):
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=5)
         for retry_cnt in range(_MAX_RETRY):
@@ -56,10 +61,27 @@ def _auto_retry(func):
     return retry
 
 
+def _log_start_end(func):
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(_START_TITLE.format(func.__name__))
+        try:
+            func(*args, **kwargs)
+        finally:
+            logger.info(_END_TITLE.format(func.__name__))
+
+    return wrapper
+
+
 def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              digest: str,
                              cluster_metadata: common.ClusterMetadata,
                              ssh_credentials: Dict[str, str]) -> None:
+    if len(cluster_metadata.instances) > 1:
+        worker_log_path = metadata_utils.get_instance_log_dir(
+            cluster_name, '*') / (stage_name + '.log')
+        logger.info(f'Logs of worker nodes found at: {worker_log_path}')
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
         for instance_id, metadata in cluster_metadata.instances.items():
@@ -68,11 +90,13 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                                                      **ssh_credentials)
             wrapper = metadata_utils.cache_func(cluster_name, instance_id,
                                                 stage_name, digest)
-            log_dir_abs = metadata_utils.get_instance_log_dir(
-                cluster_name, instance_id)
-            log_path_abs = str(log_dir_abs / (stage_name + '.log'))
-            logger.info(f'Running {stage_name} on {instance_id} - logging to '
-                        f'{log_path_abs}')
+            if cluster_metadata.head_instance_id == instance_id:
+                # Log the head node's output to the provision.log
+                log_path_abs = str(provision_config.config.provision_log)
+            else:
+                log_dir_abs = metadata_utils.get_instance_log_dir(
+                    cluster_name, instance_id)
+                log_path_abs = str(log_dir_abs / (stage_name + '.log'))
             results.append(
                 pool.submit(wrapper(func), runner, metadata, log_path_abs))
 
@@ -80,6 +104,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
             future.result()
 
 
+@_log_start_end
 def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
                                 cluster_metadata: common.ClusterMetadata,
                                 ssh_credentials: Dict[str, str]) -> None:
@@ -117,6 +142,7 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
                              ssh_credentials=ssh_credentials)
 
 
+@_log_start_end
 @_auto_retry
 def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
                         cluster_metadata: common.ClusterMetadata,
@@ -126,9 +152,10 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
         cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, (cluster_name,
                                                            cluster_metadata)
-    log_dir = metadata_utils.get_instance_log_dir(
-        cluster_name, cluster_metadata.head_instance_id)
-    log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
+    stage_name = 'start_ray_head_node'
+    logger.info(_START_TITLE.format(stage_name))
+    # Log the head node's output to the provision.log
+    log_path_abs = str(provision_config.config.provision_log)
     ray_options = (
         f'--port={constants.SKY_REMOTE_RAY_PORT} '
         f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
@@ -151,8 +178,10 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
                            f'(exit code {returncode}). Error: '
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
+    logger.info(_END_TITLE.format(stage_name))
 
 
+@_log_start_end
 @_auto_retry
 def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
                            custom_resource: Optional[str],
@@ -162,6 +191,8 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
     if len(cluster_metadata.instances) <= 1:
         return
 
+    stage_name = 'start_ray_worker_nodes'
+    logger.info(_START_TITLE.format(stage_name))
     ip_list = cluster_metadata.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list[1:], port_list=None, **ssh_credentials)
@@ -210,8 +241,10 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
                                    f'(exit code {returncode}). Error: '
                                    f'===== stdout ===== \n{stdout}\n'
                                    f'===== stderr ====={stderr}')
+    logger.info(_END_TITLE.format(stage_name))
 
 
+@_log_start_end
 @_auto_retry
 def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
                  ssh_credentials: Dict[str, str]) -> None:
@@ -223,9 +256,7 @@ def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
     ssh_runner = command_runner.SSHCommandRunner(
         cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, cluster_metadata
-    log_dir = metadata_utils.get_instance_log_dir(
-        cluster_name, cluster_metadata.head_instance_id)
-    log_path_abs = str(log_dir / ('skylet' + '.log'))
+    log_path_abs = str(provision_config.config.provision_log)
     returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,
                                                 require_outputs=True,
@@ -273,6 +304,7 @@ def _internal_file_mounts(file_mounts: Dict,
         )
 
 
+@_log_start_end
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
                          cluster_metadata: common.ClusterMetadata,
                          ssh_credentials: Dict[str,

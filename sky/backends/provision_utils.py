@@ -1,6 +1,5 @@
 """Cloud-neutral VM provision utils."""
 import collections
-import dataclasses
 import contextlib
 import dataclasses
 import json
@@ -22,6 +21,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_comm
+from sky.provision import config as provision_config
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.utils import command_runner
@@ -43,11 +43,12 @@ class ClusterName:
     def __repr__(self) -> str:
         return self.display_name
 
+
 @contextlib.contextmanager
 def _add_logger_handlers(log_path: str):
     """Add file handler for logger."""
     try:
-        log_abs_path = os.path.abspath(os.path.expanduser(log_path))
+        log_abs_path = pathlib.Path(log_path).expanduser().absolute()
         fh = logging.FileHandler(log_abs_path)
         fh.setFormatter(sky_logging.FORMATTER)
         fh.setLevel(logging.DEBUG)
@@ -62,6 +63,8 @@ def _add_logger_handlers(log_path: str):
 
         provision_logger.addHandler(fh)
         provision_logger.addHandler(stream_handler)
+
+        provision_config.config.provision_log = log_abs_path
         yield
     finally:
         logger.removeHandler(fh)
@@ -306,8 +309,10 @@ def _post_provision_setup(
     cluster_metadata = provision.get_cluster_metadata(
         cloud_name, provision_metadata.region, cluster_name.name_on_cloud)
 
-    logger.debug(f'Provision metadata: {repr(provision_metadata)}\n'
-                 f'Cluster metadata: {repr(cluster_metadata)}')
+    logger.debug('Provision metadata:\n'
+                 f'{json.dumps(provision_metadata.dict(), indent=2)}\n'
+                 'Cluster metadata:\n'
+                 f'{json.dumps(cluster_metadata.dict(), indent=2)}')
 
     head_instance = cluster_metadata.get_head_instance()
     if head_instance is None:
@@ -351,30 +356,25 @@ def _post_provision_setup(
 
         runtime_preparation_str = ('[bold cyan]Preparing - Setting up SkyPilot '
                                    'runtime ({step}/3 - {step_name})')
-        status.update(
-            runtime_preparation_str.format(step=1, step_name='files'))
-        logger.debug('\nMounting internal files...')
+        status.update(runtime_preparation_str.format(step=1, step_name='files'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
                                             cluster_metadata,
                                             ssh_credentials,
                                             wheel_hash=wheel_hash)
-        logger.debug('Internal files: done.')
 
         status.update(
             runtime_preparation_str.format(step=2, step_name='dependencies'))
-        logger.debug('\nSetting up SkyPilot dependencies...')
         instance_setup.internal_dependencies_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
-        logger.debug('SkyPilot dependencies: done...')
 
         head_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                       port=22,
                                                       **ssh_credentials)
 
-        status.update(runtime_preparation_str.format(step=3, step_name='ray cluster'))
-        logger.debug('\nSetting up Ray cluster...')
+        status.update(
+            runtime_preparation_str.format(step=3, step_name='ray cluster'))
         full_ray_setup = True
         if not provision_metadata.is_instance_just_booted(
                 head_instance.instance_id):
@@ -412,12 +412,9 @@ def _post_provision_setup(
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
-        logger.debug('Ray cluster: done.')
 
-        logger.debug('\nSetting up Skylet...')
         instance_setup.start_skylet(cluster_name.name_on_cloud,
                                     cluster_metadata, ssh_credentials)
-        logger.debug('Skylet: done.')
 
     logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
                 f'{cluster_name!r}.{colorama.Style.RESET_ALL}')

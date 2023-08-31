@@ -23,7 +23,8 @@ def _get_instance_metadata_dir(cluster_name: str,
                                instance_id: str) -> pathlib.Path:
     dirname = (SKY_CLUSTER_METADATA_PATH / cluster_name / 'instances' /
                instance_id)
-    dirname.mkdir(parents=True, exist_ok=True)
+    if instance_id != '*':
+        dirname.mkdir(parents=True, exist_ok=True)
     return dirname.resolve()
 
 
@@ -89,7 +90,8 @@ def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     instance_metadata_dir = _get_instance_metadata_dir(cluster_name,
                                                        instance_id)
     path = instance_metadata_dir / 'logs'
-    path.mkdir(parents=True, exist_ok=True)
+    if instance_id != '*':
+        path.mkdir(parents=True, exist_ok=True)
     return path
 
 
