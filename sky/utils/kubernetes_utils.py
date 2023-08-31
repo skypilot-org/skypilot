@@ -38,8 +38,8 @@ class KubernetesNetworkingMode(enum.Enum):
     """Enum for the different types of networking modes for accessing
     jump pods.
     """
-    NODEPORT = 'NodePort'
-    PORTFORWARD = 'PortForward'
+    NODEPORT = 'nodeport'
+    PORTFORWARD = 'portforward'
 
 
 class KubernetesServiceType(enum.Enum):
@@ -853,9 +853,9 @@ def clean_zombie_sshjump_pod(namespace: str, node_id: str):
     """Analyzes SSH jump pod and removes if it is in a bad state
 
     Prevents the existence of a dangling SSH jump pod. This could happen
-    in case the pod main container did not start properly (or failed) and SSH
-    jump pod lifecycle management (LCM) will not function properly to take care
-    of removing the pod and service when needed.
+    in case the pod main container did not start properly (or failed). In that
+    case, jump pod lifecycle management (LCM) will not functioning properly to
+    remove the pod and service automatically, and must be done manually.
 
     Args:
         namespace: Namespace to remove the SSH jump pod and service from

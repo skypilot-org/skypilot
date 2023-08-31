@@ -412,11 +412,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    if ssh_setup_mode.lower() == nodeport_mode.value.lower():
+    if ssh_setup_mode.lower() == nodeport_mode.value:
         network_mode = nodeport_mode
         service_type = kubernetes_utils.KubernetesServiceType.NODEPORT
 
-    elif ssh_setup_mode.lower() == port_forward_mode.value.lower():
+    elif ssh_setup_mode.lower() == port_forward_mode.value:
         kubernetes_utils.check_port_forward_mode_dependencies()
         network_mode = port_forward_mode
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and

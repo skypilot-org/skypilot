@@ -214,12 +214,9 @@ class KubernetesNodeProvider(NodeProvider):
                     'Cluster may be out of resources or '
                     'may be too slow to autoscale.')
             all_ready = True
-            pods_and_containers_running = False
-            pods = []
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
-                pods.append(pod)
                 if pod.status.phase == 'Pending':
                     # Iterate over each pod to check their status
                     if pod.status.container_statuses is not None:
@@ -239,16 +236,26 @@ class KubernetesNodeProvider(NodeProvider):
                         # If container_statuses is None, then the pod hasn't
                         # been scheduled yet.
                         all_ready = False
-
-            # check if all the pods and containers within the pods are running
-            if  all([ pod.status.phase == "Running" for pod in pods]) \
-                and all([container.state.running for pod in pods for container in pod.status.container_statuses]):
-                pods_and_containers_running = True
-
-            if all_ready and pods_and_containers_running:
+            if all_ready:
                 break
             time.sleep(1)
 
+        # Wait for pod containers to be ready - they may be pulling images or
+        # may be in the process of container creation.
+        while True:
+            pods = []
+            for node in new_nodes:
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+                pods.append(pod)
+            if all([pod.status.phase == "Running" for pod in pods]) \
+                    and all(
+                [container.state.running for pod in pods for container in
+                 pod.status.container_statuses]):
+                break
+            time.sleep(1)
+
+        # Once all containers are ready, we can exec into them and set env vars.
         # Kubernetes automatically populates containers with critical
         # environment variables, such as those for discovering services running
         # in the cluster and CUDA/nvidia environment variables. We need to
@@ -256,7 +263,7 @@ class KubernetesNodeProvider(NodeProvider):
         # for GPU support and service discovery.
         # See https://github.com/skypilot-org/skypilot/issues/2287 for
         # more details.
-        # Capturing env. var. from the pod's runtime and writes them to
+        # Capturing env vars from the pod's runtime and writes them to
         # /etc/profile.d/ making them available for all users in future
         # shell sessions.
         set_k8s_env_var_cmd = [

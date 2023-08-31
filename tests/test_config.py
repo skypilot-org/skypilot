@@ -82,7 +82,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
                                       None) == PROXY_COMMAND
     new_config = skypilot_config.set_nested(('kubernetes', 'networking'),
                                             PORT_FORWARD_MODE_NAME)
-    assert new_config['aws']['ssh_proxy_command'] == PORT_FORWARD_MODE_NAME
+    assert new_config['kubernetes']['ssh_proxy_command'] == PORT_FORWARD_MODE_NAME
     assert skypilot_config.get_nested(('kubernetes', 'networking'),
                                       None) == NODEPORT_MODE_NAME
     # Check that dumping the config to a file with the new None can be reloaded
