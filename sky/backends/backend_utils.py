@@ -2850,7 +2850,7 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                                    stream_logs=False,
                                    require_outputs=True)
         if rc != 0:
-            logger.debug(f'CSYNC: failed to terminate the CSYNC on {runner.ip}')
+            logger.debug(f'CSYNC: failed to terminate the CSYNC on {runner.ip}. Details: {common_utils.format_exception(e, use_bracket=True)}')
 
     with log_utils.safe_rich_status(
             f'[bold cyan]Waiting for CSYNC to complete[/]'):
