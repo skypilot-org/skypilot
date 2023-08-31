@@ -1296,13 +1296,13 @@ def wait_until_ray_cluster_ready(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 log_path=log_path,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
             subprocess_utils.handle_returncode(
-                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 'Failed to run ray status on head node.', stderr)
             logger.debug(output)
 
@@ -2052,7 +2052,7 @@ def _update_cluster_status_no_lock(
                                                      port=handle.head_ssh_port,
                                                      **ssh_credentials)
             rc, output, stderr = runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
@@ -2060,7 +2060,7 @@ def _update_cluster_status_no_lock(
                 raise RuntimeError(
                     f'Refreshing status ({cluster_name!r}): Failed to check '
                     f'ray cluster\'s healthiness with '
-                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD}.\n'
+                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):

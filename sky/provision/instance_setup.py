@@ -33,14 +33,14 @@ _DUMP_RAY_PORTS = (
     f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
     f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\'')
 
+_RAY_PORT_COMMAND = (
+    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
+    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379)')
+
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'RAY_ADDRESS={ip}:$RAY_PORT ray status')
-
-RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD = (
-    RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND.format(ip='127.0.0.1'))
+    f'{_RAY_PORT_COMMAND}; '
+    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
@@ -221,8 +221,16 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +
            _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     if no_restart:
-        cmd = (RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND.format(ip=head_private_ip) +
-               f' || {{ {cmd}; }}')
+        # We do not use ray status to check whether ray is running, because
+        # on worker node, if the user started their own ray cluster, ray status
+        # will return 0, i.e., we don't know skypilot's ray cluster is running.
+        # Instead, we check whether the raylet process is running on gcs address
+        # that is connected to the head with the correct port.
+        cmd = (
+            f'{_RAY_PORT_COMMAND}; ps aux | grep "ray/raylet/raylet" | '
+            f'grep "--gcs-address={head_private_ip}:${{RAY_PORT}}" || '
+            f'{{ {cmd}; }}'
+        )
     else:
         cmd = 'ray stop; ' + cmd
 

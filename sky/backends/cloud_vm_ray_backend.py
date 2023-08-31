@@ -2066,7 +2066,7 @@ class RetryingVmProvisioner(object):
 
         returncode, output, _ = backend.run_on_head(
             handle,
-            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
+            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             require_outputs=True)
         while returncode == 0 and 'No cluster status' in output:
             # Retry until ray status is ready. This is to avoid the case where
@@ -2075,7 +2075,7 @@ class RetryingVmProvisioner(object):
             time.sleep(1)
             returncode, output, _ = backend.run_on_head(
                 handle,
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 require_outputs=True)
         if returncode == 0:
             return
