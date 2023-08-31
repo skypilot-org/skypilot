@@ -2590,6 +2590,28 @@ def test_azure_disk_tier():
         run_one_test(test)
 
 
+@pytest.mark.azure
+def test_azure_best_tier_failover():
+    type = Azure._get_disk_type(resources_utils.DiskTier.LOW)
+    name = _get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Azure.max_cluster_name_length())
+    region = 'westus2'
+    test = Test(
+        'azure-best-tier-failover',
+        [
+            f'sky launch -y -c {name} --cloud azure --region {region} '
+            f'--disk-tier best --instance-type Standard_D8_v5 echo "hello sky"',
+            f'az resource list --tag ray-cluster-name={name_on_cloud} --query '
+            f'"[?type==\'Microsoft.Compute/disks\'].sku.name" '
+            f'--output tsv | grep {type}',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins  (it takes around ~12 mins)
+    )
+    run_one_test(test)
+
+
 # ------ Testing Zero Quota Failover ------
 @pytest.mark.aws
 def test_aws_zero_quota_failover():
