@@ -1101,6 +1101,8 @@ def serve_up(
 
         handle = cluster_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend), backend
         # TODO(tian): endpoint is redundant now. We could fetch head ip of
         # controller cluster and concat with load balancer port to get the
         # endpoint.
@@ -1110,18 +1112,12 @@ def serve_up(
 
         console = rich_console.Console()
 
-        def _wait_until_job_is_running(cluster_name: str,
-                                       job_id: Optional[int],
-                                       retry_time: int = 30) -> bool:
+        def _wait_until_job_is_running_on_controller(
+                job_id: Optional[int]) -> bool:
             if job_id is None:
                 return False
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-            backend = backend_utils.get_backend_from_handle(handle)
-            assert isinstance(backend, backends.CloudVmRayBackend), backend
             pending_cnt = 0
-            for _ in range(retry_time):
+            for _ in range(serve.JOB_WAITING_TIMEOUT):
                 job_statuses = backend.get_job_status(handle, [job_id],
                                                       stream_logs=False)
                 job_status = job_statuses.get(str(job_id), None)
@@ -1154,9 +1150,7 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            controller_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, controller_job_id)
-        if not controller_job_is_running:
+        if not _wait_until_job_is_running_on_controller(controller_job_id):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}Controller failed to launch. '
@@ -1185,9 +1179,7 @@ def serve_up(
                 cluster_name=controller_cluster_name,
                 detach_run=True,
             )
-            load_balancer_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, load_balancer_job_id)
-        if not load_balancer_job_is_running:
+        if not _wait_until_job_is_running_on_controller(load_balancer_job_id):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
