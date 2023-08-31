@@ -37,7 +37,10 @@ _DUMP_RAY_PORTS = (
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
+    'RAY_ADDRESS={ip}:$RAY_PORT ray status')
+
+RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD = (
+    RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND.format(ip='127.0.0.1'))
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
@@ -74,14 +77,19 @@ def _log_start_end(func):
     return wrapper
 
 
+def _hint_worker_log_path(cluster_name: str,
+                          cluster_metadata: common.ClusterMetadata,
+                          stage_name: str):
+    if len(cluster_metadata.instances) > 1:
+        worker_log_path = metadata_utils.get_instance_log_dir(
+            cluster_name, '*') / (stage_name + '.log')
+        logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
+
+
 def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              digest: str,
                              cluster_metadata: common.ClusterMetadata,
                              ssh_credentials: Dict[str, str]) -> None:
-    if len(cluster_metadata.instances) > 1:
-        worker_log_path = metadata_utils.get_instance_log_dir(
-            cluster_name, '*') / (stage_name + '.log')
-        logger.info(f'Logs of worker nodes found at: {worker_log_path}')
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
         for instance_id, metadata in cluster_metadata.instances.items():
@@ -109,6 +117,8 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
                                 cluster_metadata: common.ClusterMetadata,
                                 ssh_credentials: Dict[str, str]) -> None:
     """Setup internal dependencies."""
+    _hint_worker_log_path(cluster_name, cluster_metadata,
+                          'internal_dependencies_setup')
     # compute the digest
     digests = []
     for cmd in setup_commands:
@@ -152,8 +162,6 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
         cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, (cluster_name,
                                                            cluster_metadata)
-    stage_name = 'start_ray_head_node'
-    logger.info(_START_TITLE.format(stage_name))
     # Log the head node's output to the provision.log
     log_path_abs = str(provision_config.config.provision_log)
     ray_options = (
@@ -164,21 +172,21 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+           'ray start --disable-usage-stats --head '
+           f'{ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
+    logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
-    returncode, stdout, stderr = ssh_runner.run(
-        'ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-        'ray start --disable-usage-stats --head '
-        f'{ray_options};' + _RAY_PRLIMIT + _DUMP_RAY_PORTS,
-        stream_logs=False,
-        log_path=log_path_abs,
-        require_outputs=True)
+    returncode, stdout, stderr = ssh_runner.run(cmd,
+                                                stream_logs=False,
+                                                log_path=log_path_abs,
+                                                require_outputs=True)
     if returncode:
         raise RuntimeError('Failed to start ray on the head node '
                            f'(exit code {returncode}). Error: '
                            f'===== stdout ===== \n{stdout}\n'
                            f'===== stderr ====={stderr}')
-    logger.info(_END_TITLE.format(stage_name))
 
 
 @_log_start_end
@@ -190,9 +198,7 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
     """Start Ray on the worker nodes."""
     if len(cluster_metadata.instances) <= 1:
         return
-
-    stage_name = 'start_ray_worker_nodes'
-    logger.info(_START_TITLE.format(stage_name))
+    _hint_worker_log_path(cluster_name, cluster_metadata, 'ray_cluster')
     ip_list = cluster_metadata.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list[1:], port_list=None, **ssh_credentials)
@@ -206,18 +212,21 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
 
     ray_options = (
         f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
-        f'--object-manager-port=8076 '
-        f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
+        f'--object-manager-port=8076')
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --disable-usage-stats {ray_options};' + _RAY_PRLIMIT)
+           f'ray start --disable-usage-stats {ray_options} || exit 1;' +
+           _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     if no_restart:
-        cmd = f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND} || ' + cmd
+        cmd = (RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND.format(ip=head_private_ip) +
+               f' || {{ {cmd}; }}')
     else:
         cmd = 'ray stop; ' + cmd
+
+    logger.info(f'Running command on worker nodes: {cmd}')
 
     def _setup_ray_worker(runner_and_id: Tuple[command_runner.SSHCommandRunner,
                                                str]):
@@ -238,10 +247,10 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
         if returncode:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Failed to start ray on the worker node '
-                                   f'(exit code {returncode}). Error: '
+                                   f'(exit code {returncode}). \n'
+                                   'Detailed Error: \n'
                                    f'===== stdout ===== \n{stdout}\n'
                                    f'===== stderr ====={stderr}')
-    logger.info(_END_TITLE.format(stage_name))
 
 
 @_log_start_end
@@ -254,6 +263,7 @@ def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
         cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, cluster_metadata
     log_path_abs = str(provision_config.config.provision_log)
+    logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
     returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,
                                                 require_outputs=True,
@@ -307,6 +317,8 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
                          ssh_credentials: Dict[str,
                                                str], wheel_hash: str) -> None:
     """Executes file mounts - rsyncing internal local files"""
+    _hint_worker_log_path(cluster_name, cluster_metadata,
+                          'internal_file_mounts')
 
     def _setup_node(runner: command_runner.SSHCommandRunner,
                     metadata: common.InstanceMetadata, log_path: str):

@@ -380,7 +380,7 @@ def _post_provision_setup(
                 head_instance.instance_id):
             # Check if head node Ray is alive
             returncode = head_runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND_ON_HEAD,
                 stream_logs=False)
             if returncode:
                 logger.info('Ray cluster on head is not up. Restarting...')
