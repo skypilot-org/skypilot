@@ -270,16 +270,22 @@ class Cloud:
                                                   clouds=cls._REPR.lower())
 
     def get_feasible_launchable_resources(
-            self,
-            resources: 'resources_lib.Resources',
-            num_nodes: int = 1) -> 'resources_lib.Resources':
-        """Returns a list of feasible and launchable resources.
+        self,
+        resources: 'resources_lib.Resources',
+        num_nodes: int = 1
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """Returns ([feasible and launchable resources], [fuzzy candidates]).
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
         cloud's offerings only w.r.t. accelerators constraints.
 
         Launchable resources require a cloud and an instance type be assigned.
+
+        Fuzzy candidates example: when the requested GPU is A100:1 but is not
+        available in a cloud/region, the fuzzy candidates are results of a fuzzy
+        search in the catalog that are offered in the location. E.g.,
+          ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
@@ -296,7 +302,10 @@ class Cloud:
             return ([], [])
         return self._get_feasible_launchable_resources(resources)
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """See get_feasible_launchable_resources()."""
         raise NotImplementedError
 
     def get_reservations_available_resources(
