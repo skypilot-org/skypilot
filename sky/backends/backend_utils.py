@@ -2016,13 +2016,11 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
 
-            if handle.head_ssh_port is None:
-                # Refresh the ssh ports. It is ok to refresh as it is fast.
-                handle.external_ssh_ports()
-                if handle.head_ssh_port is None:
-                    raise RuntimeError(
-                        f'Refreshing status ({cluster_name!r}): failed '
-                        f'to get the ssh ports. Handle: {handle}')
+            # Potentially refresh the external SSH ports, in case the existing
+            # cluster before #2491 was launched without external SSH ports
+            # cached.
+            external_ssh_ports = handle.external_ssh_ports()
+            head_ssh_port = external_ssh_ports[0]
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
@@ -2030,7 +2028,7 @@ def _update_cluster_status_no_lock(
 
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
-                                                     port=handle.head_ssh_port)
+                                                     port=head_ssh_port)
             rc, output, stderr = runner.run(
                 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
@@ -2055,6 +2053,12 @@ def _update_cluster_status_no_lock(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
             logger.debug(str(e))
+        except Exception as e:  # pylint: disable=broad-except
+            # This can be raised by `external_ssh_ports()`, due to the
+            # underlying call to kubernetes API.
+            logger.debug(
+                f'Refreshing status ({cluster_name!r}) failed: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return False
 
     # Determining if the cluster is healthy (UP):

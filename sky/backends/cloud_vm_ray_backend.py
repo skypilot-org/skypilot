@@ -1547,7 +1547,7 @@ class RetryingVmProvisioner(object):
                 tpu_delete_script=config_dict.get('tpu-delete-script'),
                 # Use the previous cluster's IPs and ports if available to
                 # optimize the case where the cluster is restarted, i.e., no
-                # need to query the IPs from the cloud provider.
+                # need to query IPs and ports from the cloud provider.
                 stable_internal_external_ips=prev_cluster_ips,
                 stable_ssh_ports=prev_ssh_ports)
             usage_lib.messages.usage.update_final_cluster_status(
@@ -2317,6 +2317,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
+        """Updates the cluster SSH ports cached in the handle."""
         # TODO(romilb): Replace this with a call to the cloud class to get ports
         # Use port 22 for everything except Kubernetes
         if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
@@ -2364,6 +2365,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             external_ips: The external IPs to use for the cluster. Similar to
                 internal_ips, it is an optimization to avoid retrieving the
                 external IPs from the cloud provider.
+
+        Raises:
+            exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+                HEAD or WORKER.
         """
 
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
