@@ -4142,6 +4142,8 @@ def serve_up(
                 # launch 2 new services in the same time, where we should
                 # inform user maybe you want to use the same controller
                 # and please wait for a while.
+                # Challenge: how to identify launching/unhealthy? Maybe we
+                # could check service statuses
                 continue
             handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)

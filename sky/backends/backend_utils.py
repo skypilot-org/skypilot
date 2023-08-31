@@ -99,7 +99,7 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
-DEFAULT_TASK_CPU_DEMAND = 0.5
+DEFAULT_TASK_CPU_DEMAND = 0.25
 
 # Mapping from reserved cluster names to the corresponding group name (logging
 # purpose).
@@ -2685,7 +2685,13 @@ def _refresh_service_record_no_lock(
     # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
-    if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+    # For controller init, there is a small chance that the controller is
+    # running but the load balancer is not. In this case, the service status
+    # shouldn't be refreshed too.
+    if record['status'] not in [
+            status_lib.ServiceStatus.SHUTTING_DOWN,
+            status_lib.ServiceStatus.CONTROLLER_INIT,
+    ]:
         record['status'] = _service_status_from_replica_info(
             latest_info['replica_info'])
 
