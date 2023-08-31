@@ -39,7 +39,7 @@ class KubernetesNetworkingMode(enum.Enum):
     jump pods.
     """
     NODEPORT = 'NodePort'
-    PORT_FORWARD = 'Port_Forward'
+    PORTFORWARD = 'PortForward'
 
 
 class KubernetesServiceType(enum.Enum):
@@ -374,7 +374,7 @@ def get_port(svc_name: str, namespace: str) -> int:
 
 
 def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
-    if network_mode == KubernetesNetworkingMode.PORT_FORWARD:
+    if network_mode == KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP
     nodes = kubernetes.core_api().list_node().items
@@ -682,7 +682,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
             This key must be authorized to access the SSH jump pod.
         ssh_jump_name: str; Name of the SSH jump service to use
         network_mode: KubernetesNetworkingMode; networking mode for ssh
-            session. It is either 'NODEPORT' or 'PORT_FORWARD'
+            session. It is either 'NODEPORT' or 'PORTFORWARD'
         namespace: Kubernetes namespace to use
         port_fwd_proxy_cmd_path: str; path to the script used as Proxycommand
             with 'kubectl port-forward'
@@ -752,7 +752,7 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str,
                     name=ssh_jump_name, namespace=namespace)
                 kubernetes.core_api().create_namespaced_service(
                     namespace, content['service_spec'])
-                port_forward_mode = KubernetesNetworkingMode.PORT_FORWARD.value
+                port_forward_mode = KubernetesNetworkingMode.PORTFORWARD.value
                 nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
                 clusterip_svc = KubernetesServiceType.CLUSTERIP.value
                 nodeport_svc = KubernetesServiceType.NODEPORT.value
@@ -936,7 +936,7 @@ def check_port_forward_mode_dependencies() -> None:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{KubernetesNetworkingMode.PORT_FORWARD.value}` default '
+                    f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
                     'networking mode and it is not installed. '
                     'For Debian/Ubuntu system, install it with:\n'
                     f'  $ sudo apt install {name}') from None

@@ -3,7 +3,6 @@ import logging
 import math
 from typing import Any, Dict, Union
 
-from sky import clouds
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
 

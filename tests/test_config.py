@@ -11,7 +11,7 @@ from sky.utils import kubernetes_utils
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
 NODEPORT_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.NODEPORT.value
-PORT_FORWARD_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD.value
+PORT_FORWARD_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD.value
 
 
 def _reload_config() -> None:

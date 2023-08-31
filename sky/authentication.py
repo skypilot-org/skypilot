@@ -382,7 +382,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
     # ClusterIP service
     nodeport_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
-    port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORT_FORWARD
+    port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD
     ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'),
                                                 port_forward_mode.value)
     get_or_generate_keys()
