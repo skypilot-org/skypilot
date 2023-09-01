@@ -98,7 +98,8 @@ def _build_sky_wheel():
             wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
         except StopIteration:
             raise RuntimeError(
-                f'Fail to find pip wheel for SkyPilot under {tmp_dir} with glob pattern {_WHEEL_PATTERN!r}. '
+                f'Fail to find pip wheel for SkyPilot under {tmp_dir} with '
+                f'glob pattern {_WHEEL_PATTERN!r}. '
                 f'Found: {list(map(str, tmp_dir.glob("*")))}.'
                 'No wheel file is generated.') from None
 
