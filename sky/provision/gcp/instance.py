@@ -239,6 +239,9 @@ def cleanup_ports(
         # No new ports were opened, so there is nothing to clean up.
         return
     project_id = provider_config['project_id']
+    # TODO(tian): Maybe we could filter all rules with
+    # (name eq user-ports-cluster-name-.*)? Then we don't need to
+    # read from provider config.
     for port in provider_config['ports']:
         rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
         instance_utils.GCPComputeInstance.delete_firewall_rule(

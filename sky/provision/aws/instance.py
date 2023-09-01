@@ -161,12 +161,42 @@ def terminate_instances(
     #  of most cloud implementations (including AWS).
 
 
-def generate_new_security_group_for_cluster(
+def _get_sg_from_name(
+    ec2: Any,
+    sg_name: str,
+):
+    # GroupNames will only filter SGs in the default VPC, so we need to use
+    # Filters here. Ref:
+    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
+    sgs = ec2.security_groups.filter(Filters=[{
+        'Name': 'group-name',
+        'Values': [sg_name]
+    }])
+    num_sg = len(list(sgs))
+    if num_sg == 0:
+        logger.warning(f'Expected security group {sg_name} not found. ')
+        return None
+    if num_sg > 1:
+        # TODO(tian): Better handle this case. Maybe we can check when creating
+        # the SG and throw an error if there is already an existing SG with the
+        # same name.
+        logger.warning(f'Found {num_sg} security groups with name {sg_name}. ')
+        return None
+    return list(sgs)[0]
+
+
+def _copy_sg_and_use(
     region: str,
     cluster_name_on_cloud: str,
+    previous_sg_name: str,
 ) -> Optional[str]:
-    sg_name = f'sky-sg-{cluster_name_on_cloud}'
     ec2 = _default_ec2_resource(region)
+    previous_sg = _get_sg_from_name(ec2, previous_sg_name)
+    if previous_sg is None:
+        logger.warning('Find previous security group failed. Skip creating '
+                       'new security group.')
+        return None
+    sg_name = f'sky-sg-{cluster_name_on_cloud}'
     filters = _cluster_name_filter(cluster_name_on_cloud)
     instances = ec2.instances.filter(Filters=filters)
     if len(list(instances)) != 1:
@@ -179,6 +209,7 @@ def generate_new_security_group_for_cluster(
         GroupName=sg_name,
         Description='Auto-created security group for Ray workers',
         VpcId=instance.vpc_id)
+    sg.authorize_ingress(IpPermissions=previous_sg.ip_permissions)
     instance.modify_attribute(Groups=[sg.id])
     return sg_name
 
@@ -214,29 +245,16 @@ def open_ports(
     # SG instead of modifying the default SG.
     sg_name = provider_config['security_group']['GroupName']
     if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
-        new_sg_name = generate_new_security_group_for_cluster(
-            region, cluster_name_on_cloud)
+        new_sg_name = _copy_sg_and_use(region, cluster_name_on_cloud, sg_name)
         if new_sg_name is None:
             logger.warning('Cannot create new security group. Skip open ports.')
             return None
+        logger.debug(f'Created new security group {new_sg_name}.')
         sg_name = new_sg_name
-    sgs = ec2.security_groups.filter(Filters=[{
-        'Name': 'group-name',
-        'Values': [sg_name]
-    }])
-    num_sg = len(list(sgs))
-    if num_sg == 0:
-        logger.warning(f'Expected security group {sg_name} not found. '
-                       'Skip open ports.')
+    sg = _get_sg_from_name(ec2, sg_name)
+    if sg is None:
+        logger.warning('Find new security group failed. Skip open ports.')
         return None
-    if num_sg > 1:
-        # TODO(tian): Better handle this case. Maybe we can check when creating
-        # the SG and throw an error if there is already an existing SG with the
-        # same name.
-        logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
-                       'Skip open ports. Please open them manually.')
-        return None
-    sg = list(sgs)[0]
     sg.authorize_ingress(IpPermissions=ip_permissions)
     return sg_name
 
@@ -252,29 +270,15 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    # GroupNames will only filter SGs in the default VPC, so we need to use
-    # Filters here. Ref:
-    # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
-    sgs = ec2.security_groups.filter(Filters=[{
-        'Name': 'group-name',
-        'Values': [sg_name]
-    }])
-    num_sg = len(list(sgs))
-    if num_sg == 0:
-        logger.warning(f'Expected security group {sg_name} not found. '
-                       'Skip cleanup.')
-        return
-    if num_sg > 1:
-        # TODO(tian): Better handle this case. Maybe we can check when creating
-        # the SG and throw an error if there is already an existing SG with the
-        # same name.
-        logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
-                       'Skip cleanup. Please delete them manually.')
+    sg = _get_sg_from_name(ec2, sg_name)
+    if sg is None:
+        logger.warning(
+            'Find security group failed. Skip cleanup security group.')
         return
     backoff = common_utils.Backoff()
     for _ in range(MAX_ATTEMPTS):
         try:
-            list(sgs)[0].delete()
+            sg.delete()
         except aws.botocore_exceptions().ClientError as e:
             if _DEPENDENCY_VIOLATION_PATTERN.findall(str(e)):
                 logger.debug(

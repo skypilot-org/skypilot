@@ -2959,7 +2959,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert len(task.resources) == 1
         ports = list(task.resources)[0].ports
         if ports is not None:
-            self._open_inexistent_ports(handle, ports)
+            with rich_utils.safe_status(
+                    '[bold cyan]Launching - Opening new ports'):
+                self._open_inexistent_ports(handle, ports)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
