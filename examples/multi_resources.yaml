@@ -1,12 +1,12 @@
 name: multi_resources
 
 resources:
-  cloud: gcp
+  cloud: azure
   # zone: us-east-1d
-  use_spot: True
-  accelerators: ['A100-40GB:1', 'A100-80GB']
-  # accelerators: ['K80:1', 'V100:1']
-  # accelerators: 'V100:1'
+  # use_spot: True
+  # accelerators: ['A100-40GB:1', 'A100-80GB']
+  accelerators: ['K80:1', 'K80:2']
+  # accelerators: K80:1
 
 run: |
   nvidia-smi

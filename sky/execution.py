@@ -629,17 +629,27 @@ def spot_launch(
                 'generated) .')
         task_names.add(task_.name)
     for task_ in dag.tasks:
-        assert len(task_.resources) == 1, task_
-        resources = list(task_.resources)[0]
 
-        change_default_value: Dict[str, Any] = {}
-        if not resources.use_spot_specified:
-            change_default_value['use_spot'] = True
-        if resources.spot_recovery is None:
-            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
-
-        new_resources = resources.copy(**change_default_value)
-        task_.set_resources({new_resources})
+        if len(task_.resources_pref_list) >= 1:
+            res_ord = task_.resources_pref_list
+        else:
+            res_ord = list(task_.resources)  # pylint
+        
+        new_resources_list = []
+        for res in res_ord:
+            
+            override_params = {}
+            if not res.use_spot_specified:
+                override_params['use_spot'] = True
+            if res.spot_recovery is None:
+                override_params['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+            new_resources = res.copy(**override_params)
+            new_resources_list.append(new_resources)
+        
+        if len(task_.resources_pref_list) >= 1:
+            task_.set_resources(new_resources_list)
+        else:
+            task_.set_resources(set(new_resources_list))
 
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 

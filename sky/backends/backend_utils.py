@@ -2661,8 +2661,10 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     else:
         # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
         # sky.optimize(), so best_resources may be None.
-        assert len(task.resources) == 1, task.resources
-        resources = list(task.resources)[0]
+        
+        # assert len(task.resources) == 1, task.resources
+        # resources = list(task.resources)[0]
+        resources = task.best_resources
     if resources is not None:
         accelerator_dict = resources.accelerators
     return accelerator_dict
