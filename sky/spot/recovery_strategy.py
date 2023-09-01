@@ -332,12 +332,14 @@ class StrategyExecutor:
                 # If the file mounts fails, the failure can be due to:
                 # 1. Errors before the job submission, e.g., invalid file mounts
                 #   -- user changed the bucket content on the cloud manually
-                # 2. Preemption during the file mounts.
                 #   during the launch/recovery.
+                # 2. Preemption during the file mounts.
                 # When case 1 happens, we should not retry the launch, as the
                 # error is not recoverable.
                 # When case 2 happens, we should be able to find the cluster not
                 # in UP status, and we can retry the launch.
+                # TODO(zhwu): For network glitches that cause file mounts fail, 
+                # the cluster will still be UP, and we should retry the launch.
 
                 # Pull the actual cluster status from the cloud provider to
                 # determine whether the cluster is preempted.
