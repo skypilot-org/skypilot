@@ -8,6 +8,7 @@ from sky.serve.constants import JOB_WAITING_TIMEOUT
 from sky.serve.constants import LOAD_BALANCER_PORT_RANGE
 from sky.serve.serve_utils import generate_controller_cluster_name
 from sky.serve.serve_utils import generate_controller_yaml_file_name
+from sky.serve.serve_utils import generate_remote_service_dir_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name
 from sky.serve.serve_utils import generate_replica_cluster_name
 from sky.serve.serve_utils import get_ports_for_controller_and_load_balancer

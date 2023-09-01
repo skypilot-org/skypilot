@@ -75,17 +75,42 @@ def generate_controller_cluster_name(service_name: str) -> str:
     return constants.CONTROLLER_PREFIX + service_name
 
 
-def generate_remote_task_yaml_file_name(service_name: str) -> str:
-    service_name = service_name.replace('-', '_')
-    # Don't expand here since it is used for remote machine.
-    prefix = constants.SERVE_PREFIX
-    return os.path.join(prefix, f'{service_name}.yaml')
-
-
 def generate_controller_yaml_file_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVE_PREFIX)
     return os.path.join(prefix, f'{service_name}_controller.yaml')
+
+
+def generate_remote_service_dir_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    return os.path.join(constants.SERVE_PREFIX, service_name)
+
+
+def generate_remote_task_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'task.yaml')
+
+
+def generate_replica_launch_log_file_name(service_name: str,
+                                          replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_launch.log')
+
+
+def generate_replica_down_log_file_name(service_name: str,
+                                        replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_down.log')
+
+
+def generate_replica_local_log_file_name(service_name: str,
+                                         replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_local.log')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -94,24 +119,6 @@ def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
 
 def get_replica_id_from_cluster_name(cluster_name: str) -> int:
     return int(cluster_name.split('-')[-1])
-
-
-def generate_replica_launch_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_launch.log')
-
-
-def generate_replica_down_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_down.log')
-
-
-def generate_replica_local_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_local.log')
 
 
 def get_ports_for_controller_and_load_balancer(
@@ -315,10 +322,8 @@ def stream_logs(service_name: str,
                 skip_local_log_file_check: bool = False) -> str:
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
     local_log_file_name = generate_replica_local_log_file_name(
-        replica_cluster_name)
+        service_name, replica_id)
 
     if not skip_local_log_file_check and os.path.exists(local_log_file_name):
         # When sync down, we set skip_local_log_file_check to False so it won't
@@ -329,6 +334,8 @@ def stream_logs(service_name: str,
             print(f.read(), flush=True)
         return ''
 
+    replica_cluster_name = generate_replica_cluster_name(
+        service_name, replica_id)
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
@@ -336,7 +343,7 @@ def stream_logs(service_name: str,
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     launch_log_file_name = generate_replica_launch_log_file_name(
-        replica_cluster_name)
+        service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')

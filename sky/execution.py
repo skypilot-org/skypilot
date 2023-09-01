@@ -1026,6 +1026,7 @@ def serve_up(
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
+            'service_dir': serve.generate_remote_service_dir_name(service_name),
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
         }
@@ -1066,6 +1067,7 @@ def serve_up(
                 backend=backend,
                 stages=[
                     Stage.SYNC_FILE_MOUNTS,
+                    Stage.EXEC,
                 ],
                 cluster_name=controller_cluster_name,
             )

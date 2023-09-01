@@ -12,3 +12,6 @@ setup: |
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
+
+run: |
+  mkdir -p {{service_dir}}

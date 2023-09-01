@@ -412,7 +412,8 @@ class SkyPilotInfraProvider(InfraProvider):
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
-        fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_launch_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
@@ -451,7 +452,8 @@ class SkyPilotInfraProvider(InfraProvider):
                 follow=False,
                 skip_local_log_file_check=True)
             local_log_file_name = (
-                serve_utils.generate_replica_local_log_file_name(cluster_name))
+                serve_utils.generate_replica_local_log_file_name(
+                    self.service_name, replica_id))
             with open(local_log_file_name, 'w') as f:
                 try:
                     subprocess.run(code, shell=True, check=True, stdout=f)
@@ -465,7 +467,8 @@ class SkyPilotInfraProvider(InfraProvider):
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']
-        fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_down_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
