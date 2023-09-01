@@ -143,6 +143,9 @@ class SpotController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+            exceptions.FileMountError: This will be raised when the underlying
+                `sky.launch` fails due to file mount errors that cannot be a
+                preemption.
             exceptions.SpotJobReachedMaxRetryError: This will be raised when
                 all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -339,8 +342,8 @@ class SpotController:
                 if not succeeded:
                     break
         except exceptions.ProvisionPrechecksError as e:
-            # Please refer to the docstring of self._run for the cases when
-            # this exception can occur.
+            # Please refer to the docstring of self._run_one_task for the cases
+            # when this exception can occur.
             failure_reason = ('; '.join(
                 common_utils.format_exception(reason, use_bracket=True)
                 for reason in e.reasons))
@@ -355,8 +358,8 @@ class SpotController:
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
         except exceptions.SpotJobReachedMaxRetriesError as e:
-            # Please refer to the docstring of self._run for the cases when
-            # this exception can occur.
+            # Please refer to the docstring of self._run_one_task for the cases
+            # when this exception can occur.
             logger.error(common_utils.format_exception(e))
             # The spot job should be marked as FAILED_NO_RESOURCE, as the
             # spot job may be able to launch next time.
@@ -364,6 +367,19 @@ class SpotController:
                 self._job_id,
                 task_id=task_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                failure_reason=common_utils.format_exception(e),
+                callback_func=spot_utils.event_callback_func(
+                    job_id=self._job_id,
+                    task_id=task_id,
+                    task=self._dag.tasks[task_id]))
+        except exceptions.FileMountError as e:
+            # Please refer to the docstring of self._run_one_task for the cases
+            # when this exception can occur.
+            logger.error(common_utils.format_exception(e))
+            spot_state.set_failed(
+                self._job_id,
+                task_id=task_id,
+                failure_type=spot_state.SpotStatus.FAILED,
                 failure_reason=common_utils.format_exception(e),
                 callback_func=spot_utils.event_callback_func(
                     job_id=self._job_id,

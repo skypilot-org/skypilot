@@ -3,7 +3,9 @@ import typing
 from typing import Dict, Generic, Optional
 
 import sky
+from sky import exceptions
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
@@ -59,7 +61,12 @@ class Backend(Generic[_ResourceHandleType]):
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
     def sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
-        return self._sync_workdir(handle, workdir)
+        try:
+            return self._sync_workdir(handle, workdir)
+        except Exception as e:  # pylint: disable=broad-except
+            raise exceptions.FileMountError(
+                f'Failed to sync file mounts for {handle.get_cluster_name()!r}:'
+                f' {common_utils.format_exception(e)}') from e
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
@@ -69,7 +76,13 @@ class Backend(Generic[_ResourceHandleType]):
         all_file_mounts: Dict[Path, Path],
         storage_mounts: Dict[Path, 'storage_lib.Storage'],
     ) -> None:
-        return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
+        try:
+            return self._sync_file_mounts(handle, all_file_mounts,
+                                          storage_mounts)
+        except Exception as e:  # pylint: disable=broad-except
+            raise exceptions.FileMountError(
+                f'Failed to sync file mounts for {handle.get_cluster_name()!r}:'
+                f' {common_utils.format_exception(e)}') from e
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')

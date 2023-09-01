@@ -327,9 +327,42 @@ class StrategyExecutor:
                     return None
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
+            # TODO(zhwu): Avoid retry for storage exceptions
+            except exceptions.FileMountError as e:
+                # If the file mounts fails, the failure can be due to:
+                # 1. Errors before the job submission, e.g., invalid file mounts
+                #   -- user changed the bucket content on the cloud manually
+                # 2. Preemption during the file mounts.
+                #   during the launch/recovery.
+                # When case 1 happens, we should not retry the launch, as the
+                # error is not recoverable.
+                # When case 2 happens, we should be able to find the cluster not
+                # in UP status, and we can retry the launch.
+
+                # Pull the actual cluster status from the cloud provider to
+                # determine whether the cluster is preempted.
+                time.sleep(5)
+                (cluster_status,
+                 _) = backend_utils.refresh_cluster_status_handle(
+                     self.cluster_name,
+                     force_refresh_statuses=set(status_lib.ClusterStatus))
+                if cluster_status == status_lib.ClusterStatus.UP:
+                    # Case 1: Errors before the job submission. We should fail
+                    # fast and not retry the launch.
+                    logger.info('User file mounts failed. Not retrying.\n'
+                                '  Detailed exception: '
+                                f'{common_utils.format_exception(e)}')
+                    # We should raise the exception, no matter whether
+                    # raise_on_failure is True or False, because even though the
+                    # user file mounts suceeded in the previous launch, contents
+                    # in the bucket may have changed, and we should not retry
+                    # the launch, if the user file mounts failed.
+                    raise
+                # Case 2: The cluster is preempted during the launch, retry
+                # the launch.
+                logger.info('The cluster is preempted during the launch. '
+                            'Retrying.')
             except Exception as e:  # pylint: disable=broad-except
-                # If the launch fails, it will be recovered by the following
-                # code.
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
                 logger.info(f'  Traceback: {traceback.format_exc()}')
