@@ -433,10 +433,11 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
 
 def _get_endpoint(service_record: _ServiceRecord) -> str:
     handle = _get_service_handle(service_record)
-    endpoint = handle.endpoint
-    if not endpoint:
+    if handle.endpoint_ip is None:
         return '-'
-    return endpoint
+    if handle.load_balancer_port is None:
+        return '-'
+    return f'{handle.endpoint_ip}:{handle.load_balancer_port}'
 
 
 def _get_service_status(

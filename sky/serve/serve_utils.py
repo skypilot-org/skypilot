@@ -157,7 +157,7 @@ class ServiceHandle(object):
     - (required) Service requested resources.
     - (required) All replica info.
     - (optional) Service uptime.
-    - (optional) Service endpoint URL.
+    - (optional) Service endpoint IP.
     - (optional) Controller port to use.
     - (optional) LoadBalancer port to use.
     - (optional) Controller job id.
@@ -176,7 +176,7 @@ class ServiceHandle(object):
         requested_resources: 'sky.Resources',
         replica_info: List[Dict[str, Any]],
         uptime: Optional[int] = None,
-        endpoint: Optional[str] = None,
+        endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
         load_balancer_port: Optional[int] = None,
         controller_job_id: Optional[int] = None,
@@ -187,7 +187,7 @@ class ServiceHandle(object):
         self.controller_cluster_name = controller_cluster_name
         self.replica_info = replica_info
         self.uptime = uptime
-        self.endpoint = endpoint
+        self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
         self.controller_port = controller_port
@@ -201,7 +201,7 @@ class ServiceHandle(object):
                 f'\n\tcontroller_cluster_name={self.controller_cluster_name},'
                 f'\n\treplica_info={self.replica_info},'
                 f'\n\tuptime={self.uptime},'
-                f'\n\tendpoint={self.endpoint},'
+                f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
                 f'\n\tcontroller_port={self.controller_port},'

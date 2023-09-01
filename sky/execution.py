@@ -1104,11 +1104,7 @@ def serve_up(
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend), backend
-        # TODO(tian): endpoint is redundant now. We could fetch head ip of
-        # controller cluster and concat with load balancer port to get the
-        # endpoint.
-        endpoint = f'{handle.head_ip}:{load_balancer_port}'
-        service_handle.endpoint = endpoint
+        service_handle.endpoint_ip = handle.head_ip
         global_user_state.set_service_handle(service_name, service_handle)
 
         console = rich_console.Console()
@@ -1220,7 +1216,7 @@ def serve_up(
         print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
               'Endpoint URL: '
               f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{endpoint}'
+              f'{handle.head_ip}:{load_balancer_port}'
               f'{colorama.Style.RESET_ALL}')
         print(f'{colorama.Fore.GREEN}Starting replica now...'
               f'{colorama.Style.RESET_ALL}')

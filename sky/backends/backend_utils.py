@@ -2646,7 +2646,7 @@ def _refresh_service_record_no_lock(
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    if not service_handle.endpoint:
+    if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
