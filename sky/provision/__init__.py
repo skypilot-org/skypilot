@@ -82,7 +82,7 @@ def open_ports(
     cluster_name_on_cloud: str,
     ports: List[Union[int, str]],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
+) -> Optional[str]:
     """Open ports for inbound traffic."""
     raise NotImplementedError
 

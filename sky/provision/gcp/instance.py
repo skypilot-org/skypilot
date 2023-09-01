@@ -173,11 +173,13 @@ def terminate_instances(
     # time (same as what we did in ray's node_provider).
 
 
+# We disable useless return here, otherwise mypy will complain.
+# pylint: disable=useless-return
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[Union[int, str]],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
+) -> Optional[str]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
@@ -224,6 +226,7 @@ def open_ports(
     _wait_for_operations(operations, project_id, None)
     if errs:
         raise RuntimeError(f'Failed to open ports: {errs}')
+    return None
 
 
 def cleanup_ports(

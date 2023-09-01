@@ -2884,8 +2884,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     'new provisioner API.')
                 return
             logger.debug(f'Opening new ports {ports_to_open} for {cloud}')
-            provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
-                                     ports_to_open, provider_config)
+            new_sg_name = provision_lib.open_ports(repr(cloud),
+                                                   handle.cluster_name_on_cloud,
+                                                   ports_to_open,
+                                                   provider_config)
+            if new_sg_name is not None:
+                assert isinstance(cloud, clouds.AWS)
+                provider_config['security_group']['GroupName'] = new_sg_name
             new_ports = existing_ports + ports_to_open
             provider_config['ports'] = new_ports
             common_utils.dump_yaml(handle.cluster_yaml, config)

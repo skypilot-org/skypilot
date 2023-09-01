@@ -161,11 +161,33 @@ def terminate_instances(
     #  of most cloud implementations (including AWS).
 
 
+def generate_new_security_group_for_cluster(
+    region: str,
+    cluster_name_on_cloud: str,
+) -> Optional[str]:
+    sg_name = f'sky-sg-{cluster_name_on_cloud}'
+    ec2 = _default_ec2_resource(region)
+    filters = _cluster_name_filter(cluster_name_on_cloud)
+    instances = ec2.instances.filter(Filters=filters)
+    if len(list(instances)) != 1:
+        logger.warning(
+            f'Expected 1 instance with cluster name {cluster_name_on_cloud}, '
+            f'but found {len(instances)}. Skip creating security group.')
+        return None
+    instance = list(instances)[0]
+    sg = ec2.create_security_group(
+        GroupName=sg_name,
+        Description='Auto-created security group for Ray workers',
+        VpcId=instance.vpc_id)
+    instance.modify_attribute(Groups=[sg.id])
+    return sg_name
+
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[Union[int, str]],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
+) -> Optional[str]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
@@ -191,6 +213,13 @@ def open_ports(
     # TODO(tian): Check if the SG is the default SG. If so, change to a new
     # SG instead of modifying the default SG.
     sg_name = provider_config['security_group']['GroupName']
+    if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
+        new_sg_name = generate_new_security_group_for_cluster(
+            region, cluster_name_on_cloud)
+        if new_sg_name is None:
+            logger.warning('Cannot create new security group. Skip open ports.')
+            return None
+        sg_name = new_sg_name
     sgs = ec2.security_groups.filter(Filters=[{
         'Name': 'group-name',
         'Values': [sg_name]
@@ -199,16 +228,17 @@ def open_ports(
     if num_sg == 0:
         logger.warning(f'Expected security group {sg_name} not found. '
                        'Skip open ports.')
-        return
+        return None
     if num_sg > 1:
         # TODO(tian): Better handle this case. Maybe we can check when creating
         # the SG and throw an error if there is already an existing SG with the
         # same name.
         logger.warning(f'Found {num_sg} security groups with name {sg_name}. '
                        'Skip open ports. Please open them manually.')
-        return
+        return None
     sg = list(sgs)[0]
     sg.authorize_ingress(IpPermissions=ip_permissions)
+    return sg_name
 
 
 def cleanup_ports(
