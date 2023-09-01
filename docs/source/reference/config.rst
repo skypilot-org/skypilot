@@ -99,3 +99,17 @@ Available fields and semantics:
     ssh_proxy_command:
       us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
       us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
+
+  # Advanced GCP configurations (optional).
+  # Apply to all new instances but not existing ones.
+  gcp:
+    # Reserved capacity (optional).
+    #
+    # The specific reservation to be considered when provisioning clusters on GCP.
+    # SkyPilot will automatically prioritize this reserved capacity (considered as
+    # zero cost) if the requested resources matches the reservation.
+    # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
+    specific_reservations:
+      # Only one element is allowed in this list, as GCP disallows multiple
+      # specific_reservations in a single request.
+      - projects/my-project/reservations/my-reservation

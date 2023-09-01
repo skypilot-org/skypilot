@@ -495,7 +495,9 @@ class GCP(clouds.Cloud):
 
         return resources_vars
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
