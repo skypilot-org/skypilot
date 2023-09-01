@@ -338,7 +338,7 @@ class StrategyExecutor:
                 # error is not recoverable.
                 # When case 2 happens, we should be able to find the cluster not
                 # in UP status, and we can retry the launch.
-                # TODO(zhwu): For network glitches that cause file mounts fail, 
+                # TODO(zhwu): For network glitches that cause file mounts fail,
                 # the cluster will still be UP, and we should retry the launch.
 
                 # Pull the actual cluster status from the cloud provider to
