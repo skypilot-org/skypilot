@@ -36,8 +36,7 @@ class RayUpLineProcessor(LineProcessor):
 
     def __enter__(self):
         self.state = self.ProvisionStatus.LAUNCH
-        self.status_display = rich_utils.safe_status(
-            '[bold cyan]Launching')
+        self.status_display = rich_utils.safe_status('[bold cyan]Launching')
         self.status_display.start()
 
     def process_line(self, log_line):
