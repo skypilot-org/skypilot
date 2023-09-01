@@ -99,7 +99,7 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
-DEFAULT_TASK_CPU_DEMAND = 0.25
+DEFAULT_TASK_CPU_DEMAND = 0.5
 
 # Mapping from reserved cluster names to the corresponding group name (logging
 # purpose).

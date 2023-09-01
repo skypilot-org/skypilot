@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
-import requests
 from rich import console as rich_console
 
 import sky
@@ -1282,8 +1281,7 @@ def serve_down(
                     'Unexpected message when tearing down replica of service '
                     f'{service_name}: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
-        except (RuntimeError, ValueError,
-                requests.exceptions.ConnectionError) as e:
+        except Exception as e:  # pylint: disable=broad-except
             if purge:
                 logger.warning('Ignoring error when cleaning replicas of '
                                f'{service_name}: {e}')
@@ -1307,8 +1305,7 @@ def serve_down(
             if service_handle.load_balancer_job_id is not None:
                 jobs.append(service_handle.load_balancer_job_id)
             backend.cancel_jobs(handle, jobs=jobs, silent=True)
-    except (ValueError, exceptions.ClusterNotUpError,
-            exceptions.CommandError) as e:
+    except Exception as e:  # pylint: disable=broad-except
         if purge:
             logger.warning('Ignoring error when stopping controller and '
                            f'load balancer jobs of service {service_name}: {e}')
