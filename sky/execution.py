@@ -968,10 +968,9 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 @usage_lib.entrypoint
 def serve_up(
     task: 'sky.Task',
+    service: 'sky.ServiceSpec',
     service_name: str,
-    controller_cluster_name: Optional[str],
-    controller_resources: 'sky.Resources',
-    controller_best_resources: Optional['sky.Resources'],
+    controller_cluster_name: Optional[str] = None,
 ):
     """Spin up a service.
 
@@ -979,30 +978,30 @@ def serve_up(
 
     Args:
         task: sky.Task to serve up.
+        service: ServiceSpec to serve up.
         service_name: Name of the service.
-        controller_resources: The resources requirement for the controller.
-        controller_best_resources: The optimized resources for the controller.
+        controller_cluster_name: Name of the controller cluster to use.
+          If None, a new controller cluster will be created.
     """
     use_existing_controller = True
     if controller_cluster_name is None:
-        assert controller_best_resources is not None
+        # TODO(tian): Auto-select too. Only generate new one when none
+        # available or all are full.
         controller_cluster_name = serve.generate_controller_cluster_name(
             service_name)
-        controller_best_resources.cloud.check_cluster_name_is_valid(
-            controller_cluster_name)
+        sky.clouds.Cloud.check_cluster_name_is_valid(controller_cluster_name)
         use_existing_controller = False
-    assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
     service_handle = serve.ServiceHandle(
         controller_cluster_name=controller_cluster_name,
-        policy=task.service.policy_str(),
+        policy=service.policy_str(),
         requested_resources=requested_resources,
         replica_info=[])
     global_user_state.add_or_update_service(
         service_name, None, service_handle,
         status_lib.ServiceStatus.CONTROLLER_INIT)
-    app_port = int(task.service.app_port)
+    app_port = int(service.app_port)
 
     # TODO(tian): Use skyserve constants.
     _maybe_translate_local_file_mounts_and_sync_up(task)
@@ -1037,8 +1036,11 @@ def serve_up(
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         # This is for the case when the best resources failed to provision.
-        controller_task.set_resources(controller_resources)
-        controller_task.best_resources = controller_best_resources
+        controller_task.set_resources(service.controller_resources)
+        # It is ok if the service.best_resources is None, since the _execution
+        # function will optimize it if needed. This is typically from the case
+        # when directly using programmatic API to serve up.
+        controller_task.best_resources = service.controller_best_resources
 
         controller_envs = {
             'SKYPILOT_USER_ID': common_utils.get_user_hash(),

@@ -12,8 +12,8 @@ from typing import Optional
 import fastapi
 import uvicorn
 
+import sky
 from sky import authentication
-from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import infra_providers
@@ -135,7 +135,7 @@ if __name__ == '__main__':
     authentication.get_or_generate_keys()
 
     # ======= Infra Provider =========
-    service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
+    service_spec = sky.ServiceSpec.from_yaml(args.task_yaml)
     _infra_provider = infra_providers.SkyPilotInfraProvider(
         args.task_yaml,
         args.service_name,

@@ -1,4 +1,5 @@
 """Service specification for SkyServe."""
+import copy
 import json
 import os
 import textwrap
@@ -6,14 +7,31 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+import sky
 from sky.backends import backend_utils
 from sky.serve import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
 
 
-class SkyServiceSpec:
-    """SkyServe service specification."""
+def _prepare_controller_resources(
+        extra_controller_resources: Optional[Dict[str, Any]]) -> sky.Resources:
+    controller_resources_config = copy.copy(constants.CONTROLLER_RESOURCES)
+    if extra_controller_resources is not None:
+        controller_resources_config.update(extra_controller_resources)
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config)
+    except ValueError as e:
+        raise ValueError(
+            'Encountered error when parsing controller resources') from e
+    extra_ports = controller_resources.ports or []
+    extra_ports.append(constants.LOAD_BALANCER_PORT_RANGE)
+    return controller_resources.copy(ports=extra_ports)
+
+
+class ServiceSpec:
+    """ServiceSpec: a skyserve service specification."""
 
     def __init__(
         self,
@@ -53,7 +71,9 @@ class SkyServiceSpec:
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
-        self._controller_resources = controller_resources
+        self._controller_resources = _prepare_controller_resources(
+            controller_resources)
+        self.controller_best_resources = None
 
     @staticmethod
     def from_yaml_config(config: Optional[Dict[str, Any]]):
@@ -119,7 +139,7 @@ class SkyServiceSpec:
         service_config['controller_resources'] = config.pop(
             'controller_resources', None)
 
-        return SkyServiceSpec(**service_config)
+        return ServiceSpec(**service_config)
 
     @staticmethod
     def from_yaml(yaml_path: str):
@@ -139,7 +159,7 @@ class SkyServiceSpec:
                 raise ValueError('Service YAML must have a "service" section. '
                                  f'Is it correct? Path: {yaml_path}')
 
-        return SkyServiceSpec.from_yaml_config(config['service'])
+        return ServiceSpec.from_yaml_config(config['service'])
 
     def to_yaml_config(self):
         config = dict()
@@ -167,7 +187,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
         add_if_not_none('controller_resources', None,
-                        self._controller_resources)
+                        self._controller_resources.to_yaml_config())
 
         return config
 
@@ -193,6 +213,20 @@ class SkyServiceSpec:
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)
+
+    def replace_replica_task_ports(self, replica_task: 'sky.Task') -> None:
+        assert len(replica_task.resources) == 1
+        requested_resources: sky.Resources = list(replica_task.resources)[0]
+        if requested_resources.ports is not None:
+            if not (len(requested_resources.ports) == 1 and
+                    requested_resources.ports[0] == self.app_port):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Specifying ports in resources is not allowed. '
+                        'SkyServe will use the port specified in the '
+                        'service section.')
+        replica_task.set_resources(
+            requested_resources.copy(ports=[int(self.app_port)]))
 
     @property
     def readiness_suffix(self) -> str:
@@ -231,5 +265,5 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def controller_resources(self) -> Optional[Dict[str, Any]]:
+    def controller_resources(self) -> sky.Resources:
         return self._controller_resources

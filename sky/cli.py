@@ -4100,6 +4100,7 @@ def serve_up(
     if task.service is None:
         click.secho('Service section not found in the YAML file.', fg='red')
         return
+    service = sky.ServiceSpec.from_yaml_config(task.service)
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     if requested_resources.ports is not None:
@@ -4107,26 +4108,11 @@ def serve_up(
             raise ValueError(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
-    app_port = int(task.service.app_port)
+    app_port = int(service.app_port)
     task.set_resources(requested_resources.copy(ports=[app_port]))
 
-    controller_resources_config: Dict[str, Any] = copy.copy(
-        serve_lib.CONTROLLER_RESOURCES)
-    if task.service.controller_resources is not None:
-        controller_resources_config.update(task.service.controller_resources)
-    if 'ports' not in controller_resources_config:
-        controller_resources_config['ports'] = []
-    controller_resources_config['ports'].append(
-        serve_lib.LOAD_BALANCER_PORT_RANGE)
-    try:
-        controller_resources = sky.Resources.from_yaml_config(
-            controller_resources_config)
-    except ValueError as e:
-        raise ValueError(
-            'Encountered error when parsing controller resources') from e
-
     click.secho('Service Spec:', fg='cyan')
-    click.echo(task.service)
+    click.echo(service)
 
     existing_controllers = global_user_state.get_cluster_names_start_with(
         serve_lib.CONTROLLER_PREFIX)
@@ -4148,7 +4134,7 @@ def serve_up(
             handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             # TODO(tian): Why less_demanding_than not comparing cpus and memory?
-            if controller_resources.less_demanding_than(
+            if service.controller_resources.less_demanding_than(
                     handle.launched_resources):
                 useable_controllers.append(controller_name)
 
@@ -4169,7 +4155,7 @@ def serve_up(
                     f'Controller {controller!r} not found or resources not '
                     'match.')
             dummy_controller_task = sky.Task().set_resources(
-                controller_resources)
+                service.controller_resources)
             click.secho('Launching a new controller.', fg='cyan')
             click.secho('The controller will use the following resource:',
                         fg='cyan')
@@ -4178,12 +4164,12 @@ def serve_up(
             sky.optimize(dag)
             click.echo()
             dummy_controller_task: sky.Task = dag.tasks[0]
-            controller_best_resources = dummy_controller_task.best_resources
+            service.controller_best_resources = (
+                dummy_controller_task.best_resources)
             useable_controller = None
         else:
             useable_controller = useable_controllers[0]
     if useable_controller is not None:
-        controller_best_resources = None
         click.secho(f'Using existing controller {useable_controller!r}.\n',
                     fg='cyan')
 
@@ -4198,8 +4184,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, useable_controller, controller_resources,
-                 controller_best_resources)
+    sky.serve_up(task, service, service_name, useable_controller)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

@@ -39,6 +39,7 @@ from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
+from sky.service_spec import ServiceSpec
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
 from sky.task import Task

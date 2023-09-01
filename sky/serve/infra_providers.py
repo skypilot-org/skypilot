@@ -441,8 +441,7 @@ class SkyPilotInfraProvider(InfraProvider):
                            'exists. Skipping.')
             return
 
-        replica_id = serve_utils.get_replica_id_from_cluster_name(
-            cluster_name)
+        replica_id = serve_utils.get_replica_id_from_cluster_name(cluster_name)
         if sync_down_logs:
             logger.info(f'Syncing down logs for cluster {cluster_name}...')
             code = serve_utils.ServeCodeGen.stream_logs(

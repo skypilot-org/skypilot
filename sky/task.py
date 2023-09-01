@@ -14,7 +14,6 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
@@ -149,6 +148,7 @@ class Task:
         envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
+        service: Optional[Dict[str, Any]] = None,
         # Advanced:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
@@ -204,6 +204,7 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
+          service: A dictionary of service configuration.
           docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
             is used.) The base docker image that this Task will be built on.
             Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -230,7 +231,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
-        self._service: Optional[serve_lib.SkyServiceSpec] = None
+        self._service = service
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -345,6 +346,7 @@ class Task:
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
             num_nodes=config.pop('num_nodes', None),
+            service=config.pop('service', None),
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
         )
@@ -406,11 +408,6 @@ class Task:
         resources = sky.Resources.from_yaml_config(resources)
 
         task.set_resources({resources})
-
-        service = config.pop('service', None)
-        service = serve_lib.SkyServiceSpec.from_yaml_config(service)
-        task.set_service(service)
-
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -573,21 +570,8 @@ class Task:
         return self.resources
 
     @property
-    def service(self) -> Optional[serve_lib.SkyServiceSpec]:
+    def service(self) -> Optional[Dict[str, Any]]:
         return self._service
-
-    def set_service(self,
-                    service: Optional[serve_lib.SkyServiceSpec]) -> 'Task':
-        """Sets the service spec for this task.
-
-        Args:
-          service: a SkyServiceSpec object.
-
-        Returns:
-          self: The current task, with service set.
-        """
-        self._service = service
-        return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -959,8 +943,7 @@ class Task:
             resources = list(self.resources)[0]
             add_if_not_none('resources', resources.to_yaml_config())
 
-        if self.service is not None:
-            add_if_not_none('service', self.service.to_yaml_config())
+        add_if_not_none('service', self.service)
 
         add_if_not_none('num_nodes', self.num_nodes)
 
