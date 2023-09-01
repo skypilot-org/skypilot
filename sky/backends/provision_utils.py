@@ -58,7 +58,7 @@ def _add_logger_handlers(log_path: str):
         provision_logger = logging.getLogger('sky.provision')
         stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
-        stream_handler.setFormatter(sky_logging.FORMATTER)
+        stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
         stream_handler.setLevel(logging.WARNING)
 
         provision_logger.addHandler(fh)
@@ -69,6 +69,8 @@ def _add_logger_handlers(log_path: str):
     finally:
         logger.removeHandler(fh)
         provision_logger.removeHandler(fh)
+        provision_logger.removeHandler(stream_handler)
+        stream_handler.close()
         fh.close()
 
 
@@ -98,8 +100,7 @@ def _bulk_provision(
                     f'{region_name}{style.RESET_ALL} ({zone_str})')
 
     start = time.time()
-    with rich_utils.safe_status(
-            '[bold cyan]Launching - Bootstrapping configurations') as status:
+    with rich_utils.safe_status('[bold cyan]Launching[/]') as status:
         try:
             # TODO(suquark): Should we cache the bootstrapped result?
             #  Currently it is not necessary as bootstrapping takes
@@ -114,9 +115,6 @@ def _bulk_provision(
                          f'"{cluster_name}".')
             raise
 
-        plural = '' if config.count == 1 else 's'
-        status.update(
-            f'[bold cyan]Launching - Starting {config.count} instance{plural}')
         try:
             provision_metadata = provision.start_instances(
                 provider_name,
@@ -133,11 +131,7 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update('[bold cyan]Launching - Waiting for '
-                      f'[green]{cluster_name}[bold cyan] to be ready')
-        # AWS would take a very short time (<<1s) updating the state of
-        # the instance. Wait 4 seconds should be enough.
-        time.sleep(3)
+        status.update('[bold cyan]Launching - Checking instance statuses[/]')
         for retry_cnt in range(_MAX_RETRY):
             try:
                 provision.wait_instances(provider_name, region_name,
@@ -145,6 +139,13 @@ def _bulk_provision(
                 break
             except aws.botocore_exceptions().WaiterError:
                 time.sleep(backoff.current_backoff())
+            except Exception:  # pylint: disable=broad-except
+                if retry_cnt == 0:
+                    # AWS would take a very short time (<<1s) updating the state
+                    # of the instance. Wait 4 seconds should be enough.
+                    time.sleep(3)
+                else:
+                    raise
         logger.debug(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
@@ -152,10 +153,6 @@ def _bulk_provision(
     logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
                  f'seconds.')
 
-    plural = '' if config.count == 1 else 's'
-    if not isinstance(cloud, clouds.Local):
-        logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
-                    f'or found existing VM{plural}.{style.RESET_ALL}')
     return provision_metadata
 
 
@@ -309,6 +306,14 @@ def _post_provision_setup(
     cluster_metadata = provision.get_cluster_metadata(
         cloud_name, provision_metadata.region, cluster_name.name_on_cloud)
 
+    if len(cluster_metadata.instances) > 1:
+        # Only worker nodes have logs in the per-instance log directory. Head
+        # node's log will be redirected to the main log file.
+        per_instance_log_dir = metadata_utils.get_instance_log_dir(
+            cluster_name.name_on_cloud, '*')
+        logger.debug('For per-instance logs, run: '
+                     f'tail -n 100 -f {per_instance_log_dir}/*.log')
+
     logger.debug('Provision metadata:\n'
                  f'{json.dumps(provision_metadata.dict(), indent=2)}\n'
                  'Cluster metadata:\n'
@@ -332,12 +337,18 @@ def _post_provision_setup(
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    with rich_utils.safe_status(
-            '[bold cyan]Preparing - Waiting for SSH to be available') as status:
+    with rich_utils.safe_status('[bold cyan]Preparing SkyPilot '
+                                'runtime[/]') as status:
+
+        status.update('[bold cyan]Launching - Waiting for SSH access[/]')
         logger.debug(
-            f'\nWaiting for SSH to be avilable for "{cluster_name}" ...')
+            f'\nWaiting for SSH to be available for "{cluster_name}" ...')
         wait_for_ssh(cluster_metadata, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
+        plural = '' if len(cluster_metadata.instances) == 1 else 's'
+        logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
+                    f'or found existing instance{plural}.'
+                    f'{colorama.Style.RESET_ALL}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
@@ -354,9 +365,10 @@ def _post_provision_setup(
             **config_from_yaml.get('file_mounts', {})
         }
 
-        runtime_preparation_str = ('[bold cyan]Preparing - Setting up SkyPilot '
+        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
                                    'runtime ({step}/3 - {step_name})')
-        status.update(runtime_preparation_str.format(step=1, step_name='files'))
+        status.update(
+            runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
                                             cluster_metadata,
@@ -364,7 +376,8 @@ def _post_provision_setup(
                                             wheel_hash=wheel_hash)
 
         status.update(
-            runtime_preparation_str.format(step=2, step_name='dependencies'))
+            runtime_preparation_str.format(step=2,
+                                           step_name='installing dependencies'))
         instance_setup.internal_dependencies_setup(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
@@ -374,7 +387,8 @@ def _post_provision_setup(
                                                       **ssh_credentials)
 
         status.update(
-            runtime_preparation_str.format(step=3, step_name='ray cluster'))
+            runtime_preparation_str.format(step=3,
+                                           step_name='starting runtime'))
         full_ray_setup = True
         if not provision_metadata.is_instance_just_booted(
                 head_instance.instance_id):
@@ -416,8 +430,8 @@ def _post_provision_setup(
         instance_setup.start_skylet(cluster_name.name_on_cloud,
                                     cluster_metadata, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
-                f'{cluster_name!r}.{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster.'
+                f'{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
@@ -435,11 +449,6 @@ def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
     with _add_logger_handlers(log_abs_path):
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
-            per_instance_log_dir = metadata_utils.get_instance_log_dir(
-                cluster_name.name_on_cloud, '*')
-            logger.debug(
-                f'For per-instance logs, see: "{per_instance_log_dir}".\n'
-                f'  Or run: tail -n 100 -f {per_instance_log_dir}/*.log')
             return _post_provision_setup(cloud_name,
                                          cluster_name,
                                          cluster_yaml=cluster_yaml,

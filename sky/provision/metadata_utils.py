@@ -58,8 +58,8 @@ def check_cache_hash_or_update(cluster_name: str, instance_id: str,
             need_update = f.read() != hash_str
     else:
         need_update = True
-    logger.debug(f'Need to update {cluster_name}/{instance_id}/{stage_name}: '
-                 f'{str(need_update)}')
+    logger.debug(f'Need to run stage {stage_name} on instance {instance_id} of '
+                 f'cluster {cluster_name}: {str(need_update)}')
     errored = False
     try:
         yield need_update

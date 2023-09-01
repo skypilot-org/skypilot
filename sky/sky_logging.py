@@ -5,6 +5,8 @@ import logging
 import sys
 import threading
 
+import colorama
+
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -18,14 +20,17 @@ _DATE_FORMAT = '%m-%d %H:%M:%S'
 class NewLineFormatter(logging.Formatter):
     """Adds logging prefix to newlines to align multi-line messages."""
 
-    def __init__(self, fmt, datefmt=None):
+    def __init__(self, fmt, datefmt=None, dim=False):
         logging.Formatter.__init__(self, fmt, datefmt)
+        self.dim = dim
 
     def format(self, record):
         msg = logging.Formatter.format(self, record)
         if record.message != '':
-            parts = msg.split(record.message)
+            parts = msg.partition(record.message)
             msg = msg.replace('\n', '\r\n' + parts[0])
+            if self.dim:
+                msg = colorama.Style.DIM + msg + colorama.Style.RESET_ALL
         return msg
 
 
@@ -41,6 +46,7 @@ _default_handler = None
 _logging_config = threading.local()
 
 FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
+DIM_FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT, dim=True)
 
 # All code inside the library should use sky_logging.print()
 # rather than print().

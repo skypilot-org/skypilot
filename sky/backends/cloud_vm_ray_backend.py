@@ -1585,9 +1585,6 @@ class RetryingVmProvisioner(object):
                 # NOTE: We handle the logic of '_ensure_cluster_ray_started'
                 # in '_post_provision_setup()'.
                 if provision_metadata is not None:
-                    handle.update_cluster_ips(
-                        max_attempts=_FETCH_IP_MAX_ATTEMPTS)
-                    handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, region, zones))
@@ -2002,7 +1999,8 @@ class RetryingVmProvisioner(object):
 
         # All code below is handling num_nodes > 1.
 
-        provision_str = 'Successfully provisioned or found existing head VM.'
+        provision_str = ('Successfully provisioned or found existing head '
+                         'instance.')
         if isinstance(to_provision_cloud, clouds.Local):
             provision_str = 'Successfully connected to head node.'
 
@@ -2867,6 +2865,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_metadata=provision_metadata,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
+                internal_ips, external_ips = zip(*cluster_metadata.ip_tuples())
+                handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          internal_ips=list(internal_ips),
+                                          external_ips=list(external_ips))
+                handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
                 # update launched resources
                 handle.launched_resources = handle.launched_resources.copy(

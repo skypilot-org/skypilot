@@ -226,11 +226,9 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
         # will return 0, i.e., we don't know skypilot's ray cluster is running.
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
-        cmd = (
-            f'{_RAY_PORT_COMMAND}; ps aux | grep "ray/raylet/raylet" | '
-            f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
-            f'{{ {cmd}; }}'
-        )
+        cmd = (f'{_RAY_PORT_COMMAND}; ps aux | grep "ray/raylet/raylet" | '
+               f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
+               f'{{ {cmd}; }}')
     else:
         cmd = 'ray stop; ' + cmd
 
