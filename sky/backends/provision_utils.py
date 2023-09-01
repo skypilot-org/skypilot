@@ -430,8 +430,8 @@ def _post_provision_setup(
         instance_setup.start_skylet(cluster_name.name_on_cloud,
                                     cluster_metadata, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster.'
-                f'{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
+                f'{cluster_name}.{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
