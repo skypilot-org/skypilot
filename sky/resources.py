@@ -253,7 +253,8 @@ class Resources:
 
         ports = ''
         if self.ports is not None:
-            ports = f', ports={self.ports}'
+            simplified_ports = resources_utils.simplify_ports(self.ports)
+            ports = f', ports={simplified_ports}'
 
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
