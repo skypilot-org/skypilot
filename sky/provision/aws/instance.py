@@ -241,8 +241,6 @@ def open_ports(
             }],
         })
 
-    # TODO(tian): Check if the SG is the default SG. If so, change to a new
-    # SG instead of modifying the default SG.
     sg_name = provider_config['security_group']['GroupName']
     if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
         new_sg_name = _copy_sg_and_use(region, cluster_name_on_cloud, sg_name)
