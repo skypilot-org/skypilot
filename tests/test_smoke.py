@@ -49,6 +49,7 @@ from sky.clouds import Azure
 from sky.clouds import GCP
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.data.data_utils import Rclone
 from sky.skylet import events
 from sky.utils import common_utils
@@ -2889,7 +2890,7 @@ class TestStorageWithCredentials:
             stores: Optional[Dict[storage_lib.StoreType,
                                   storage_lib.AbstractStore]] = None,
             persistent: Optional[bool] = True,
-            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+            mode: storage_utils.StorageMode = storage_utils.StorageMode.MOUNT):
         # Creates a temporary storage object. Stores must be added in the test.
         storage_obj = storage_lib.Storage(name=name,
                                           source=source,
@@ -2972,8 +2973,8 @@ class TestStorageWithCredentials:
 
         # Try to initialize another storage with the storage object created
         # above, but now in COPY mode. This should succeed.
-        yield from self.yield_storage_object(name=storage_name,
-                                             mode=storage_lib.StorageMode.COPY)
+        yield from self.yield_storage_object(
+            name=storage_name, mode=storage_utils.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
@@ -3004,7 +3005,7 @@ class TestStorageWithCredentials:
             yield from self.yield_storage_object(
                 name=tmp_bucket_name,
                 source=tmpdir,
-                mode=storage_lib.StorageMode.COPY)
+                mode=storage_utils.StorageMode.COPY)
 
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):

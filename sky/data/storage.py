@@ -116,12 +116,6 @@ class StoreType(enum.Enum):
                 raise ValueError(f'Unknown store type: {store}')
 
 
-class StorageMode(enum.Enum):
-    MOUNT = 'MOUNT'
-    COPY = 'COPY'
-    CSYNC = 'CSYNC'
-
-
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     if isinstance(cloud, clouds.AWS):
         return StoreType.S3
@@ -378,7 +372,7 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
-            mode: Optional[StorageMode] = None,
+            mode: Optional[storage_utils.StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
@@ -405,14 +399,15 @@ class Storage(object):
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
-    def __init__(self,
-                 name: Optional[str] = None,
-                 source: Optional[SourceType] = None,
-                 stores: Optional[Dict[StoreType, AbstractStore]] = None,
-                 persistent: Optional[bool] = True,
-                 mode: StorageMode = StorageMode.MOUNT,
-                 interval: Optional[int] = None,
-                 sync_on_reconstruction: bool = True) -> None:
+    def __init__(
+            self,
+            name: Optional[str] = None,
+            source: Optional[SourceType] = None,
+            stores: Optional[Dict[StoreType, AbstractStore]] = None,
+            persistent: Optional[bool] = True,
+            mode: storage_utils.StorageMode = storage_utils.StorageMode.MOUNT,
+            interval: Optional[int] = None,
+            sync_on_reconstruction: bool = True) -> None:
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -443,9 +438,9 @@ class Storage(object):
             (s3://, gs://, etc.). Local paths do not need to be absolute.
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
-          mode: StorageMode; Specify how the storage object is manifested on
-            the remote VM. Can be either MOUNT, COPY, or CSYNC. Defaults to
-            MOUNT.
+          mode: storage_utils.StorageMode; Specify how the storage object is
+            manifested on the remote VM. Can be either MOUNT, COPY, or CSYNC.
+            Defaults to MOUNT.
           interval: int; Used for CSYNC mode only. Runs the sync command
             continuously for every INTERVAL seconds.
           sync_on_reconstruction: bool; Whether to sync the data if the storage
@@ -457,7 +452,7 @@ class Storage(object):
         self.source = source
         self.persistent = persistent
         self.mode = mode
-        assert mode in StorageMode
+        assert mode in storage_utils.StorageMode
         self.interval = interval
         self.sync_on_reconstruction = sync_on_reconstruction
 
@@ -547,7 +542,7 @@ class Storage(object):
 
     @staticmethod
     def _validate_source(
-            source: SourceType, mode: StorageMode,
+            source: SourceType, mode: storage_utils.StorageMode,
             sync_on_reconstruction: bool) -> Tuple[SourceType, bool]:
         """Validates the source path.
 
@@ -555,12 +550,13 @@ class Storage(object):
           source: str; File path where the data is initially stored. Can be a
             local path or a cloud URI (s3://, gs://, r2:// etc.).
             Local paths do not need to be absolute.
-          mode: StorageMode; StorageMode of the storage object
+          mode: storage_utils.StorageMode; StorageMode of the storage object
 
         Returns:
           Tuple[source, is_local_source]
           source: str; The source path.
-          is_local_path: bool; Whether the source is a local path. False if URI.
+          is_local_path: bool; Whether the source is a local path.
+            False if URI.
         """
 
         def _check_basename_conflicts(source_list: List[str]) -> None:
@@ -628,7 +624,7 @@ class Storage(object):
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
-                if mode == StorageMode.MOUNT:
+                if mode == storage_utils.StorageMode.MOUNT:
                     if ((not split_path.scheme == 'cos' and
                          split_path.path.strip('/') != '') or
                         (split_path.scheme == 'cos' and
@@ -675,7 +671,7 @@ class Storage(object):
 
         if self.source is None:
             # If the mode is COPY, the source must be specified
-            if self.mode == StorageMode.COPY:
+            if self.mode == storage_utils.StorageMode.COPY:
                 # Check if a Storage object already exists in global_user_state
                 # (e.g. used as scratch previously). Such storage objects can be
                 # mounted in copy mode even though they have no source in the
@@ -900,10 +896,10 @@ class Storage(object):
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
-            mode = StorageMode(mode_str.upper())
+            mode = storage_utils.StorageMode(mode_str.upper())
         else:
             # Make sure this keeps the same as the default mode in __init__
-            mode = StorageMode.MOUNT
+            mode = storage_utils.StorageMode.MOUNT
         persistent = config.pop('persistent', True)
 
         assert not config, f'Invalid storage args: {config.keys()}'
@@ -942,7 +938,7 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
-        if self.mode == StorageMode.CSYNC:
+        if self.mode == storage_utils.StorageMode.CSYNC:
             add_if_not_none('interval', self.interval)
         if self.force_delete:
             config['_force_delete'] = True
@@ -1272,9 +1268,8 @@ class S3Store(AbstractStore):
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
                      f'{self.bucket.name} {mount_path}')
-        return mounting_utils.get_mounting_command(StorageMode.MOUNT,
-                                                   mount_path, mount_cmd,
-                                                   install_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
 
     def csync_command(self,
                       csync_path: str,
@@ -1301,8 +1296,8 @@ class S3Store(AbstractStore):
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {dst} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
-        return mounting_utils.get_mounting_command(StorageMode.CSYNC,
-                                                   csync_path, csync_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1732,10 +1727,9 @@ class GcsStore(AbstractStore):
                      f'{self.bucket.name} {mount_path}')
         version_check_cmd = (
             f'gcsfuse --version | grep -q {self.GCSFUSE_VERSION}')
-        return mounting_utils.get_mounting_command(StorageMode.MOUNT,
-                                                   mount_path, mount_cmd,
-                                                   install_cmd,
-                                                   version_check_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.MOUNT, mount_path, mount_cmd, install_cmd,
+            version_check_cmd)
 
     def csync_command(self,
                       csync_path: str,
@@ -1762,8 +1756,8 @@ class GcsStore(AbstractStore):
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f'gcs {dst} --interval {interval} '
                      '--lock --delete --no-follow-symlinks')
-        return mounting_utils.get_mounting_command(StorageMode.CSYNC,
-                                                   csync_path, csync_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -2125,9 +2119,8 @@ class R2Store(AbstractStore):
             f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
             f'--endpoint {endpoint_url} '
             f'{self.bucket.name} {mount_path}')
-        return mounting_utils.get_mounting_command(StorageMode.MOUNT,
-                                                   mount_path, mount_cmd,
-                                                   install_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
 
     def csync_command(self,
                       csync_path: str,
@@ -2547,9 +2540,8 @@ class IBMCosStore(AbstractStore):
         install_cmd = 'rclone version >/dev/null 2>&1 || (curl https://rclone.org/install.sh | sudo bash)'
         # --daemon will keep the mounting process running in the background.
         mount_cmd = f'{configure_rclone_profile} && rclone mount {self.bucket_rclone_profile}:{self.bucket.name} {mount_path} --daemon'
-        return mounting_utils.get_mounting_command(StorageMode.MOUNT,
-                                                   mount_path, mount_cmd,
-                                                   install_cmd)
+        return mounting_utils.get_mounting_command(
+            storage_utils.StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
 
     def _create_cos_bucket(self,
                            bucket_name: str,

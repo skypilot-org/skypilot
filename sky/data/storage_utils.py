@@ -1,4 +1,5 @@
 """Utility functions for the storage module."""
+import enum
 import os
 import subprocess
 from typing import Any, Dict, List
@@ -17,6 +18,12 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'specified in .gitignore will be uploaded '
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
+
+
+class StorageMode(enum.Enum):
+    MOUNT = 'MOUNT'
+    COPY = 'COPY'
+    CSYNC = 'CSYNC'
 
 
 def format_storage_table(storages: List[Dict[str, Any]],

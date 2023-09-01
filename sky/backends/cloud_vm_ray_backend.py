@@ -41,6 +41,7 @@ from sky.backends import onprem_utils
 from sky.backends import wheel_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2979,7 +2980,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
         self._execute_storage_csync(handle, storage_mounts)
-        self._set_cluster_storage_mounts_metadata(handle, storage_mounts)
+        self._set_cluster_storage_mounts_metadata(handle.cluster_name,
+                                                  storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -3367,7 +3369,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name = handle.cluster_name
         # Check if the cluster includes storage with CSYNC mode and terminates
         # the CSYNC process after the syncing is completed if it was running.
-        if self._csync_mode_set(handle):
+        if self._has_csync(cluster_name):
             backend_utils.wait_and_terminate_csync(cluster_name)
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
@@ -4355,7 +4357,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if storage_mount.mode == storage_utils.StorageMode.MOUNT
         }
 
         if not storage_mounts:
@@ -4437,7 +4439,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.CSYNC
+            if storage_mount.mode == storage_utils.StorageMode.CSYNC
         }
 
         if not storage_mounts:
@@ -4496,7 +4498,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'Storage Sync setup took {end - start} seconds.')
 
     def _set_cluster_storage_mounts_metadata(
-            self, handle: CloudVmRayResourceHandle,
+            self, cluster_name: str,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
         """Sets 'storage_mounts' object in cluster's storage metadata"""
         if not storage_mounts:
@@ -4511,15 +4513,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 storage_obj_metadata.add_store(store_obj)
             storage_mounts_metadata[dst] = storage_obj_metadata
         global_user_state.set_cluster_storage_mounts_metadata(
-            handle.cluster_name, storage_mounts_metadata)
+            cluster_name, storage_mounts_metadata)
 
     def _get_cluster_storage_mounts_metadata(
-        self, handle: CloudVmRayResourceHandle
-    ) -> Optional[Dict[Path, storage_lib.Storage]]:
+            self,
+            cluster_name: str) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage metadata"""
         storage_mounts_metadata = \
             global_user_state.get_cluster_storage_mounts_metadata(
-            handle.cluster_name)
+            cluster_name)
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}
@@ -4532,14 +4534,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             storage_mounts[dst] = storage_obj
         return storage_mounts
 
-    def _csync_mode_set(self, handle: CloudVmRayResourceHandle) -> bool:
+    def _has_csync(self, cluster_name: str) -> bool:
         """Chekcs if there is a storage running with CSYNC mode within the
         cluster.
         """
-        storage_mounts = self._get_cluster_storage_mounts_metadata(handle)
+        storage_mounts = self._get_cluster_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:
             for _, storage_obj in storage_mounts.items():
-                if storage_obj.mode == storage_lib.StorageMode.CSYNC:
+                if storage_obj.mode == storage_utils.StorageMode.CSYNC:
                     return True
         return False
 

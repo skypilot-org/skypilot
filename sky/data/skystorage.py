@@ -9,6 +9,8 @@ import urllib.parse
 import click
 import psutil
 
+from sky.utils import common_utils
+
 _CSYNC_BASE_PATH = '~/.skystorage'
 _CSYNC_PID_PATH = '~/.skystorage/csync_pid'
 _SYNC_PID_PATH = '~/.skystorage/sync_pid'
@@ -61,7 +63,8 @@ def run_sync(src: str,
              interval: int,
              delete: bool,
              no_follow_symlinks: bool,
-             max_retries: int = 10):
+             max_retries: int = 10,
+             backoff: Optional[common_utils.Backoff] = None):
     """Runs the sync command to from SRC to STORETYPE bucket"""
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
@@ -92,15 +95,18 @@ def run_sync(src: str,
             src_to_bucket = (f'\'{src}\' to \'{dst}\' '
                              f'at \'{storetype}\'')
             if max_retries > 0:
-                #TODO: display the error with remaining # of retries
-                wait_time = interval / 2
+                if backoff is None:
+                    # interval/2 is heuristically determined as initial backoff
+                    backoff = common_utils.Backoff(interval / 2)
+                wait_time = backoff.current_backoff()
                 fout.write('Encountered an error while syncing '
                            f'{src_to_bucket}. Retrying'
                            f' in {wait_time}s. {max_retries} more reattempts '
                            f'remaining. Check {log_path} for details.')
                 time.sleep(wait_time)
                 return run_sync(src, storetype, dst, num_threads, interval,
-                                delete, no_follow_symlinks, max_retries - 1)
+                                delete, no_follow_symlinks, max_retries - 1,
+                                backoff)
             else:
                 raise RuntimeError(f'Failed to sync {src_to_bucket} after '
                                    f'number of retries. Check {log_path} for'

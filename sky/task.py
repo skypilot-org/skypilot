@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.data import storage_utils
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -795,8 +796,8 @@ class Task:
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
-            if (storage.mode == storage_lib.StorageMode.COPY or
-                    storage.mode == storage_lib.StorageMode.CSYNC):
+            if (storage.mode == storage_utils.StorageMode.COPY or
+                    storage.mode == storage_utils.StorageMode.CSYNC):
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
