@@ -2650,7 +2650,7 @@ def _refresh_service_record_no_lock(
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = service_handle.controller_cluster_name
+    controller_cluster_name = record['controller_cluster_name']
     cluster_record = global_user_state.get_cluster_from_name(
         controller_cluster_name)
     if (cluster_record is None or
@@ -2678,7 +2678,6 @@ def _refresh_service_record_no_lock(
                         f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    service_handle.replica_info = latest_info['replica_info']
     service_handle.uptime = latest_info['uptime']
 
     # When the service is shutting down, there is a period of time which the
@@ -2696,6 +2695,7 @@ def _refresh_service_record_no_lock(
             latest_info['replica_info'])
 
     global_user_state.add_or_update_service(**record)
+    record['replica_info'] = latest_info['replica_info']
     return record, None
 
 

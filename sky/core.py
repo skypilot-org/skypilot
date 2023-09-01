@@ -129,7 +129,7 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')
     service_handle: serve.ServiceHandle = service_record['handle']
-    controller_cluster_name = service_handle.controller_cluster_name
+    controller_cluster_name = service_record['controller_cluster_name']
     handle = global_user_state.get_handle_from_cluster_name(
         controller_cluster_name)
     if handle is None:

@@ -4301,8 +4301,7 @@ def serve_status(all: bool, service_name: Optional[str]):
                f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
-        service_handle: serve_lib.ServiceHandle = service_record['handle']
-        for replica_record in service_handle.replica_info:
+        for replica_record in service_record['replica_info']:
             replica_record['service_name'] = service_record['name']
             replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
@@ -4479,7 +4478,7 @@ def serve_logs(
         click.secho(f'Service {service_name!r} not found.', fg='red')
         return
     service_handle: serve_lib.ServiceHandle = service_record['handle']
-    controller_cluster_name = service_handle.controller_cluster_name
+    controller_cluster_name = service_record['controller_cluster_name']
     if controller:
         core.tail_logs(controller_cluster_name,
                        job_id=service_handle.controller_job_id,

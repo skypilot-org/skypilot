@@ -995,12 +995,11 @@ def serve_up(
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
     service_handle = serve.ServiceHandle(
-        controller_cluster_name=controller_cluster_name,
+        service_name=service_name,
         policy=task.service.policy_str(),
-        requested_resources=requested_resources,
-        replica_info=[])
+        requested_resources=requested_resources)
     global_user_state.add_or_update_service(
-        service_name, None, service_handle,
+        service_name, None, controller_cluster_name, service_handle,
         status_lib.ServiceStatus.CONTROLLER_INIT)
     app_port = int(task.service.app_port)
 
@@ -1239,7 +1238,7 @@ def serve_down(
     # Already filtered all inexistent service in cli.py
     assert service_record is not None, service_name
     service_handle: serve.ServiceHandle = service_record['handle']
-    controller_cluster_name = service_handle.controller_cluster_name
+    controller_cluster_name = service_record['controller_cluster_name']
     global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(

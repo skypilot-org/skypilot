@@ -399,8 +399,7 @@ def _get_service_handle(
 
 
 def _get_controller_cluster_name(service_record: _ServiceRecord) -> str:
-    handle = _get_service_handle(service_record)
-    return handle.controller_cluster_name
+    return service_record['controller_cluster_name']
 
 
 def _get_policy(service_record: _ServiceRecord) -> str:
@@ -423,11 +422,10 @@ def _get_uptime(service_record: _ServiceRecord) -> str:
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
     ready_replica_num = 0
-    handle = _get_service_handle(service_record)
-    for info in handle.replica_info:
+    for info in service_record['replica_info']:
         if _get_status(info) == status_lib.ReplicaStatus.READY:
             ready_replica_num += 1
-    total_replica_num = len(handle.replica_info)
+    total_replica_num = len(service_record['replica_info'])
     return f'{ready_replica_num}/{total_replica_num}'
 
 

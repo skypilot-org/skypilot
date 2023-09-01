@@ -123,7 +123,7 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 
 def get_ports_for_controller_and_load_balancer(
         controller_cluster_name: str) -> Tuple[int, int]:
-    services = global_user_state.get_services_from_controller_name(
+    services = global_user_state.get_services_from_controller_cluster_name(
         controller_cluster_name)
     # Use `is None`` to filter out self and all services with
     # initialize status
@@ -171,10 +171,9 @@ class ServiceHandle(object):
     def __init__(
         self,
         *,
-        controller_cluster_name: str,
+        service_name: str,
         policy: str,
         requested_resources: 'sky.Resources',
-        replica_info: List[Dict[str, Any]],
         uptime: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
@@ -184,8 +183,7 @@ class ServiceHandle(object):
         ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self._version = self._VERSION
-        self.controller_cluster_name = controller_cluster_name
-        self.replica_info = replica_info
+        self.service_name = service_name
         self.uptime = uptime
         self.endpoint_ip = endpoint_ip
         self.policy = policy
@@ -198,8 +196,7 @@ class ServiceHandle(object):
 
     def __repr__(self):
         return ('ServiceHandle('
-                f'\n\tcontroller_cluster_name={self.controller_cluster_name},'
-                f'\n\treplica_info={self.replica_info},'
+                f'\n\tservice_name={self.service_name},'
                 f'\n\tuptime={self.uptime},'
                 f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
