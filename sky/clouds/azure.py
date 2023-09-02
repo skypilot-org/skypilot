@@ -279,23 +279,26 @@ class Azure(clouds.Cloud):
             'cloud_init_setup_commands': cloud_init_setup_commands
         }
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
 
         def failover_disk_tier(
                 instance_type: str,
                 disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
-            """Figure out the actual disk tier to be used
+            """Figure out the actual disk tier to be used.
 
             Check the disk_tier specified by the user with the instance type to
             be used. If not valid, return False.
+
             When the disk_tier is not specified, failover through the possible
             disk tiers.
 
             Returns:
-                A tuple of a boolean value and an optional string to represent the
-                instance_type to use. If the boolean value is False, the specified
-                configuration is not a valid combination, and should not be used
-                for launching a VM.
+                A tuple of a boolean value and an optional string to represent
+                the instance_type to use. If the boolean value is False, the
+                specified configuration is not a valid combination, and should
+                not be used for launching a VM.
             """
             if disk_tier is not None:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
