@@ -142,8 +142,6 @@ def _bulk_provision(
                 break
             except (aws.botocore_exceptions().WaiterError, RuntimeError):
                 time.sleep(backoff.current_backoff())
-            except Exception:  # pylint: disable=broad-except
-                raise
         logger.debug(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
