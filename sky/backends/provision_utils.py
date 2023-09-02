@@ -134,7 +134,7 @@ def _bulk_provision(
         status.update('[bold cyan]Launching - Checking instance statuses[/]')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
-        time.sleep(3)
+        time.sleep(1)
         for retry_cnt in range(_MAX_RETRY):
             try:
                 provision.wait_instances(provider_name, region_name,
