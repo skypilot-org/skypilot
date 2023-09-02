@@ -333,10 +333,9 @@ def _post_provision_setup(
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    with rich_utils.safe_status('[bold cyan]Preparing SkyPilot '
-                                'runtime[/]') as status:
+    with rich_utils.safe_status(
+            '[bold cyan]Launching - Waiting for SSH access[/]') as status:
 
-        status.update('[bold cyan]Launching - Waiting for SSH access[/]')
         logger.debug(
             f'\nWaiting for SSH to be available for "{cluster_name}" ...')
         wait_for_ssh(cluster_metadata, ssh_credentials)
@@ -345,6 +344,19 @@ def _post_provision_setup(
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'
                     f'{colorama.Style.RESET_ALL}')
+
+        docker_config = config_from_yaml.get('docker', {})
+        if docker_config:
+            status.update(
+                '[bold cyan]Lauching - Initializing docker container[/]')
+        docker_user = instance_setup.initialize_docker(
+            cluster_name.name_on_cloud,
+            docker_config=docker_config,
+            cluster_metadata=cluster_metadata,
+            ssh_credentials=ssh_credentials)
+        if docker_user is not None:
+            ssh_credentials['docker_user'] = docker_user
+        logger.debug(f'Docker user: {docker_user}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because

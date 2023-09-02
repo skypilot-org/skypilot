@@ -4,11 +4,12 @@ import functools
 import hashlib
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
 from sky.provision import config as provision_config
+from sky.provision import docker_utils
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -89,7 +90,7 @@ def _hint_worker_log_path(cluster_name: str,
 def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              digest: str,
                              cluster_metadata: common.ClusterMetadata,
-                             ssh_credentials: Dict[str, str]) -> None:
+                             ssh_credentials: Dict[str, str]) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
         for instance_id, metadata in cluster_metadata.instances.items():
@@ -108,8 +109,35 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
             results.append(
                 pool.submit(wrapper(func), runner, metadata, log_path_abs))
 
-        for future in results:
-            future.result()
+        return [future.result() for future in results]
+
+
+@_log_start_end
+def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
+                      cluster_metadata: common.ClusterMetadata,
+                      ssh_credentials: Dict[str, str]) -> Optional[str]:
+    """Setup docker on the cluster."""
+    if not docker_config:
+        return None
+    _hint_worker_log_path(cluster_name, cluster_metadata, 'initialize_docker')
+
+    @_auto_retry
+    def _initialize_docker(runner: command_runner.SSHCommandRunner,
+                           metadata: common.InstanceMetadata, log_path: str):
+        del metadata
+        return docker_utils.DockerInitializer(docker_config, runner,
+                                              log_path).initialize()
+
+    docker_users = _parallel_ssh_with_cache(
+        _initialize_docker,
+        cluster_name,
+        stage_name='initialize_docker',
+        # Should not cache docker setup, as it needs to be
+        # run every time a cluster is restarted.
+        digest=str(time.time()),
+        cluster_metadata=cluster_metadata,
+        ssh_credentials=ssh_credentials)
+    return docker_users[0]
 
 
 @_log_start_end

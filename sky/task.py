@@ -18,8 +18,8 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -107,7 +107,7 @@ def _fill_in_env_vars_in_file_mounts(
 def _with_docker_login_config(
     resources_set: Set['resources_lib.Resources'],
     task_envs: Dict[str, str],
-) -> 'resources_lib.Resources':
+) -> Set['resources_lib.Resources']:
     all_keys = {
         constants.DOCKER_USERNAME_ENV_VAR,
         constants.DOCKER_PASSWORD_ENV_VAR,
@@ -121,7 +121,7 @@ def _with_docker_login_config(
             raise ValueError(
                 f'If any of {", ".join(all_keys)} is set, all of them must '
                 f'be set. Missing envs: {all_keys - existing_keys}')
-    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
