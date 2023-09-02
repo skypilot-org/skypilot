@@ -71,7 +71,7 @@ def _log_start_end(func):
     def wrapper(*args, **kwargs):
         logger.info(_START_TITLE.format(func.__name__))
         try:
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
         finally:
             logger.info(_END_TITLE.format(func.__name__))
 
@@ -125,8 +125,10 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     def _initialize_docker(runner: command_runner.SSHCommandRunner,
                            metadata: common.InstanceMetadata, log_path: str):
         del metadata
-        return docker_utils.DockerInitializer(docker_config, runner,
+        docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                               log_path).initialize()
+        logger.debug(f'Initialized docker user: {docker_user}')
+        return docker_user
 
     docker_users = _parallel_ssh_with_cache(
         _initialize_docker,
@@ -137,6 +139,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
         digest=str(time.time()),
         cluster_metadata=cluster_metadata,
         ssh_credentials=ssh_credentials)
+    logger.debug(f'All docker users: {docker_users}')
     return docker_users[0]
 
 
