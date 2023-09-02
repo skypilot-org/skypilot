@@ -1069,9 +1069,9 @@ class Task:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
             s += f'\n  resources: {self.resources}'
-        elif len(self.resources
-                ) == 1 and not self.get_resources_list()[0].is_empty():
-            s += f'\n  resources: {self.get_resources_list()[0]}'
+        elif len(
+                 self.resources) == 1 and not list(self.resources)[0].is_empty():
+             s += f'\n  resources: {list(self.resources)[0]}'
         else:
             s += '\n  resources: default instances'
         return s
