@@ -24,7 +24,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import networkx as nx
 
-    #pylint: disable=ungrouped-imports
+    # pylint: disable=ungrouped-imports
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -268,6 +268,7 @@ class Optimizer:
             if do_print:
                 logger.debug('#### {} ####'.format(node))
 
+            fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources, cloud_candidates, fuzzy_candidates = \
@@ -300,6 +301,7 @@ class Optimizer:
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
+                    source_hint = 'catalog'
                     if node.get_resources():
                         specified_resources = list(node.get_resources())[0]
                         if specified_resources.zone is not None:
@@ -309,17 +311,16 @@ class Optimizer:
                             location_hint = (
                                 f' Region: {specified_resources.region}.')
 
-                    # If Kubernetes was included in the search space, then
-                    # mention "kubernetes cluster" and/instead of "catalog"
-                    # in the error message.
-                    source_hint = 'catalog'
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                    if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
-                        if specified_resources.cloud is None:
-                            source_hint = 'catalog and kubernetes cluster'
-                        elif specified_resources.cloud.is_same_cloud(
-                                clouds.Kubernetes()):
-                            source_hint = 'kubernetes cluster'
+                        # If Kubernetes was included in the search space, then
+                        # mention "kubernetes cluster" and/instead of "catalog"
+                        # in the error message.
+                        enabled_clouds = global_user_state.get_enabled_clouds()
+                        if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                            if specified_resources.cloud is None:
+                                source_hint = 'catalog and kubernetes cluster'
+                            elif specified_resources.cloud.is_same_cloud(
+                                    clouds.Kubernetes()):
+                                source_hint = 'kubernetes cluster'
 
                     # TODO(romilb): When `sky show-gpus` supports Kubernetes,
                     #  add a hint to run `sky show-gpus --kubernetes` to list
@@ -906,11 +907,9 @@ class Optimizer:
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 
-        node_to_cost_map, node_to_candidate_map = \
-            Optimizer._estimate_nodes_cost_or_time(
-                topo_order,
-                minimize_cost,
-                blocked_resources)
+        node_to_cost_map, node_to_candidate_map = (
+            Optimizer._estimate_nodes_cost_or_time(topo_order, minimize_cost,
+                                                   blocked_resources))
 
         if dag.is_chain():
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
