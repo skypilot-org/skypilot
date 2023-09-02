@@ -604,7 +604,7 @@ class Task:
 
     def get_resources_list(self) -> List['resources_lib.Resources']:
         if self.is_resources_ordered:
-            return self.resources_pref_list
+            return self.resources_pref_list.copy()
         else:
             return list(self.resources)
 
