@@ -268,20 +268,21 @@ def _wait_ssh_connection_indirect(
 def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready."""
-    ips = cluster_metadata.get_feasible_ips()
     if (cluster_metadata.has_public_ips() and
             ssh_credentials.get('ssh_proxy_command') is None):
         # If we can access public IPs, then it is more efficient to test SSH
         # connection with raw sockets.
         waiter = _wait_ssh_connection_direct
+        ip_list = cluster_metadata.get_ips(use_internal_ips=False)
     else:
         # See https://github.com/skypilot-org/skypilot/pull/1512
         waiter = _wait_ssh_connection_indirect
+        ip_list = cluster_metadata.get_ips(use_internal_ips=True)
 
     timeout = 60 * 10  # 10-min maximum timeout
     start = time.time()
     # use a queue for SSH querying
-    ips = collections.deque(ips)
+    ips = collections.deque(ip_list)
     while ips:
         ip = ips.popleft()
         if not waiter(ip, **ssh_credentials):
@@ -322,7 +323,8 @@ def _post_provision_setup(
 
     # TODO(suquark): Move wheel build here in future PRs.
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_metadata.get_ips(
+        use_internal_ips=not cluster_metadata.has_public_ips())
 
     # TODO(suquark): Handle TPU VMs when dealing with GCP later.
     # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):

@@ -64,6 +64,9 @@ class ClusterMetadata(pydantic.BaseModel):
     def ip_tuples(self) -> List[Tuple[str, Optional[str]]]:
         """Get IP tuples of all instances. Make sure that list always
         starts with head node IP, if head node exists.
+
+        Returns:
+            A list of tuples (private_ip, public_ip) of all instances.
         """
         head_node_ip, other_ips = [], []
         for inst in self.instances.values():
@@ -81,23 +84,26 @@ class ClusterMetadata(pydantic.BaseModel):
             return False
         return ip_tuples[0][1] is not None
 
-    def get_feasible_ips(self) -> List[str]:
-        """Get the most feasible IPs of the cluster. This function returns
-        public IPs if they exist, otherwise it returns private IPs.
-        If the private IPs are 'None's, this means this cluster does not have
-        any IPs."""
+    def get_ips(self, use_internal_ips: bool) -> List[str]:
+        """Get public or private/internal IPs of all instances.
+
+        It returns the IP of the head node first.
+        """
         ip_tuples = self.ip_tuples()
-        if not ip_tuples:
-            return []
-        if ip_tuples[0][1] is not None:
-            ip_list = []
+        ip_list = []
+        if use_internal_ips:
+            for pair in ip_tuples:
+                private_ip = pair[0]
+                if private_ip is None:
+                    raise ValueError('Not all instances have private IPs')
+                ip_list.append(private_ip)
+        else:
             for pair in ip_tuples:
                 public_ip = pair[1]
                 if public_ip is None:
-                    raise ValueError('Inconsistent public IPs of the cluster')
+                    raise ValueError('Not all instances have public IPs')
                 ip_list.append(public_ip)
-            return ip_list
-        return [pair[0] for pair in ip_tuples]
+        return ip_list
 
     def get_head_instance(self) -> Optional[InstanceMetadata]:
         """Get the instance metadata of the head node"""

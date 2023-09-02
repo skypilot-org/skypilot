@@ -2882,11 +2882,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_metadata.region,
                     zone=provision_metadata.zone)
-                ip_list = cluster_metadata.get_feasible_ips()
+                ip_list = cluster_metadata.get_ips(
+                    not cluster_metadata.has_public_ips())
                 if cluster_metadata.has_public_ips():
                     ip_tuples = cluster_metadata.ip_tuples()
                 else:
-                    # This is a strange trick that our handle uses now.
+                    # This is for compatibility. If the cluster does not have
+                    # public IPs, we use the internal IPs as the external IPs.
                     ip_tuples = list(zip(ip_list, ip_list))
                 handle.stable_internal_external_ips = ip_tuples
                 self._update_after_cluster_provisioned(

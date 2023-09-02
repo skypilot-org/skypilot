@@ -158,8 +158,11 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
                         cluster_metadata: common.ClusterMetadata,
                         ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the head node."""
-    ssh_runner = command_runner.SSHCommandRunner(
-        cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
+    ip_list = cluster_metadata.get_ips(
+        use_internal_ips=not cluster_metadata.has_public_ips())
+    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
+                                                 port=22,
+                                                 **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, (cluster_name,
                                                            cluster_metadata)
     # Log the head node's output to the provision.log
@@ -199,7 +202,8 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
     if len(cluster_metadata.instances) <= 1:
         return
     _hint_worker_log_path(cluster_name, cluster_metadata, 'ray_cluster')
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_metadata.get_ips(
+        use_internal_ips=not cluster_metadata.has_public_ips())
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list[1:], port_list=None, **ssh_credentials)
     worker_ids = [
@@ -265,8 +269,11 @@ def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
                  ssh_credentials: Dict[str, str]) -> None:
     """Start skylet on the header node."""
     del cluster_name
-    ssh_runner = command_runner.SSHCommandRunner(
-        cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
+    ip_list = cluster_metadata.get_ips(
+        use_internal_ips=not cluster_metadata.has_public_ips())
+    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
+                                                 port=22,
+                                                 **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, cluster_metadata
     log_path_abs = str(provision_config.config.provision_log)
     logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
