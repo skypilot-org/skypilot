@@ -71,8 +71,22 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-def generate_controller_cluster_name(service_name: str) -> str:
-    return constants.CONTROLLER_PREFIX + service_name
+def get_existing_controller_names() -> List[str]:
+    return global_user_state.get_cluster_names_start_with(
+        constants.CONTROLLER_PREFIX)
+
+
+# We use incremental controller number to make sure two simultaneous
+# `sky serve up` will take same controller name
+def generate_controller_cluster_name() -> str:
+    existing_controllers = get_existing_controller_names()
+    index = 0
+    while True:
+        controller_name = (f'{constants.CONTROLLER_PREFIX}'
+                           f'{common_utils.get_user_hash()}-{index}')
+        if controller_name not in existing_controllers:
+            return controller_name
+        index += 1
 
 
 def generate_controller_yaml_file_name(service_name: str) -> str:
@@ -147,6 +161,36 @@ def get_ports_for_controller_and_load_balancer(
         controller_port = max(existing_controller_ports) + 1
         load_balancer_port = max(existing_load_balancer_ports) + 1
     return controller_port, load_balancer_port
+
+
+def get_controller_to_use(
+        controller_resources: 'sky.Resources') -> Optional[str]:
+    existing_controllers = get_existing_controller_names()
+    useable_controller_to_service_num = dict()
+    for controller_name in existing_controllers:
+        controller_record = global_user_state.get_cluster_from_name(
+            controller_name)
+        assert controller_record is not None
+        handle = controller_record['handle']
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        if controller_resources.less_demanding_than(handle.launched_resources):
+            services_num_on_controller = len(
+                global_user_state.get_services_from_controller_cluster_name(
+                    controller_name))
+            controller_cloud = handle.launched_resources.cloud
+            controller_instance_type = handle.launched_resources.instance_type
+            controller_memory = (
+                controller_cloud.get_vcpus_mem_from_instance_type(
+                    controller_instance_type)[1])
+            max_services_num = int(controller_memory /
+                                   constants.SERVICES_MEMORY_USAGE_GB)
+            if services_num_on_controller < max_services_num:
+                useable_controller_to_service_num[controller_name] = (
+                    services_num_on_controller)
+    if not useable_controller_to_service_num:
+        return None
+    return max(useable_controller_to_service_num,
+               key=lambda k: useable_controller_to_service_num[k])
 
 
 class ServiceHandle(object):

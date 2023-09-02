@@ -11,6 +11,7 @@ from sky.serve.serve_utils import generate_controller_yaml_file_name
 from sky.serve.serve_utils import generate_remote_service_dir_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name
 from sky.serve.serve_utils import generate_replica_cluster_name
+from sky.serve.serve_utils import get_controller_to_use
 from sky.serve.serve_utils import get_ports_for_controller_and_load_balancer
 from sky.serve.serve_utils import load_latest_info
 from sky.serve.serve_utils import load_terminate_service_result

@@ -971,7 +971,7 @@ def serve_up(
     service_name: str,
     controller_cluster_name: Optional[str],
     controller_resources: 'sky.Resources',
-    controller_best_resources: Optional['sky.Resources'],
+    controller_best_resources: Optional['sky.Resources'] = None,
 ):
     """Spin up a service.
 
@@ -983,14 +983,11 @@ def serve_up(
         controller_resources: The resources requirement for the controller.
         controller_best_resources: The optimized resources for the controller.
     """
-    use_existing_controller = True
+    # Try again here for the case when user directly call this programmatic API.
+    controller_cluster_name = serve.get_controller_to_use(controller_resources)
     if controller_cluster_name is None:
-        assert controller_best_resources is not None
-        controller_cluster_name = serve.generate_controller_cluster_name(
-            service_name)
-        controller_best_resources.cloud.check_cluster_name_is_valid(
-            controller_cluster_name)
-        use_existing_controller = False
+        controller_cluster_name = serve.generate_controller_cluster_name()
+        sky.clouds.Cloud.check_cluster_name_is_valid(controller_cluster_name)
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
@@ -1050,38 +1047,21 @@ def serve_up(
         }
         controller_task.update_envs(controller_envs)
 
-        if use_existing_controller:
-            print(f'{colorama.Fore.YELLOW}'
-                  f'Syncing utility files for {service_name} to controller...'
-                  f'{colorama.Style.RESET_ALL}')
-            handle = backend_utils.check_cluster_available(
-                controller_cluster_name,
-                operation='launching controller',
-                check_cloud_vm_ray_backend=True)
-            backend = backend_utils.get_backend_from_handle(handle)
-            _execute(
-                entrypoint=controller_task,
-                stream_logs=True,
-                handle=handle,
-                backend=backend,
-                stages=[
-                    Stage.SYNC_FILE_MOUNTS,
-                    Stage.EXEC,
-                ],
-                cluster_name=controller_cluster_name,
-            )
-        else:
-            print(f'{colorama.Fore.YELLOW}'
-                  f'Launching controller for {service_name}...'
-                  f'{colorama.Style.RESET_ALL}')
-            _execute(
-                entrypoint=controller_task,
-                stream_logs=True,
-                cluster_name=controller_cluster_name,
-                retry_until_up=True,
-                down=True,
-                idle_minutes_to_autostop=20,
-            )
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching controller for {service_name}...'
+              f'{colorama.Style.RESET_ALL}')
+        # We use launch here to make sure:
+        #   1. The controller will be re-launch if it is in unhealthy status;
+        #   2. The setup is executed on the controller node (mainly for the race
+        #      condition).
+        _execute(
+            entrypoint=controller_task,
+            stream_logs=True,
+            cluster_name=controller_cluster_name,
+            retry_until_up=True,
+            down=True,
+            idle_minutes_to_autostop=20,
+        )
 
         cluster_record = global_user_state.get_cluster_from_name(
             controller_cluster_name)

@@ -5,6 +5,7 @@ setup: |
   # This is for multicloud support. To allow controller launch on all clouds,
   # we need to install all cloud dependencies.
   # This also includes all serve dependencies.
+  # TODO(tian): Check if the cloud dependencies are already installed.
   pip install skypilot[all] > /dev/null 2>&1
 
   # Install gcloud CLI.
