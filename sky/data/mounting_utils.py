@@ -1,7 +1,6 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
 import textwrap
-import typing
 from typing import Optional
 
 from sky import exceptions

@@ -1295,7 +1295,7 @@ class S3Store(AbstractStore):
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f's3 {dst} --interval {interval} '
-                     '--lock --delete --no-follow-symlinks')
+                     '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(
             storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
 
@@ -1755,7 +1755,7 @@ class GcsStore(AbstractStore):
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
                      f'gcs {dst} --interval {interval} '
-                     '--lock --delete --no-follow-symlinks')
+                     '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(
             storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
 
