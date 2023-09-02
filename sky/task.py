@@ -978,9 +978,31 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.best_resources is not None:
-            resources = self.best_resources
-            add_if_not_none('resources', resources.to_yaml_config())
+        # if self.best_resources is not None:
+        #     resources = self.best_resources
+        #     tmp_resource_config = resources.to_yaml_config()
+
+        if len(self.resources_pref_list) >= 1:
+            tmp_resource_config = self.resources_pref_list[0].to_yaml_config()
+            accelerators_list = []
+            for r in self.resources_pref_list:
+                k, v = r.accelerators.popitem()
+                accelerators_list.append(f'{k}:{v}')
+                r.accelerators[k] = v
+            tmp_resource_config['accelerators'] = accelerators_list
+        elif len(self.resources) > 1:
+            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+            accelerators_list = []
+            for r in self.resources:
+                k, v = r.accelerators.popitem()
+                accelerators_list.append(f'{k}:{v}')
+                r.accelerators[k] = v
+            tmp_resource_config['accelerators'] = accelerators_list
+        else:
+            resources = list(self.resources)[0]
+            tmp_resource_config = resources.to_yaml_config()
+
+        add_if_not_none('resources', tmp_resource_config)
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:

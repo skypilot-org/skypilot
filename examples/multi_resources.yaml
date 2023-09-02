@@ -1,11 +1,12 @@
-name: multi_resources
+name: multi-resources
 
 resources:
-  cloud: azure
+  cloud: gcp
   # zone: us-east-1d
-  # use_spot: True
+  use_spot: True
+  spot_recovery: FAILOVER
   # accelerators: ['A100-40GB:1', 'A100-80GB']
-  accelerators: ['K80:1', 'K80:2']
+  accelerators: ['A100-40GB:1', 'T4:1', 'K80:1', 'K80:2']
   # accelerators: K80:1
 
 run: |

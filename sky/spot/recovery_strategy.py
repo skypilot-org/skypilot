@@ -93,16 +93,28 @@ class StrategyExecutor:
     def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
-        task_resources = task.resources
-        assert len(task_resources) == 1, 'Only one resource is supported.'
-        resources: 'sky.Resources' = list(task_resources)[0]
 
-        spot_recovery = resources.spot_recovery
+        has_pref_list = len(task.resources_pref_list) >= 1
+        if has_pref_list:
+            resource_list = task.resources_pref_list
+        else:
+            resource_list = list(task.resources)
+
+        spot_recovery = resource_list[0].spot_recovery
         assert spot_recovery is not None, (
             'spot_recovery is required to use spot strategy.')
+
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
-        task.set_resources({resources.copy(spot_recovery=None)})
+        new_resources_list = []
+        for resource in resource_list:
+            new_resources_list.append(resource.copy(spot_recovery=None))
+
+        if has_pref_list >= 1:
+            task.set_resources(new_resources_list)
+        else:
+            task.set_resources(set(new_resources_list))
+
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
@@ -411,17 +423,36 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             # first (if valid).
             if self._launched_cloud_region is not None:
                 task = self.dag.tasks[0]
-                resources = list(task.resources)[0]
-                original_resources = resources
-
                 launched_cloud, launched_region = self._launched_cloud_region
-                new_resources = resources.copy(cloud=launched_cloud,
-                                               region=launched_region)
-                task.set_resources({new_resources})
+
+                has_pref_list = len(task.resources_pref_list) >= 1
+                if has_pref_list:
+                    original_resources = task.resources_pref_list
+                else:
+                    original_resources = list(task.resources)
+
+                # Remove the spot_recovery field from the resources, as
+                # the strategy will be handled by the strategy class.
+                new_resources_list = []
+                for resource in original_resources:
+                    new_resources_list.append(
+                        resource.copy(cloud=launched_cloud,
+                                      region=launched_region))
+
+                if has_pref_list:
+                    task.set_resources(set(new_resources_list))
+                else:
+                    task.set_resources(new_resources_list)
+
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
-                task.set_resources({original_resources})
+
+                if has_pref_list:
+                    task.set_resources(original_resources)
+                else:
+                    task.set_resources(set(original_resources))
+
                 if job_submitted_at is not None:
                     return job_submitted_at
 
@@ -500,6 +531,8 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         if self._launched_cloud_region is not None:
             task = self.dag.tasks[0]
             requested_resources = list(task.resources)[0]
+            if task.best_resources is not None:
+                requested_resources = task.best_resources
             if (requested_resources.region is None and
                     requested_resources.zone is None):
                 # Optimization: We only block the previously launched region,
