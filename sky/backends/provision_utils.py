@@ -132,21 +132,16 @@ def _bulk_provision(
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
         status.update('[bold cyan]Launching - Checking instance statuses[/]')
+        # AWS would take a very short time (<<1s) updating the state of the
+        # instance.
+        time.sleep(3)
         for retry_cnt in range(_MAX_RETRY):
             try:
                 provision.wait_instances(provider_name, region_name,
                                          cluster_name.name_on_cloud, 'running')
                 break
-            except aws.botocore_exceptions().WaiterError:
+            except (aws.botocore_exceptions().WaiterError, RuntimeError):
                 time.sleep(backoff.current_backoff())
-            except RuntimeError:
-                if retry_cnt == 0:
-                    # AWS would take a very short time (<<1s) updating the state
-                    # of the instance. Wait 4 seconds should be enough.
-                    logger.debug('Retry for waiting instance state...')
-                    time.sleep(3)
-                    continue
-                raise
             except Exception:  # pylint: disable=broad-except
                 raise
         logger.debug(
