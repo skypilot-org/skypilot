@@ -758,17 +758,29 @@ def spot_launch(
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        assert len(controller_task.resources) == 1, controller_task
+        # assert len(controller_task.resources) == 1, controller_task
         # Backward compatibility: if the user changed the
         # spot-controller.yaml.j2 to customize the controller resources,
         # we should use it.
-        controller_task_resources = list(controller_task.resources)[0]
-        if not controller_task_resources.is_empty():
-            controller_resources = controller_task_resources
-        controller_task.set_resources(controller_resources)
+
+        # We assume that the controller_task only has one resource.
+
+        is_user_specified_order = len(controller_task.resources_pref_list) > 1
+        if is_user_specified_order:
+            controller_task_resources = controller_task.resources_pref_list
+        else:
+            controller_task_resources = list(controller_task.resources)
+
+        if len(controller_task_resources) > 0:
+            if is_user_specified_order:
+                controller_task.set_resources(controller_task_resources)
+            else:
+                controller_task.set_resources(set(controller_task_resources))
+        else:
+            controller_task.set_resources(controller_resources)
 
         controller_task.spot_dag = dag
-        assert len(controller_task.resources) == 1
+        # assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name} from spot controller...'

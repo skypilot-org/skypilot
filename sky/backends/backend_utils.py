@@ -1927,9 +1927,15 @@ def check_can_clone_disk_and_override_task(
                     'disk is only supported when creating a new cluster. To fix: specify '
                     'a new target cluster name.')
 
-    assert len(task.resources) == 1, task.resources
-    task_resources = list(task.resources)[0]
-    if handle.launched_resources.disk_size > task_resources.disk_size:
+    # assert len(task.resources) == 1, task.resources
+    is_user_specified_order = len(task.resources_pref_list) > 1
+
+    if is_user_specified_order:
+        task_resources = task.resources_pref_list
+    else:
+        task_resources = list(task.resources)
+
+    if handle.launched_resources.disk_size > task_resources[0].disk_size:
         # The target cluster's disk should be at least as large as the source.
         with ux_utils.print_exception_no_traceback():
             target_cluster_name_str = f' {target_cluster_name!r}'
@@ -1942,18 +1948,18 @@ def check_can_clone_disk_and_override_task(
     override_param = {}
     original_cloud = handle.launched_resources.cloud
     assert original_cloud is not None, handle.launched_resources
-    if task_resources.cloud is None:
+    if task_resources[0].cloud is None:
         override_param['cloud'] = original_cloud
     else:
-        if not original_cloud.is_same_cloud(task_resources.cloud):
+        if not original_cloud.is_same_cloud(task_resources[0].cloud):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources.cloud}.')
+                    f'{task_resources[0].cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    if task_resources.region is None:
+    if task_resources[0].region is None:
         override_param['region'] = handle.launched_resources.region
 
     if override_param:
@@ -1962,8 +1968,14 @@ def check_can_clone_disk_and_override_task(
             f'as source cluster {cluster_name!r}: '
             f'{handle.launched_resources.cloud}'
             f'({handle.launched_resources.region}).')
-        task_resources = task_resources.copy(**override_param)
-        task.set_resources({task_resources})
+
+        for r in task_resources:
+            r = r.copy(**override_param)
+
+        if is_user_specified_order:
+            task.set_resources(task_resources)
+        else:
+            task.set_resources(set(task_resources))
         # Reset the best_resources to triger re-optimization
         # later, so that the new task_resources will be used.
         task.best_resources = None

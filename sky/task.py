@@ -832,7 +832,10 @@ class Task:
         #  3. if not specified or the task's cloud does not support storage,
         #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
-        assert len(self.resources) == 1, self.resources
+
+        # This check is not needed to support multiple accelerators;
+        # We just need to get the storage_cloud.
+        # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
         backend_utils.check_public_cloud_enabled()
