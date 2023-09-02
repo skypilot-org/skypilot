@@ -1,3 +1,5 @@
+"""Initialize docker containers on a remote node."""
+
 import dataclasses
 import shlex
 import typing
@@ -38,22 +40,22 @@ DEFAULT_OBJECT_STORE_MEMORY_PROPORTION = 0.3
 
 
 def _check_helper(cname, template, docker_cmd):
-    return " ".join([
-        docker_cmd, "inspect", "-f", "'{{" + template + "}}'", cname, "||",
-        "true"
+    return ' '.join([
+        docker_cmd, 'inspect', '-f', '"{{' + template + '}}"', cname, '||',
+        'true'
     ])
 
 
 def check_docker_running_cmd(cname, docker_cmd):
-    return _check_helper(cname, ".State.Running", docker_cmd)
+    return _check_helper(cname, '.State.Running', docker_cmd)
 
 
 def check_bind_mounts_cmd(cname, docker_cmd):
-    return _check_helper(cname, "json .Mounts", docker_cmd)
+    return _check_helper(cname, 'json .Mounts', docker_cmd)
 
 
 def check_docker_image(cname, docker_cmd):
-    return _check_helper(cname, ".Config.Image", docker_cmd)
+    return _check_helper(cname, '.Config.Image', docker_cmd)
 
 
 def docker_start_cmds(
@@ -63,7 +65,7 @@ def docker_start_cmds(
     docker_cmd,
 ):
     """Generating docker start command without --rm.
-    
+
     The code is borrowed from `ray.autoscaler._private.docker`. The only
     difference is that we don't use `--rm` flag here.
     """
@@ -93,9 +95,9 @@ def docker_start_cmds(
 
 def _with_interactive(cmd):
     force_interactive = (
-        f"source ~/.bashrc; "
-        f"export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore && ({cmd})")
-    return ["bash", "--login", "-c", "-i", shlex.quote(force_interactive)]
+        f'source ~/.bashrc; '
+        f'export OMP_NUM_THREADS=1 PYTHONWARNINGS=ignore && ({cmd})')
+    return ['bash', '--login', '-c', '-i', shlex.quote(force_interactive)]
 
 
 # SkyPilot: New class to initialize docker containers on a remote node.
@@ -118,7 +120,8 @@ class DockerInitializer:
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
-            cmd = f'docker exec {self.container_name} /bin/bash -c {shlex.quote(cmd)} '
+            cmd = (f'docker exec {self.container_name} /bin/bash -c '
+                   f'{shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
         rc, stdout, stderr = self.runner.run(cmd,
@@ -152,10 +155,10 @@ class DockerInitializer:
             # TODO(tian): Maybe support a command to get the login password?
             docker_login_config: DockerLoginConfig = self.docker_config[
                 'docker_login_config']
-            self._run(
-                f'{self.docker_cmd} login --username {docker_login_config.username} '
-                f'--password {docker_login_config.password} '
-                f'{docker_login_config.server}')
+            self._run(f'{self.docker_cmd} login --username '
+                      f'{docker_login_config.username} '
+                      f'--password {docker_login_config.password} '
+                      f'{docker_login_config.server}')
             specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
@@ -176,11 +179,11 @@ class DockerInitializer:
                                    self.docker_cmd)).strip())
             if running_image != specific_image:
                 logger.error(
-                    f'A container with name {self.container_name} is running image '
-                    f'{running_image} instead of {specific_image} (which was provided in the '
-                    'YAML)')
+                    f'A container with name {self.container_name} is running '
+                    f'image {running_image} instead of {specific_image} (which '
+                    'was provided in the YAML)')
 
-        if (not container_running):
+        if not container_running:
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -248,10 +251,10 @@ class DockerInitializer:
         return docker_user
 
     def _check_docker_installed(self):
-        no_exist = "NoExist"
+        no_exist = 'NoExist'
         cleaned_output = self._run(
-            f"command -v {self.docker_cmd} || echo '{no_exist}'").strip()
-        if no_exist in cleaned_output or "docker" not in cleaned_output:
+            f'command -v {self.docker_cmd} || echo {no_exist!r}').strip()
+        if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
                 f'{self.docker_cmd.capitalize()} not installed. Please use an '
                 'image with Docker installed.')
@@ -262,12 +265,12 @@ class DockerInitializer:
         output = (self._run(
             check_docker_running_cmd(self.container_name,
                                      self.docker_cmd)).strip())
-        # Checks for the false positive where "true" is in the container name
+        # Checks for the false positive where 'true' is in the container name
         return 'true' in output.lower(
         ) and 'no such object' not in output.lower()
 
     def _docker_expand_user(self, string, any_char=False):
-        user_pos = string.find("~")
+        user_pos = string.find('~')
         if user_pos > -1:
             if self.home_dir is None:
                 self.home_dir = (self._run(
@@ -275,43 +278,43 @@ class DockerInitializer:
                     'printenv HOME',).strip())
 
             if any_char:
-                return string.replace("~/", self.home_dir + "/")
+                return string.replace('~/', self.home_dir + '/')
 
             elif not any_char and user_pos == 0:
-                return string.replace("~", self.home_dir, 1)
+                return string.replace('~', self.home_dir, 1)
 
         return string
 
     def _configure_runtime(self, run_options: List[str]) -> List[str]:
-        if self.docker_config.get("disable_automatic_runtime_detection"):
+        if self.docker_config.get('disable_automatic_runtime_detection'):
             return run_options
 
         runtime_output = (self._run(f'{self.docker_cmd} ' +
-                                    'info -f \'{{.Runtimes}}\'').strip())
+                                    'info -f "{{.Runtimes}}"').strip())
         if 'nvidia-container-runtime' in runtime_output:
             try:
                 self._run('nvidia-smi')
-                return run_options + ["--runtime=nvidia"]
+                return run_options + ['--runtime=nvidia']
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
-                    "Nvidia Container Runtime is present, but no GPUs found.")
-                logger.debug(f"nvidia-smi error: {e}")
+                    'Nvidia Container Runtime is present, but no GPUs found.')
+                logger.debug(f'nvidia-smi error: {e}')
                 return run_options
 
         return run_options
 
     def _auto_configure_shm(self, run_options: List[str]) -> List[str]:
-        if self.docker_config.get("disable_shm_size_detection"):
+        if self.docker_config.get('disable_shm_size_detection'):
             return run_options
         for run_opt in run_options:
-            if "--shm-size" in run_opt:
-                logger.info("Bypassing automatic SHM-Detection because of "
-                            f"`run_option`: {run_opt}")
+            if '--shm-size' in run_opt:
+                logger.info('Bypassing automatic SHM-Detection because of '
+                            f'`run_option`: {run_opt}')
                 return run_options
         try:
             shm_output = self._run('cat /proc/meminfo || true').strip()
             available_memory = int([
-                ln for ln in shm_output.split("\n") if "MemAvailable" in ln
+                ln for ln in shm_output.split('\n') if 'MemAvailable' in ln
             ][0].split()[1])
             available_memory_bytes = available_memory * 1024
             # Overestimate SHM size by 10%
@@ -320,7 +323,7 @@ class DockerInitializer:
                  DEFAULT_OBJECT_STORE_MEMORY_PROPORTION * 1.1),
                 DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES,
             )
-            return run_options + [f"--shm-size='{shm_size}b'"]
+            return run_options + [f'--shm-size="{shm_size}b"']
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Received error while trying to auto-compute SHM size {e}')

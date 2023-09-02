@@ -126,7 +126,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
                            metadata: common.InstanceMetadata, log_path: str):
         del metadata
         docker_user = docker_utils.DockerInitializer(docker_config, runner,
-                                              log_path).initialize()
+                                                     log_path).initialize()
         logger.debug(f'Initialized docker user: {docker_user}')
         return docker_user
 
@@ -203,11 +203,10 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
-    cmd = (
-        f'ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-        'ray start --disable-usage-stats --head '
-        f'{ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
+    cmd = (f'ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
+           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+           'ray start --disable-usage-stats --head '
+           f'{ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
