@@ -969,8 +969,8 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
-    controller_cluster_name: Optional[str],
     controller_resources: 'sky.Resources',
+    controller_cluster_name: Optional[str] = None,
     controller_best_resources: Optional['sky.Resources'] = None,
 ):
     """Spin up a service.

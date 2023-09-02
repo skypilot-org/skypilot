@@ -4096,7 +4096,6 @@ def serve_up(
 
     controller_cluster_name = serve_lib.get_controller_to_use(
         controller_resources)
-
     if controller_cluster_name is not None:
         click.secho(f'Using existing controller {controller_cluster_name!r}.\n',
                     fg='cyan')
@@ -4124,8 +4123,8 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_cluster_name,
-                 controller_resources, controller_best_resources)
+    sky.serve_up(task, service_name, controller_resources,
+                 controller_cluster_name, controller_best_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

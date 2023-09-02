@@ -149,16 +149,17 @@ def get_ports_for_controller_and_load_balancer(
         if service_handle.load_balancer_port is not None:
             existing_load_balancer_ports.append(
                 service_handle.load_balancer_port)
+    # Cannot expose controller to public internet.
+    # We opened 30000-40000 for controller VM, so load balancer port
+    # should be in this range and controller port should not be in
+    # this range.
     if not existing_controller_ports:
-        assert not existing_load_balancer_ports
-        # Cannot expose controller to public internet.
-        # We opened 30000-40000 for controller VM, so load balancer port
-        # should be in this range and controller port should not be in
-        # this range.
-        controller_port, load_balancer_port = (
-            constants.CONTROLLER_PORT_START, constants.LOAD_BALANCER_PORT_START)
+        controller_port = constants.CONTROLLER_PORT_START
     else:
         controller_port = max(existing_controller_ports) + 1
+    if not existing_load_balancer_ports:
+        load_balancer_port = constants.LOAD_BALANCER_PORT_START
+    else:
         load_balancer_port = max(existing_load_balancer_ports) + 1
     return controller_port, load_balancer_port
 
@@ -170,9 +171,14 @@ def get_controller_to_use(
     for controller_name in existing_controllers:
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
-        assert controller_record is not None
+        # Corner case: controller is removed from local DB due to refresh
+        if controller_record is None:
+            continue
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        # TODO(tian): Maybe ignore controller resources when no new controller
+        # is launched, like spot implementation?
+        # If so, we could set controller resources in skypilot_config as well.
         if controller_resources.less_demanding_than(handle.launched_resources):
             services_num_on_controller = len(
                 global_user_state.get_services_from_controller_cluster_name(
