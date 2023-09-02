@@ -1070,8 +1070,8 @@ class Task:
         if len(self.resources) > 1:
             s += f'\n  resources: {self.resources}'
         elif len(
-                 self.resources) == 1 and not list(self.resources)[0].is_empty():
-             s += f'\n  resources: {list(self.resources)[0]}'
+                self.resources) == 1 and not list(self.resources)[0].is_empty():
+            s += f'\n  resources: {list(self.resources)[0]}'
         else:
             s += '\n  resources: default instances'
         return s
