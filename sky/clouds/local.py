@@ -48,7 +48,7 @@ class Local(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return None
 
     @classmethod
@@ -141,7 +141,8 @@ class Local(clouds.Cloud):
         return {}
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the

@@ -16,7 +16,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -109,7 +109,7 @@ class AWS(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -368,7 +368,8 @@ class AWS(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -441,7 +442,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            cls.get_current_user_identity()
+            identity_str = cls.get_current_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -486,9 +487,10 @@ class AWS(clouds.Cloud):
             aws_catalog.get_default_instance_type()
         except RuntimeError as e:
             return False, (
-                'Failed to fetch the availability zones for the account. It is '
-                'likely due to permission issues, please check the minimal '
-                'permission required for AWS: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
@@ -768,20 +770,22 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
-        assert region is not None, (tag_filters, region)
-        del tag_filters, zone  # unused
+        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
+        del zone  # unused
 
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
 
-        status = provision_lib.query_instances('AWS', cluster_name,
+        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
                                                {'region': region})
         instance_ids = list(status.keys())
         if not instance_ids:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('Failed to find the source cluster on AWS.')
+                raise RuntimeError(
+                    f'Failed to find the source cluster {cluster_name!r} on '
+                    'AWS.')
 
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
@@ -806,7 +810,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
@@ -853,7 +857,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the target image {target_image_id!r} on {target_region} to be '
             'available on AWS.')
         wait_image_cmd = (
@@ -875,7 +879,7 @@ class AWS(clouds.Cloud):
         sky_logging.print(
             f'The target image {target_image_id!r} is created successfully.')
 
-        log_utils.force_update_rich_status('Deleting the source image.')
+        rich_utils.force_update_status('Deleting the source image.')
         cls.delete_image(image_id, source_region)
         return target_image_id
 

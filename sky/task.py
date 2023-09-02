@@ -7,29 +7,34 @@ import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
+import colorama
 import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.data import storage_utils
 from sky.skylet import constants
+from sky.skylet.providers import command_runner
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
+logger = sky_logging.init_logger(__name__)
+
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -66,11 +71,6 @@ def _is_valid_name(name: str) -> bool:
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
 
 
-def _is_valid_env_var(name: str) -> bool:
-    """Checks if the task environment variable name is valid."""
-    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
-
-
 def _fill_in_env_vars_in_file_mounts(
     file_mounts: Dict[str, Any],
     task_envs: Dict[str, str],
@@ -103,6 +103,38 @@ def _fill_in_env_vars_in_file_mounts(
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
     file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
     return json.loads(file_mounts_str)
+
+
+def _with_docker_login_config(
+    resources_set: Set['resources_lib.Resources'],
+    task_envs: Dict[str, str],
+) -> 'resources_lib.Resources':
+    all_keys = {
+        constants.DOCKER_USERNAME_ENV_VAR,
+        constants.DOCKER_PASSWORD_ENV_VAR,
+        constants.DOCKER_SERVER_ENV_VAR,
+    }
+    existing_keys = all_keys & set(task_envs.keys())
+    if not existing_keys:
+        return resources_set
+    if len(existing_keys) != len(all_keys):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'If any of {", ".join(all_keys)} is set, all of them must '
+                f'be set. Missing envs: {all_keys - existing_keys}')
+    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+        task_envs)
+
+    def _add_docker_login_config(resources: 'resources_lib.Resources'):
+        if resources.extract_docker_image() is None:
+            logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
+                           f'{", ".join(all_keys)} are provided, but no docker '
+                           'image is specified in `image_id`. The login configs'
+                           f' will be ignored.{colorama.Style.RESET_ALL}')
+            return resources
+        return resources.copy(_docker_login_config=docker_login_config)
+
+    return {_add_docker_login_config(resources) for resources in resources_set}
 
 
 class Task:
@@ -453,7 +485,7 @@ class Task:
                 if not isinstance(key, str):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Env keys must be strings.')
-                if not _is_valid_env_var(key):
+                if not common_utils.is_valid_env_var(key):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Invalid env key: {key}')
         else:
@@ -528,7 +560,7 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = resources
+        self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
     def get_resources(self):

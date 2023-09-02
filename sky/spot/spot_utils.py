@@ -22,9 +22,11 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet.log_lib import run_bash_command_with_log
+from sky.spot import constants as spot_constants
 from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -202,7 +204,14 @@ def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
 
 def generate_spot_cluster_name(task_name: str, job_id: int) -> str:
     """Generate spot cluster name."""
-    return f'{task_name}-{job_id}'
+    # Truncate the task name to 30 chars to avoid the cluster name being too
+    # long after appending the job id, which will cause another truncation in
+    # the underlying sky.launch, hiding the `job_id` in the cluster name.
+    cluster_name = common_utils.make_cluster_name_on_cloud(
+        task_name,
+        spot_constants.SPOT_CLUSTER_NAME_PREFIX_LENGTH,
+        add_user_hash=False)
+    return f'{cluster_name}-{job_id}'
 
 
 def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
@@ -272,8 +281,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING'
                   '{status_str}[/].')
-    status_display = log_utils.safe_rich_status(
-        status_msg.format(status_str=''))
+    status_display = rich_utils.safe_status(status_msg.format(status_str=''))
     num_tasks = spot_state.get_num_tasks(job_id)
 
     with status_display:

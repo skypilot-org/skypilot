@@ -219,7 +219,7 @@ class GCP(clouds.Cloud):
         return {}
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
@@ -495,7 +495,9 @@ class GCP(clouds.Cloud):
 
         return resources_vars
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -1105,11 +1107,16 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
         assert zone is not None
+        # TODO(zhwu): This assumes the cluster is created with the
+        # `ray-cluster-name` tag, which is guaranteed by the current `ray`
+        # backend. Once the `provision.query_instances` is implemented for GCP,
+        # we should be able to get rid of this assumption.
+        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '

@@ -76,8 +76,10 @@ def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
         az_mappings = None
         if aws_user_hash != 'default':
             # Fetch az mapping from AWS.
-            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
+            print(
+                f'\r{colorama.Style.DIM}AWS: Fetching availability zones '
+                f'mapping...{colorama.Style.RESET_ALL}',
+                end='')
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None

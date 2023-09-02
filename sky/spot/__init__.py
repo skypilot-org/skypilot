@@ -1,6 +1,7 @@
 """Modules for managed spot clusters."""
 import pathlib
 
+from sky.spot.constants import SPOT_CLUSTER_NAME_PREFIX_LENGTH
 from sky.spot.constants import SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 from sky.spot.constants import SPOT_CONTROLLER_TEMPLATE
 from sky.spot.constants import SPOT_CONTROLLER_YAML_PREFIX
