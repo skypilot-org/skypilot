@@ -2955,7 +2955,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            
+
             # For backward compatibility and robustness of skylet, it is checked
             # and restarted if necessary.
             logger.debug('Checking if skylet is running on the head node.')

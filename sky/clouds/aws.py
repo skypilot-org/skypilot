@@ -106,7 +106,12 @@ class AWS(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+                f'Docker image is not supported in {cls._REPR}. '
+                'You can try running docker command inside the `run` section in task.yaml.'
+            ),
+        }
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
