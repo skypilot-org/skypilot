@@ -630,13 +630,8 @@ def spot_launch(
         task_names.add(task_.name)
     for task_ in dag.tasks:
 
-        if len(task_.resources_pref_list) >= 1:
-            res_ord = task_.resources_pref_list
-        else:
-            res_ord = list(task_.resources)  # pylint
-
         new_resources_list = []
-        for res in res_ord:
+        for res in task_.get_resources_list():
 
             override_params: Dict[str, Any] = {}
             if not res.use_spot_specified:
@@ -646,10 +641,7 @@ def spot_launch(
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        if len(task_.resources_pref_list) >= 1:
-            task_.set_resources(new_resources_list)
-        else:
-            task_.set_resources(set(new_resources_list))
+        task_.set_resources(new_resources_list, task_.is_resources_ordered)
 
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 
@@ -758,29 +750,17 @@ def spot_launch(
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        # assert len(controller_task.resources) == 1, controller_task
+        assert len(controller_task.resources) == 1, controller_task
         # Backward compatibility: if the user changed the
         # spot-controller.yaml.j2 to customize the controller resources,
         # we should use it.
-
-        # We assume that the controller_task only has one resource.
-
-        is_user_specified_order = len(controller_task.resources_pref_list) > 1
-        if is_user_specified_order:
-            controller_task_resources = controller_task.resources_pref_list
-        else:
-            controller_task_resources = list(controller_task.resources)
-
-        if len(controller_task_resources) > 0:
-            if is_user_specified_order:
-                controller_task.set_resources(controller_task_resources)
-            else:
-                controller_task.set_resources(set(controller_task_resources))
-        else:
-            controller_task.set_resources(controller_resources)
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_empty():
+            controller_resources = controller_task_resources
+        controller_task.set_resources(controller_resources)
 
         controller_task.spot_dag = dag
-        # assert len(controller_task.resources) == 1
+        assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name} from spot controller...'

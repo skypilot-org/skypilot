@@ -94,11 +94,7 @@ class StrategyExecutor:
              task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
-        has_pref_list = len(task.resources_pref_list) >= 1
-        if has_pref_list:
-            resource_list = task.resources_pref_list
-        else:
-            resource_list = list(task.resources)
+        resource_list = task.get_resources_list()
 
         spot_recovery = resource_list[0].spot_recovery
         assert spot_recovery is not None, (
@@ -106,14 +102,9 @@ class StrategyExecutor:
 
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
-        new_resources_list = []
-        for resource in resource_list:
-            new_resources_list.append(resource.copy(spot_recovery=None))
 
-        if has_pref_list >= 1:
-            task.set_resources(new_resources_list)
-        else:
-            task.set_resources(set(new_resources_list))
+        new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
+        task.set_resources(new_resources_list, task.is_resources_ordered)
 
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
@@ -425,33 +416,24 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                 task = self.dag.tasks[0]
                 launched_cloud, launched_region = self._launched_cloud_region
 
-                has_pref_list = len(task.resources_pref_list) >= 1
-                if has_pref_list:
-                    original_resources = task.resources_pref_list
-                else:
-                    original_resources = list(task.resources)
+                original_resources = task.get_resources_list()
 
                 # Remove the spot_recovery field from the resources, as
                 # the strategy will be handled by the strategy class.
-                new_resources_list = []
-                for resource in original_resources:
-                    new_resources_list.append(
-                        resource.copy(cloud=launched_cloud,
-                                      region=launched_region))
+                new_resources_list = [
+                    r.copy(cloud=launched_cloud, region=launched_region)
+                    for r in original_resources
+                ]
 
-                if has_pref_list:
-                    task.set_resources(set(new_resources_list))
-                else:
-                    task.set_resources(new_resources_list)
+                task.set_resources(new_resources_list,
+                                   task.is_resources_ordered)
 
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
 
-                if has_pref_list:
-                    task.set_resources(original_resources)
-                else:
-                    task.set_resources(set(original_resources))
+                task.set_resources(original_resources,
+                                   task.is_resources_ordered)
 
                 if job_submitted_at is not None:
                     return job_submitted_at

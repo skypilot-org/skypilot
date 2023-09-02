@@ -420,9 +420,9 @@ class Task:
                     sky.Resources.from_yaml_config(tmp_resource))
 
             if isinstance(accelerators, set):
-                task.set_resources(set(tmp_resources_list))
+                task.set_resources(tmp_resources_list, False)
             elif isinstance(accelerators, list):
-                task.set_resources(tmp_resources_list)
+                task.set_resources(tmp_resources_list, True)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
         else:
@@ -475,6 +475,10 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+
+    @property
+    def is_resources_ordered(self) -> bool:
+        return len(self.resources_pref_list) >= 1
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -563,11 +567,11 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
 
-    def set_resources(
-        self, resources: Union['resources_lib.Resources',
-                               Set['resources_lib.Resources'],
-                               List['resources_lib.Resources']]
-    ) -> 'Task':
+    def set_resources(self,
+                      resources: Union['resources_lib.Resources',
+                                       Set['resources_lib.Resources'],
+                                       List['resources_lib.Resources']],
+                      is_resources_ordered: bool = False) -> 'Task':
         """Sets the required resources to execute this task.
 
         If this function is not called for a Task, default resource
@@ -584,30 +588,35 @@ class Task:
         # Reset the preference list.
         self.resources_pref_list = []
         if isinstance(resources, sky.Resources):
+            if is_resources_ordered:
+                self.resources_pref_list = list(resources)
             resources = {resources}
-        if isinstance(resources, list):
-            self.resources_pref_list = resources
+        elif isinstance(resources, list):
+            if is_resources_ordered:
+                self.resources_pref_list = resources
             resources = set(resources)
+        elif isinstance(resources, set):
+            if is_resources_ordered:
+                self.resources_pref_list = list(resources)
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
+    def get_resources_list(self) -> List['resources_lib.Resources']:
+        if self.is_resources_ordered:
+            return self.resources_pref_list
+        else:
+            return list(self.resources)
+
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
-        if len(self.resources_pref_list) >= 1:
-            res_ord = self.resources_pref_list
-        else:
-            res_ord = list(self.resources)  # pylint
 
         new_resources_list = []
-        for res in res_ord:
+        for res in self.get_resources_list():
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        if len(self.resources_pref_list) >= 1:
-            self.set_resources(new_resources_list)
-        else:
-            self.set_resources(set(new_resources_list))
+        self.set_resources(new_resources_list, self.is_resources_ordered)
         return self
 
     def get_resources(self):
@@ -846,7 +855,7 @@ class Task:
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
-            resources = list(self.resources)[0]
+            resources = self.get_resources_list()[0]
             storage_cloud = resources.cloud
         if storage_cloud is not None:
             if str(storage_cloud) not in enabled_storage_clouds:
@@ -1060,9 +1069,9 @@ class Task:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
             s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+        elif len(self.resources
+                ) == 1 and not self.get_resources_list()[0].is_empty():
+            s += f'\n  resources: {self.get_resources_list()[0]}'
         else:
             s += '\n  resources: default instances'
         return s

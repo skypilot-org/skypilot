@@ -1928,12 +1928,7 @@ def check_can_clone_disk_and_override_task(
                     'a new target cluster name.')
 
     # assert len(task.resources) == 1, task.resources
-    is_user_specified_order = len(task.resources_pref_list) > 1
-
-    if is_user_specified_order:
-        task_resources = task.resources_pref_list
-    else:
-        task_resources = list(task.resources)
+    task_resources = task.get_resources_list()
 
     if handle.launched_resources.disk_size > task_resources[0].disk_size:
         # The target cluster's disk should be at least as large as the source.
@@ -1972,10 +1967,7 @@ def check_can_clone_disk_and_override_task(
         for r in task_resources:
             r = r.copy(**override_param)
 
-        if is_user_specified_order:
-            task.set_resources(task_resources)
-        else:
-            task.set_resources(set(task_resources))
+        task.set_resources(task_resources, task.is_resources_ordered)
         # Reset the best_resources to triger re-optimization
         # later, so that the new task_resources will be used.
         task.best_resources = None
