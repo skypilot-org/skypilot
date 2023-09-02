@@ -270,7 +270,7 @@ class Optimizer:
 
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, cloud_candidates = \
+                launchable_resources, cloud_candidates, fuzzy_candidates = \
                     _fill_in_launchable_resources(
                         node,
                         blocked_resources
@@ -325,15 +325,23 @@ class Optimizer:
                     #  add a hint to run `sky show-gpus --kubernetes` to list
                     #  available accelerators on Kubernetes.
 
+                    bold = colorama.Style.BRIGHT
+                    cyan = colorama.Fore.CYAN
+                    reset = colorama.Style.RESET_ALL
+                    fuzzy_candidates_str = ''
+                    if fuzzy_candidates:
+                        fuzzy_candidates_str = (
+                            f'\nTry one of these offered accelerators: {cyan}'
+                            f'{fuzzy_candidates}{reset}')
                     error_msg = (
-                        'No launchable resource found for task '
-                        f'{node}.{location_hint}\nThis means the '
-                        f'{source_hint} does not contain any resources that '
-                        'satisfy this request.\n'
-                        'To fix: relax or change the resource requirements.\n'
-                        'Hint: \'sky show-gpus --all\' '
+                        f'{source_hint.capitalize()} does not contain any '
+                        f'instances satisfying the request:\n{node}.'
+                        f'{location_hint}\n\nTo fix: relax or change the '
+                        f'resource requirements.{fuzzy_candidates_str}\n\n'
+                        f'Hint: {bold}sky show-gpus{reset} '
                         'to list available accelerators.\n'
-                        '      \'sky check\' to check the enabled clouds.')
+                        f'      {bold}sky check{reset} to check the enabled '
+                        'clouds.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
@@ -953,7 +961,7 @@ class Optimizer:
             if 0 < node_i < len(topo_order) - 1:
 
                 # Convert partial resource labels to launchable resources.
-                launchable_resources_map, _ = \
+                launchable_resources_map, _ , _ = \
                     _fill_in_launchable_resources(
                         task = node,
                         blocked_resources = blocked_resources,
@@ -1084,13 +1092,22 @@ def _fill_in_launchable_resources(
     try_fix_with_sky_check: bool = True,
     print_logger: bool = True
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
-           _PerCloudCandidates]:
+           _PerCloudCandidates, List[str]]:
+    """Fills in the launchable resources for the task.
+
+    Returns:
+      A tuple of:
+        Dict mapping the task's requested Resources to a list of launchable
+          Resources,
+        Dict mapping Cloud to a list of feasible Resources (for printing),
+        Sorted list of fuzzy candidates (alternative GPU names).
+    """
     backend_utils.check_public_cloud_enabled()
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
-    cloud_candidates: Dict[clouds.Cloud,
-                           resources_lib.Resources] = collections.defaultdict(
-                               resources_lib.Resources)
+    all_fuzzy_candidates = set()
+    cloud_candidates: _PerCloudCandidates = collections.defaultdict(
+        List[resources_lib.Resources])
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.get_resources():
@@ -1120,7 +1137,6 @@ def _fill_in_launchable_resources(
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)
                 ]
-            all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list) = (
                     cloud.get_feasible_launchable_resources(
@@ -1160,4 +1176,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    return launchable, cloud_candidates
+    return launchable, cloud_candidates, list(sorted(all_fuzzy_candidates))
