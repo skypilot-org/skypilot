@@ -566,7 +566,7 @@ def wait_instances(region: str, cluster_name: str, state: str) -> None:
     # boto3 waiter would wait for an empty list forever
     instances = list(ec2.instances.filter(Filters=filters))
     if not instances:
-        return
+        raise RuntimeError(f'No instances found for cluster {cluster_name}.')
 
     if state == 'running':
         waiter = client.get_waiter('instance_running')

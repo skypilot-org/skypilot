@@ -139,13 +139,14 @@ def _bulk_provision(
                 break
             except aws.botocore_exceptions().WaiterError:
                 time.sleep(backoff.current_backoff())
-            except Exception:  # pylint: disable=broad-except
+            except RuntimeError:
                 if retry_cnt == 0:
                     # AWS would take a very short time (<<1s) updating the state
                     # of the instance. Wait 4 seconds should be enough.
                     time.sleep(3)
-                else:
-                    raise
+                raise
+            except Exception:  # pylint: disable=broad-except
+                raise
         logger.debug(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
