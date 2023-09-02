@@ -110,5 +110,6 @@ class SSHCommandRunner:
               *,
               up: bool,
               log_path: str = ...,
-              stream_logs: bool = ...) -> None:
+              stream_logs: bool = ...,
+              max_retry: int = ...) -> None:
         ...

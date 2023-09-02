@@ -146,6 +146,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
+MAX_DATA_TRANSFER_RETRY = 3
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -1402,10 +1404,24 @@ def parallel_data_transfer_to_nodes(
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
-            rc, stdout, stderr = runner.run(cmd,
-                                            log_path=log_path,
-                                            stream_logs=stream_logs,
-                                            require_outputs=True)
+            retry_cnt = 0
+            backoff = common_utils.Backoff(initial_backoff=5,
+                                           max_backoff_factor=5)
+            while True:
+                # Retry on connection error to handle network instability.
+                rc, stdout, stderr = runner.run(cmd,
+                                                log_path=log_path,
+                                                stream_logs=stream_logs,
+                                                require_outputs=True)
+                if rc == 255:
+                    if retry_cnt >= MAX_DATA_TRANSFER_RETRY:
+                        break
+                    retry_cnt += 1
+                    backoff_seconds = backoff.current_backoff()
+                    logger.warning(
+                        f'{action_message}: connection error on {runner.ip}. '
+                        f'Retrying in {backoff_seconds:.2f}s...')
+                    time.sleep(backoff_seconds)
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')
@@ -1426,6 +1442,7 @@ def parallel_data_transfer_to_nodes(
                 up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
+                max_retry=MAX_DATA_TRANSFER_RETRY,
             )
 
     num_nodes = len(runners)

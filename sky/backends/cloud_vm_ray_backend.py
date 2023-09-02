@@ -2982,6 +2982,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 up=True,
                 log_path=log_path,
                 stream_logs=False,
+                max_retry=backend_utils.MAX_DATA_TRANSFER_RETRY,
             )
 
         num_nodes = handle.launched_nodes
