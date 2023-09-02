@@ -2955,6 +2955,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
+            
+            # For backward compatibility and robustness of skylet, it is checked
+            # and restarted if necessary.
+            logger.debug('Checking if skylet is running on the head node.')
+            with rich_utils.safe_status(
+                    '[bold cyan]Preparing SkyPilot runtime'):
+                self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
+
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
                                                    ssh_port_list, lock_path)
@@ -2970,12 +2978,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatibility and robustness of skylet, it is checked
-        # and restarted if necessary.
-        with rich_utils.safe_status(
-                '[bold cyan]Launching - Preparing SkyPilot runtime'):
-            self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
-
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if prev_cluster_status == status_lib.ClusterStatus.INIT:
@@ -2985,8 +2987,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                    handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
+            logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
-                    '[bold cyan]Launching - Preparing Job Queue'):
+                    '[bold cyan]Preparing SkyPilot runtime'):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
