@@ -15,6 +15,7 @@ class InstanceConfig(pydantic.BaseModel):
     """Metadata for instance configuration."""
     provider_config: Dict[str, Any]
     authentication_config: Dict[str, Any]
+    docker_config: Dict[str, Any]
     node_config: Dict[str, Any]
     count: int
     tags: Dict[str, str]
@@ -60,6 +61,7 @@ class ClusterMetadata(pydantic.BaseModel):
     """Metadata from querying a cluster."""
     instances: Dict[str, InstanceMetadata]
     head_instance_id: Optional[str]
+    docker_user: Optional[str]
 
     def ip_tuples(self) -> List[Tuple[str, Optional[str]]]:
         """Get IP tuples of all instances. Make sure that list always

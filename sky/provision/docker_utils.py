@@ -120,6 +120,7 @@ class DockerInitializer:
             cmd = ' '.join(_with_interactive(cmd))
             cmd = f'docker exec {self.container_name} /bin/bash -c {shlex.quote(cmd)} '
 
+        logger.debug(f'+ {cmd}')
         rc, stdout, stderr = self.runner.run(cmd,
                                              require_outputs=True,
                                              stream_logs=False,

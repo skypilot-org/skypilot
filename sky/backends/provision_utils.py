@@ -171,6 +171,7 @@ def bulk_provision(
     bootstrap_config = provision_comm.InstanceConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
+        docker_config=original_config.get('docker', {}),
         # NOTE: (might be a legacy issue) we call it
         # 'ray_head_default' in 'gcp-ray.yaml'
         node_config=original_config['available_node_types']['ray.head.default']
@@ -355,6 +356,7 @@ def _post_provision_setup(
             cluster_metadata=cluster_metadata,
             ssh_credentials=ssh_credentials)
         if docker_user is not None:
+            cluster_metadata.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
         logger.debug(f'Docker user: {docker_user}')
 
