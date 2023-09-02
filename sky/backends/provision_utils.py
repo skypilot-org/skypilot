@@ -143,8 +143,9 @@ def _bulk_provision(
                 if retry_cnt == 0:
                     # AWS would take a very short time (<<1s) updating the state
                     # of the instance. Wait 4 seconds should be enough.
-                    logger.debug('Waiting for AWS to update instance state...')
+                    logger.debug('Retry for waiting instance state...')
                     time.sleep(3)
+                    continue
                 raise
             except Exception:  # pylint: disable=broad-except
                 raise
