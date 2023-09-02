@@ -327,20 +327,16 @@ class StrategyExecutor:
                     return None
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
-            # TODO(zhwu): Avoid retry for storage exceptions
             except exceptions.FileMountError as e:
                 # If the file mounts fails, the failure can be due to:
                 # 1. Errors before the job submission, e.g., invalid file mounts
                 #   -- user changed the bucket content on the cloud manually
-                #   during the launch/recovery.
-                # 2. Preemption during the file mounts.
-                # When case 1 happens, we should not retry the launch, as the
-                # error is not recoverable.
-                # When case 2 happens, we should be able to find the cluster not
-                # in UP status, and we can retry the launch.
-                # TODO(zhwu): For network glitches that cause file mounts fail,
-                # the cluster will still be UP, and we should retry the launch.
-
+                #   during the launch/recovery. We should not retry the launch,
+                #   as the error is not recoverable.
+                # 2. Preemption during the file mounts. We should be able to
+                #   find the cluster not in UP status, and we can retry the
+                #   launch.
+                #
                 # Pull the actual cluster status from the cloud provider to
                 # determine whether the cluster is preempted.
                 time.sleep(5)
@@ -351,6 +347,8 @@ class StrategyExecutor:
                 if cluster_status == status_lib.ClusterStatus.UP:
                     # Case 1: Errors before the job submission. We should fail
                     # fast and not retry the launch.
+                    # Note: the underlying file mounts will retry for the
+                    # network glitches, so we do not need to retry here.
                     logger.info('User file mounts failed. Not retrying.\n'
                                 '  Detailed exception: '
                                 f'{common_utils.format_exception(e)}')
