@@ -990,11 +990,7 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        # if self.best_resources is not None:
-        #     resources = self.best_resources
-        #     tmp_resource_config = resources.to_yaml_config()
-
-        if len(self.resources_pref_list) >= 1:
+        if self.is_resources_ordered:
             tmp_resource_config = self.resources_pref_list[0].to_yaml_config()
             accelerators_list = []
             for r in self.resources_pref_list:
