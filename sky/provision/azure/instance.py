@@ -44,14 +44,14 @@ def open_ports(
 
     def security_rule_parameters(priority: int) -> Dict[str, Any]:
         return {
-            "priority": priority,
-            "protocol": "TCP",
-            "access": "Allow",
-            "direction": "Inbound",
-            "sourceAddressPrefix": "*",
-            "sourcePortRange": "*",
-            "destinationAddressPrefix": "*",
-            "destinationPortRanges": ports,
+            'priority': priority,
+            'protocol': 'TCP',
+            'access': 'Allow',
+            'direction': 'Inbound',
+            'sourceAddressPrefix': '*',
+            'sourcePortRange': '*',
+            'destinationAddressPrefix': '*',
+            'destinationPortRanges': ports,
         }
 
     list_nsg = get_azure_sdk_function(

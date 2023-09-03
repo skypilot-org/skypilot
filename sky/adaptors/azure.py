@@ -1,5 +1,6 @@
 """Azure cli adaptor"""
 
+# pylint: disable=import-outside-toplevel
 import functools
 import threading
 
