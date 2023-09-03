@@ -1405,8 +1405,7 @@ def parallel_data_transfer_to_nodes(
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
             retry_cnt = 0
-            backoff = common_utils.Backoff(initial_backoff=5,
-                                           max_backoff_factor=5)
+            backoff = common_utils.Backoff()
             while True:
                 # Retry on connection error to handle network instability.
                 rc, stdout, stderr = runner.run(cmd,
