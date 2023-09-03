@@ -113,12 +113,12 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
 
 
 @_log_start_end
-def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
-                                cluster_metadata: common.ClusterMetadata,
-                                ssh_credentials: Dict[str, str]) -> None:
+def run_runtime_setup_on_cluster(cluster_name: str, setup_commands: List[str],
+                                 cluster_metadata: common.ClusterMetadata,
+                                 ssh_credentials: Dict[str, str]) -> None:
     """Setup internal dependencies."""
     _hint_worker_log_path(cluster_name, cluster_metadata,
-                          'internal_dependencies_setup')
+                          'run_runtime_setup_on_cluster')
     # compute the digest
     digests = []
     for cmd in setup_commands:
@@ -146,7 +146,7 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
 
     _parallel_ssh_with_cache(_setup_node,
                              cluster_name,
-                             stage_name='internal_dependencies_setup',
+                             stage_name='run_runtime_setup_on_cluster',
                              digest=digest,
                              cluster_metadata=cluster_metadata,
                              ssh_credentials=ssh_credentials)
@@ -154,9 +154,9 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
 
 @_log_start_end
 @_auto_retry
-def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
-                        cluster_metadata: common.ClusterMetadata,
-                        ssh_credentials: Dict[str, str]) -> None:
+def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
+                           cluster_metadata: common.ClusterMetadata,
+                           ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the head node."""
     ip_list = cluster_metadata.get_ips(
         use_internal_ips=not cluster_metadata.has_public_ips())
@@ -194,10 +194,10 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
 
 @_log_start_end
 @_auto_retry
-def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
-                           custom_resource: Optional[str],
-                           cluster_metadata: common.ClusterMetadata,
-                           ssh_credentials: Dict[str, str]) -> None:
+def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
+                              custom_resource: Optional[str],
+                              cluster_metadata: common.ClusterMetadata,
+                              ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the worker nodes."""
     if len(cluster_metadata.instances) <= 1:
         return
@@ -265,9 +265,10 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
 
 @_log_start_end
 @_auto_retry
-def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
-                 ssh_credentials: Dict[str, str]) -> None:
-    """Start skylet on the header node."""
+def start_skylet_on_head_node(cluster_name: str,
+                              cluster_metadata: common.ClusterMetadata,
+                              ssh_credentials: Dict[str, str]) -> None:
+    """Start skylet on the head node."""
     del cluster_name
     ip_list = cluster_metadata.get_ips(
         use_internal_ips=not cluster_metadata.has_public_ips())

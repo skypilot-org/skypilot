@@ -1,4 +1,4 @@
-"""Common data structure for provisioning"""
+"""Common data structures for provisioning"""
 from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
@@ -13,11 +13,17 @@ import pydantic
 
 class InstanceConfig(pydantic.BaseModel):
     """Metadata for instance configuration."""
+    # Global configurations for the cloud provider.
     provider_config: Dict[str, Any]
+    # Configurations for the authentication.
     authentication_config: Dict[str, Any]
+    # Configurations for each instance.
     node_config: Dict[str, Any]
+    # Number of instances to start.
     count: int
+    # Tags for the instances.
     tags: Dict[str, str]
+    # Whether or not to resume stopped instances.
     resume_stopped_nodes: bool
 
 
@@ -26,17 +32,26 @@ class InstanceConfig(pydantic.BaseModel):
 
 class ProvisionMetadata(pydantic.BaseModel):
     """Metadata from provisioning."""
+    # The name of the cloud provider.
     provider_name: str
+    # The name of the region.
     region: str
+    # The name of the sub-zone in the region.
     zone: str
+    # The name of the cluster.
     cluster_name: str
+    # The head node ID.
     head_instance_id: str
+    # The IDs of all just resumed instances.
     resumed_instance_ids: List[str]
+    # The IDs of all just created instances.
     created_instance_ids: List[str]
 
     def is_instance_just_booted(self, instance_id: str) -> bool:
-        """Is an instance just booted,
-        so that there are no services running?"""
+        """Whether or not the instance is just booted.
+
+        Is an instance just booted,  so that there are no services running?
+        """
         return (instance_id in self.resumed_instance_ids or
                 instance_id in self.created_instance_ids)
 
@@ -69,9 +84,9 @@ class ClusterMetadata(pydantic.BaseModel):
             A list of tuples (private_ip, public_ip) of all instances.
         """
         head_node_ip, other_ips = [], []
-        for inst in self.instances.values():
-            pair = (inst.private_ip, inst.public_ip)
-            if inst.instance_id == self.head_instance_id:
+        for instance in self.instances.values():
+            pair = (instance.private_ip, instance.public_ip)
+            if instance.instance_id == self.head_instance_id:
                 head_node_ip.append(pair)
             else:
                 other_ips.append(pair)

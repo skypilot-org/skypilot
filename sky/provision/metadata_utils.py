@@ -1,4 +1,7 @@
-"""Utils for managing metadata for provisioning."""
+"""Utils for managing provisioning config, instance status,
+and stage cache.
+"""
+
 import contextlib
 import functools
 import pathlib
@@ -73,9 +76,12 @@ def check_cache_hash_or_update(cluster_name: str, instance_id: str,
 
 
 def get_instance_cache_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
-    """This function returns a pathlib.Path object representing the cache
+    """Get the cache directory for the specified cluster and instance.
+
+    This function returns a pathlib.Path object representing the cache
     directory for the specified cluster and instance. If the directory
-    does not exist, it is created."""
+    does not exist, it is created.
+    """
     instance_metadata_dir = _get_instance_metadata_dir(cluster_name,
                                                        instance_id)
     path = instance_metadata_dir / 'cache'
@@ -84,9 +90,12 @@ def get_instance_cache_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
 
 
 def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
-    """This function returns a pathlib.Path object representing the
+    """Get the log directory for the specified cluster and instance.
+
+    This function returns a pathlib.Path object representing the
     log directory for the specified cluster and instance. If the
-    directory does not exist, it is created."""
+    directory does not exist, it is created.
+    """
     instance_metadata_dir = _get_instance_metadata_dir(cluster_name,
                                                        instance_id)
     path = instance_metadata_dir / 'logs'
@@ -96,8 +105,10 @@ def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
 
 
 def remove_cluster_metadata(cluster_name: str) -> None:
-    """Remove metadata of a cluster. This is called when terminating
-    the cluster."""
+    """Remove metadata of a cluster.
+
+    This function is called when terminating the cluster.
+    """
     dirname = _get_cluster_metadata_dir(cluster_name)
     logger.debug(f'Remove metadata of cluster {cluster_name}.')
     shutil.rmtree(dirname, ignore_errors=True)

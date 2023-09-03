@@ -20,7 +20,7 @@ from sky import provision
 from sky import sky_logging
 from sky.adaptors import aws
 from sky.backends import backend_utils
-from sky.provision import common as provision_comm
+from sky.provision import common as provision_common
 from sky.provision import config as provision_config
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -79,8 +79,8 @@ def _bulk_provision(
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
     cluster_name: ClusterName,
-    bootstrap_config: provision_comm.InstanceConfig,
-) -> provision_comm.ProvisionMetadata:
+    bootstrap_config: provision_common.InstanceConfig,
+) -> provision_common.ProvisionMetadata:
     provider_name = repr(cloud)
     region_name = region.name
 
@@ -161,14 +161,14 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Optional[provision_comm.ProvisionMetadata]:
+) -> Optional[provision_common.ProvisionMetadata]:
     """Provisions a cluster and wait until fully provisioned."""
     log_dir = os.path.abspath(os.path.expanduser(log_dir))
     os.makedirs(log_dir, exist_ok=True)
     log_abs_path = os.path.join(log_dir, 'provision.log')
 
     original_config = common_utils.read_yaml(cluster_yaml)
-    bootstrap_config = provision_comm.InstanceConfig(
+    bootstrap_config = provision_common.InstanceConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         # NOTE: (might be a legacy issue) we call it
@@ -265,7 +265,7 @@ def _wait_ssh_connection_indirect(
     return proc.returncode == 0
 
 
-def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
+def wait_for_ssh(cluster_metadata: provision_common.ClusterMetadata,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready."""
     if (cluster_metadata.has_public_ips() and
@@ -289,7 +289,7 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
             ips.append(ip)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
-                    raise TimeoutError(
+                    raise RuntimeError(
                         f'Failed to SSH to {ip} after timeout {timeout}s.')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
@@ -298,8 +298,8 @@ def wait_for_ssh(cluster_metadata: provision_comm.ClusterMetadata,
 def _post_provision_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         local_wheel_path: pathlib.Path, wheel_hash: str,
-        provision_metadata: provision_comm.ProvisionMetadata,
-        custom_resource: Optional[str]) -> provision_comm.ClusterMetadata:
+        provision_metadata: provision_common.ProvisionMetadata,
+        custom_resource: Optional[str]) -> provision_common.ClusterMetadata:
     cluster_metadata = provision.get_cluster_metadata(
         cloud_name, provision_metadata.region, cluster_name.name_on_cloud)
 
@@ -376,7 +376,7 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=2,
                                            step_name='installing dependencies'))
-        instance_setup.internal_dependencies_setup(
+        instance_setup.run_runtime_setup_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
 
@@ -402,7 +402,7 @@ def _post_provision_setup(
 
         if full_ray_setup:
             logger.debug('Starting Ray on the whole cluster.')
-            instance_setup.start_ray_head_node(
+            instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
@@ -418,27 +418,28 @@ def _post_provision_setup(
         #         worker_ips.append(inst.public_ip)
 
         if len(ip_list) > 1:
-            instance_setup.start_ray_worker_nodes(
+            instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
 
-        instance_setup.start_skylet(cluster_name.name_on_cloud,
-                                    cluster_metadata, ssh_credentials)
+        instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
+                                                 cluster_metadata,
+                                                 ssh_credentials)
 
     logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
                 f'{cluster_name}.{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
-def post_provision_setup(cloud_name: str, cluster_name: ClusterName,
-                         cluster_yaml: str, local_wheel_path: pathlib.Path,
-                         wheel_hash: str,
-                         provision_metadata: provision_comm.ProvisionMetadata,
-                         custom_resource: Optional[str],
-                         log_dir: str) -> provision_comm.ClusterMetadata:
+def post_provision_runtime_setup(
+        cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
+        local_wheel_path: pathlib.Path, wheel_hash: str,
+        provision_metadata: provision_common.ProvisionMetadata,
+        custom_resource: Optional[str],
+        log_dir: str) -> provision_common.ClusterMetadata:
     """Run internal setup commands after provisioning and before
     user setup."""
     log_path = os.path.join(log_dir, 'provision.log')

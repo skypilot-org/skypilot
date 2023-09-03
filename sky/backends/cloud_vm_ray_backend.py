@@ -1585,7 +1585,7 @@ class RetryingVmProvisioner(object):
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
                     log_dir=self.log_dir)
                 # NOTE: We handle the logic of '_ensure_cluster_ray_started'
-                # in '_post_provision_setup()'.
+                # in 'post_provision_runtime_setup()'.
                 if provision_metadata is not None:
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
@@ -2862,7 +2862,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 provision_metadata = config_dict['provision_metadata']
                 resources_vars = config_dict['resources_vars']
 
-                cluster_metadata = provision_utils.post_provision_setup(
+                # setup SkyPilot runtime after the cluster is provisioned
+                cluster_metadata = provision_utils.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     provision_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
