@@ -2877,7 +2877,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
                                ports_to_open: List[Union[int, str]]) -> None:
         cloud = handle.launched_resources.cloud
-        if not isinstance(cloud, (clouds.AWS, clouds.GCP)):
+        if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
             logger.warning(f'Cannot open ports for {cloud} that not support '
                            'new provisioner API.')
             return
@@ -4011,12 +4011,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
-            if isinstance(cloud, (clouds.AWS, clouds.GCP)):
-                # Clean up AWS SGs or GCP firewall rules
-                # We don't need to clean up on Azure since it is done by
-                # our sky node provider.
-                # TODO(tian): Adding a no-op cleanup_ports API after #2286
-                # merged.
+            if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 
