@@ -185,44 +185,59 @@ def _get_sg_from_name(
     return list(sgs)[0]
 
 
-def _copy_sg_and_use(
-    region: str,
+def _maybe_move_to_new_sg(
+    ec2: Any,
     cluster_name_on_cloud: str,
-    previous_sg_name: str,
-) -> Optional[str]:
-    ec2 = _default_ec2_resource(region)
-    previous_sg = _get_sg_from_name(ec2, previous_sg_name)
-    if previous_sg is None:
-        logger.warning('Find previous security group failed. Skip creating '
-                       'new security group.')
-        return None
-    sg_name = f'sky-sg-{cluster_name_on_cloud}'
-    filters = _cluster_name_filter(cluster_name_on_cloud)
+    expected_sg_name: str,
+) -> Any:
+    filters = [
+        {
+            'Name': 'instance-state-name',
+            # exclude 'shutting-down' or 'terminated' states
+            'Values': ['pending', 'running', 'stopping', 'stopped'],
+        },
+        *_cluster_name_filter(cluster_name_on_cloud),
+    ]
     instances = ec2.instances.filter(Filters=filters)
     if len(list(instances)) != 1:
         logger.warning(
             f'Expected 1 instance with cluster name {cluster_name_on_cloud}, '
-            f'but found {len(instances)}. Skip creating security group.')
+            f'but found {len(list(instances))}. Skip creating security group.')
         return None
     instance = list(instances)[0]
-    sg = ec2.create_security_group(
-        GroupName=sg_name,
-        Description='Auto-created security group for Ray workers',
-        VpcId=instance.vpc_id)
-    sg.authorize_ingress(IpPermissions=previous_sg.ip_permissions)
+    sg_names = [sg['GroupName'] for sg in instance.security_groups]
+    if len(sg_names) != 1:
+        logger.warning(
+            f'Expected 1 security group for instance {instance.id}, '
+            f'but found {len(sg_names)}. Skip creating security group.')
+        return None
+    sg_name = sg_names[0]
+    if sg_name == expected_sg_name:
+        return _get_sg_from_name(ec2, sg_name)
+    logger.info(f'Cluster {cluster_name_on_cloud} is using shared security '
+                f'group {sg_name}. Change to dedicated security group '
+                f'{expected_sg_name} to allow more inbound rules.')
+    # The security groups will be automatically created by config.py for AWS
+    # since we write it to provider config. For here we just move to it.
+    sg = _get_sg_from_name(ec2, expected_sg_name)
     instance.modify_attribute(Groups=[sg.id])
-    return sg_name
+    return sg
 
 
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[Union[int, str]],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Optional[str]:
+) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
+    sg_name = provider_config['security_group']['GroupName']
+    sg = _maybe_move_to_new_sg(ec2, cluster_name_on_cloud, sg_name)
+    if sg is None:
+        logger.warning('Find new security group failed. Skip open ports.')
+        return
 
     ip_permissions = []
     for port in ports:
@@ -241,20 +256,7 @@ def open_ports(
             }],
         })
 
-    sg_name = provider_config['security_group']['GroupName']
-    if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
-        new_sg_name = _copy_sg_and_use(region, cluster_name_on_cloud, sg_name)
-        if new_sg_name is None:
-            logger.warning('Cannot create new security group. Skip open ports.')
-            return None
-        logger.debug(f'Created new security group {new_sg_name}.')
-        sg_name = new_sg_name
-    sg = _get_sg_from_name(ec2, sg_name)
-    if sg is None:
-        logger.warning('Find new security group failed. Skip open ports.')
-        return None
     sg.authorize_ingress(IpPermissions=ip_permissions)
-    return sg_name
 
 
 def cleanup_ports(

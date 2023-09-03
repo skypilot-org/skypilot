@@ -3,6 +3,7 @@ import itertools
 from typing import List, Set, Union
 
 
+# TODO(tian): Maybe we need more intuitive names for these functions.
 def parse_ports(ports: List[Union[int, str]]) -> Set[int]:
     """Parse a list of ports into a set that containing no duplicates.
 
