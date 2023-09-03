@@ -2876,20 +2876,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
                                ports_to_open: List[Union[int, str]]) -> None:
-        if ports_to_open:
-            cloud = handle.launched_resources.cloud
-            if not isinstance(cloud, (clouds.AWS, clouds.GCP)):
-                logger.warning(
-                    f'Cannot open ports for {cloud} that not support '
-                    'new provisioner API.')
-                return
-            logger.debug(f'Opening new ports {ports_to_open} for {cloud}')
-            config = common_utils.read_yaml(handle.cluster_yaml)
-            provider_config = config['provider']
-            provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
-                                     ports_to_open, provider_config)
-        else:
-            logger.debug('No new ports to open.')
+        cloud = handle.launched_resources.cloud
+        if not isinstance(cloud, (clouds.AWS, clouds.GCP)):
+            logger.warning(f'Cannot open ports for {cloud} that not support '
+                           'new provisioner API.')
+            return
+        logger.debug(f'Opening new ports {ports_to_open} for {cloud}')
+        config = common_utils.read_yaml(handle.cluster_yaml)
+        provider_config = config['provider']
+        provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
+                                 ports_to_open, provider_config)
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
@@ -2941,7 +2937,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
 
-        if ports_to_open is not None:
+        if ports_to_open:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
                 self._open_inexistent_ports(handle, ports_to_open)

@@ -237,6 +237,5 @@ def cleanup_ports(
         return
     project_id = provider_config['project_id']
     for port in provider_config['ports']:
-        rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
         instance_utils.GCPComputeInstance.delete_firewall_rule(
-            project_id, rule_name)
+            project_id, cluster_name_on_cloud, port)

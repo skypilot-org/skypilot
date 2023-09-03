@@ -164,7 +164,7 @@ def terminate_instances(
 def _get_sg_from_name(
     ec2: Any,
     sg_name: str,
-):
+) -> Any:
     # GroupNames will only filter SGs in the default VPC, so we need to use
     # Filters here. Ref:
     # https://boto3.amazonaws.com/v1/documentation/api/1.26.112/reference/services/ec2/service-resource/security_groups.html  # pylint: disable=line-too-long
@@ -218,7 +218,8 @@ def _maybe_move_to_new_sg(
                 f'group {sg_name}. Change to dedicated security group '
                 f'{expected_sg_name} to allow more inbound rules.')
     # The security groups will be automatically created by config.py for AWS
-    # since we write it to provider config. For here we just move to it.
+    # since we write it to provider config. But it won't change an existing
+    # instance's security group, so here we move to it.
     sg = _get_sg_from_name(ec2, expected_sg_name)
     instance.modify_attribute(Groups=[sg.id])
     return sg

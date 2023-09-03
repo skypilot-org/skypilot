@@ -1,5 +1,5 @@
 """Utilities for GCP instances."""
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -75,7 +75,8 @@ class GCPInstance:
     def delete_firewall_rule(
         cls,
         project_id: str,
-        firewall_rule_name: str,
+        cluster_name_on_cloud: str,
+        port: Union[int, str],
     ) -> None:
         raise NotImplementedError
 
@@ -95,8 +96,15 @@ class GCPInstance:
         cluster_name_on_cloud: str,
         port: Union[int, str],
         vpc_name: str,
-    ) -> Dict[str, Any]:
+    ) -> dict:
         raise NotImplementedError
+
+
+def _get_firewall_rule_name(
+    cluster_name_on_cloud: str,
+    port: Union[int, str],
+) -> str:
+    return f'user-ports-{cluster_name_on_cloud}-{port}'
 
 
 class GCPComputeInstance(GCPInstance):
@@ -221,8 +229,11 @@ class GCPComputeInstance(GCPInstance):
     def delete_firewall_rule(
         cls,
         project_id: str,
-        firewall_rule_name: str,
+        cluster_name_on_cloud: str,
+        port: Union[int, str],
     ) -> None:
+        firewall_rule_name = _get_firewall_rule_name(cluster_name_on_cloud,
+                                                     port)
         rule = cls.load_resource().firewalls().list(
             project=project_id, filter=f'name={firewall_rule_name}').execute()
         # For the return value format, please refer to
@@ -243,6 +254,7 @@ class GCPComputeInstance(GCPInstance):
         zone: str,
         instance_name: str,
     ) -> Optional[str]:
+        # Any errors will be handled in the caller function.
         instance = cls.load_resource().instances().get(
             project=project_id,
             zone=zone,
@@ -260,7 +272,7 @@ class GCPComputeInstance(GCPInstance):
         port: Union[int, str],
         vpc_name: str,
     ) -> dict:
-        name = f'user-ports-{cluster_name_on_cloud}-{port}'
+        name = _get_firewall_rule_name(cluster_name_on_cloud, port)
         body = {
             'name': name,
             'description': f'Allow user-specified port {port} for cluster {cluster_name_on_cloud}',
