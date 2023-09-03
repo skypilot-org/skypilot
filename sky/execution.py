@@ -1000,7 +1000,8 @@ def serve_up(
         status_lib.ServiceStatus.CONTROLLER_INIT)
     app_port = int(task.service.app_port)
 
-    # TODO(tian): Use skyserve constants.
+    # TODO(tian): Use skyserve constants, or maybe refactor these constants
+    # out of spot constants since their name is mostly not spot-specific.
     _maybe_translate_local_file_mounts_and_sync_up(task)
     ephemeral_storage = []
     if task.storage_mounts is not None:
