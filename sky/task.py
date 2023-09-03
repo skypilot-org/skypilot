@@ -592,8 +592,7 @@ class Task:
                 self.resources_pref_list = list(resources)
             resources = {resources}
         elif isinstance(resources, list):
-            if is_resources_ordered:
-                self.resources_pref_list = resources
+            self.resources_pref_list = resources
             resources = set(resources)
         elif isinstance(resources, set):
             if is_resources_ordered:

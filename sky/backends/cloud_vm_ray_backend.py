@@ -4240,7 +4240,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 task_cloud = r.cloud
             else:
                 task_cloud = clouds.Cloud
-            task_cloud.check_cluster_name_is_valid(cluster_name)
+            if task_cloud is not None:
+                task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually
