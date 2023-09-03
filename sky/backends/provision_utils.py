@@ -124,8 +124,6 @@ def _bulk_provision(
         except Exception:  # pylint: disable=broad-except
             logger.debug(f'Starting instances for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
-            logger.error(f'Failed to provision {cluster_name!r} after '
-                         'maximum retries.')
             raise
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
@@ -142,6 +140,10 @@ def _bulk_provision(
                 break
             except (aws.botocore_exceptions().WaiterError, RuntimeError):
                 time.sleep(backoff.current_backoff())
+        else:
+            raise RuntimeError(
+                f'Failed to wait for instances of {cluster_name!r} to be '
+                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
         logger.debug(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
@@ -187,9 +189,12 @@ def bulk_provision(
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
         except Exception:  # pylint: disable=broad-except
-            logger.error(
-                f'*** Failed provisioning the cluster ({cluster_name}). ***')
-            logger.debug(f'Starting instances for "{cluster_name}" '
+            zone_str = 'all zones'
+            if zones:
+                zone_str = ','.join(zone.name for zone in zones)
+            logger.error(f'Failed to provision {cluster_name.display_name!r} '
+                         f'on {cloud} ({zone_str}).')
+            logger.debug(f'Starting instances for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
@@ -198,7 +203,7 @@ def bulk_provision(
             # sky launch, somehow failed, then we may be terminating it here.
             terminate = not is_prev_cluster_healthy
             terminate_str = ('Terminating' if terminate else 'Stopping')
-            logger.error(f'*** {terminate_str} the failed cluster. ***')
+            logger.error(f'{terminate_str} the failed cluster.')
             teardown_cluster(repr(cloud),
                              cluster_name,
                              terminate=terminate,

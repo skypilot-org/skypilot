@@ -123,7 +123,10 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
 
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
-    max_tries = max(BOTO_CREATE_MAX_RETRIES, len(subnet_ids))
+    num_subnets = len(subnet_ids)
+    max_tries = max(num_subnets * (BOTO_CREATE_MAX_RETRIES // num_subnets),
+                    len(subnet_ids))
+    per_subnet_tries = max_tries // num_subnets
     for i in range(max_tries):
         try:
             if 'NetworkInterfaces' in conf:
@@ -131,9 +134,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                 # interfaces (create_instances call fails otherwise)
                 conf.pop('SecurityGroupIds', None)
             else:
-                # Launch failure may be due to instance type availability in
-                # the given AZ. Try to always launch in the first listed subnet.
-                subnet_id = subnet_ids[i % len(subnet_ids)]
+                # Try each subnet for per_subnet_tries times.
+                subnet_id = subnet_ids[i // per_subnet_tries]
                 conf['SubnetId'] = subnet_id
 
             # NOTE: We set retry=0 for fast failing when the resource is not
@@ -159,13 +161,15 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                     'Max attempts exceeded.')
             return instances
         except aws.botocore_exceptions().ClientError as exc:
+            echo = logger.debug
+            if (i + 1) % per_subnet_tries == 0:
+                # Print the warning only once per subnet
+                echo = logger.warning
+            echo(f'create_instances: Attempt failed with {exc}, retrying.')
             if (i + 1) >= max_tries:
                 raise RuntimeError(
                     'Failed to launch instances. Max attempts exceeded.'
                 ) from exc
-            else:
-                logger.warning(
-                    f'create_instances: Attempt failed with {exc}, retrying.')
     assert False, 'This code should not be reachable'
 
 
