@@ -2719,9 +2719,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
-            to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, to_provision, task.num_nodes)
-            # Try to launch the exiting cluster first
+            # Try to launch the exiting cluster first. If no existing cluster,
+            # this function will create a to_provision_config with required
+            # resources.
             to_provision_config = self._check_existing_cluster(
                 task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
