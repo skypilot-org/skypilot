@@ -1927,10 +1927,10 @@ def check_can_clone_disk_and_override_task(
                     'disk is only supported when creating a new cluster. To fix: specify '
                     'a new target cluster name.')
 
-    # assert len(task.resources) == 1, task.resources
     task_resources = task.get_resources_list()
+    first_task_resource = task_resources[0]
 
-    if handle.launched_resources.disk_size > task_resources[0].disk_size:
+    if handle.launched_resources.disk_size > first_task_resource.disk_size:
         # The target cluster's disk should be at least as large as the source.
         with ux_utils.print_exception_no_traceback():
             target_cluster_name_str = f' {target_cluster_name!r}'
@@ -1943,18 +1943,18 @@ def check_can_clone_disk_and_override_task(
     override_param = {}
     original_cloud = handle.launched_resources.cloud
     assert original_cloud is not None, handle.launched_resources
-    if task_resources[0].cloud is None:
+    if first_task_resource.cloud is None:
         override_param['cloud'] = original_cloud
     else:
-        if not original_cloud.is_same_cloud(task_resources[0].cloud):
+        if not original_cloud.is_same_cloud(first_task_resource.cloud):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources[0].cloud}.')
+                    f'{first_task_resource.cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    if task_resources[0].region is None:
+    if first_task_resource.region is None:
         override_param['region'] = handle.launched_resources.region
 
     if override_param:
@@ -2675,10 +2675,9 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     else:
         # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
         # sky.optimize(), so best_resources may be None.
-
-        # assert len(task.resources) == 1, task.resources
-        # resources = list(task.resources)[0]
         resources = task.best_resources
+        if resources is None:
+            resources = list(task.resources)[0]
     if resources is not None:
         accelerator_dict = resources.accelerators
     return accelerator_dict

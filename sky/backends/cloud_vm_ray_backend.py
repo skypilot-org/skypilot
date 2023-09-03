@@ -4235,13 +4235,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        resources = task.best_resources
-
-        if resources is not None:
-            task_cloud = resources.cloud
-        else:
-            task_cloud = clouds.Cloud
-        task_cloud.check_cluster_name_is_valid(cluster_name)
+        for r in task.resources:
+            if r is not None:
+                task_cloud = r.cloud
+            else:
+                task_cloud = clouds.Cloud
+            task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually

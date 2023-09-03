@@ -586,6 +586,7 @@ class Task:
           self: The current task, with resources set.
         """
         # Reset the preference list.
+        print('resources', resources, flush=True)
         self.resources_pref_list = []
         if isinstance(resources, sky.Resources):
             if is_resources_ordered:
