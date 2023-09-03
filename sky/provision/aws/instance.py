@@ -165,7 +165,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
             if (i + 1) % per_subnet_tries == 0:
                 # Print the warning only once per subnet
                 echo = logger.warning
-            echo(f'create_instances: Attempt failed with {exc}, retrying.')
+            echo(f'create_instances: Attempt failed with {exc}')
             if (i + 1) >= max_tries:
                 raise RuntimeError(
                     'Failed to launch instances. Max attempts exceeded.'
