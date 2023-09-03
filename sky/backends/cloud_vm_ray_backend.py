@@ -2937,6 +2937,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
 
+        # This include ports_to_open is not None and not empty.
         if ports_to_open:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
@@ -4208,13 +4209,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ))
         assert len(task.resources) == 1
         required_ports = list(task.resources)[0].ports
+        if required_ports is None:
+            required_ports = []
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            existing_ports = handle.launched_resources.ports or []
+            existing_ports = handle.launched_resources.ports
+            if existing_ports is None:
+                existing_ports = []
             ports_to_open = resources_utils.parse_port_set(
                 resources_utils.parse_ports(required_ports) -
                 resources_utils.parse_ports(existing_ports))
