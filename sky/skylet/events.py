@@ -211,7 +211,12 @@ class AutostopEvent(SkyletEvent):
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
-        subprocess.run('ray stop', shell=True, check=True)
+        proc = subprocess.run('ray stop', shell=True, check=False)
+        if proc.returncode != 0:
+            operator_str = 'terminate' if autostop_config.down else 'stop'
+            logger.warning('Failed to stop ray autoscaler. Continuing to '
+                           f'{operator_str} the cluster. Please be careful of '
+                           'any possible leaked VMs.')
 
         operation_fn = provision_lib.stop_instances
         if autostop_config.down:
