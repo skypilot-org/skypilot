@@ -136,6 +136,8 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #   well as the disabling of the auto-update with apt-get.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    ('provider', 'ports'),
+    ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
@@ -827,22 +829,7 @@ def _replace_yaml_dicts(
         for key, value in new_block.items():
             if key in restore_key_names:
                 if key in old_block:
-                    if key != 'provider':
-                        new_block[key] = old_block[key]
-                    else:
-                        # We override ports and security_group in provider
-                        # config to get the latest values.
-                        old_provider_config = old_block[key]
-                        new_provider_config = new_block[key]
-                        if new_provider_config.get('ports', None) is not None:
-                            old_provider_config['ports'] = new_provider_config[
-                                'ports']
-                        if new_provider_config.get('security_group',
-                                                   None) is not None:
-                            old_provider_config[
-                                'security_group'] = new_provider_config[
-                                    'security_group']
-                        new_block[key] = old_provider_config
+                    new_block[key] = old_block[key]
                 else:
                     del new_block[key]
             elif isinstance(value, dict):
