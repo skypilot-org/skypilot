@@ -7,7 +7,7 @@ from typing import List, Set, Union
 def parse_ports(ports: List[Union[int, str]]) -> Set[int]:
     """Parse a list of ports into a set that containing no duplicates.
 
-    For example, [1-3, 5-7] will be parsed to {1, 2, 3, 5, 6, 7}.
+    For example, ['1-3', '5-7'] will be parsed to {1, 2, 3, 5, 6, 7}.
     """
     port_set = set()
     for p in ports:
@@ -24,7 +24,7 @@ def parse_port_set(port_set: Set[int]) -> List[Union[int, str]]:
 
     This function will group consecutive ports together into a range,
     and keep the rest as is. For example, {1, 2, 3, 5, 6, 7} will be
-    parsed to [1-3, 5-7].
+    parsed to ['1-3', '5-7'].
     """
     ports: List[Union[int, str]] = []
     # Group consecutive ports together.
@@ -46,6 +46,6 @@ def parse_port_set(port_set: Set[int]) -> List[Union[int, str]]:
 def simplify_ports(ports: List[Union[int, str]]) -> List[Union[int, str]]:
     """Simplify a list of ports.
 
-    For example, [1, 2, 3, 5-6, 7] will be simplified to [1-3, 5-7].
+    For example, [1, 2, 3, '5-6', 7] will be simplified to ['1-3', '5-7'].
     """
     return parse_port_set(parse_ports(ports))
