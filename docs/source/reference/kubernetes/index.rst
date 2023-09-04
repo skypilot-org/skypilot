@@ -1,7 +1,7 @@
 .. _kubernetes-overview:
 
 SkyPilot on Kubernetes (Alpha)
-=============================
+==============================
 
 .. note::
     Kubernetes support for SkyPilot is a alpha preview under active development.
@@ -19,7 +19,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 * Replace complex Kubernetes manifests with simple SkyPilot tasks
 * Maximize resource utilization by running cloud jobs on your Kubernetes cluster.
 * Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested.
-* Retain observability and control over your cluster with your existing Kubernetes tools
+* Retain observability and control over your cluster with your existing Kubernetes tools.
 
 **Supported deployment models:**
 
@@ -38,18 +38,18 @@ To connect and use a Kubernetes cluster, SkyPilot needs:
 
 In a typical workflow:
 
-1. A cluster administrator sets up a Kubernetes cluster. Detailed guides for
+1. A cluster administrator sets up a Kubernetes cluster. Detailed admin guides for
    different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
 
 2. Users who want to run SkyPilot tasks on this cluster are issued Kubeconfig
    files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/tools/>`_).
-   SkyPilot reads this Kubeconfig file and adds the cluster to list clouds considered when launching tasks.
+   SkyPilot reads this Kubeconfig file to communicate with the cluster.
 
 Submitting SkyPilot tasks to Kubernetes Clusters
 ------------------------------------------------
 .. _kubernetes-instructions:
 
-Once your Kubernetes cluster is up and running:
+Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes-setup>` and provided you with a kubeconfig file:
 
 0. Make sure `Kubectl <https://kubernetes.io/docs/tasks/tools/>`_, `socat <https://kubernetes.io/docs/tasks/tools/>`_ and `lsof <https://kubernetes.io/docs/tasks/tools/>`_ are installed on the machine which will submit tasks.
 
@@ -61,27 +61,6 @@ Once your Kubernetes cluster is up and running:
      $ cp /path/to/kubeconfig ~/.kube/config
 
    You can verify your credentials are setup correctly by running :code:`kubectl get pods`
-
-2. **[If using GPUs, not required for GKE clusters]** If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node). Additionally, you will need to label each node in your cluster with the GPU type. For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`. We provide a convinience script that automatically detects GPU type and labels each node. You can run it with:
-
-   .. code-block:: console
-
-     $ python -m sky.utils.kubernetes.gpu_labeler
-
-     Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
-     Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
-     GPU labeling started - this may take a few minutes to complete.
-     To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
-     You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerators: <gpu_name>`.
-
-
-   .. note::
-     GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
-
-
-   .. note::
-     To cleanup any leftover jobs from the GPU labelling process, run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup``.
-
 
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
@@ -137,12 +116,6 @@ Once your Kubernetes cluster is up and running:
     $ # Set a specific namespace to be used in the current-context
     $ kubectl config set-context --current --namespace=mynamespace
 
-
-Observability
--------------
-Hi.
-
-
 FAQs
 ----
 
@@ -157,6 +130,10 @@ FAQs
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
   The goal of SkyPilot on Kubernetes is to run SkyPilot tasks on resources in an existing Kubernetes cluster. It does not provision any new Kubernetes clusters or add new nodes to an existing Kubernetes cluster. The Kubernetes control plane remains untouched.
+
+* **I have multiple users in my organization who share the same Kubernetes cluster. How do I provide isolation for their SkyPilot workloads?**
+
+  You can create an individual Kubernetes namespace for each user and set it in the kubeconfig distributed to the user. SkyPilot will use this namespace for running all tasks.
 
 Features and Roadmap
 --------------------
