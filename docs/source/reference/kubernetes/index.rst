@@ -1,13 +1,16 @@
 .. _kubernetes-overview:
 
-SkyPilot on Kubernetes (Beta)
+SkyPilot on Kubernetes (Alpha)
 =============================
 
 .. note::
-    Kubernetes support for SkyPilot is a beta preview under active development. There may be rough edges and features may change without notice. Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and `reach out to us <http://slack.skypilot.co>`_ for feature requests.
+    Kubernetes support for SkyPilot is a alpha preview under active development.
+    There may be rough edges and features may change without notice.
+    Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
+    `reach out to us <http://slack.skypilot.co>`_ for feature requests.
 
-SkyPilot can run on your private on-prem or cloud Kubernetes clusters.
-Your Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
+SkyPilot tasks can be deployed on your private on-prem or cloud clusters running Kubernetes.
+The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
 tasks can be submitted to your Kubernetes cluster just like any other cloud provider.
 
 **Benefits of bringing your Kubernetes cluster to SkyPilot:**
@@ -16,6 +19,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 * Replace complex Kubernetes manifests with simple SkyPilot tasks
 * Maximize resource utilization by running cloud jobs on your Kubernetes cluster.
 * Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested.
+* Retain observability and control over your cluster with your existing Kubernetes tools
 
 **Supported deployment models:**
 
@@ -29,17 +33,25 @@ Kubernetes Cluster Requirements
 
 To connect and use a Kubernetes cluster, SkyPilot needs:
 
-* `Kubectl <https://kubernetes.io/docs/tasks/tools/>`_
+* An existing Kubernetes cluster running Kubernetes v1.20 or later.
 * A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
-* Ports 30000-32767 should be accessible on all Kubernetes nodes.
 
-Detailed guides for setting up different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
+In a typical workflow:
 
-Using Kubernetes Clusters with SkyPilot
----------------------------------------
+1. A cluster administrator sets up a Kubernetes cluster. Detailed guides for
+   different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
+
+2. Users who want to run SkyPilot tasks on this cluster are issued Kubeconfig
+   files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/tools/>`_).
+   SkyPilot reads this Kubeconfig file and adds the cluster to list clouds considered when launching tasks.
+
+Submitting SkyPilot tasks to Kubernetes Clusters
+------------------------------------------------
 .. _kubernetes-instructions:
 
 Once your Kubernetes cluster is up and running:
+
+0. Make sure `Kubectl <https://kubernetes.io/docs/tasks/tools/>`_, `socat <https://kubernetes.io/docs/tasks/tools/>`_ and `lsof <https://kubernetes.io/docs/tasks/tools/>`_ are installed on the machine which will submit tasks.
 
 1. Place your kubeconfig file at ``~/.kube/config``.
 
@@ -47,6 +59,8 @@ Once your Kubernetes cluster is up and running:
 
      $ mkdir -p ~/.kube
      $ cp /path/to/kubeconfig ~/.kube/config
+
+   You can verify your credentials are setup correctly by running :code:`kubectl get pods`
 
 2. **[If using GPUs, not required for GKE clusters]** If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node). Additionally, you will need to label each node in your cluster with the GPU type. For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`. We provide a convinience script that automatically detects GPU type and labels each node. You can run it with:
 
@@ -79,6 +93,12 @@ Once your Kubernetes cluster is up and running:
      ...
      Kubernetes: enabled
      ...
+
+
+   .. note::
+     :code:`sky check` will also check if GPU support is available on your cluster. If GPU support is not available, it
+     will show the reason.
+     To setup GPU support on the cluster, refer to the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
 
 4. You can now run any SkyPilot task on your Kubernetes cluster.
 
@@ -118,6 +138,11 @@ Once your Kubernetes cluster is up and running:
     $ kubectl config set-context --current --namespace=mynamespace
 
 
+Observability
+-------------
+Hi.
+
+
 FAQs
 ----
 
@@ -127,12 +152,11 @@ FAQs
 
 * **What container image is used for tasks? Can I specify my own image?**
 
-  We use and maintain a SkyPilot container image that has conda and a few other basic tools installed. You can specify a custom image to use in `clouds/kubernetes.py`, but it must have rsync and conda installed. We are working on a interface to allow specifying custom images through the :code:`image_id` field in the task YAML - stay tuned!
+  We use and maintain a SkyPilot container image that has conda and a few other basic tools installed. You can specify a custom image to use in `clouds/kubernetes.py`, but it must have rsync, conda and OpenSSH server installed. We are working on a interface to allow specifying custom images through the :code:`image_id` field in the task YAML - stay tuned!
 
-* **Will SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
+* **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
   The goal of SkyPilot on Kubernetes is to run SkyPilot tasks on resources in an existing Kubernetes cluster. It does not provision any new Kubernetes clusters or add new nodes to an existing Kubernetes cluster. The Kubernetes control plane remains untouched.
-
 
 Features and Roadmap
 --------------------
@@ -141,7 +165,7 @@ SkyPilot on Kubernetes is under active development. Some features are in progres
 
 * CPU Tasks - ✅ Available
 * Auto-down - ✅ Available
-* Storage mounting - ✅ (supported only on x86_64 clusters)
+* Storage mounting - ✅ Available on x86_64 clusters
 * GPU Tasks - ✅ Available
 * Multi-node tasks - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
