@@ -4084,7 +4084,6 @@ def serve_up(
         click.secho('Ports in controller resources will be ignored.',
                     fg='yellow')
     # TODO(tian): Open required ports only after #2485 is merged.
-    # We should support simultaneously open different ports in #2485.
     controller_resources_config['ports'] = [serve_lib.LOAD_BALANCER_PORT_RANGE]
     try:
         controller_resources = sky.Resources.from_yaml_config(

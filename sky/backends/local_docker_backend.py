@@ -270,8 +270,12 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  task: 'task_lib.Task',
                  detach_run: bool,
                  dryrun: bool = False) -> Optional[int]:
-        """ Launches the container."""
+        """ Launches the container.
 
+        Returns:
+            The job id if the job is submitted successfully. LocalDockerBackend
+            does not have the concept of job id, so this is always None.
+        """
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
                                       'LocalDockerBackend.')

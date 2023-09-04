@@ -3335,6 +3335,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         detach_run: bool,
         dryrun: bool = False,
     ) -> Optional[int]:
+        """Execute a job on the cluster.
+
+        Returns:
+            The job id if the job is submitted successfully, None otherwise.
+        """
         if task.run is None:
             logger.info('Run commands not specified or empty.')
             return None
@@ -3677,10 +3682,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         )
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
-                        service_name: str, controller_port: int,
+                        service_handle: serve_lib.ServiceHandle,
                         replica_id: int, follow: bool) -> None:
-        code = serve_lib.ServeCodeGen.stream_logs(service_name, controller_port,
-                                                  replica_id, follow)
+        if service_handle.controller_port is None:
+            logger.warning('Controller task is not successfully launched '
+                           f'for service {service_handle.service_name!r}. '
+                           'Cannot stream logs.')
+            return
+        code = serve_lib.ServeCodeGen.stream_logs(
+            service_handle.service_name, service_handle.controller_port,
+            replica_id, follow)
 
         signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
         signal.signal(signal.SIGTSTP, backend_utils.stop_handler)

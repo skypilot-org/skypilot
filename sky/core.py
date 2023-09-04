@@ -137,12 +137,7 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    assert service_handle.controller_port is not None
-    backend.tail_serve_logs(handle,
-                            service_name,
-                            service_handle.controller_port,
-                            replica_id,
-                            follow=follow)
+    backend.tail_serve_logs(handle, service_handle, replica_id, follow=follow)
 
 
 @usage_lib.entrypoint

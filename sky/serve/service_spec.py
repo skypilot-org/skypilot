@@ -4,6 +4,7 @@ import os
 import textwrap
 from typing import Any, Dict, Optional
 
+import colorama
 import yaml
 
 from sky.backends import backend_utils
@@ -186,10 +187,14 @@ class SkyServiceSpec:
                 f'{self.max_replicas} replica{max_plural}')
 
     def __repr__(self) -> str:
+        # pylint: disable=line-too-long
         return textwrap.dedent(f"""\
             Readiness probe method:        {self.probe_str()}
             Replica autoscaling policy:    {self.policy_str()}
             Service initial delay seconds: {self.initial_delay_seconds}
+            App port:                      {self.app_port}
+            {colorama.Fore.YELLOW}App port is the port your app is listening to. SkyServe will
+            automatically assign a port for the load balancer.{colorama.Style.RESET_ALL}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)

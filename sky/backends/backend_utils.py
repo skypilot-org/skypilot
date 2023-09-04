@@ -2664,7 +2664,9 @@ def _refresh_service_record_no_lock(
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    assert service_handle.controller_port is not None
+    if service_handle.controller_port is None:
+        return record, 'Controller task is not successfully launched.'
+
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)
     returncode, latest_info_payload, stderr = backend.run_on_head(
