@@ -324,8 +324,7 @@ class StrategyExecutor:
                     logger.error(
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
-                    raise exceptions.ProvisionPrechecksError(
-                            reasons=reasons)
+                    raise exceptions.ProvisionPrechecksError(reasons=reasons)
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
             except exceptions.FileMountError as e:
