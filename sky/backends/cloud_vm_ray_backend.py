@@ -2873,7 +2873,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_metadata=provision_metadata,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
+                # We must query the IPs from the cloud provider, when the
+                # provisioning is done, to make sure the cluster IPs are
+                # up-to-date.
+                # The staled IPs may be caused by the node being restarted
+                # manually or by the cloud provider.
+                # Optimize the case where the cluster's IPs can be retrieved
+                # from cluster_metadata.
                 internal_ips, external_ips = zip(*cluster_metadata.ip_tuples())
+                if not cluster_metadata.has_public_ips():
+                    external_ips = internal_ips
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           internal_ips=list(internal_ips),
                                           external_ips=list(external_ips))
@@ -2883,17 +2892,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_metadata.region,
                     zone=provision_metadata.zone)
-                ip_list = cluster_metadata.get_ips(
-                    not cluster_metadata.has_public_ips())
-                if cluster_metadata.has_public_ips():
-                    ip_tuples = cluster_metadata.ip_tuples()
-                else:
-                    # This is for compatibility. If the cluster does not have
-                    # public IPs, we use the internal IPs as the external IPs.
-                    ip_tuples = list(zip(ip_list, ip_list))
-                handle.stable_internal_external_ips = ip_tuples
                 self._update_after_cluster_provisioned(
-                    handle, task, prev_cluster_status, ip_list,
+                    handle, task, prev_cluster_status, handle.external_ips(),
                     handle.external_ssh_ports(), lock_path)
                 return handle
 
