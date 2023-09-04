@@ -477,6 +477,10 @@ def launch(
                 2. Non-empty: iff at least 1 exception from either
                 our pre-checks (e.g., cluster name invalid) or a region/zone
                 throwing resource unavailability.
+        exceptions.FileMountError: the workdir / file mounts failed to sync.
+            Since retry is applied in the underlying file mounts, this will only
+            be raised if the file mounts failed to sync after all retries, e.g.,
+            due to permission errors, or source files not found.
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
