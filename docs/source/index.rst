@@ -130,7 +130,6 @@ Documentation
    reference/faq
    reference/logging
    reference/kubernetes/index
-   reference/local/index
 
 .. toctree::
    :maxdepth: 1

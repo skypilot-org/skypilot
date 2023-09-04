@@ -6,7 +6,9 @@ Kubernetes Cluster Setup
 
 .. note::
     This is a guide for cluster administrators on how to setup Kubernetes clusters
-    for use with SkyPilot. If you are a SkyPilot user and your cluster administrator has already setup a cluster
+    for use with SkyPilot.
+
+    If you are a SkyPilot user and your cluster administrator has already setup a cluster
     and shared a kubeconfig file with you, :ref:`Submitting tasks to Kubernetes <kubernetes-instructions>`
     explains how to submit tasks to your cluster.
 
@@ -135,7 +137,7 @@ such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/
 Please follow their respective guides to deploy your Kubernetes cluster.
 
 Setting up GPU support
-^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~
 If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia
 device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
 Additionally, you will need to label each node in your cluster with the GPU type.
@@ -167,7 +169,7 @@ Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/co
 
         $ sky check
 
-Observability for administrators
+Observability for Administrators
 --------------------------------
 All SkyPilot tasks are run in pods inside a Kubernetes cluster. As a cluster administrator,
 you can inspect running pods (e.g., with :code:`kubectl get pods -n namespace`) to check which

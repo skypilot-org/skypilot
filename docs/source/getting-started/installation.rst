@@ -120,6 +120,19 @@ Azure
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can also run tasks on On-Prem or cloud hosted Kubernetes clusters.
+
+.. code-block:: console
+
+  $ # Place your kubeconfig at ~/.kube/config
+  $ mkdir -p ~/.kube
+  $ cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
 
