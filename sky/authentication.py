@@ -332,6 +332,26 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    client = fluidstack_utils.FluidstackClient()
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    public_key = None
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    client.get_or_add_ssh_key(public_key)
+
+    # Need to use ~ relative path because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
+
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+    return config
+
+
 def setup_ibm_authentication(config):
     """registers keys if they do not exist in sky folder
     and updates config file.
