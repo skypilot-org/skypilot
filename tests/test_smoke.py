@@ -798,6 +798,8 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 def test_aws_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
+    # delay required to guarantee difference between two storage names
+    time.sleep(1)
     csync_storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
@@ -828,6 +830,8 @@ def test_aws_storage_mounts():
 def test_gcp_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
+    # delay required to guarantee difference between two storage names
+    time.sleep(1)
     csync_storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
