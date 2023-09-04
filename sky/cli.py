@@ -62,16 +62,19 @@ from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import log_utils
+from sky.usage import usage_lib
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import dag_utils
-from sky.utils import command_runner
+from sky.utils import env_options
+from sky.utils import kubernetes_utils
+from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -508,15 +511,17 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         else:
             value = os.path.basename(os.environ['SHELL'])
 
-    zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
-    bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
+    zshrc_diff = '\n# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
+    bashrc_diff = ('\n# For SkyPilot shell completion'
+                   '\n. ~/.sky/.sky-complete.bash')
 
     if value == 'bash':
         install_cmd = f'_SKY_COMPLETE=bash_source sky > \
                 ~/.sky/.sky-complete.bash && \
                 echo "{bashrc_diff}" >> ~/.bashrc'
 
-        cmd = f'(grep -q "SkyPilot" ~/.bashrc) || ({install_cmd})'
+        cmd = (f'(grep -q "SkyPilot" ~/.bashrc) || '
+               f'[[ ${{BASH_VERSINFO[0]}} -ge 4 ]] && ({install_cmd})')
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
@@ -1284,9 +1289,13 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Whether to retry provisioning infinitely until the cluster is up, '
           'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors.'))
+          'to unavailability errors.'),
+)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1338,7 +1347,6 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1347,6 +1355,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching tasks on it')
@@ -1724,7 +1733,7 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
-            with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+            with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
                 try:
                     num_in_progress_jobs, msg = spot_jobs_future.get()
                 except KeyboardInterrupt:
@@ -1885,7 +1894,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except (RuntimeError, exceptions.NotSupportedError,
+        except (RuntimeError, ValueError, exceptions.NotSupportedError,
                 exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
@@ -2025,44 +2034,59 @@ def logs(
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel job(s)."""
+    """Cancel job(s).
+
+    Example usage:
+
+    .. code-block:: bash
+
+      \b
+      # Cancel specific jobs on a cluster.
+      sky cancel cluster_name 1
+      sky cancel cluster_name 1 2 3
+      \b
+      # Cancel all jobs on a cluster.
+      sky cancel cluster_name -a
+      \b
+      # Cancel the latest running job on a cluster.
+      sky cancel cluster_name
+
+    Job IDs can be looked up by ``sky queue cluster_name``.
+    """
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
+    job_identity_str = None
+    job_ids_to_cancel = None
     if not jobs and not all:
-        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        message = textwrap.dedent(f"""\
-          Use:
-            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
-            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
-
-          Job IDs can be looked up by {bold}sky queue{reset}.""")
-        raise click.UsageError(message)
-
-    if not yes:
+        click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
+                   'cancelling the latest running job.'
+                   f'{colorama.Style.RESET_ALL}')
+        job_identity_str = 'the latest running job'
+    else:
+        # Cancelling specific jobs or --all.
         job_ids = ' '.join(map(str, jobs))
         plural = 's' if len(job_ids) > 1 else ''
         job_identity_str = f'job{plural} {job_ids}'
+        job_ids_to_cancel = jobs
         if all:
             job_identity_str = 'all jobs'
-        job_identity_str += f' on cluster {cluster!r}'
+            job_ids_to_cancel = None
+    job_identity_str += f' on cluster {cluster!r}'
+
+    if not yes:
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
 
     try:
-        core.cancel(cluster, all, jobs)
+        core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
         # Friendly message for usage like 'sky cancel <spot controller> -a/<job
         # id>'.
-        if all:
-            arg_str = '--all'
-        else:
-            arg_str = ' '.join(map(str, jobs))
         error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
-                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-                     f'job IDs> [--all]'
-                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+                     f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
+                     f'job IDs> [--all]{reset}')
         click.echo(error_str)
         sys.exit(1)
     except ValueError as e:
@@ -2278,8 +2302,12 @@ def autostop(
     default=False,
     is_flag=True,
     required=False,
+    # Disabling quote check here, as there seems to be a bug in pylint,
+    # which incorrectly recognizes the help string as a docstring.
+    # pylint: disable=bad-docstring-quotes
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if we fail to start the cluster due to unavailability errors.'))
+          'if we fail to start the cluster due to unavailability errors.'),
+)
 @click.option(
     '--force',
     '-f',
@@ -2332,9 +2360,15 @@ def start(
     to_start = []
 
     if not clusters and not all:
-        raise click.UsageError(
-            'sky start requires either a cluster name (see `sky status`) '
-            'or --all.')
+        # UX: frequently users may have only 1 cluster. In this case, be smart
+        # and default to that unique choice.
+        all_cluster_names = global_user_state.get_cluster_names_start_with('')
+        if len(all_cluster_names) <= 1:
+            clusters = all_cluster_names
+        else:
+            raise click.UsageError(
+                '`sky start` requires either a cluster name or glob '
+                '(see `sky status`), or the -a/--all flag.')
 
     if all:
         if len(clusters) > 0:
@@ -2348,7 +2382,11 @@ def start(
             if cluster['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
 
-    if clusters:
+    if not clusters:
+        click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
+                   'mean to use `sky launch` to provision a new cluster?')
+        return
+    else:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
         local_clusters = onprem_utils.check_and_get_local_clusters()
@@ -2548,7 +2586,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
            'jobs (output of `sky spot queue`) will be lost.')
     click.echo(msg)
     if cluster_status == status_lib.ClusterStatus.UP:
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 '[bold cyan]Checking for in-progress spot jobs[/]'):
             try:
                 spot_jobs = core.spot_queue(refresh=False)
@@ -2603,9 +2641,16 @@ def _down_or_stop_clusters(
     else:
         command = 'stop'
     if not names and apply_to_all is None:
-        raise click.UsageError(
-            f'`sky {command}` requires either a cluster name (see `sky status`)'
-            ' or --all.')
+        # UX: frequently users may have only 1 cluster. In this case, 'sky
+        # stop/down' without args should be smart and default to that unique
+        # choice.
+        all_cluster_names = global_user_state.get_cluster_names_start_with('')
+        if len(all_cluster_names) <= 1:
+            names = all_cluster_names
+        else:
+            raise click.UsageError(
+                f'`sky {command}` requires either a cluster name or glob '
+                '(see `sky status`), or the -a/--all flag.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -2695,7 +2740,7 @@ def _down_or_stop_clusters(
     usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
-        click.echo('\nCluster(s) not found (tip: see `sky status`).')
+        click.echo('Cluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
@@ -3068,7 +3113,7 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
-@service_catalog.use_default_catalog
+@service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
@@ -3099,6 +3144,9 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
+    # validation for the --cloud kubernetes
+    if cloud == 'kubernetes':
+        raise click.UsageError('Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3176,11 +3224,14 @@ def show_gpus(
             else:
                 name, quantity = accelerator_str, None
 
+        # Case-sensitive
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=name,
                                                    quantity_filter=quantity,
                                                    region_filter=region,
-                                                   clouds=cloud)
+                                                   clouds=cloud,
+                                                   case_sensitive=False)
+
         if len(result) == 0:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
@@ -3455,11 +3506,12 @@ def spot():
     default=None,
     is_flag=True,
     required=False,
-    help=('(Default: True; this flag is deprecated and will be removed in a '
-          'future release.) Whether to retry provisioning infinitely until the '
-          'cluster is up, if unavailability errors are encountered. This '
-          'applies to launching the spot clusters (both the initial and any '
-          'recovery attempts), not the spot controller.'))
+    help=(
+        '(Default: True; this flag is deprecated and will be removed in a '
+        'future release.) Whether to retry provisioning infinitely until the '
+        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
+        'applies to launching the spot clusters (both the initial and any '
+        'recovery attempts), not the spot controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3651,7 +3703,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    with log_utils.safe_rich_status('[cyan]Checking spot jobs[/]'):
+    with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
         _, msg = _get_spot_jobs(refresh=refresh,
                                 skip_finished=skip_finished,
                                 show_all=all,
@@ -4430,6 +4482,97 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         subprocess_utils.run_in_parallel(_delete_benchmark, to_delete)
         progress.live.transient = False
         progress.refresh()
+
+
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
+def local():
+    """SkyPilot local tools CLI."""
+    pass
+
+
+@local.command('up', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up():
+    """Creates a local cluster."""
+    cluster_created = False
+    # Check if ~/.kube/config exists:
+    if os.path.exists(os.path.expanduser('~/.kube/config')):
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        skypilot_context = 'kind-skypilot'
+        if curr_context is not None and curr_context != skypilot_context:
+            click.echo(
+                f'Current context in kube config: {curr_context}'
+                '\nWill automatically switch to kind-skypilot after the local '
+                'cluster is created.')
+    with rich_utils.safe_status('Creating local cluster...'):
+        path_to_package = os.path.dirname(os.path.dirname(__file__))
+        up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                      'create_cluster.sh')
+        # Get directory of script and run it from there
+        cwd = os.path.dirname(os.path.abspath(up_script_path))
+        # Run script and don't print output
+        try:
+            subprocess_utils.run(up_script_path, cwd=cwd, capture_output=True)
+            cluster_created = True
+        except subprocess.CalledProcessError as e:
+            # Check if return code is 100
+            if e.returncode == 100:
+                click.echo('\nLocal cluster already exists. '
+                           'Run `sky local down` to delete it.')
+            else:
+                stderr = e.stderr.decode('utf-8')
+                click.echo(f'\nFailed to create local cluster. {stderr}')
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    stdout = e.stdout.decode('utf-8')
+                    click.echo(f'Logs:\n{stdout}')
+                sys.exit(1)
+    # Run sky check
+    with rich_utils.safe_status('Running sky check...'):
+        sky_check.check(quiet=True)
+    if cluster_created:
+        # Get number of CPUs
+        p = subprocess_utils.run(
+            'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
+            capture_output=True)
+        num_cpus = int(p.stdout.decode('utf-8'))
+        if num_cpus < 2:
+            click.echo('Warning: Local cluster has less than 2 CPUs. '
+                       'This may cause issues with running tasks.')
+        click.echo(
+            'Local Kubernetes cluster created successfully with '
+            f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
+            '\nHint: To change the number of CPUs, change your docker '
+            'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
+        )
+
+
+@local.command('down', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_down():
+    """Deletes a local cluster."""
+    cluster_removed = False
+    with rich_utils.safe_status('Removing local cluster...'):
+        path_to_package = os.path.dirname(os.path.dirname(__file__))
+        down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                        'delete_cluster.sh')
+        try:
+            subprocess_utils.run(down_script_path, capture_output=True)
+            cluster_removed = True
+        except subprocess.CalledProcessError as e:
+            # Check if return code is 100
+            if e.returncode == 100:
+                click.echo('\nLocal cluster does not exist.')
+            else:
+                stderr = e.stderr.decode('utf-8')
+                click.echo(f'\nFailed to delete local cluster. {stderr}')
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    stdout = e.stdout.decode('utf-8')
+                    click.echo(f'Logs:\n{stdout}')
+    if cluster_removed:
+        # Run sky check
+        with rich_utils.safe_status('Running sky check...'):
+            sky_check.check(quiet=True)
+        click.echo('Local cluster removed.')
 
 
 def main():

@@ -1,19 +1,20 @@
 """Common utilities for service catalog."""
 import ast
+import difflib
 import hashlib
 import os
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-import difflib
 import filelock
-import requests
 import pandas as pd
+import requests
 
 from sky import sky_logging
 from sky.clouds import cloud as cloud_lib
+from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -69,7 +70,7 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
     meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
@@ -103,16 +104,13 @@ def read_catalog(filename: str,
             update_frequency_str = ''
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with log_utils.safe_rich_status(
-                (f'Updating {cloud} catalog: '
-                 f'{filename}'
-                 f'{update_frequency_str}')) as status:
+            with rich_utils.safe_status((f'Updating {cloud} catalog: '
+                                         f'{filename}'
+                                         f'{update_frequency_str}')):
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
-                    ux_utils.console_newline()
-                    status.stop()
                     error_str = (f'Failed to fetch {cloud} catalog '
                                  f'{filename}. ')
                     if os.path.exists(catalog_path):
@@ -394,7 +392,8 @@ def get_instance_type_for_accelerator_impl(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """

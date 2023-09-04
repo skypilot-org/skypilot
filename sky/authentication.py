@@ -30,18 +30,19 @@ from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp, ibm
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -373,3 +374,33 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r') as f:
         public_key = f.read().strip()
     return _replace_ssh_info_in_config(config, public_key)
+
+
+def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    # Run kubectl command to add the public key to the cluster.
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    cmd = f'kubectl create secret generic {key_label} ' \
+          f'--from-file=ssh-publickey={public_key_path}'
+    try:
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode('utf-8')
+        suffix = f'\nError message: {output}'
+        if 'already exists' in output:
+            logger.debug(
+                f'Key {key_label} already exists in the cluster, using it...')
+        elif any(err in output for err in ['connection refused', 'timeout']):
+            with ux_utils.print_exception_no_traceback():
+                raise ConnectionError(
+                    'Failed to connect to the cluster. Check if your '
+                    'cluster is running, your kubeconfig is correct '
+                    'and you can connect to it using: '
+                    f'kubectl get namespaces.{suffix}') from e
+        else:
+            logger.error(suffix)
+            raise
+
+    return config
