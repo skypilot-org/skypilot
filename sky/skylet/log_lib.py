@@ -8,9 +8,9 @@ import multiprocessing.pool
 import os
 import subprocess
 import sys
-import time
-import textwrap
 import tempfile
+import textwrap
+import time
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama

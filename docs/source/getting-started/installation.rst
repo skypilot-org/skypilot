@@ -27,7 +27,13 @@ If you only have access to certain clouds, use any combination of
 the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
-You may also install SkyPilot from source.
+To get the latest features/updates, either install the nightly build:
+
+.. code-block:: console
+
+  $ pip install -U "skypilot-nightly[all]"
+
+or install from source:
 
 .. code-block:: console
 
@@ -131,7 +137,7 @@ Lambda Cloud
 IBM
 ~~~~~~~~~
 
-To access IBM's services, store the following fields in ``~/.ibm/credentials.yaml``:
+To access IBM's VPC service, store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. code-block:: text
 
@@ -145,6 +151,23 @@ To access IBM's services, store the following fields in ``~/.ibm/credentials.yam
   Stock images aren't currently providing ML tools out of the box.
   Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
 
+To access IBM's Cloud Object Storage (COS), append the following fields to the credentials file:
+
+.. code-block:: text
+
+  access_key_id: <access_key_id>
+  secret_access_key: <secret_key_id>
+
+To get :code:`access_key_id` and :code:`secret_access_key` use the IBM web console:
+
+1. Create/Select a COS instance from the `web console <https://cloud.ibm.com/objectstorage/>`__.
+2. From "Service Credentials" tab, click "New Credential" and toggle "Include HMAC Credential".
+3. Copy "secret_access_key" and "access_key_id" to file.
+
+Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/install.sh | sudo bash``
+
+.. note::
+  :code:`sky check` does not reflect IBM COS's enabled status. :code:`IBM: enabled` only guarantees that IBM VM instances are enabled.
 
 Oracle Cloud Infrastructure (OCI)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

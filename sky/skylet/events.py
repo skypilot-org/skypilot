@@ -11,8 +11,10 @@ import psutil
 import yaml
 
 from sky import sky_logging
-from sky.backends import backend_utils, cloud_vm_ray_backend
-from sky.skylet import autostop_lib, job_lib
+from sky.backends import backend_utils
+from sky.backends import cloud_vm_ray_backend
+from sky.skylet import autostop_lib
+from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
 
@@ -123,6 +125,17 @@ class AutostopEvent(SkyletEvent):
             autostop_lib.set_autostopping_started()
 
             config = common_utils.read_yaml(self._ray_yaml_path)
+
+            provider_module = config['provider']['module']
+            provider_search = re.search(r'providers\.(.*)\.', provider_module)
+            assert provider_search is not None, config
+            provider_name = provider_search.group(1).lower()
+
+            if provider_name in ['aws', 'gcp']:
+                self._stop_cluster_with_new_provisioner(autostop_config, config,
+                                                        provider_name)
+                return
+
             is_cluster_multinode = config['max_workers'] > 0
 
             # Even for !is_cluster_multinode, we want to call this to replace
@@ -183,6 +196,35 @@ class AutostopEvent(SkyletEvent):
                 env=env)
         else:
             raise NotImplementedError
+
+    def _stop_cluster_with_new_provisioner(self, autostop_config,
+                                           cluster_config, provider_name):
+        # pylint: disable=import-outside-toplevel
+        from sky import provision as provision_lib
+        autostop_lib.set_autostopping_started()
+
+        cluster_name_on_cloud = cluster_config['cluster_name']
+        is_cluster_multinode = cluster_config['max_workers'] > 0
+
+        os.environ.pop('AWS_ACCESS_KEY_ID', None)
+        os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
+
+        # Stop the ray autoscaler to avoid scaling up, during
+        # stopping/terminating of the cluster.
+        subprocess.run('ray stop', shell=True, check=True)
+
+        operation_fn = provision_lib.stop_instances
+        if autostop_config.down:
+            operation_fn = provision_lib.terminate_instances
+
+        if is_cluster_multinode:
+            operation_fn(provider_name=provider_name,
+                         cluster_name_on_cloud=cluster_name_on_cloud,
+                         provider_config=cluster_config['provider'],
+                         worker_only=True)
+        operation_fn(provider_name=provider_name,
+                     cluster_name_on_cloud=cluster_name_on_cloud,
+                     provider_config=cluster_config['provider'])
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r') as f:

@@ -7,22 +7,23 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Any
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import provision as provision_lib
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -108,7 +109,7 @@ class AWS(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -222,7 +223,8 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id_str
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -348,7 +350,12 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(r.image_id, region_name, r.instance_type)
+        if r.extract_docker_image() is not None:
+            image_id_to_use = None
+        else:
+            image_id_to_use = r.image_id
+        image_id = self._get_image_id(image_id_to_use, region_name,
+                                      r.instance_type)
 
         return {
             'instance_type': r.instance_type,
@@ -361,7 +368,8 @@ class AWS(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -434,7 +442,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            cls.get_current_user_identity()
+            identity_str = cls.get_current_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -471,9 +479,20 @@ class AWS(clouds.Cloud):
                         cls._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS catalogs
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import aws_catalog
+
         # Trigger the fetch of the availability zones mapping.
-        aws_catalog.get_default_instance_type()
+        try:
+            aws_catalog.get_default_instance_type()
+        except RuntimeError as e:
+            return False, (
+                'Failed to fetch the availability zones for the account '
+                f'{identity_str}. It is likely due to permission issues, please'
+                ' check the minimal permission required for AWS: '
+                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                f'\n{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
 
     @classmethod
@@ -718,7 +737,8 @@ class AWS(clouds.Cloud):
         region = resources.region
         use_spot = resources.use_spot
 
-        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
+        # pylint: disable=import-outside-toplevel,unused-import
+        from sky.clouds.service_catalog import aws_catalog
 
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
@@ -742,79 +762,31 @@ class AWS(clouds.Cloud):
         return True
 
     @classmethod
-    def _query_instance_property_with_retries(
-        cls,
-        tag_filters: Dict[str, str],
-        region: str,
-        query: str,
-    ) -> Tuple[int, str, str]:
-        filter_str = ' '.join(f'Name=tag:{key},Values={value}'
-                              for key, value in tag_filters.items())
-        query_cmd = (f'aws ec2 describe-instances --filters {filter_str} '
-                     f'--region {region} --query "{query}" --output json')
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
-            query_cmd,
-            retry_returncode=[255],
-            retry_stderrs=[
-                'Unable to locate credentials. You can configure credentials by '
-                'running "aws configure"'
-            ])
-        return returncode, stdout, stderr
-
-    @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
-        del zone  # unused
-        status_map = {
-            'pending': status_lib.ClusterStatus.INIT,
-            'running': status_lib.ClusterStatus.UP,
-            # TODO(zhwu): stopping and shutting-down could occasionally fail
-            # due to internal errors of AWS. We should cover that case.
-            'stopping': status_lib.ClusterStatus.STOPPED,
-            'stopped': status_lib.ClusterStatus.STOPPED,
-            'shutting-down': None,
-            'terminated': None,
-        }
-
-        assert region is not None, (tag_filters, region)
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].State.Name')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query AWS cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        original_statuses = json.loads(stdout.strip())
-
-        statuses = []
-        for s in original_statuses:
-            node_status = status_map[s]
-            if node_status is not None:
-                statuses.append(node_status)
-        return statuses
+        # TODO(suquark): deprecate this method
+        assert False, 'This could path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
+        assert region is not None, (cluster_name, cluster_name_on_cloud, region)
         del zone  # unused
-        assert region is not None, (tag_filters, region)
+
         image_name = f'skypilot-{cluster_name}-{int(time.time())}'
-        returncode, stdout, stderr = cls._query_instance_property_with_retries(
-            tag_filters, region, query='Reservations[].Instances[].InstanceId')
 
-        subprocess_utils.handle_returncode(
-            returncode,
-            '',
-            error_msg='Failed to find the source cluster on AWS.',
-            stderr=stderr,
-            stream_logs=False)
+        status = provision_lib.query_instances('AWS', cluster_name_on_cloud,
+                                               {'region': region})
+        instance_ids = list(status.keys())
+        if not instance_ids:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to find the source cluster {cluster_name!r} on '
+                    'AWS.')
 
-        instance_ids = json.loads(stdout.strip())
         if len(instance_ids) != 1:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
@@ -838,14 +810,14 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
         wait_image_cmd = (
             f'aws ec2 wait image-available --region {region} --image-ids {image_id}'
         )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
+        returncode, _, stderr = subprocess_utils.run_with_retries(
             wait_image_cmd,
             retry_returncode=[255],
         )
@@ -885,7 +857,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the target image {target_image_id!r} on {target_region} to be '
             'available on AWS.')
         wait_image_cmd = (
@@ -907,7 +879,7 @@ class AWS(clouds.Cloud):
         sky_logging.print(
             f'The target image {target_image_id!r} is created successfully.')
 
-        log_utils.force_update_rich_status('Deleting the source image.')
+        rich_utils.force_update_status('Deleting the source image.')
         cls.delete_image(image_id, source_region)
         return target_image_id
 
