@@ -2643,7 +2643,7 @@ def test_user_ray_cluster(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
-            f'sky status -r | grep {name} | grep UP',
+            f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 2 --status',
         ],
