@@ -101,6 +101,12 @@ def main():
 
 
 def update_interval(interval: int, elapsed_time: int):
+    """Updates the time interval for the next sync operation.
+
+    Given the originally set interval and the time elapsed during the
+    sync operation, this function computes and returns the remaining time to
+    wait before the next sync operation.
+    """
     diff = interval - elapsed_time
     if diff <= 0:
         return 0
@@ -145,7 +151,7 @@ def run_sync(src: str,
              csync_pid: int,
              max_retries: int = 10,
              backoff: Optional[common_utils.Backoff] = None):
-    """Runs the sync command to from SRC to STORETYPE bucket"""
+    """Runs the sync command to from src to storetype bucket"""
     #TODO: add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
@@ -228,6 +234,18 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     """Syncs the source to the bucket every INTERVAL seconds. Creates an entry
     of pid of the sync process in local database while sync command is runninng
     and removes it when completed.
+    Args:
+        source (str): The local path to the directory that you want to sync.
+        storetype (str): The type of cloud storage to sync to.
+        destination (str): The bucket or subdirectory in the bucket where the
+            files should be synced.
+        num_threads (int): The number of threads to use for the sync operation.
+        interval (int): The time interval, in seconds, at which to run the
+            sync operation.
+        delete (bool): Whether or not to delete files in the destination that
+            are not present in the source.
+        no_follow_symlinks (bool): Whether or not to follow symbolic links in
+            the source directory.
     """
     full_src = os.path.abspath(os.path.expanduser(source))
     csync_mounted_source_paths = _get_running_csync_source_path()
@@ -261,6 +279,14 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
 def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
     """Terminates all the CSYNC daemon running after checking if all the
     sync process has completed.
+    
+    Args:
+        paths (List[str]): list of CSYNC-mounted paths
+        all (bool): determine either or not to unmount every CSYNC-mounted
+            paths
+
+    Raises:
+        click.UsageError: when the paths are not specified
     """
     if not paths and not all:
         raise click.UsageError('Please provide the CSYNC-mounted path to '
