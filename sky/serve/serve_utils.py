@@ -208,8 +208,8 @@ class ServiceHandle(object):
     - (required) All replica info.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
-    - (optional) Controller port to use.
-    - (optional) LoadBalancer port to use.
+    - (optional) Controller port.
+    - (optional) LoadBalancer port.
     - (optional) Controller job id.
     - (optional) LoadBalancer job id.
     - (optional) Ephemeral storage generated for the service.
