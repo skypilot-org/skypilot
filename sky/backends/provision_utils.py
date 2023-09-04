@@ -41,7 +41,7 @@ class ClusterName:
     name_on_cloud: str
 
     def __repr__(self) -> str:
-        return self.display_name
+        return repr(self.display_name)
 
 
 @contextlib.contextmanager
