@@ -240,7 +240,7 @@ class StrategyExecutor:
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
+                raise_on_max_retry: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -248,7 +248,8 @@ class StrategyExecutor:
 
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
-            raise_on_failure: Whether to raise an exception if the launch fails.
+            raise_on_max_retry: Whether to raise an exception if the launch
+                fails after reaching the maximum number of retries.
 
         Returns:
             The job's submit timestamp, or None if failed to submit the job
@@ -265,6 +266,10 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
+            exceptions.FileMountError: The will be raised when the underlying
+                `sky.launch` fails due to file mounts errors only. Since we
+                retry the file mounts in the `sky.launch`, this exception will
+                be raised only when the sources of the file mounts do not exist.
             exceptions.SpotJobReachedMaxRetryError: This will be raised when
                 all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -295,9 +300,7 @@ class StrategyExecutor:
                     exceptions.ResourcesMismatchError) as e:
                 logger.error('Failure happened before provisioning. '
                              f'{common_utils.format_exception(e)}')
-                if raise_on_failure:
-                    raise exceptions.ProvisionPrechecksError(reasons=[e])
-                return None
+                raise exceptions.ProvisionPrechecksError(reasons=[e])
             except exceptions.ResourcesUnavailableError as e:
                 # This is raised when the launch fails due to prechecks or
                 # after failing over through all the candidates.
@@ -321,10 +324,8 @@ class StrategyExecutor:
                     logger.error(
                         'Failure happened before provisioning. Failover '
                         f'reasons: {reasons_str}')
-                    if raise_on_failure:
-                        raise exceptions.ProvisionPrechecksError(
+                    raise exceptions.ProvisionPrechecksError(
                             reasons=reasons)
-                    return None
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
             except exceptions.FileMountError as e:
@@ -352,11 +353,6 @@ class StrategyExecutor:
                     logger.info('User file mounts failed. Not retrying.\n'
                                 '  Detailed exception: '
                                 f'{common_utils.format_exception(e)}')
-                    # We should raise the exception, no matter whether
-                    # raise_on_failure is True or False, because even though the
-                    # user file mounts suceeded in the previous launch, contents
-                    # in the bucket may have changed, and we should not retry
-                    # the launch, if the user file mounts failed.
                     raise
                 # Case 2: The cluster is preempted during the launch, retry
                 # the launch.
@@ -383,7 +379,7 @@ class StrategyExecutor:
             terminate_cluster(self.cluster_name)
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
-                if raise_on_failure:
+                if raise_on_max_retry:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.SpotJobReachedMaxRetriesError(
                             'Resources unavailable: failed to launch the spot '
