@@ -1,5 +1,4 @@
 """Skystorage module"""
-import multiprocessing
 import os
 import pathlib
 import subprocess
@@ -10,8 +9,11 @@ import urllib.parse
 import click
 import psutil
 
+from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import db_utils
+
+logger = sky_logging.init_logger(__name__)
 
 _CSYNC_BASE_PATH = '~/.skystorage'
 
@@ -140,6 +142,7 @@ def run_sync(src: str,
              interval: int,
              delete: bool,
              no_follow_symlinks: bool,
+             csync_pid: int,
              max_retries: int = 10,
              backoff: Optional[common_utils.Backoff] = None):
     """Runs the sync command to from SRC to STORETYPE bucket"""
@@ -159,15 +162,18 @@ def run_sync(src: str,
     sync_point = result.path.split('/')[-1]
     log_file_name = f'csync_{storetype}_{sync_point}.log'
     base_dir = os.path.expanduser(_CSYNC_BASE_PATH)
+    os.makedirs(base_dir, exist_ok=True)
     log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
 
     with open(log_path, 'a') as fout:
         try:
-            subprocess.run(sync_cmd,
-                           shell=True,
-                           check=True,
-                           stdout=fout,
-                           stderr=fout)
+            with subprocess.Popen(sync_cmd,
+                                  stdout=fout,
+                                  stderr=fout,
+                                  start_new_session=True,
+                                  shell=True) as proc:
+                _set_running_csync_sync_pid(csync_pid, proc.pid)
+                proc.wait()
         except subprocess.CalledProcessError:
             src_to_bucket = (f'\'{src}\' to \'{dst}\' '
                              f'at \'{storetype}\'')
@@ -181,13 +187,17 @@ def run_sync(src: str,
                            f' in {wait_time}s. {max_retries} more reattempts '
                            f'remaining. Check {log_path} for details.')
                 time.sleep(wait_time)
+                # reset sync pid as the sync process is terminated
+                _set_running_csync_sync_pid(csync_pid, 0)
                 run_sync(src, storetype, dst, num_threads, interval, delete,
-                         no_follow_symlinks, max_retries - 1, backoff)
+                         no_follow_symlinks, csync_pid, max_retries - 1,
+                         backoff)
             else:
                 raise RuntimeError(f'Failed to sync {src_to_bucket} after '
                                    f'number of retries. Check {log_path} for'
                                    'details') from None
 
+    _set_running_csync_sync_pid(csync_pid, 0)
     #run necessary post-processes
     if storetype == 's3':
         # set number of threads back to its default value
@@ -224,37 +234,41 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     # If the given source is already mounted with CSYNC, terminate it.
     for source_path in csync_mounted_source_paths:
         if os.path.samefile(full_src, source_path):
-            terminate(full_src)
+            _terminate([full_src])
             break
     csync_pid = os.getpid()
     _add_running_csync(csync_pid, full_src)
     while True:
-        sync_process = multiprocessing.Process(
-            target=run_sync,
-            args=(full_src, storetype, destination, num_threads, interval,
-                  delete, no_follow_symlinks))
         start_time = time.time()
-        sync_process.start()
-        _set_running_csync_sync_pid(csync_pid, sync_process.pid)
-        sync_process.join()
+        run_sync(full_src, storetype, destination, num_threads, interval,
+                 delete, no_follow_symlinks, csync_pid)
         end_time = time.time()
         # the time took to sync gets reflected to the INTERVAL
         elapsed_time = int(end_time - start_time)
         remaining_interval = update_interval(interval, elapsed_time)
         # sync_pid column is set to 0 when sync is not running
-        _set_running_csync_sync_pid(csync_pid, 0)
         time.sleep(remaining_interval)
 
 
 @main.command()
+@click.argument('paths', nargs=-1, required=False, type=str)
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Terminates all CSYNC processes.')
-@click.argument('path', required=False, type=str)
-def terminate(all: bool, path: Optional[str] = None) -> None:
+def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
+    """Terminates all the CSYNC daemon running after checking if all the
+    sync process has completed.
+    """
+    if not paths and not all:
+        raise click.UsageError('Please provide the CSYNC-mounted path to '
+                               'terminate the CSYNC process.')
+    _terminate(paths, all)
+
+
+def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
     """Terminates all the CSYNC daemon running after checking if all the
     sync process has completed.
     """
@@ -265,9 +279,10 @@ def terminate(all: bool, path: Optional[str] = None) -> None:
     if all:
         csync_pid_set = set(_get_all_csync_pid())
     else:
-        if path:
+        csync_pid_set = set()
+        for path in paths:
             full_path = os.path.abspath(os.path.expanduser(path))
-            csync_pid_set = set([_get_csync_pid_from_source_path(full_path)])
+            csync_pid_set.add(_get_csync_pid_from_source_path(full_path))
     while True:
         if not csync_pid_set:
             break
@@ -277,8 +292,14 @@ def terminate(all: bool, path: Optional[str] = None) -> None:
                 sync_running_csync_set.add(csync_pid)
         remove_process_set = csync_pid_set.difference(sync_running_csync_set)
         for csync_pid in remove_process_set:
-            psutil.Process(int(csync_pid)).terminate()
+            try:
+                psutil.Process(int(csync_pid)).terminate()
+            except psutil.NoSuchProcess as e:
+                if 'process no longer exists' in str(e):
+                    _delete_running_csync(csync_pid)
+                    continue
             _delete_running_csync(csync_pid)
+            print(f'deleted {csync_pid}')
             csync_pid_set.remove(csync_pid)
         time.sleep(5)
 

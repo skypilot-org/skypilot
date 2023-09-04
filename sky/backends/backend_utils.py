@@ -2894,9 +2894,9 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                            '>/dev/null 2>&1')
 
     def _run_csync_terminate(runner):
-        logger.info('CSYNC termination initiated. If a sync process is '
-                    'currently running, we will wait for it to complete '
-                    'before terminating the CSYNC daemon...\n')
+        logger.info(f'CSYNC termination initiated for {cluster_name}. If a '
+                    'sync process is currently running, we will wait for it '
+                    'to complete before terminating the CSYNC daemon...\n')
 
         rc, _, stderr = runner.run(csync_terminate_cmd,
                                    stream_logs=False,
