@@ -843,6 +843,15 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_accelerators_str(self) -> str:
+        accelerators = self.accelerators
+        if accelerators is None:
+            accelerators = '-'
+        elif isinstance(accelerators, dict) and len(accelerators) == 1:
+            accelerators, count = list(accelerators.items())[0]
+            accelerators = f'{accelerators}:{count}'
+        return accelerators
+
     def make_deploy_variables(
             self, region: clouds.Region,
             zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:

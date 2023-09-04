@@ -1001,9 +1001,10 @@ class Task:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
             accelerators_list = []
             for r in self.resources:
-                k, v = r.accelerators.popitem()
-                accelerators_list.append(f'{k}:{v}')
-                r.accelerators[k] = v
+                if r.accelerators is not None:
+                    k, v = r.accelerators.popitem()
+                    accelerators_list.append(f'{k}:{v}')
+                    r.accelerators[k] = v
             tmp_resource_config['accelerators'] = accelerators_list
         else:
             resources = list(self.resources)[0]

@@ -127,8 +127,10 @@ class Optimizer:
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
                 logger.info(
-                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list (will be tried in the listed order).{colorama.Style.RESET_ALL}'  # pylint: disable=line-too-long
+                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order).'  # pylint: disable=line-too-long
                 )
+                resources_list = dag.tasks[0].get_resources_list()
+                logger.info([r.get_accelerators_str() for r in resources_list])
                 _ = Optimizer._set_resources_by_user_order(
                     dag=dag, blocked_resources=blocked_resources, quiet=quiet)
             else:
@@ -745,12 +747,8 @@ class Optimizer:
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
-            accelerators = resources.accelerators
-            if accelerators is None:
-                accelerators = '-'
-            elif isinstance(accelerators, dict) and len(accelerators) == 1:
-                accelerators, count = list(accelerators.items())[0]
-                accelerators = f'{accelerators}:{count}'
+
+            accelerators = resources.get_accelerators_str()
             spot = '[Spot]' if resources.use_spot else ''
             cloud = resources.cloud
             vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
@@ -816,7 +814,8 @@ class Optimizer:
             best_per_cloud: Dict[str, Tuple[resources_lib.Resources,
                                             float]] = {}
             for resources, cost in v.items():
-                cloud = str(resources.cloud)
+                accelerators = resources.get_accelerators_str()
+                cloud = str(resources.cloud) + accelerators
                 if cloud in best_per_cloud:
                     if cost < best_per_cloud[cloud][1]:
                         best_per_cloud[cloud] = (resources, cost)
@@ -833,9 +832,10 @@ class Optimizer:
                     chosen_cost = cost
                     break
 
-            best_per_cloud[str(chosen_resources.cloud)] = (chosen_resources,
-                                                           chosen_cost)
-
+            chosen_accelerators = chosen_resources.get_accelerators_str()
+            best_per_cloud[str(chosen_resources.cloud) +
+                           chosen_accelerators] = (chosen_resources,
+                                                   chosen_cost)
             rows = []
             for resources, cost in best_per_cloud.values():
                 if minimize_cost:
