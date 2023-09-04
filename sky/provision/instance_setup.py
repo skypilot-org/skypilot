@@ -70,7 +70,7 @@ def _log_start_end(func):
     def wrapper(*args, **kwargs):
         logger.info(_START_TITLE.format(func.__name__))
         try:
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
         finally:
             logger.info(_END_TITLE.format(func.__name__))
 
