@@ -54,6 +54,7 @@ run: |
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
   ! ls /mount_private_mount/circle-link
+  ! ls /mount_private_csync/circle-link
   
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
