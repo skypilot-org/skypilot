@@ -4566,7 +4566,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self, cluster_name: str,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
         """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
-        
+
         After converting Storage objects in 'storage_mounts' to metadata,
         it stores {PATH:StorageMetadata} into the table.
         """
@@ -4588,7 +4588,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self,
             cluster_name: str) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage_mounts_metadata
-        
+
         After retrieving storage_mounts_metadata, it converts back the
         StorageMetadata to Storage object and restores 'storage_mounts'
         """

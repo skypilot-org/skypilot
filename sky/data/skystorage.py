@@ -279,7 +279,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
 def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
     """Terminates all the CSYNC daemon running after checking if all the
     sync process has completed.
-    
+
     Args:
         paths (List[str]): list of CSYNC-mounted paths
         all (bool): determine either or not to unmount every CSYNC-mounted
