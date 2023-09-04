@@ -53,7 +53,7 @@ Deploying on GKE
 ----------------
 
 1. Create a GKE standard cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
-2. Get the kubeconfig for your cluster. This will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster. :
+2. Get the kubeconfig for your cluster. This will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster:
 
     .. code-block:: console
 
@@ -77,7 +77,7 @@ Deploying on GKE
 
    To verify if GPU drivers are setup, run TODO - add oneliner to run k describe nodes and list resources.
 
-4. Verify your kubeconfig is correctly setup by running :code:`sky check`:
+4. Verify your kubeconfig (and GPU support, if available) is correctly setup by running :code:`sky check`:
 
     .. code-block:: console
 
@@ -90,16 +90,48 @@ Deploying on GKE
 Deploying on AWS EKS
 --------------------
 
-TODO(romilb): Test and add this.
+1. Create a EKS cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
+
+2. TODO - Add instructions on getting kubeconfig.
+
+3. [If using GPUs] EKS clusters already come with Nvidia drivers setup. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+
+    .. code-block:: console
+
+        python -m sky.utils.kubernetes.gpu_labeler
+
+
+   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. You can check the status of these jobs by running:
+
+    .. code-block:: console
+
+        kubectl get jobs -n kube-system
+
+4. Verify your kubeconfig (and GPU support, if available) is correctly setup by running :code:`sky check`:
+
+    .. code-block:: console
+
+        $ sky check
 
 
 Deploying on On-Prem Clusters
 -----------------------------
 
-You can also deploy Kubernetes on your On-Prem clusters using off-the-shelf tools, such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_, `k3s <https://docs.k3s.io/quick-start>`_ or `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_. Please follow their respective guides to deploy your Kubernetes cluster.
+You can also deploy Kubernetes on your On-Prem clusters using off-the-shelf tools,
+such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
+`k3s <https://docs.k3s.io/quick-start>`_ or
+`Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
+Please follow their respective guides to deploy your Kubernetes cluster.
 
-Once the cluster is deployed, make sure:
+If your On-Prem cluster uses GPUs, please make sure ``nvidia.com/gpu`` resource is available on the nodes.
+Additionally, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
 
-1. You have a kubeconfig file for accessing the cluster.
+    .. code-block:: console
 
-If all looks good, follow instructions :ref:`here <kubernetes-instructions>` to setup Kubernetes access for each SkyPilot client.
+        python -m sky.utils.kubernetes.gpu_labeler
+
+Once the cluster is deployed and you have placed your kubeconfig at``~/.kube/config``, verify your setup by running :code:`sky check`:
+
+    .. code-block:: console
+
+        $ sky check
