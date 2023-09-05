@@ -9,15 +9,15 @@ from sky.utils import common_utils
 import os
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-from sky.skylet.providers.fluidstack.fluidstack_utils import (
-    FluidstackClient,
-    FluidstackAPIError,
-)
-import time 
+from sky.skylet.providers.fluidstack import fluidstack_utils
+import json
+import time
+
 logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -35,11 +35,7 @@ class FluidstackNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.cached_nodes = {}
-        self.fluidstack_client = FluidstackClient()
-
-        ########
-        # TODO #
-        ########
+        self.fluidstack_client = fluidstack_utils.FluidstackClient()
         # Load credentials
         public_key_path = os.path.expanduser(auth.PUBLIC_SSH_KEY_PATH)
         self.ssh_public_key = None
@@ -57,7 +53,9 @@ class FluidstackNodeProvider(NodeProvider):
 
         for instance in running_instances:
             for key, value in tag_filters.items():
-                if instance["tags"].get(key,None) == value:
+                if type(instance["tags"]) == str:
+                    instance["tags"] = json.loads(instance["tags"])
+                if instance["tags"].get(key, None) == value:
                     self.cached_nodes[instance["id"]] = instance
         return self.cached_nodes
 
@@ -71,14 +69,15 @@ class FluidstackNodeProvider(NodeProvider):
         must be called again to refresh results.
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, instance in nodes.items() if instance['status'] not in ["Terminated", "Error Creating"]]
+        return [
+            k for k, instance in nodes.items()
+            if instance['status'] not in ["Terminated", "Error Creating"]
+        ]
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
-        return (
-            self._get_cached_node(node_id=node_id) is not None
-            and self._get_cached_node(node_id=node_id)["status"] == "Running"
-        )
+        return (self._get_cached_node(node_id=node_id) is not None and
+                self._get_cached_node(node_id=node_id)["status"] == "Running")
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
@@ -91,17 +90,17 @@ class FluidstackNodeProvider(NodeProvider):
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
         ip = self._get_cached_node(node_id=node_id)["ip"]
-        if ip.lower() in ["pending","provisioning"] or not ip:
+        if ip.lower() in ["pending", "provisioning"] or not ip:
             return None
         return ip
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
         ip = self._get_cached_node(node_id=node_id)["ip"]
-        if ip.lower() in ["pending","provisioning"] or not ip:
+        if ip.lower() in ["pending", "provisioning"] or not ip:
             return None
 
-        return ip 
+        return ip
 
     def create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
@@ -116,11 +115,11 @@ class FluidstackNodeProvider(NodeProvider):
         ttype = node_config["InstanceType"]
         region = self.provider_config["region"]
         vm_id = self.fluidstack_client.create_instance(
-            instance_type=ttype, region=region, ssh_pub_key=self.ssh_public_key
-        )
+            instance_type=ttype, region=region, ssh_pub_key=self.ssh_public_key)
 
         if vm_id is None:
-            raise FluidstackAPIError("Failed to launch instance.")
+            raise fluidstack_utils.FluidstackAPIError(
+                "Failed to launch instance.")
 
         self.fluidstack_client.add_tags(vm_id, config_tags)
         instances = self.fluidstack_client.list_instances()
@@ -131,11 +130,12 @@ class FluidstackNodeProvider(NodeProvider):
         while True:
             time.sleep(30)
             instance = self.fluidstack_client.info(vm_id)
-            if instance["status"] == "Error Creating":
-                raise FluidstackAPIError("Failed to launch instance")
-            if instance["status"] == "Running":
+            if instance['status'] == 'Error Creating':
+                raise fluidstack_utils.FluidstackAPIError(
+                    "Failed to launch instance")
+            if instance['status'] == "Running":
                 break
-            
+
         ########
         # TODO #
         ########
