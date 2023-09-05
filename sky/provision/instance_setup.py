@@ -47,6 +47,11 @@ _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
 
 def _auto_retry(func):
+    """Decorator that retries the function if it fails.
+
+    This decorator is mostly for SSH disconnection issues, which might happen
+    during the setup of instances.
+    """
 
     @functools.wraps(func)
     def retry(*args, **kwargs):

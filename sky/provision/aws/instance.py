@@ -543,6 +543,7 @@ def cleanup_ports(
 
 def wait_instances(region: str, cluster_name: str, state: str) -> None:
     """See sky/provision/__init__.py"""
+    # TODO(suquark): unify state for different clouds
     # possible exceptions: https://github.com/boto/boto3/issues/176
     ec2 = _default_ec2_resource(region)
     client = ec2.meta.client

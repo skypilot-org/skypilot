@@ -125,4 +125,6 @@ class ClusterMetadata(pydantic.BaseModel):
         """Get the instance metadata of the head node"""
         if self.head_instance_id is None:
             return None
+        if self.head_instance_id not in self.instances:
+            raise ValueError('Head instance ID not in the cluster metadata.')
         return self.instances[self.head_instance_id]
