@@ -110,7 +110,7 @@ install_requires = [
     # https://github.com/ray-project/ray/issues/35661
     'pydantic <2.0, >=1.10.8',
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
-    'pyyaml > 3.13'
+    'pyyaml > 3.13, != 5.4.*'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
