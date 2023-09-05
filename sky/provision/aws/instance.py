@@ -11,19 +11,18 @@ from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
 
-BOTO_CREATE_MAX_RETRIES = 5
+logger = sky_logging.init_logger(__name__)
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
+# Max retries for general AWS API calls.
 BOTO_MAX_RETRIES = 12
-
-logger = sky_logging.init_logger(__name__)
-
-BOTO_MAX_RETRIES = 12
-
-MAX_ATTEMPTS = 6
+# Max retries for creating an instance.
+BOTO_CREATE_MAX_RETRIES = 5
+# Max retries for deleting security groups etc.
+BOTO_DELETE_MAX_ATTEMPTS = 6
 
 _DEPENDENCY_VIOLATION_PATTERN = re.compile(
     r'An error occurred \(DependencyViolation\) when calling the '
@@ -125,6 +124,9 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
     for i in range(max_tries):
         try:
             if 'NetworkInterfaces' in conf:
+                logger.debug(
+                    'Attempting to create instances with NetworkInterfaces.'
+                    'Ignore SecurityGroupIds.')
                 # remove security group IDs previously copied from network
                 # interfaces (create_instances call fails otherwise)
                 conf.pop('SecurityGroupIds', None)
@@ -137,6 +139,8 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
             # available. Here we have to handle 'RequestLimitExceeded'
             # error, so the provision would not fail due to request limit
             # issues.
+            # Here the backoff config (5, 12) is picked at random and does not
+            # have any special meaning.
             backoff = common_utils.Backoff(5, 12)
             instances = None
             for _ in range(utils.BOTO_MAX_RETRIES):
@@ -188,8 +192,8 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def start_instances(region: str, cluster_name: str,
-                    config: common.InstanceConfig) -> common.ProvisionMetadata:
+def run_instances(region: str, cluster_name: str,
+                  config: common.InstanceConfig) -> common.ProvisionMetadata:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
 
@@ -522,7 +526,7 @@ def cleanup_ports(
                        'Skip cleanup. Please delete them manually.')
         return
     backoff = common_utils.Backoff()
-    for _ in range(MAX_ATTEMPTS):
+    for _ in range(BOTO_DELETE_MAX_ATTEMPTS):
         try:
             list(sgs)[0].delete()
         except aws.botocore_exceptions().ClientError as e:
@@ -532,8 +536,9 @@ def cleanup_ports(
                 continue
             raise
         return
-    logger.warning(f'Cannot delete security group {sg_name} after '
-                   f'{MAX_ATTEMPTS} attempts. Please delete it manually.')
+    logger.warning(
+        f'Cannot delete security group {sg_name} after '
+        f'{BOTO_DELETE_MAX_ATTEMPTS} attempts. Please delete it manually.')
 
 
 def wait_instances(region: str, cluster_name: str, state: str) -> None:

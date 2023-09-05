@@ -116,7 +116,7 @@ def _bulk_provision(
             raise
 
         try:
-            provision_metadata = provision.start_instances(
+            provision_metadata = provision.run_instances(
                 provider_name,
                 region_name,
                 cluster_name.name_on_cloud,
@@ -381,7 +381,7 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=2,
                                            step_name='installing dependencies'))
-        instance_setup.run_runtime_setup_on_cluster(
+        instance_setup.setup_runtime_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
 

@@ -113,12 +113,12 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
 
 
 @_log_start_end
-def run_runtime_setup_on_cluster(cluster_name: str, setup_commands: List[str],
-                                 cluster_metadata: common.ClusterMetadata,
-                                 ssh_credentials: Dict[str, str]) -> None:
+def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
+                             cluster_metadata: common.ClusterMetadata,
+                             ssh_credentials: Dict[str, str]) -> None:
     """Setup internal dependencies."""
     _hint_worker_log_path(cluster_name, cluster_metadata,
-                          'run_runtime_setup_on_cluster')
+                          'setup_runtime_on_cluster')
     # compute the digest
     digests = []
     for cmd in setup_commands:
@@ -146,7 +146,7 @@ def run_runtime_setup_on_cluster(cluster_name: str, setup_commands: List[str],
 
     _parallel_ssh_with_cache(_setup_node,
                              cluster_name,
-                             stage_name='run_runtime_setup_on_cluster',
+                             stage_name='setup_runtime_on_cluster',
                              digest=digest,
                              cluster_metadata=cluster_metadata,
                              ssh_credentials=ssh_credentials)
