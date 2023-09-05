@@ -2,6 +2,7 @@ import copy
 import itertools
 import json
 import logging
+import re
 import os
 import time
 from distutils.version import StrictVersion
@@ -35,6 +36,11 @@ SECURITY_GROUP_TEMPLATE = RAY + "-{}"
 SKYPILOT = "skypilot"
 DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
 DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
+
+_DUPLICATED_INBOUND_RULES_MSG = (
+    "An error occurred (InvalidParameterValue) when calling the AuthorizeSecurityGroupIngress "
+    "operation: The same permission must not appear multiple times"
+)
 
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
@@ -1007,7 +1013,22 @@ def _update_inbound_rules(target_security_group, sgids, config):
     ip_permissions = _create_default_inbound_rules(
         sgids, user_specified_rules, extended_rules
     )
-    target_security_group.authorize_ingress(IpPermissions=ip_permissions)
+    try:
+        target_security_group.authorize_ingress(IpPermissions=ip_permissions)
+    except botocore.exceptions.ClientError as e:
+        if str(e) == _DUPLICATED_INBOUND_RULES_MSG:
+            logger.warning(
+                f"{cf.bold(target_security_group.group_name)} already has "
+                f"ingress rules matching {cf.bold(ip_permissions)}. "
+                "Skipping ingress rule update."
+            )
+        else:
+            handle_boto_error(
+                e,
+                "Failed to update security group {} with inbound rules.",
+                cf.bold(target_security_group.group_name),
+            )
+            raise e
 
 
 def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=None):
@@ -1027,6 +1048,9 @@ def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=No
 def _retrieve_user_specified_rules(ports):
     rules = []
     for port in ports:
+        if port == 22:
+            # Not creating a duplicate rule for port 22
+            continue
         if isinstance(port, int):
             from_port = to_port = port
         else:
