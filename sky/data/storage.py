@@ -1121,8 +1121,7 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            # TODO: Add s5cmd when it supports --include option
-            # Issue reference: https://github.com/peak/s5cmd/issues/516
+            #if data_utils.s5cmd_installed():
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '

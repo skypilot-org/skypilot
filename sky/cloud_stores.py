@@ -42,7 +42,7 @@ class S3CloudStorage(CloudStorage):
     """AWS Cloud Storage."""
 
     # List of commands to install s5cmd
-    _S5CMD_VERSION = '2.1.0'
+    _S5CMD_VERSION = '2.2.0'
     _GET_S5CMD = [('s5cmd version &> /dev/null || '
                    '{ wget -nc https://github.com/peak/s5cmd/releases/download/'
                    f'v{_S5CMD_VERSION}/s5cmd_{_S5CMD_VERSION}_linux_amd64.deb '
