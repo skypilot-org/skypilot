@@ -172,10 +172,8 @@ def fill_template(template_name: str, variables: Dict,
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
-  
     with open(output_path, 'w') as fout:
         fout.write(content)
-
 
 
 def _optimize_file_mounts(yaml_path: str) -> None:
@@ -190,7 +188,6 @@ def _optimize_file_mounts(yaml_path: str) -> None:
     """
     yaml_config = common_utils.read_yaml(yaml_path)
     file_mounts = yaml_config.get('file_mounts', {})
-    
     # Remove the file mounts added by the newline.
     if '' in file_mounts:
         assert file_mounts[''] == '', file_mounts['']
@@ -1012,7 +1009,6 @@ def write_cluster_config(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY,
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
-       
         with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
@@ -1076,7 +1072,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-   
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
     if isinstance(cloud, clouds.AWS):

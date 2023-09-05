@@ -32,12 +32,9 @@ class Fluidstack(clouds.Cloud):
 
     _REPR = 'Fluidstack'
 
-    # Lamdba has a 64 char limit for cluster name.
-    # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
-    # However, we need to account for the suffixes '-head' and '-worker'
     _MAX_CLUSTER_NAME_LEN_LIMIT = 57
-    # Currently, none of clouds.CloudImplementationFeatures are implemented
-    # for Fluidstack Cloud.
+    # Currently, none of clouds.CloudImplementationFeatures
+    # are implemented for Fluidstack Cloud.
     # STOP/AUTOSTOP: The Fluidstack cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'FluidStack cloud does not support stopping VMs.',
@@ -226,7 +223,7 @@ class Fluidstack(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-    
+
         try:
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_KEY_PATH))
             assert os.path.exists(os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
@@ -234,8 +231,8 @@ class Fluidstack(clouds.Cloud):
             return False, (
                 'Failed to access FluidStack Cloud with credentials. '
                 'To configure credentials, go to:\n    '
-                '  https://console.fluidstack.io \n    '
-                'to obtain an API key and API Token, then add save the contents\n'
+                '  https://console2.fluidstack.io \n    '
+                'to obtain an API key and API Token, then add save the contents '
                 'to ~/.fluidstack/api_key and ~/.fluidstack/api_token \n')
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify FluidStack Cloud credentials. '
@@ -287,16 +284,16 @@ class Fluidstack(clouds.Cloud):
         **kwargs,
     ) -> List[status_lib.ClusterStatus]:
         status_map = {
-            "Provisioning": status_lib.ClusterStatus.INIT,
-            "Starting Up": status_lib.ClusterStatus.INIT,
-            "Running": status_lib.ClusterStatus.UP,
-            "Error Creating": status_lib.ClusterStatus.INIT,  #should be error
+            'Provisioning': status_lib.ClusterStatus.INIT,
+            'Starting Up': status_lib.ClusterStatus.INIT,
+            'Running': status_lib.ClusterStatus.UP,
+            'Error Creating': status_lib.ClusterStatus.INIT,  #should be error
         }
         status_list = []
         vms = FluidstackClient().list_instances()
 
         for node in vms:
-            node_status = status_map.get(node["status"], None)
+            node_status = status_map.get(node['status'], None)
             if node_status is not None:
                 status_list.append(node_status)
         return status_list
