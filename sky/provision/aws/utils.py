@@ -1,11 +1,5 @@
 """Utils for AWS provisioner."""
-import threading
-from typing import Any, Dict
-
-import boto3
-from botocore import config
 import colorama
-import urllib3
 
 from sky import sky_logging
 
@@ -15,25 +9,6 @@ BOTO_MAX_RETRIES = 12
 
 # ======================== Thread-safe ========================
 # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html#multithreading-or-multiprocessing-with-resources
-
-_lock = threading.RLock()
-
-
-def create_resource(resource: str,
-                    region: str,
-                    max_attempts: int = BOTO_MAX_RETRIES,
-                    **credentials) -> Any:
-    """Create an AWS resource."""
-    # overhead: 6.69 ms ± 41.5 µs
-    with _lock:
-        # We should prevent caching the resource for thread safety.
-        # Instead, the logic that uses the resource should reuse the same
-        # resource as much as possible.
-        return boto3.resource(
-            resource,
-            region,
-            config=config.Config(retries={'max_attempts': max_attempts}),
-            **credentials)
 
 
 def handle_boto_error(exc: Exception, msg: str) -> None:
@@ -108,33 +83,3 @@ def handle_boto_error(exc: Exception, msg: str) -> None:
     logger.fatal('')
     logger.error(f'Boto3 error: {vars(exc)} {exec}')
     raise SystemExit(1)
-
-
-def get_self_instance_metadata() -> Dict[str, str]:
-    """Get instance metadata within an instance."""
-    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-    prefix = 'http://169.254.169.254/latest/meta-data'
-    http = urllib3.PoolManager()
-    instance_req = http.request('GET', f'{prefix}/instance-id')
-    region_req = http.request('GET', f'{prefix}/placement/region')
-    availability_zone_req = http.request(
-        'GET', f'{prefix}/placement/availability-zone')
-    instance_id = instance_req.data.decode()
-    region = region_req.data.decode()
-    availability_zone = availability_zone_req.data.decode()
-
-    if instance_req.status != 200:
-        raise ValueError('Get "instance-id" from metadata with status '
-                         f'{instance_req.status}. Message: {instance_id}')
-    if region_req.status != 200:
-        raise ValueError('Get "region" from metadata with status '
-                         f'{region_req.status}. Message: {region}')
-    if availability_zone_req.status != 200:
-        raise ValueError(f'Get "availability_zone" from metadata with status '
-                         f'{availability_zone_req.status}. Message: '
-                         f'{availability_zone}')
-    return {
-        'instance_id': instance_id,
-        'region': region,
-        'availability_zone': availability_zone,
-    }

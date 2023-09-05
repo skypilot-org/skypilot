@@ -57,11 +57,6 @@ def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
     }]
 
 
-def describe_instances(region: str) -> Dict:
-    # overhead: 658 ms ± 65.3 ms
-    return utils.create_resource('ec2', region).meta.client.describe_instances()
-
-
 def _format_tags(tags: Dict[str, str]) -> List:
     return [{'Key': k, 'Value': v} for k, v in tags.items()]
 
@@ -196,7 +191,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def start_instances(region: str, cluster_name: str,
                     config: common.InstanceConfig) -> common.ProvisionMetadata:
     """See sky/provision/__init__.py"""
-    ec2 = utils.create_resource('ec2', region=region)
+    ec2 = _default_ec2_resource(region)
 
     region = ec2.meta.client.meta.region_name
     zone = None
@@ -330,9 +325,11 @@ def start_instances(region: str, cluster_name: str,
         #  resumed), then we cannot guarantee that they will be in the same
         #  availability zone (when there are multiple zones specified).
         #  This is a known issue before.
-        ec2_fail_fast = utils.create_resource('ec2',
-                                              region=region,
-                                              max_attempts=0)
+        ec2_fail_fast = aws.resource(
+            'ec2',
+            region_name=region,
+            config=aws.botocore_config().Config(retries={'max_attempts': 0}))
+
         created_instances = _create_instances(ec2_fail_fast, cluster_name,
                                               config.node_config, tags,
                                               to_start_count)
@@ -542,7 +539,7 @@ def cleanup_ports(
 def wait_instances(region: str, cluster_name: str, state: str) -> None:
     """See sky/provision/__init__.py"""
     # possible exceptions: https://github.com/boto/boto3/issues/176
-    ec2 = utils.create_resource('ec2', region=region)
+    ec2 = _default_ec2_resource(region)
     client = ec2.meta.client
 
     filters = [
@@ -588,7 +585,7 @@ def wait_instances(region: str, cluster_name: str, state: str) -> None:
 def get_cluster_metadata(region: str,
                          cluster_name: str) -> common.ClusterMetadata:
     """See sky/provision/__init__.py"""
-    ec2 = utils.create_resource('ec2', region=region)
+    ec2 = _default_ec2_resource(region)
     filters = [
         {
             'Name': 'instance-state-name',

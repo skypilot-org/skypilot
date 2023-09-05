@@ -36,8 +36,9 @@ class ProvisionMetadata(pydantic.BaseModel):
     provider_name: str
     # The name of the region.
     region: str
-    # The name of the sub-zone in the region.
-    zone: str
+    # The name of the sub-zone in the region. It must be a single zone.
+    # It can also be None if the cloud provider does not support zones.
+    zone: Optional[str]
     # The name of the cluster.
     cluster_name: str
     # The head node ID.

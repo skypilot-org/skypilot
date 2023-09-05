@@ -1584,8 +1584,8 @@ class RetryingVmProvisioner(object):
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
                     log_dir=self.log_dir)
-                # NOTE: We handle the logic of '_ensure_cluster_ray_started'
-                # in 'post_provision_runtime_setup()'.
+                # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
+                # in 'provision_utils.post_provision_runtime_setup()' in the caller.
                 if provision_metadata is not None:
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
@@ -1597,7 +1597,7 @@ class RetryingVmProvisioner(object):
 
                 # NOTE: We try to cleanup the cluster even if the previous
                 # cluster does not exist. Also we are fast at
-                # cleaning up clusters now if there are not existing nodes.
+                # cleaning up clusters now if there is no existing node..
                 CloudVmRayBackend().post_teardown_cleanup(
                     handle, terminate=not is_prev_cluster_healthy)
                 # TODO(suquark): other clouds may have different zone
@@ -1788,7 +1788,8 @@ class RetryingVmProvisioner(object):
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
 
-    # TODO(suquark): Deprecate this method in future PRs.
+    # TODO(suquark): Deprecate this method
+    # once the `provision_utils` is adopted for all the clouds.
     @timeline.event
     def _gang_schedule_ray_up(
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
@@ -2855,14 +2856,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record['handle'] if record is not None else None
 
-            # We pass handle in the config dict for the new provisioner
             if 'provision_metadata' in config_dict:
                 # New provisioner is used here.
                 handle = config_dict['handle']
                 provision_metadata = config_dict['provision_metadata']
                 resources_vars = config_dict['resources_vars']
 
-                # setup SkyPilot runtime after the cluster is provisioned
+                # Setup SkyPilot runtime after the cluster is provisioned
+                # 1. Wait for SSH to be ready.
+                # 2. Mount the cloud credentials, skypilot wheel,
+                #    and other necessary files to the VM.
+                # 3. Run setup commands to install dependencies.
+                # 4. Starting ray cluster and skylet.
                 cluster_metadata = provision_utils.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     provision_utils.ClusterName(handle.cluster_name,
@@ -2888,7 +2893,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                           external_ips=list(external_ips))
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
 
-                # update launched resources
+                # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_metadata.region,
                     zone=provision_metadata.zone)

@@ -445,8 +445,15 @@ def post_provision_runtime_setup(
         provision_metadata: provision_common.ProvisionMetadata,
         custom_resource: Optional[str],
         log_dir: str) -> provision_common.ClusterMetadata:
-    """Run internal setup commands after provisioning and before
-    user setup."""
+    """Run internal setup commands after provisioning and before user setup.
+
+    Here are the steps:
+    1. Wait for SSH to be ready.
+    2. Mount the cloud credentials, skypilot wheel,
+       and other necessary files to the VM.
+    3. Run setup commands to install dependencies.
+    4. Starting ray cluster and skylet.
+    """
     log_path = os.path.join(log_dir, 'provision.log')
     log_abs_path = os.path.abspath(os.path.expanduser(log_path))
 
