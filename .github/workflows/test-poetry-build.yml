@@ -1,4 +1,4 @@
-name: Python Tests
+name: Poetry Test
 on:
   # Trigger the workflow on push or pull request,
   # but only for the main branch
