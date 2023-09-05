@@ -109,6 +109,7 @@ install_requires = [
     # >=1.10.8 is needed for ray>=2.6. See
     # https://github.com/ray-project/ray/issues/35661
     'pydantic <2.0, >=1.10.8',
+    # Cython 3.0 release breaks PyYAML 5.4.* (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*'
 ]
