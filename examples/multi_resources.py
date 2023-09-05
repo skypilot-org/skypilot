@@ -19,7 +19,8 @@ if True:
         sky.Resources(sky.Azure(), accelerators={'K80': 1}),
         sky.Resources(sky.Azure(), accelerators={'T4': 1}),
         sky.Resources(sky.Azure(), accelerators={'T4': 4}),
-    ], is_resources_ordered=True)
+    ],
+                       is_resources_ordered=True)
 
     sky.launch(task,
                cluster_name=f'my-cluster',
@@ -56,13 +57,15 @@ if False:
 
 if False:
 
-    task.set_resources([
-        sky.Resources(accelerators={'T4': 1}),
-        # sky.Resources(accelerators={'V100': 1}, use_spot=True),
-        sky.Resources(accelerators={'V100': 1}),
-        sky.Resources(accelerators={'K80': 1}),
-        # sky.Resources(accelerators={'T4': 4}),
-    ], is_resources_ordered=True)
+    task.set_resources(
+        [
+            sky.Resources(accelerators={'T4': 1}),
+            # sky.Resources(accelerators={'V100': 1}, use_spot=True),
+            sky.Resources(accelerators={'V100': 1}),
+            sky.Resources(accelerators={'K80': 1}),
+            # sky.Resources(accelerators={'T4': 4}),
+        ],
+        is_resources_ordered=True)
 
     sky.launch(task,
                cluster_name=f'my-cluster',
