@@ -381,6 +381,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         # preempted.)
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
+        self._launched_accelerators: Optional[str] = None
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
@@ -395,8 +396,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
+            self._launched_accelerators = launched_resources.get_accelerators_str()  # pylint: disable=line-too-long
         else:
             self._launched_cloud_region = None
+            self._launched_accelerators = None
         return job_submitted_at
 
     def recover(self) -> float:
@@ -420,10 +423,16 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
 
                 # Remove the spot_recovery field from the resources, as
                 # the strategy will be handled by the strategy class.
-                new_resources_list = [
-                    r.copy(cloud=launched_cloud, region=launched_region)
-                    for r in original_resources
-                ]
+                new_resources_list = []
+                for r in original_resources:
+                    if r.get_accelerators_str() == self._launched_accelerators:
+                        # Copy launched_cloud and launched_region to the
+                        # previously picked resource.
+                        new_resources_list.append(
+                            r.copy(cloud=launched_cloud,
+                                   region=launched_region))
+                    else:
+                        new_resources_list.append(r.copy())
 
                 task.set_resources(new_resources_list,
                                    task.is_resources_ordered)
