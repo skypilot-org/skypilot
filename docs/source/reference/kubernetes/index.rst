@@ -4,7 +4,7 @@ SkyPilot on Kubernetes (Alpha)
 ==============================
 
 .. note::
-    Kubernetes support for SkyPilot is a alpha preview under active development.
+    Kubernetes support for SkyPilot is an alpha preview under active development.
     There may be rough edges and features may change without notice.
     Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
     `reach out to us <http://slack.skypilot.co>`_ for feature requests.
@@ -51,7 +51,7 @@ Submitting SkyPilot tasks to Kubernetes Clusters
 
 Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes-setup>` and provided you with a kubeconfig file:
 
-0. Make sure `Kubectl <https://kubernetes.io/docs/tasks/tools/>`_, `socat <https://kubernetes.io/docs/tasks/tools/>`_ and `lsof <https://kubernetes.io/docs/tasks/tools/>`_ are installed on the machine which will submit tasks.
+0. Make sure `kubectl <https://kubernetes.io/docs/tasks/tools/>`_, ``socat`` and ``lsof`` are installed.
 
 1. Place your kubeconfig file at ``~/.kube/config``.
 
@@ -148,9 +148,6 @@ SkyPilot on Kubernetes is under active development. Some features are in progres
 * Multiple Kubernetes Clusters - 🚧 In progress
 
 
-
-Table of Contents
--------------------
 .. toctree::
    :hidden:
 

@@ -25,7 +25,10 @@ Deployment Guides
 -----------------
 Below we show minimal examples to setup a new Kubernetes cluster in different environments, including hosted services on the cloud, and generating kubeconfig files which can be :ref:`used by SkyPilot <kubernetes-instructions>`.
 
-TODO (Add image grid 4x4 - Kind,  GKE, EKS, On-Prem).
+..
+  TODO(romilb) - Add a table of contents/grid cards for each deployment environment.
+
+.. _kubernetes-setup-kind:
 
 Deploying locally on your Laptop
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -62,6 +65,9 @@ It runs a Kubernetes cluster inside a container, so no setup is required.
     It is not recommended for use in a production environment.
     If you want to run a private On-Prem cluster, see the section on `On-Prem deployment <Deploying on On-Prem Clusters>`_ for more.
 
+
+.. _kubernetes-setup-gke:
+
 Deploying on GKE
 ^^^^^^^^^^^^^^^^
 
@@ -88,7 +94,7 @@ Deploying on GKE
         # For Ubuntu (COS) based nodes:
         kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
 
-   To verify if GPU drivers are setup, run TODO - add oneliner to run k describe nodes and list resources.
+   To verify if GPU drivers are setup, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
 
 4. Verify your kubeconfig (and GPU support, if available) is correctly setup by running :code:`sky check`:
 
@@ -99,6 +105,8 @@ Deploying on GKE
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
 
+
+.. _kubernetes-setup-eks:
 
 Deploying on AWS EKS
 ^^^^^^^^^^^^^^^^^^^^
@@ -126,6 +134,8 @@ Deploying on AWS EKS
 
         $ sky check
 
+
+.. _kubernetes-setup-onprem:
 
 Deploying on On-Prem Clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -169,13 +179,37 @@ Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/co
 
         $ sky check
 
+
+.. _kubernetes-observability:
+
 Observability for Administrators
 --------------------------------
 All SkyPilot tasks are run in pods inside a Kubernetes cluster. As a cluster administrator,
 you can inspect running pods (e.g., with :code:`kubectl get pods -n namespace`) to check which
 tasks are running and how many resources they are consuming on the cluster.
 
-Additionally, you can also deploy tools such as the Kubernetes dashboard for easily viewing and managing
+Additionally, you can also deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ for easily viewing and managing
 SkyPilot tasks running on your cluster.
 
-TODO - add instructions and screenshot.
+As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
+
+.. code-block:: console
+
+    $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/scripts/dashboard.yaml
+
+
+To access the dashboard, run:
+
+.. code-block:: console
+
+    $ kubectl proxy
+
+
+In a browser, open http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/ and click on Skip when
+prompted for credentials. Note that this dashboard can only be accessed from the machine where the ``kubectl proxy`` command is executed.
+
+.. note::
+    The demo dashboard is not secure and should not be used in production. Please refer to the
+    `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
+    for more information on how to setup access control for the dashboard.
+
