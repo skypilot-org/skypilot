@@ -24,7 +24,6 @@ jobs:
           - tests/test_list_accelerators.py
           - tests/test_optimizer_dryruns.py
           - tests/test_optimizer_random_dag.py
-          - tests/test_pycryptodome_version.py
           - tests/test_storage.py
           - tests/test_wheels.py
           - tests/test_spot.py

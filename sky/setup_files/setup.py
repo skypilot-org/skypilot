@@ -71,7 +71,6 @@ install_requires = [
     'jinja2 >= 3.0',
     'jsonschema',
     'networkx',
-    'oauth2client',
     'pandas',
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
@@ -119,7 +118,7 @@ install_requires = [
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, accuroding to https://github.com/boto/botocore/issues/2926
+    # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
     # We have to explicitly pin the version to optimize the time for
     # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
     'urllib3<2',
@@ -129,8 +128,6 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # 'Crypto' module used in authentication.py for AWS.
-    'pycryptodome==3.12.0',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
