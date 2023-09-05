@@ -26,24 +26,24 @@ jobs:
         run: |
           mkdir foo
           cat <<EOF > foo/pyproject.toml
-            [tool.poetry]
-            name = "foo"
-            version = "1.0.0"
-            authors = ["skypilot-bot"]
-            description = ""
+          [tool.poetry]
+          name = "foo"
+          version = "1.0.0"
+          authors = ["skypilot-bot"]
+          description = ""
 
-            [tool.poetry.dependencies]
-            python = "3.10.x"
+          [tool.poetry.dependencies]
+          python = "3.10.x"
 
-            [tool.poetry.group.dev.dependencies]
-            sky = {git = "https://github.com/skypilot-org/skypilot.git", branch = "\${{ github.head_ref }}"}
+          [tool.poetry.group.dev.dependencies]
+          sky = {git = "https://github.com/skypilot-org/skypilot.git", branch = "${{ github.head_ref }}"}
 
-            [build-system]
-            requires = ["poetry-core"]
-            build-backend = "poetry.core.masonry.api"
-            EOF
+          [build-system]
+          requires = ["poetry-core"]
+          build-backend = "poetry.core.masonry.api"
+          
+          EOF
 
-          cat foo/pyproject.toml
       - name: Check poetry lock time
         run: |
           cd foo
