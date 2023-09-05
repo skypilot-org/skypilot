@@ -216,6 +216,12 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
+    consider_demand_option = click.option(
+        '--consider-demand',
+        default=None,
+        is_flag=True,
+        help='If true, consider on-demand when use spot instances.')
+
     tpuvm_option = click.option('--tpu-vm',
                                 default=False,
                                 is_flag=True,
@@ -305,6 +311,7 @@ def _interactive_node_cli_command(cli_func):
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
+        consider_demand_option,
         *([tpuvm_option] if cli_func.__name__ == 'tpunode' else []),
 
         # Attach options
@@ -391,6 +398,11 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, overrides the '
               '"resources.use_spot" config.')),
+    click.option(
+        '--consider-demand',
+        required=False,
+        default=None,
+        help=('Whether to consider on-demand when request spot instances')),
     click.option('--image-id',
                  required=False,
                  default=None,
@@ -621,6 +633,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            memory: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
+                           consider_demand: Optional[bool] = None,
                            image_id: Optional[str] = None,
                            disk_size: Optional[int] = None,
                            disk_tier: Optional[str] = None) -> Dict[str, Any]:
@@ -663,6 +676,8 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['instance_type'] = instance_type
     if use_spot is not None:
         override_params['use_spot'] = use_spot
+    if consider_demand is not None:
+        override_params['consider_demand'] = consider_demand
     if image_id is not None:
         if image_id.lower() == 'none':
             override_params['image_id'] = None
@@ -1029,6 +1044,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
+    consider_demand: Optional[bool] = None,
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
@@ -1068,6 +1084,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              memory=memory,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
+                                             consider_demand=consider_demand,
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier)
@@ -1100,6 +1117,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     # Spot launch specific.
     if spot_recovery is not None:
         override_params['spot_recovery'] = spot_recovery
+
+    if consider_demand is not None:
+        override_params['consider_demand'] = consider_demand
 
     task.set_resources_override(override_params)
 
@@ -3532,6 +3552,7 @@ def spot_launch(
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    consider_demand: Optional[bool],
     image_id: Optional[str],
     spot_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
@@ -3557,8 +3578,8 @@ def spot_launch(
       sky spot launch 'echo hello!'
     """
     env = _merge_env_vars(env_file, env)
-    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint,
+    task_or_dag = launch(
+        entrypoint=entrypoint,
         name=name,
         workdir=workdir,
         cloud=cloud,
@@ -3570,6 +3591,7 @@ def spot_launch(
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
+        consider_demand=consider_demand,
         image_id=image_id,
         env=env,
         disk_size=disk_size,
@@ -3602,6 +3624,43 @@ def spot_launch(
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
+    dag = sky.optimize(dag, quiet=True)
+    task = dag.tasks[0]
+    print('best_resources', task.best_resources)
+    if task.best_resources and not task.best_resources.use_spot:
+        if task.best_resources.consider_demand:
+            print('Use on-demand instead')
+            # TODO: __init__() got an unexpected keyword argument 'entrypoint'
+            launch(entrypoint=entrypoint,
+                   cluster=None,
+                   dryrun=False,
+                   detach_setup=False,
+                   detach_run=detach_run,
+                   backend_name=None,
+                   name=name,
+                   workdir=workdir,
+                   cloud=cloud,
+                   region=region,
+                   zone=zone,
+                   gpus=gpus,
+                   cpus=cpus,
+                   memory=memory,
+                   instance_type=instance_type,
+                   num_nodes=num_nodes,
+                   use_spot=use_spot,
+                   image_id=image_id,
+                   env_file=env_file,
+                   env=env,
+                   disk_size=disk_size,
+                   disk_tier=disk_tier,
+                   idle_minutes_to_autostop=None,
+                   down=False,
+                   retry_until_up=retry_until_up,
+                   yes=yes,
+                   no_setup=False,
+                   clone_disk_from=None)
+            return
+        
     if not yes:
         prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
         if prompt is not None:
@@ -3613,11 +3672,12 @@ def spot_launch(
         # cluster name against the regex, and the cloud-specific validation will
         # be done by the spot controller when actually launching the spot
         # cluster.
-        resources = list(task.resources)[0]
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
-        task_cloud.check_cluster_name_is_valid(name)
 
+        for r in list(task.resources):
+            task_cloud = (r.cloud if r.cloud is not None else clouds.Cloud)
+            task_cloud.check_cluster_name_is_valid(name)
+
+    sys.exit()
     sky.spot_launch(dag,
                     name,
                     detach_run=detach_run,

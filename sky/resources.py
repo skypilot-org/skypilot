@@ -52,6 +52,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
+        consider_demand: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
@@ -139,6 +140,7 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
+        self._consider_demand = consider_demand
         self._spot_recovery = None
         if spot_recovery is not None:
             if spot_recovery.strip().lower() != 'none':
@@ -292,6 +294,10 @@ class Resources:
     @property
     def instance_type(self):
         return self._instance_type
+
+    @property
+    def consider_demand(self):
+        return self._consider_demand
 
     @property
     def cpus(self) -> Optional[str]:
@@ -1038,6 +1044,8 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
+            consider_demand=override.pop('consider_demand',
+                                         self.consider_demand),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
@@ -1104,6 +1112,8 @@ class Resources:
             resources_fields['use_spot'] = config.pop('use_spot')
         if config.get('spot_recovery') is not None:
             resources_fields['spot_recovery'] = config.pop('spot_recovery')
+        if config.get('consider_demand') is not None:
+            resources_fields['consider_demand'] = config.pop('consider_demand')
         if config.get('disk_size') is not None:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
@@ -1144,6 +1154,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         config['spot_recovery'] = self.spot_recovery
+        config['consider_demand'] = self.consider_demand
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
