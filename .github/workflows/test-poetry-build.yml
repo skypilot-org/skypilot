@@ -24,7 +24,6 @@ jobs:
           echo "$HOME/.poetry/bin" >> $GITHUB_PATH
       - name: Create foo package
         run: |
-          cd ..
           mkdir foo
           cat <<EOF > foo/pyproject.toml
             [tool.poetry]
