@@ -42,7 +42,7 @@ In a typical workflow:
    different deployment environments (Amazon EKS, Google GKE, On-Prem and local debugging) are included in the :ref:`Kubernetes cluster setup guide <kubernetes-setup>`.
 
 2. Users who want to run SkyPilot tasks on this cluster are issued Kubeconfig
-   files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/tools/>`_).
+   files containing their credentials (`kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_).
    SkyPilot reads this Kubeconfig file to communicate with the cluster.
 
 Submitting SkyPilot tasks to Kubernetes Clusters

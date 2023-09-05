@@ -191,6 +191,12 @@ tasks are running and how many resources they are consuming on the cluster.
 Additionally, you can also deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ for easily viewing and managing
 SkyPilot tasks running on your cluster.
 
+.. image:: ../../images/screenshots/kubernetes/kubernetes-dashboard.png
+    :width: 80%
+    :align: center
+    :alt: Kubernetes Dashboard
+
+
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
 
 .. code-block:: console
@@ -206,7 +212,9 @@ To access the dashboard, run:
 
 
 In a browser, open http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/ and click on Skip when
-prompted for credentials. Note that this dashboard can only be accessed from the machine where the ``kubectl proxy`` command is executed.
+prompted for credentials.
+
+Note that this dashboard can only be accessed from the machine where the ``kubectl proxy`` command is executed.
 
 .. note::
     The demo dashboard is not secure and should not be used in production. Please refer to the
