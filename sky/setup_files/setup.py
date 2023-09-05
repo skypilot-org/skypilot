@@ -109,7 +109,7 @@ install_requires = [
     # https://github.com/yaml/pyyaml/issues/601
     # https://github.com/aws/aws-cli/issues/8036
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
-    'pyyaml > 3.13, <= 5.3.1'
+    'pyyaml > 3.13'
 ]
 
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the

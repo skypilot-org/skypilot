@@ -48,6 +48,6 @@ jobs:
         run: |
           cd foo
           poetry lock --no-update
-        timeout-minutes: 5
+        timeout-minutes: 1
 
 
