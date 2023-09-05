@@ -215,9 +215,8 @@ class InfraProvider:
     def get_uptime(self) -> Optional[float]:
         return self.uptime
 
-    def total_replica_num(self) -> int:
-        # Returns the total number of replicas, including those under
-        # provisioning and deletion
+    def total_replica_num(self, count_failed_replica: bool) -> int:
+        # Returns the total number of replicas
         raise NotImplementedError
 
     def get_ready_replicas(self) -> Set[str]:
@@ -389,8 +388,13 @@ class SkyPilotInfraProvider(InfraProvider):
             for info in self.replica_info.values()
         ]
 
-    def total_replica_num(self) -> int:
-        return len(self.replica_info)
+    def total_replica_num(self, count_failed_replica: bool) -> int:
+        if count_failed_replica:
+            return len(self.replica_info)
+        return len([
+            i for i in self.replica_info.values()
+            if i.status != status_lib.ReplicaStatus.FAILED
+        ])
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()

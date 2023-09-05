@@ -26,6 +26,7 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         controller_resources: Optional[Dict[str, Any]] = None,
+        auto_restart: bool = False,
     ):
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -60,6 +61,7 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._controller_resources = controller_resources
+        self._auto_restart = auto_restart
 
     @staticmethod
     def from_yaml_config(config: Optional[Dict[str, Any]]):
@@ -124,6 +126,7 @@ class SkyServiceSpec:
 
         service_config['controller_resources'] = config.pop(
             'controller_resources', None)
+        service_config['auto_restart'] = config.pop('auto_restart', False)
 
         return SkyServiceSpec(**service_config)
 
@@ -174,6 +177,7 @@ class SkyServiceSpec:
                         self.qps_lower_threshold)
         add_if_not_none('controller_resources', None,
                         self._controller_resources)
+        add_if_not_none('auto_restart', None, self._auto_restart)
 
         return config
 
@@ -196,6 +200,7 @@ class SkyServiceSpec:
             Readiness probe method:        {self.probe_str()}
             Replica autoscaling policy:    {self.policy_str()}
             Service initial delay seconds: {self.initial_delay_seconds}
+            Auto restart:                  {self._auto_restart}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)
@@ -239,3 +244,7 @@ class SkyServiceSpec:
     @property
     def controller_resources(self) -> Optional[Dict[str, Any]]:
         return self._controller_resources
+
+    @property
+    def auto_restart(self) -> bool:
+        return self._auto_restart
