@@ -611,6 +611,7 @@ class SkyPilotInfraProvider(InfraProvider):
             info = self.replica_info[cluster_name]
             info.status_property.service_ready_now = res
             if res:
+                info.consecutive_failure_cnt = 0
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
                 continue
