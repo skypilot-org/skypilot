@@ -407,10 +407,13 @@ class Task:
         if resources_config and resources_config.get(
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
+
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
+            elif isinstance(accelerators, list):
+                pass
             elif isinstance(accelerators, dict):
-                accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
+                accelerators = {f'{k}' for k, _ in accelerators.items()}
 
             tmp_resources_list = []
             for acc in accelerators:
@@ -592,7 +595,8 @@ class Task:
                 self.resources_pref_list = list(resources)
             resources = {resources}
         elif isinstance(resources, list):
-            self.resources_pref_list = resources
+            if is_resources_ordered:
+                self.resources_pref_list = resources
             resources = set(resources)
         elif isinstance(resources, set):
             if is_resources_ordered:
