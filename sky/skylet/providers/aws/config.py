@@ -2,7 +2,6 @@ import copy
 import itertools
 import json
 import logging
-import re
 import os
 import time
 from distutils.version import StrictVersion
@@ -39,8 +38,7 @@ DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
 
 _DUPLICATED_INBOUND_RULES_MSG = (
     "An error occurred (InvalidParameterValue) when calling the AuthorizeSecurityGroupIngress "
-    "operation: The same permission must not appear multiple times"
-)
+    "operation: The same permission must not appear multiple times")
 
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
