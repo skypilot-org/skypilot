@@ -130,7 +130,10 @@ class Optimizer:
                     f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order).'  # pylint: disable=line-too-long
                 )
                 resources_list = dag.tasks[0].get_resources_list()
-                logger.info([r.get_accelerators_str() for r in resources_list])
+                logger.info([
+                    r.get_accelerators_str() + r.get_spot_str()
+                    for r in resources_list
+                ])
                 _ = Optimizer._set_resources_by_user_order(
                     dag=dag, blocked_resources=blocked_resources, quiet=quiet)
             else:
@@ -803,7 +806,8 @@ class Optimizer:
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
             resources_pref_list = [
-                r.get_accelerators_str() for r in task.resources_pref_list
+                r.get_accelerators_str() + r.get_spot_str()
+                for r in task.resources_pref_list
             ]
             task_str = (f'for task_lib.Task {repr(task)!r}'
                         if num_tasks > 1 else '')
@@ -817,8 +821,8 @@ class Optimizer:
             best_per_cloud: Dict[str, Tuple[resources_lib.Resources,
                                             float]] = {}
             for resources, cost in v.items():
-                accelerators = resources.get_accelerators_str()
-                cloud = str(resources.cloud) + accelerators
+                cloud = str(resources.cloud) + resources.get_accelerators_str(
+                ) + resources.get_spot_str()
                 if cloud in best_per_cloud:
                     if cost < best_per_cloud[cloud][1]:
                         best_per_cloud[cloud] = (resources, cost)
@@ -835,10 +839,10 @@ class Optimizer:
                     chosen_cost = cost
                     break
 
-            chosen_accelerators = chosen_resources.get_accelerators_str()
             best_per_cloud[str(chosen_resources.cloud) +
-                           chosen_accelerators] = (chosen_resources,
-                                                   chosen_cost)
+                           chosen_resources.get_accelerators_str() +
+                           chosen_resources.get_spot_str()] = (chosen_resources,
+                                                               chosen_cost)
             rows = []
             for resources, cost in best_per_cloud.values():
                 if minimize_cost:
@@ -856,8 +860,12 @@ class Optimizer:
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
             if task.is_resources_ordered:
-                rows = sorted(rows,
-                              key=lambda x: resources_pref_list.index(x[-4]))  # pylint: disable=cell-var-from-loop
+                rows = sorted(
+                    rows,
+                    key=lambda x: (
+                        resources_pref_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
+                            '[Spot]' if '[Spot]' in x[1] else '')),  # pylint: disable=cell-var-from-loop
+                        x[-2]))  # pylint: disable=cell-var-from-loop
             else:
                 rows = sorted(rows, key=lambda x: float(x[-2]))
             # Highlight the chosen resources.

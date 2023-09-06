@@ -852,6 +852,9 @@ class Resources:
             accelerators = f'{accelerators}:{count}'
         return accelerators
 
+    def get_spot_str(self) -> str:
+        return '[Spot]' if self.use_spot else ''
+
     def make_deploy_variables(
             self, region: clouds.Region,
             zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
