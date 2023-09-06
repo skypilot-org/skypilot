@@ -147,7 +147,7 @@ extras_require: Dict[str, List[str]] = {
     'lambda': [],
     'oci': ['oci'],
     'kubernetes': ['kubernetes'],
-    'runpod': ['runpod'],
+    'runpod': ['runpod>=1.2.0'],
     'scp': [],
 }
 
