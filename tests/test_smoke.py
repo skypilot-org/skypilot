@@ -3458,6 +3458,7 @@ class TestYamlSpecs:
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
 
+
 # ---------- Testing Multiple Resources ----------
 def test_multiple_resources():
     name = _get_cluster_name()
@@ -3470,4 +3471,3 @@ def test_multiple_resources():
         f'sky down -y {name}',
     )
     run_one_test(test)
-    
