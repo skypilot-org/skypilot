@@ -2664,8 +2664,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
                         f'{mismatch_str}')
-            task.resources = {valid_resource}
-
         else:
             task_resources = list(task.resources)[0]
             assert task_resources is not None, task.to_yaml_config()

@@ -3457,3 +3457,17 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
+# ---------- Testing Multiple Resources ----------
+def test_multiple_resources():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_zone',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+    
