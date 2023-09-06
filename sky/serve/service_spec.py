@@ -180,7 +180,6 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
         add_if_not_none('controller_resources', None,
                         self._controller_resources)
-        add_if_not_none('auto_restart', None, self._auto_restart)
 
         return config
 
