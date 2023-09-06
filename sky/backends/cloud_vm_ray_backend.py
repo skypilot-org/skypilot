@@ -1200,7 +1200,7 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'RunPodError:' in s.strip()
+            if any(err in s.strip() for err in ['runpod.error.QueryError:', 'RunPodError:'])
         ]
         if not errors:
             logger.info('====== stdout ======')
