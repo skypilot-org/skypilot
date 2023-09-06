@@ -58,7 +58,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-        ports: Optional[List[Union[int, str]]] = None,
+        ports: Optional[Union[int, str, List[Union[int, str]]]] = None,
         # Internal use only.
         _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
@@ -168,6 +168,9 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+        if ports is not None:
+            if not isinstance(ports, list):
+                ports = [ports]
         self._ports = ports
         self._docker_login_config = _docker_login_config
 
