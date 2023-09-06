@@ -2762,8 +2762,6 @@ def _down_or_stop_clusters(
         total=len(clusters))
 
     def _down_or_stop(name: str):
-        # if there's a sync process launched by CSYNC mode running
-        # in the cluster, wait until the sync completes
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:

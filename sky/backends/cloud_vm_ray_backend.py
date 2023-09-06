@@ -4486,12 +4486,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     if env_options.Options.SHOW_DEBUG_INFO.get():
                         raise exceptions.CommandError(e.returncode,
-                                                    command='to mount',
-                                                    error_msg=e.error_msg)
+                                                      command='to mount',
+                                                      error_msg=e.error_msg)
                     else:
                         # Strip the command (a big heredoc) from the exception
                         raise exceptions.CommandError(
-                            e.returncode, command='to mount',
+                            e.returncode,
+                            command='to mount',
                             error_msg=e.error_msg) from None
 
         end = time.time()
@@ -4562,13 +4563,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             except exceptions.CommandError as e:
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     raise exceptions.CommandError(e.returncode,
-                                                command='to CSYNC',
-                                                error_msg=e.error_msg)
+                                                  command='to CSYNC',
+                                                  error_msg=e.error_msg)
                 else:
                     # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(e.returncode,
-                                                command='to CSYNC',
-                                                error_msg=e.error_msg) from None
+                    raise exceptions.CommandError(
+                        e.returncode, command='to CSYNC',
+                        error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage Sync setup took {end - start} seconds.')
@@ -4585,13 +4586,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            storage_obj_metadata = storage_lib.Storage.StorageMetadata(
-                storage_name=storage_obj.name,
-                source=storage_obj.source,
-                mode=storage_obj.mode)
-            for _, store_obj in storage_obj.stores.items():
-                storage_obj_metadata.add_store(store_obj)
-            storage_mounts_metadata[dst] = storage_obj_metadata
+            storage_mounts_metadata[dst] = storage_obj.handle
         global_user_state.set_cluster_storage_mounts_metadata(
             cluster_name, storage_mounts_metadata)
 
@@ -4610,12 +4605,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_obj = storage_lib.Storage(
-                name=storage_metadata.storage_name,
-                source=storage_metadata.source,
-                mode=storage_metadata.mode,
-                sync_on_reconstruction=False)
-            storage_mounts[dst] = storage_obj
+            storage_mounts[dst] = \
+                storage_lib.Storage.from_metadata(storage_metadata,
+                                                  sync_on_reconstruction=False)
         return storage_mounts
 
     def _has_csync(self, cluster_name: str) -> bool:

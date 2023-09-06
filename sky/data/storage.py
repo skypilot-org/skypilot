@@ -313,8 +313,7 @@ class AbstractStore:
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """ Returns the command to continuously sync from CSYNC_PATH to
-        Storage bucket.
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
@@ -362,7 +361,8 @@ class Storage(object):
         """A pickle-able tuple of:
 
         - (required) Storage name.
-        - (required) Source
+        - (required) Source.
+        - (optional) Sync interval for CSYNC mode.
         - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
@@ -372,12 +372,15 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
+            interval: Optional[int],
             mode: Optional[storage_utils.StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None):
+                                      AbstractStore.StoreMetadata]] = None,
+        ):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
+            self.interval = interval
             self.mode = mode
             # Only stores managed by sky are stored here in the
             # global_user_state
@@ -387,6 +390,7 @@ class Storage(object):
             return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
+                    f'\n\tinterval={self.interval},'
                     f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
@@ -527,6 +531,8 @@ class Storage(object):
             }
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
+                                               interval=self.interval,
+                                               mode=self.mode,
                                                sky_stores=sky_managed_stores)
 
             if self.source is not None:
@@ -733,6 +739,55 @@ class Storage(object):
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
+
+    @classmethod
+    def from_metadata(cls, metadata: StorageMetadata, **override_args):
+        """Create Storage from a StorageMetadata object.
+
+        Used when reconstructing Storage and Store objects from
+        global_user_state.
+        """
+        storage_obj = cls(name=override_args.get('name', metadata.storage_name),
+                          source=override_args.get('source', metadata.source),
+                          sync_on_reconstruction=override_args.get(
+                              'sync_on_reconstruction', True))
+
+        # For backward compatibility
+        if hasattr(metadata, 'interval'):
+            storage_obj.interval = metadata.interval
+        if hasattr(metadata, 'mode'):
+            if metadata.mode:
+                storage_obj.mode = metadata.mode
+
+        for s_type, s_metadata in metadata.sky_stores.items():
+            # When initializing from global_user_state, we override the
+            # source from the YAML
+            if s_type == StoreType.S3:
+                store = S3Store.from_metadata(
+                    s_metadata,
+                    source=storage_obj.source,
+                    sync_on_reconstruction=storage_obj.sync_on_reconstruction)
+            elif s_type == StoreType.GCS:
+                store = GcsStore.from_metadata(
+                    s_metadata,
+                    source=storage_obj.source,
+                    sync_on_reconstruction=storage_obj.sync_on_reconstruction)
+            elif s_type == StoreType.R2:
+                store = R2Store.from_metadata(
+                    s_metadata,
+                    source=storage_obj.source,
+                    sync_on_reconstruction=storage_obj.sync_on_reconstruction)
+            elif s_type == StoreType.IBM:
+                store = IBMCosStore.from_metadata(
+                    s_metadata,
+                    source=storage_obj.source,
+                    sync_on_reconstruction=storage_obj.sync_on_reconstruction)
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unknown store type: {s_type}')
+
+            storage_obj._add_store(store, is_reconstructed=True)
+        return storage_obj
 
     def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
         """Initializes and adds a new store to the storage.
@@ -1276,8 +1331,7 @@ class S3Store(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """ Returns the command to continuously sync from CSYNC_PATH to
-        Storage bucket.
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
@@ -1736,8 +1790,7 @@ class GcsStore(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """ Returns the command to continuously sync from CSYNC_PATH to
-        Storage bucket.
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
@@ -2127,9 +2180,8 @@ class R2Store(AbstractStore):
     def csync_command(self,
                       csync_path: str,
                       interval: Optional[int] = 600) -> str:
-        """ Returns the command to continuously sync from CSYNC_PATH to
-        Storage bucket.
-
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
+        
         Args:
           csync_path: str; Path to continuously sync the bucket to.
           interval: int; runs the sync command every INTERVAL seconds
