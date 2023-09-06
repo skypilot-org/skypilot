@@ -2650,14 +2650,13 @@ def _refresh_service_record_no_lock(
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = record['controller_cluster_name']
-    cluster_record = global_user_state.get_cluster_from_name(
-        controller_cluster_name)
+    controller_name = record['controller_name']
+    cluster_record = global_user_state.get_cluster_from_name(controller_name)
     if (cluster_record is None or
             cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_cluster_name!r} '
+        return record, (f'Controller cluster {controller_name!r} '
                         'is not found or UP.')
 
     handle = cluster_record['handle']
@@ -2709,7 +2708,12 @@ def _refresh_service_record(
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
                                SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
-            return _refresh_service_record_no_lock(service_name)
+            record, msg = _refresh_service_record_no_lock(service_name)
+            # Handle the case when not successfully refresh the service status.
+            if record is not None:
+                if 'replica_info' not in record:
+                    record['replica_info'] = []
+            return record, msg
     except filelock.Timeout:
         msg = ('Failed get the lock for service '
                f'{service_name!r}. Using the cached record.')

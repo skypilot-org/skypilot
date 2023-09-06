@@ -129,9 +129,8 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')
     service_handle: serve.ServiceHandle = service_record['handle']
-    controller_cluster_name = service_record['controller_cluster_name']
-    handle = global_user_state.get_handle_from_cluster_name(
-        controller_cluster_name)
+    controller_name = service_record['controller_name']
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
     if handle is None:
         raise ValueError(f'Cannot find controller for service {service_name}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle

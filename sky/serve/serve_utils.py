@@ -135,10 +135,9 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
     return int(cluster_name.split('-')[-1])
 
 
-def get_ports_for_controller_and_load_balancer(
-        controller_cluster_name: str) -> Tuple[int, int]:
+def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
     services = global_user_state.get_services_from_controller_cluster_name(
-        controller_cluster_name)
+        controller_name)
     # Use `is None`` to filter out self and all services with
     # initialize status
     existing_controller_ports, existing_load_balancer_ports = [], []
@@ -150,24 +149,41 @@ def get_ports_for_controller_and_load_balancer(
             existing_load_balancer_ports.append(
                 service_handle.load_balancer_port)
     # Cannot expose controller to public internet.
-    # We opened 30000-40000 for controller VM, so load balancer port
+    # We opened 30000-31000 for controller VM, so load balancer port
     # should be in this range and controller port should not be in
     # this range.
-    if not existing_controller_ports:
-        controller_port = constants.CONTROLLER_PORT_START
-    else:
-        controller_port = max(existing_controller_ports) + 1
-    if not existing_load_balancer_ports:
-        load_balancer_port = constants.LOAD_BALANCER_PORT_START
-    else:
-        load_balancer_port = max(existing_load_balancer_ports) + 1
+    controller_port = constants.CONTROLLER_PORT_START
+    while controller_port in existing_controller_ports:
+        controller_port += 1
+    load_balancer_port = constants.LOAD_BALANCER_PORT_START
+    while load_balancer_port in existing_load_balancer_ports:
+        load_balancer_port += 1
     return controller_port, load_balancer_port
 
 
-def get_controller_to_use(
+def get_available_controller_name(
         controller_resources: 'sky.Resources') -> Optional[str]:
+    """Get available controller name to use.
+
+    Only consider controllers that are less demanding than the requested
+    controller resources, and have available slots for services. Max number of
+    services on a controller is determined by the memory of the controller,
+    since ray job and our skypilot code is very memory demanding (~1GB/service).
+    If multiple controllers are available, choose the one with most number of
+    services to decrease the number of controllers.
+
+    Args:
+      controller_resources: The resources requested for controller.
+
+    Returns:
+      The controller name to use. None if no controller is available.
+    """
+    # Get all existing controllers.
     existing_controllers = get_existing_controller_names()
-    useable_controller_to_service_num = dict()
+    available_controller_to_service_num = dict()
+    # Get a mapping from controller name to number of services on it.
+    # Only consider controllers that are less demanding than the requested
+    # controller resources.
     for controller_name in existing_controllers:
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
@@ -179,33 +195,40 @@ def get_controller_to_use(
         # TODO(tian): Maybe ignore controller resources when no new controller
         # is launched, like spot implementation?
         # If so, we could set controller resources in skypilot_config as well.
+        # Filter out controllers that are more demanding than the requested
+        # controller resources.
         if controller_resources.less_demanding_than(handle.launched_resources):
+            # Determine max number of services on this controller.
+            controller_cloud = handle.launched_resources.cloud
+            controller_instance_type = handle.launched_resources.instance_type
+            _, controller_memory = (
+                controller_cloud.get_vcpus_mem_from_instance_type(
+                    controller_instance_type))
+            max_services_num = int(controller_memory /
+                                   constants.SERVICES_MEMORY_USAGE_GB)
+            # Get current number of services on this controller.
             services_num_on_controller = len(
                 global_user_state.get_services_from_controller_cluster_name(
                     controller_name))
-            controller_cloud = handle.launched_resources.cloud
-            controller_instance_type = handle.launched_resources.instance_type
-            controller_memory = (
-                controller_cloud.get_vcpus_mem_from_instance_type(
-                    controller_instance_type)[1])
-            max_services_num = int(controller_memory /
-                                   constants.SERVICES_MEMORY_USAGE_GB)
+            # Only consider controllers that have available slots for services.
             if services_num_on_controller < max_services_num:
-                useable_controller_to_service_num[controller_name] = (
+                available_controller_to_service_num[controller_name] = (
                     services_num_on_controller)
-    if not useable_controller_to_service_num:
+    print(available_controller_to_service_num)
+    if not available_controller_to_service_num:
         return None
-    return max(useable_controller_to_service_num,
-               key=lambda k: useable_controller_to_service_num[k])
+    # If multiple controllers are available, choose the one with most number of
+    # services.
+    return max(available_controller_to_service_num,
+               key=lambda k: available_controller_to_service_num[k])
 
 
 class ServiceHandle(object):
     """A pickle-able tuple of:
 
-    - (required) Controller cluster name.
+    - (required) Service name.
     - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
-    - (required) All replica info.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
     - (optional) Controller port.

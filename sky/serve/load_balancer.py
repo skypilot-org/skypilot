@@ -26,12 +26,12 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(
-        self, controller_url: str, port: int, app_port: int,
+        self, controller_url: str, load_balancer_port: int, app_port: int,
         load_balancing_policy: load_balancing_policies.LoadBalancingPolicy
     ) -> None:
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
-        self.port = port
+        self.load_balancer_port = load_balancer_port
         self.app_port = app_port
         self.load_balancing_policy = load_balancing_policy
 
@@ -97,10 +97,10 @@ class SkyServeLoadBalancer:
             target=self._sync_with_controller, daemon=True)
         sync_controller_thread.start()
 
-        logger.info(
-            f'SkyServe Load Balancer started on http://0.0.0.0:{self.port}')
+        logger.info('SkyServe Load Balancer started on '
+                    f'http://0.0.0.0:{self.load_balancer_port}')
 
-        uvicorn.run(self.app, host='0.0.0.0', port=self.port)
+        uvicorn.run(self.app, host='0.0.0.0', port=self.load_balancer_port)
 
 
 if __name__ == '__main__':
@@ -110,8 +110,7 @@ if __name__ == '__main__':
                         type=str,
                         help='Task YAML file',
                         required=True)
-    parser.add_argument('--port',
-                        '-p',
+    parser.add_argument('--load-balancer-port',
                         type=int,
                         help='Port to run the load balancer on.',
                         required=True)
@@ -131,7 +130,7 @@ if __name__ == '__main__':
     # ======= SkyServeLoadBalancer =========
     load_balancer = SkyServeLoadBalancer(
         controller_url=args.controller_addr,
-        port=args.port,
+        load_balancer_port=args.load_balancer_port,
         app_port=args.app_port,
         load_balancing_policy=_load_balancing_policy)
     load_balancer.run()

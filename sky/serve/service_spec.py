@@ -4,7 +4,6 @@ import os
 import textwrap
 from typing import Any, Dict, Optional
 
-import colorama
 import yaml
 
 from sky.backends import backend_utils

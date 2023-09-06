@@ -4081,8 +4081,8 @@ def serve_up(
     if task.service.controller_resources is not None:
         controller_resources_config.update(task.service.controller_resources)
     if 'ports' in controller_resources_config:
-        click.secho('Ports in controller resources will be ignored.',
-                    fg='yellow')
+        click.secho('Cannot specify ports for controller resources.', fg='red')
+        return
     # TODO(tian): Open required ports only after #2485 is merged.
     controller_resources_config['ports'] = [serve_lib.LOAD_BALANCER_PORT_RANGE]
     try:
@@ -4095,12 +4095,12 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    controller_cluster_name = serve_lib.get_controller_to_use(
+    controller_name = serve_lib.get_available_controller_name(
         controller_resources)
-    if controller_cluster_name is not None:
-        click.secho(f'Using existing controller {controller_cluster_name!r}.\n',
+    controller_best_resources = None
+    if controller_name is not None:
+        click.secho(f'Using existing controller {controller_name!r}.\n',
                     fg='cyan')
-        controller_best_resources = None
     else:
         dummy_controller_task = sky.Task().set_resources(controller_resources)
         click.secho('Launching a new controller.', fg='cyan')
@@ -4124,8 +4124,8 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_resources,
-                 controller_cluster_name, controller_best_resources)
+    sky.serve_up(task, service_name, controller_resources, controller_name,
+                 controller_best_resources)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4404,13 +4404,13 @@ def serve_logs(
         click.secho(f'Service {service_name!r} not found.', fg='red')
         return
     service_handle: serve_lib.ServiceHandle = service_record['handle']
-    controller_cluster_name = service_record['controller_cluster_name']
+    controller_name = service_record['controller_name']
     if controller:
-        core.tail_logs(controller_cluster_name,
+        core.tail_logs(controller_name,
                        job_id=service_handle.controller_job_id,
                        follow=follow)
     elif load_balancer:
-        core.tail_logs(controller_cluster_name,
+        core.tail_logs(controller_name,
                        job_id=service_handle.load_balancer_job_id,
                        follow=follow)
     else:

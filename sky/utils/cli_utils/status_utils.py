@@ -124,8 +124,8 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         StatusColumn('UPTIME', _get_uptime),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('REPLICAS', _get_replicas),
-        StatusColumn('CONTROLLER_CLUSTER_NAME',
-                     _get_controller_cluster_name,
+        StatusColumn('CONTROLLER_NAME',
+                     _get_controller_name,
                      show_by_default=False),
         StatusColumn('ENDPOINT', _get_endpoint),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
@@ -398,8 +398,8 @@ def _get_service_handle(
     return service_record['handle']
 
 
-def _get_controller_cluster_name(service_record: _ServiceRecord) -> str:
-    return service_record['controller_cluster_name']
+def _get_controller_name(service_record: _ServiceRecord) -> str:
+    return service_record['controller_name']
 
 
 def _get_policy(service_record: _ServiceRecord) -> str:
