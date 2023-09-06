@@ -17,9 +17,8 @@ setup: |
     # Setup the environment
     conda create -n chatbot python=3.10 -y
     conda activate chatbot
-    pip install git+https://github.com/lm-sys/FastChat.git
-    pip install vllm
-    pip install accelerate
+    pip install "fschat[model_worker,webui]==0.2.24"
+    pip install vllm accelerate protobuf
   fi
 
 run: |
