@@ -802,6 +802,9 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
+            resources_pref_list = [
+                r.get_accelerators_str() for r in task.resources_pref_list
+            ]
             task_str = (f'for task_lib.Task {repr(task)!r}'
                         if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
@@ -852,7 +855,11 @@ class Optimizer:
 
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
-            rows = sorted(rows, key=lambda x: float(x[-2]))
+            if task.is_resources_ordered:
+                rows = sorted(rows,
+                              key=lambda x: resources_pref_list.index(x[-4]))  # pylint: disable=cell-var-from-loop
+            else:
+                rows = sorted(rows, key=lambda x: float(x[-2]))
             # Highlight the chosen resources.
             for row in rows:
                 if row[-1] != '':
