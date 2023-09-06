@@ -600,9 +600,14 @@ class Task:
         requirements will be used (8 vCPUs).
 
         Args:
-          resources: either a sky.Resources, or a set of them.  The latter case
-            is EXPERIMENTAL and indicates asking the optimizer to "pick the
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
+          is_resources_ordered: whether the resources are ordered.
+            If True, the optimizer will consider
+            the resources in the order they are specified (requiring resources to be a list). #pylint: disable=line-too-long
+            If False, the optimizer will pick the best
+            resources from the set of resources (e.g. by cost).
 
         Returns:
           self: The current task, with resources set.
@@ -618,8 +623,7 @@ class Task:
                 self.resources_pref_list = resources
             resources = set(resources)
         elif isinstance(resources, set):
-            if is_resources_ordered:
-                self.resources_pref_list = list(resources)
+            assert not is_resources_ordered, 'Cannot set resources as a set and specify is_resources_ordered=True'  #pylint: disable=line-too-long
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
         return self

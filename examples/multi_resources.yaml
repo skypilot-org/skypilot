@@ -6,7 +6,7 @@ resources:
   use_spot: True
 
   # spot_recovery: FAILOVER
-  spot_recovery: EAGER_NEXT_REGION
+  # spot_recovery: EAGER_NEXT_REGION
 
   # Ordered Accelerators List
   accelerators: ['A100-40GB:1', 'T4:1', 'V100:1', 'K80:1']
@@ -19,4 +19,3 @@ resources:
 
 run: |
   nvidia-smi
-  sleep 600

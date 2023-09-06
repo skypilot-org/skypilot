@@ -628,7 +628,6 @@ def spot_launch(
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
         task_names.add(task_.name)
-
     for task_ in dag.tasks:
 
         new_resources_list = []

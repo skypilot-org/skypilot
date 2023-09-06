@@ -2,16 +2,8 @@ import sky
 
 task = sky.Task(run='nvidia-smi')
 
-if False:
-    task.set_resources({
-        sky.Resources(sky.AWS(),
-                      zone='us-east-1d',
-                      use_spot=True,
-                      accelerators={'K80': 1}),
-        sky.Resources(sky.GCP(), accelerators={'K80': 1}),
-    })
 
-if True:
+def test_demand_spot_mix_resources_list():
     task.set_resources([
         sky.Resources(accelerators={'V100': 1}, use_spot=True),
         sky.Resources(accelerators={'T4': 1}),
@@ -27,7 +19,8 @@ if True:
                down=False,
                dryrun=True)
 
-if True:
+
+def test_ordered_resources_list():
     task.set_resources([
         sky.Resources(accelerators={'T4': 1}),
         sky.Resources(accelerators={'V100': 1}),
@@ -42,7 +35,8 @@ if True:
                down=False,
                dryrun=True)
 
-if True:
+
+def test_unordered_resources_list():
     task.set_resources({
         sky.Resources(accelerators={'T4': 1}),
         sky.Resources(accelerators={'V100': 1}),
@@ -56,14 +50,9 @@ if True:
                down=False,
                dryrun=True)
 
-if False:
-    task.set_resources({
-        sky.Resources(sky.GCP(), accelerators={'V100': 1}, use_spot=True),
-        sky.Resources(sky.GCP()),
-    })
 
-    sky.launch(task,
-               cluster_name=f'my-cluster',
-               stream_logs=False,
-               down=False,
-               dryrun=True)
+if __name__ == "__main__":
+
+    test_demand_spot_mix_resources_list()
+    test_ordered_resources_list()
+    test_unordered_resources_list()

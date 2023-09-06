@@ -350,11 +350,7 @@ class Optimizer:
                         'clouds.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(error_msg)
-                if num_resources == 1 and node.time_estimator_func is None:
-                    logger.debug(
-                        'Defaulting the task\'s estimated time to 1 hour.')
-                    estimated_runtime = 1 * 3600
-                elif num_resources != 1:
+                if node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
                     estimated_runtime = 1 * 3600
