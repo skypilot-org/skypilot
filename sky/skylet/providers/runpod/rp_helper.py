@@ -70,11 +70,11 @@ def list_instances():
 
 
 def launch(name: str, instance_type: str, region: str):
-    '''
+    """
     Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the GPU, and launches the instance.
-    '''
+    """
     gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
     cloud_type = instance_type.split('_')[2]

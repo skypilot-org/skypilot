@@ -8,6 +8,7 @@ To show debug messages, export SKYPILOT_DEBUG=1
 Class definition: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/node_provider.py
 """
 
+import time
 import logging
 from threading import RLock
 from typing import Any, Dict, List, Optional
@@ -104,6 +105,7 @@ class RunPodNodeProvider(NodeProvider):
 
         instance_status = "PENDING"
         while instance_status != "RUNNING":
+            time.sleep(1)
             instance_status = runpod_api.list_instances()[instance_id]['status']
 
     @synchronized
