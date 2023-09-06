@@ -49,9 +49,6 @@ class RunPod(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'runpod')
