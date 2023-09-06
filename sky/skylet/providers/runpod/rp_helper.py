@@ -56,7 +56,7 @@ def list_instances():
         instance_list[instance['id']]['status'] = instance['desiredStatus']
         instance_list[instance['id']]['name'] = instance['name']
 
-        if instance['desiredStatus'] == 'running':
+        if instance['desiredStatus'] == 'RUNNING':
             for port in instance['runtime']['ports']:
                 if port['privatePort'] == 22:
                     instance_list[instance['id']]['ip'] = port['ip']
