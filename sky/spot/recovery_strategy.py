@@ -97,8 +97,8 @@ class StrategyExecutor:
         resource_list = task.get_resources_list()
 
         spot_recovery = resource_list[0].spot_recovery
-        assert spot_recovery is not None, (
-            'spot_recovery is required to use spot strategy.')
+        if spot_recovery is None:
+            spot_recovery = SPOT_DEFAULT_STRATEGY
 
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
