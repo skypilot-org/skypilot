@@ -25,9 +25,8 @@ class RunPod(clouds.Cloud):
     """
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'FluffyCloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'FluffyCloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the FluffyCloud implementation yet.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'RunPod does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the RunPod implementation yet.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
