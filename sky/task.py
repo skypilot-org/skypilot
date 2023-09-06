@@ -407,6 +407,9 @@ class Task:
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
 
+            resources_ordered = resources_config.get('resources_ordered', False)
+            resources_config.pop('resources_ordered', None)
+
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
             elif isinstance(accelerators, list):
@@ -422,9 +425,9 @@ class Task:
                     sky.Resources.from_yaml_config(tmp_resource))
 
             if isinstance(accelerators, set):
-                task.set_resources(tmp_resources_list, False)
+                task.set_resources(tmp_resources_list, resources_ordered)
             elif isinstance(accelerators, list):
-                task.set_resources(tmp_resources_list, True)
+                task.set_resources(tmp_resources_list, resources_ordered)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
         else:
@@ -1006,6 +1009,7 @@ class Task:
                         accelerators_list.append(f'{k}:{v}')
                     r.accelerators[k] = v
             tmp_resource_config['accelerators'] = accelerators_list
+            tmp_resource_config['resources_ordered'] = True
         elif len(self.resources) > 1:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
             accelerators_dict = {}

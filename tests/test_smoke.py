@@ -3460,12 +3460,26 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Resources ----------
-def test_multiple_resources():
+def test_multiple_resources_ordered():
     name = _get_cluster_name()
     test = Test(
         'gcp_zone',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_ordered.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing Multiple Resources Unordered ----------
+def test_multiple_resources_unordered():
+    name = _get_cluster_name()
+    test = Test(
+        'gcp_zone',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_unordered.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
