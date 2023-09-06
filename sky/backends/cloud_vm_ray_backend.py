@@ -4235,7 +4235,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
         for r in task.resources:
-            if r is not None:
+            if r is not None and r.cloud is not None:
                 task_cloud = r.cloud
             else:
                 task_cloud = clouds.Cloud
