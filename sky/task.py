@@ -413,7 +413,7 @@ class Task:
             elif isinstance(accelerators, list):
                 pass
             elif isinstance(accelerators, dict):
-                accelerators = {f'{k}' for k, _ in accelerators.items()}
+                accelerators = {f'{k}:{v}' for k,v in accelerators.items()}
 
             tmp_resources_list = []
             for acc in accelerators:
@@ -1003,13 +1003,13 @@ class Task:
             tmp_resource_config['accelerators'] = accelerators_list
         elif len(self.resources) > 1:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
-            accelerators_list = []
+            accelerators_dict = {}
             for r in self.resources:
                 if r.accelerators is not None:
                     k, v = r.accelerators.popitem()
-                    accelerators_list.append(f'{k}:{v}')
+                    accelerators_dict[k] = v
                     r.accelerators[k] = v
-            tmp_resource_config['accelerators'] = accelerators_list
+            tmp_resource_config['accelerators'] = accelerators_dict
         else:
             resources = list(self.resources)[0]
             tmp_resource_config = resources.to_yaml_config()

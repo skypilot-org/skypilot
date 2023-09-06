@@ -4,11 +4,17 @@ resources:
   cloud: gcp
   # zone: us-east-1d
   use_spot: True
+  
   # spot_recovery: FAILOVER
   spot_recovery: EAGER_NEXT_REGION
-  # accelerators: ['A100-40GB:1', 'A100-80GB']
+
+  # Ordered Accelerators List
   # accelerators: ['A100-40GB:1', 'T4:1', 'V100:1', 'K80:1']
-  accelerators: {'A100-40GB:1', 'T4:1', 'V100:1', 'K80:1'}
+
+  # Unordered Accelerators
+  accelerators: {'A100-40GB':1, 'T4':1, 'V100':1, 'K80':1}
+
+  # Single Accelerator
   # accelerators: K80:1
 
 run: |
