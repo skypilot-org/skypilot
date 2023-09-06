@@ -49,6 +49,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -3423,10 +3424,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             RuntimeError: If the cluster fails to be terminated/stopped.
         """
         cluster_name = handle.cluster_name
-        # Check if the cluster includes storage with CSYNC mode and terminates
-        # the CSYNC process after the syncing is completed if it was running.
-        if self._has_csync(cluster_name):
-            backend_utils.wait_and_terminate_csync(cluster_name)
         # Check if the cluster is owned by the current user. Raise
         # exceptions.ClusterOwnerIdentityMismatchError
         yellow = colorama.Fore.YELLOW
@@ -3719,6 +3716,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'Cluster {handle.cluster_name!r} is already terminated. '
                 'Skipped.')
             return
+        # Check if the cluster includes storage with CSYNC mode and terminates
+        # the CSYNC process after the syncing is completed if it was running.
+        if self._has_csync(handle.cluster_name):
+            backend_utils.wait_and_terminate_csync(handle.cluster_name)
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -4483,10 +4484,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode, command='to mount',
-                        error_msg=e.error_msg) from None
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(e.returncode,
+                                                    command='to mount',
+                                                    error_msg=e.error_msg)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode, command='to mount',
+                            error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
@@ -4554,10 +4560,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     log_path=log_path,
                 )
             except exceptions.CommandError as e:
-                # Strip the command (a big heredoc) from the exception
-                raise exceptions.CommandError(e.returncode,
-                                              command='to CSYNC',
-                                              error_msg=e.error_msg) from None
+                if env_options.Options.SHOW_DEBUG_INFO.get():
+                    raise exceptions.CommandError(e.returncode,
+                                                command='to CSYNC',
+                                                error_msg=e.error_msg)
+                else:
+                    # Strip the command (a big heredoc) from the exception
+                    raise exceptions.CommandError(e.returncode,
+                                                command='to CSYNC',
+                                                error_msg=e.error_msg) from None
 
         end = time.time()
         logger.debug(f'Storage Sync setup took {end - start} seconds.')

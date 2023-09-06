@@ -49,7 +49,7 @@ def get_mounting_command(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
-        
+
         MOUNT_MODE={mount_mode.value}
         MOUNT_PATH='{mount_path}'
         echo "MOUNT_MODE is: $MOUNT_MODE"
@@ -86,7 +86,7 @@ def get_mounting_command(
             fi
           fi
         fi
-        
+
         if [ "$MOUNT_MODE" = "MOUNT" ]; then
             echo "Mounting source bucket to $MOUNT_PATH with $MOUNT_BINARY..."
             {mount_cmd}

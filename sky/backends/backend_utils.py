@@ -2891,20 +2891,19 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, port_list=port_list, **ssh_credentials)
     csync_terminate_cmd = ('python -m sky.data.skystorage terminate -a '
-                           '>/dev/null 2>&1')
+                           '>/dev/null')
 
     def _run_csync_terminate(runner):
-        logger.info(f'CSYNC termination initiated for {cluster_name}. If a '
-                    'sync process is currently running, we will wait for it '
-                    'to complete before terminating the CSYNC daemon...\n')
 
         rc, _, stderr = runner.run(csync_terminate_cmd,
                                    stream_logs=False,
                                    require_outputs=True)
-        if rc != 0:
+        if rc:
             logger.debug(
                 f'CSYNC: failed to terminate the CSYNC on {runner.ip}. '
-                'Details: '
-                f'{common_utils.format_exception(stderr, use_bracket=True)}')
+                f'Details: {stderr}')
 
+    logger.info(f'CSYNC termination initiated for {cluster_name}. If a '
+                'sync process is currently running, we will wait for it '
+                'to complete before terminating the CSYNC daemon...\n')
     subprocess_utils.run_in_parallel(_run_csync_terminate, runners)
