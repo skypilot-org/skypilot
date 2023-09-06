@@ -301,8 +301,6 @@ class Optimizer:
                     list(node.get_resources())[0]: node.get_resources()
                 }
 
-            num_resources = len(node.get_resources())
-
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
