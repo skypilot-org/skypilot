@@ -42,12 +42,12 @@ if True:
                down=False,
                dryrun=True)
 
-if False:
+if True:
     task.set_resources({
-        sky.Resources(sky.GCP(), accelerators={'T4': 1}),
-        sky.Resources(sky.GCP(), accelerators={'V100': 1}, use_spot=True),
-        sky.Resources(sky.GCP(), accelerators={'V100': 1}),
-        sky.Resources(sky.Azure(), accelerators={'K80': 1}),
+        sky.Resources(accelerators={'T4': 1}),
+        sky.Resources(accelerators={'V100': 1}),
+        sky.Resources(accelerators={'K80': 1}),
+        sky.Resources(accelerators={'T4': 4}),
     })
 
     sky.launch(task,
