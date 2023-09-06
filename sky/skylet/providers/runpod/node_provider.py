@@ -126,7 +126,7 @@ class RunPodNodeProvider(NodeProvider):
 
         new_cache = {}
         for instance_id, instance in instances.items():
-            if instance['status'] != 'running':
+            if instance['status'] != 'RUNNING':
                 continue
             if any(tag in instance['tags'] for tag in tag_filters):
                 new_cache[instance_id] = instance
