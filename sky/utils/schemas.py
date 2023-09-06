@@ -199,6 +199,9 @@ def get_service_schema():
                     'qps_lower_threshold': {
                         'type': 'number',
                     },
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
                 }
             },
             'replicas': {
@@ -207,9 +210,6 @@ def get_service_schema():
             # resources config is validated separately using RESOURCES_SCHEMA
             'controller_resources': {
                 'type': 'object',
-            },
-            'auto_restart': {
-                'type': 'boolean',
             },
         }
     }

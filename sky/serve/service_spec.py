@@ -115,6 +115,7 @@ class SkyServiceSpec:
             service_config['max_replicas'] = None
             service_config['qps_upper_threshold'] = None
             service_config['qps_lower_threshold'] = None
+            service_config['auto_restart'] = False
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -123,10 +124,11 @@ class SkyServiceSpec:
                 'qps_upper_threshold', None)
             service_config['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
+            service_config['auto_restart'] = policy_section.get(
+                'auto_restart', False)
 
         service_config['controller_resources'] = config.pop(
             'controller_resources', None)
-        service_config['auto_restart'] = config.pop('auto_restart', False)
 
         return SkyServiceSpec(**service_config)
 
@@ -200,7 +202,7 @@ class SkyServiceSpec:
             Readiness probe method:        {self.probe_str()}
             Replica autoscaling policy:    {self.policy_str()}
             Service initial delay seconds: {self.initial_delay_seconds}
-            Replica auto restart:                  {self.auto_restart}
+            Replica auto restart:          {self.auto_restart}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)

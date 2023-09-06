@@ -2827,11 +2827,13 @@ def test_skyserve_auto_restart():
     test = Test(
         f'test-skyserve-auto-restart',
         [
+            # TODO(tian): we can dynamically generate YAML from template to
+            # avoid maintaining too many YAML files
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             terminate_replica(1),
-            'sleep 180', # Wait for consecutive failure timeout passed.
+            'sleep 180',  # Wait for consecutive failure timeout passed.
             # Currently failed replica will still count as replica num in sky serve status.
             # TODO(tian): Fix this in the future.
             '(while true; do'

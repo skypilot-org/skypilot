@@ -9,10 +9,11 @@ run: python3 server.py --port 8080
 
 service:
   port: 8080
-  auto_restart: true
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
-  replicas: 1
+  replica_policy:
+    min_replicas: 1
+    auto_restart: true
   controller_resources:
     cloud: gcp
