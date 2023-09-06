@@ -20,10 +20,12 @@ class Autoscaler:
 
     def __init__(self,
                  infra_provider: infra_providers.InfraProvider,
+                 auto_restart: bool,
                  frequency: int,
                  min_nodes: int = 1,
                  max_nodes: Optional[int] = None) -> None:
         self.infra_provider = infra_provider
+        self.auto_restart = auto_restart
         self.min_nodes: int = min_nodes
         # Default to fixed node, i.e. min_nodes == max_nodes.
         self.max_nodes: int = max_nodes or min_nodes
@@ -99,7 +101,8 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(self) -> None:
         current_time = time.time()
-        num_nodes = self.infra_provider.total_replica_num()
+        num_nodes = self.infra_provider.total_replica_num(
+            count_failed_replica=not self.auto_restart)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.

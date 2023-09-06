@@ -146,6 +146,7 @@ if __name__ == '__main__':
     # ======= Autoscaler =========
     _autoscaler = autoscalers.RequestRateAutoscaler(
         _infra_provider,
+        auto_restart=service_spec.auto_restart,
         frequency=20,
         min_nodes=service_spec.min_replicas,
         max_nodes=service_spec.max_replicas,

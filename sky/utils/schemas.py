@@ -199,6 +199,9 @@ def get_service_schema():
                     'qps_lower_threshold': {
                         'type': 'number',
                     },
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
                 }
             },
             'replicas': {
