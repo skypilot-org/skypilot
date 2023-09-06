@@ -628,19 +628,21 @@ def spot_launch(
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
         task_names.add(task_.name)
+
     for task_ in dag.tasks:
 
         new_resources_list = []
         for res in task_.get_resources_list():
 
             override_params: Dict[str, Any] = {}
-            if not res.use_spot_specified:
-                override_params['use_spot'] = True
-            if res.spot_recovery is None:
-                override_params['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+            if not task_.is_resources_mixed_spot:
+                if not res.use_spot_specified:
+                    override_params['use_spot'] = True
+                if res.spot_recovery is None:
+                    override_params[
+                        'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
-
         task_.set_resources(new_resources_list, task_.is_resources_ordered)
 
         _maybe_translate_local_file_mounts_and_sync_up(task_)

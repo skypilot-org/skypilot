@@ -402,7 +402,9 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources_config = config.pop('resources', None)
-
+        if resources_config:
+            is_mixed = ('use_spot' in resources_config and
+                        resources_config['use_spot'] == 'Mixed')
         # Translate accelerators field to potential multiple resources.
         if resources_config and resources_config.get(
                 'accelerators') is not None:
@@ -419,8 +421,17 @@ class Task:
             for acc in accelerators:
                 tmp_resource = resources_config.copy()
                 tmp_resource['accelerators'] = acc
-                tmp_resources_list.append(
-                    sky.Resources.from_yaml_config(tmp_resource))
+                if is_mixed:
+                    tmp_resource['use_spot'] = True
+                    tmp_resources_list.append(
+                        sky.Resources.from_yaml_config(tmp_resource.copy()))
+                    tmp_resource['use_spot'] = False
+                    del tmp_resource['spot_recovery']
+                    tmp_resources_list.append(
+                        sky.Resources.from_yaml_config(tmp_resource))
+                else:
+                    tmp_resources_list.append(
+                        sky.Resources.from_yaml_config(tmp_resource))
 
             if isinstance(accelerators, set):
                 task.set_resources(tmp_resources_list, False)
@@ -482,6 +493,14 @@ class Task:
     @property
     def is_resources_ordered(self) -> bool:
         return len(self.resources_pref_list) >= 1
+
+    @property
+    def is_resources_mixed_spot(self) -> bool:
+        is_use_spot_list = [r.use_spot for r in self.resources]
+        mixed = False
+        if True in is_use_spot_list and False in is_use_spot_list:
+            mixed = True
+        return mixed
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -999,8 +1018,11 @@ class Task:
             for r in self.resources_pref_list:
                 if r.accelerators is not None:
                     k, v = r.accelerators.popitem()
-                    accelerators_list.append(f'{k}:{v}')
+                    if f'{k}:{v}' not in accelerators_list:
+                        accelerators_list.append(f'{k}:{v}')
                     r.accelerators[k] = v
+                if self.is_resources_mixed_spot:
+                    tmp_resource_config['use_spot'] = 'Mixed'
             tmp_resource_config['accelerators'] = accelerators_list
         elif len(self.resources) > 1:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
@@ -1010,6 +1032,8 @@ class Task:
                     k, v = r.accelerators.popitem()
                     accelerators_dict[k] = v
                     r.accelerators[k] = v
+                if self.is_resources_mixed_spot:
+                    tmp_resource_config['use_spot'] = 'Mixed'
             tmp_resource_config['accelerators'] = accelerators_dict
         else:
             resources = list(self.resources)[0]
