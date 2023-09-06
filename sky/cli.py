@@ -4095,13 +4095,10 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    controller_name = serve_lib.get_available_controller_name(
+    controller_name, new_controller = serve_lib.get_available_controller_name(
         controller_resources)
     controller_best_resources = None
-    if controller_name is not None:
-        click.secho(f'Using existing controller {controller_name!r}.\n',
-                    fg='cyan')
-    else:
+    if new_controller:
         dummy_controller_task = sky.Task().set_resources(controller_resources)
         click.secho('Launching a new controller.', fg='cyan')
         click.secho('The controller will use the following resource:',
@@ -4112,6 +4109,9 @@ def serve_up(
         click.echo()
         dummy_controller_task: sky.Task = dag.tasks[0]
         controller_best_resources = dummy_controller_task.best_resources
+    else:
+        click.secho(f'Using existing controller {controller_name!r}.\n',
+                    fg='cyan')
 
     click.secho('Each replica will use the following resource:', fg='cyan')
     with sky.Dag() as dag:

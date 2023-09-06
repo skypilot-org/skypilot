@@ -14,6 +14,7 @@ import colorama
 import requests
 
 from sky import backends
+from sky import clouds
 from sky import global_user_state
 from sky import status_lib
 from sky.data import storage as storage_lib
@@ -162,7 +163,7 @@ def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
 
 
 def get_available_controller_name(
-        controller_resources: 'sky.Resources') -> Optional[str]:
+        controller_resources: 'sky.Resources') -> Tuple[str, bool]:
     """Get available controller name to use.
 
     Only consider controllers that are less demanding than the requested
@@ -173,10 +174,11 @@ def get_available_controller_name(
     services to decrease the number of controllers.
 
     Args:
-      controller_resources: The resources requested for controller.
+        controller_resources: The resources requested for controller.
 
     Returns:
-      The controller name to use. None if no controller is available.
+        A tuple of controller name and a boolean value indicating whether the
+        controller name is newly generated.
     """
     # Get all existing controllers.
     existing_controllers = get_existing_controller_names()
@@ -214,13 +216,14 @@ def get_available_controller_name(
             if services_num_on_controller < max_services_num:
                 available_controller_to_service_num[controller_name] = (
                     services_num_on_controller)
-    print(available_controller_to_service_num)
     if not available_controller_to_service_num:
-        return None
+        new_controller_name = generate_controller_cluster_name()
+        clouds.Cloud.check_cluster_name_is_valid(new_controller_name)
+        return new_controller_name, True
     # If multiple controllers are available, choose the one with most number of
     # services.
     return max(available_controller_to_service_num,
-               key=lambda k: available_controller_to_service_num[k])
+               key=lambda k: available_controller_to_service_num[k]), False
 
 
 class ServiceHandle(object):

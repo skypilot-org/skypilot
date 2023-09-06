@@ -31,7 +31,9 @@ class SkyServeLoadBalancer:
     ) -> None:
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
+        # This is the port where the load balancer listens to.
         self.load_balancer_port = load_balancer_port
+        # This is the port where the replica app listens to.
         self.app_port = app_port
         self.load_balancing_policy = load_balancing_policy
 

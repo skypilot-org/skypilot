@@ -990,11 +990,8 @@ def serve_up(
     """
     # Try again here for the case when user directly call this programmatic API.
     if controller_name is None:
-        controller_name = serve.get_available_controller_name(
+        controller_name, _ = serve.get_available_controller_name(
             controller_resources)
-    if controller_name is None:
-        controller_name = serve.generate_controller_cluster_name()
-        sky.clouds.Cloud.check_cluster_name_is_valid(controller_name)
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
@@ -1011,16 +1008,13 @@ def serve_up(
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(serve.CONTROLLER_SELECTION_FILE_LOCK_PATH,
                            serve.CONTROLLER_SELECTION_FILE_LOCK_TIMEOUT):
-        current_controller_name = serve.get_available_controller_name(
+        current_controller_name, _ = serve.get_available_controller_name(
             controller_resources)
-        # If current_controller_name is None, it means no controller is
-        # available and we should generate a new one.
-        if current_controller_name is None:
-            current_controller_name = serve.generate_controller_cluster_name()
         # If the current controller name is not the same as the one we
         # generated before, it means some service have been launched in
         # the same time. We should raise an error here to avoid launching
         # too much service on one controller.
+        # TODO(tian): Shall we transparently launch a new controller for user?
         if current_controller_name != controller_name:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
@@ -1028,8 +1022,6 @@ def serve_up(
                     f'{controller_name}. It is likely due to simultaneously '
                     'up multiple services exceeding single controller\'s '
                     'threshold. Please try again.')
-        logger.info(f'Selecting controller {controller_name} for service '
-                    f'{service_name}...')
         global_user_state.add_or_update_service(
             service_name, None, controller_name, service_handle,
             status_lib.ServiceStatus.CONTROLLER_INIT)
