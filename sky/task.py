@@ -225,8 +225,8 @@ class Task:
 
         self.inputs = None
         self.outputs = None
-        self.estimated_inputs_size_gigabytes = None
-        self.estimated_outputs_size_gigabytes = None
+        self.estimated_inputs_size_gigabytes = 0.0
+        self.estimated_outputs_size_gigabytes = 0.0
         # Default to CPUNode
         self.resources = {sky.Resources()}
         # Resources that this task cannot run on.
