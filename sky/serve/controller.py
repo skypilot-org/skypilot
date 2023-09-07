@@ -123,8 +123,7 @@ if __name__ == '__main__':
                         type=str,
                         help='Task YAML file',
                         required=True)
-    parser.add_argument('--port',
-                        '-p',
+    parser.add_argument('--controller-port',
                         type=int,
                         help='Port to run the controller',
                         required=True)
@@ -139,7 +138,7 @@ if __name__ == '__main__':
     _infra_provider = infra_providers.SkyPilotInfraProvider(
         args.task_yaml,
         args.service_name,
-        controller_port=args.port,
+        controller_port=args.controller_port,
         readiness_suffix=service_spec.readiness_suffix,
         initial_delay_seconds=service_spec.initial_delay_seconds,
         post_data=service_spec.post_data)
@@ -157,5 +156,6 @@ if __name__ == '__main__':
         query_interval=60)
 
     # ======= SkyServeController =========
-    controller = SkyServeController(args.port, _infra_provider, _autoscaler)
+    controller = SkyServeController(args.controller_port, _infra_provider,
+                                    _autoscaler)
     controller.run()

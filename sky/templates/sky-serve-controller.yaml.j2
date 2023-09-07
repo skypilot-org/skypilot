@@ -17,7 +17,8 @@ setup: |
    pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
 
   (pip list | grep azure-cli > /dev/null 2>&1) || \
-   pip3 install azure-cli==2.31.0 azure-core 2>&1 > /dev/null
+   pip install azure-cli==2.31.0 azure-core 2>&1 > /dev/null
+
   {{google_sdk_installation_commands}}
 
   pip list | grep oci  > /dev/null 2>&1 || pip install oci 2>&1 > /dev/null
@@ -35,11 +36,13 @@ run: |
   mkdir -p {{service_dir}}
   # Start sky serve controller.
   python -u -m sky.serve.controller --service-name {{service_name}} \
-    --task-yaml {{remote_task_yaml_path}} --port {{controller_port}} \
+    --task-yaml {{remote_task_yaml_path}} --controller-port {{controller_port}} \
     > {{controller_log_file}} 2>&1 &
   # Wait for controller to start.
   sleep 10
-  # Start sky serve load balancer.
+  # Start sky serve load balancer. We keep the load balancer running in the
+  # foreground so that the job will not finish, thus prevent our controller
+  # from auto down.
   python -u -m sky.serve.load_balancer --task-yaml {{remote_task_yaml_path}} \
     --load-balancer-port {{load_balancer_port}} --app-port {{app_port}} \
     --controller-addr http://localhost:{{controller_port}} \

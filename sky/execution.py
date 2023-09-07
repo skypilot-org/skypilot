@@ -1122,7 +1122,12 @@ def serve_up(
 
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
-        assert controller_record is not None, controller_name
+        if controller_record is None:
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Controller failed to launch. Please check the logs above.')
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         backend = backend_utils.get_backend_from_handle(handle)
@@ -1214,7 +1219,10 @@ def serve_down(
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            assert service_handle.controller_port is not None
+            if service_handle.controller_port is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Controller job of service {service_name} not found.')
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
             returncode, terminate_service_payload, stderr = backend.run_on_head(

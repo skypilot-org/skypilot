@@ -192,7 +192,6 @@ class SkyServiceSpec:
                 f'{self.max_replicas} replica{max_plural}')
 
     def __repr__(self) -> str:
-        # pylint: disable=line-too-long
         return textwrap.dedent(f"""\
             Readiness probe method:        {self.probe_str()}
             Replica autoscaling policy:    {self.policy_str()}

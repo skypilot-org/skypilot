@@ -79,8 +79,6 @@ def get_existing_controller_names() -> Set[str]:
     }
 
 
-# We use incremental controller number to make sure two simultaneous
-# `sky serve up` will take same controller name
 def generate_controller_cluster_name(existing_controllers: Set[str]) -> str:
     index = 0
     while True:
@@ -163,7 +161,7 @@ def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
             existing_load_balancer_ports.append(
                 service_handle.load_balancer_port)
     # Cannot expose controller to public internet.
-    # We opened 30000-31000 for controller VM, so load balancer port
+    # We opened 30001-31000 for controller VM, so load balancer port
     # should be in this range and controller port should not be in
     # this range.
     controller_port = constants.CONTROLLER_PORT_START
@@ -207,7 +205,7 @@ def get_available_controller_name(
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
         if controller_record is not None:
-            # If controller is already created, get its current resources.
+            # If controller is already created, use its launched resources.
             handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             if not controller_resources.less_demanding_than(
@@ -249,6 +247,8 @@ def get_available_controller_name(
     if not available_controller_to_service_num:
         new_controller_name = generate_controller_cluster_name(
             existing_controllers)
+        # This check should always be true since we already checked the
+        # service name is valid in `sky.serve_up`.
         clouds.Cloud.check_cluster_name_is_valid(new_controller_name)
         return new_controller_name, True
     # If multiple controllers are available, choose the one with most number of

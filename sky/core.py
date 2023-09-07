@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
+import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -11,7 +12,6 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
-from sky import serve
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
@@ -24,6 +24,9 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import serve
 
 logger = sky_logging.init_logger(__name__)
 
@@ -138,7 +141,7 @@ def serve_tail_logs(service_name: str, controller: bool, load_balancer: bool,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')
-    service_handle: serve.ServiceHandle = service_record['handle']
+    service_handle: 'serve.ServiceHandle' = service_record['handle']
     controller_name = service_record['controller_name']
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
     if handle is None:
