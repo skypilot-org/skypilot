@@ -112,6 +112,7 @@ class DockerInitializer:
         self.runner = runner
         self.home_dir = None
         self.initialized = False
+        use_podman = docker_config.get('use_podman', False)
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
 
