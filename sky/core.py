@@ -116,9 +116,19 @@ def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
-                    follow: bool) -> None:
-    service_name = service_record['name']
+def serve_tail_logs(service_name: str, controller: bool, load_balancer: bool,
+                    replica_id: Optional[int], follow: bool) -> None:
+    have_replica_id = replica_id is not None
+    if (controller + load_balancer + have_replica_id) != 1:
+        raise ValueError(
+            'Exactly one of `controller`, `load_balancer`, and `replica_id` '
+            f'must be specified. Got: controller={controller}, '
+            f'load_balancer={load_balancer}, replica_id={replica_id}')
+    service_record = global_user_state.get_service_from_name(service_name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist. '
+                             'Cannot stream logs.')
     if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -136,7 +146,12 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle, service_handle, replica_id, follow=follow)
+    backend.tail_serve_logs(handle,
+                            service_handle,
+                            controller,
+                            load_balancer,
+                            replica_id,
+                            follow=follow)
 
 
 @usage_lib.entrypoint

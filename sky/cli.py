@@ -4288,17 +4288,18 @@ def serve_down(
         try:
             sky.serve_down(name, purge)
         except RuntimeError as e:
-            message = (f'{colorama.Fore.RED}Teardown service {name}...failed. '
-                       'Please manually clean up the replicas and then use '
-                       '--purge to clean up the controller.'
-                       f'{colorama.Style.RESET_ALL}'
-                       f'\nReason: {common_utils.format_exception(e)}.')
+            message = (
+                f'{colorama.Fore.RED}Tearing down service {name}...failed. '
+                'Please manually clean up the replicas and then use --purge '
+                f'to clean up the controller.{colorama.Style.RESET_ALL}'
+                f'\nReason: {common_utils.format_exception(e)}.')
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             message = str(e)
         else:
-            message = (f'{colorama.Fore.GREEN}Teardown service {name}...done.'
-                       f'{colorama.Style.RESET_ALL}')
+            message = (
+                f'{colorama.Fore.GREEN}Tearing down service {name}...done.'
+                f'{colorama.Style.RESET_ALL}')
             success_progress = True
 
         progress.stop()
@@ -4364,22 +4365,11 @@ def serve_logs(
         raise click.UsageError(
             'One and only one of --controller, --load-balancer, '
             '[REPLICA_ID] can be specified.')
-    service_record = global_user_state.get_service_from_name(service_name)
-    if service_record is None:
-        click.secho(f'Service {service_name!r} not found.', fg='red')
-        return
-    service_handle: serve_lib.ServiceHandle = service_record['handle']
-    controller_name = service_record['controller_name']
-    if controller:
-        core.tail_logs(controller_name,
-                       job_id=service_handle.controller_job_id,
-                       follow=follow)
-    elif load_balancer:
-        core.tail_logs(controller_name,
-                       job_id=service_handle.load_balancer_job_id,
-                       follow=follow)
-    else:
-        core.serve_tail_logs(service_record, replica_id, follow=follow)
+    core.serve_tail_logs(service_name,
+                         controller,
+                         load_balancer,
+                         replica_id,
+                         follow=follow)
 
 
 # ==============================

@@ -108,6 +108,18 @@ def generate_remote_task_yaml_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'task.yaml')
 
 
+def generate_remote_controller_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'controller.log')
+
+
+def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'load_balancer.log')
+
+
 def generate_replica_launch_log_file_name(service_name: str,
                                           replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
@@ -256,8 +268,7 @@ class ServiceHandle(object):
     - (optional) Service endpoint IP.
     - (optional) Controller port.
     - (optional) LoadBalancer port.
-    - (optional) Controller job id.
-    - (optional) LoadBalancer job id.
+    - (optional) Controller and LoadBalancer job id.
     - (optional) Ephemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.
@@ -275,8 +286,7 @@ class ServiceHandle(object):
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
         load_balancer_port: Optional[int] = None,
-        controller_job_id: Optional[int] = None,
-        load_balancer_job_id: Optional[int] = None,
+        job_id: Optional[int] = None,
         ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self._version = self._VERSION
@@ -288,8 +298,7 @@ class ServiceHandle(object):
         self.requested_controller_resources = requested_controller_resources
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
-        self.controller_job_id = controller_job_id
-        self.load_balancer_job_id = load_balancer_job_id
+        self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
     def __repr__(self):
@@ -299,12 +308,11 @@ class ServiceHandle(object):
                 f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
-                '\n\requested_controller_resources='
+                '\n\trequested_controller_resources='
                 f'{self.requested_controller_resources},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
-                f'\n\tcontroller_job_id={self.controller_job_id},'
-                f'\n\tload_balancer_job_id={self.load_balancer_job_id},'
+                f'\n\tjob_id={self.job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
     def cleanup_ephemeral_storage(self) -> None:
@@ -350,12 +358,13 @@ def load_terminate_service_result(payload: str) -> Any:
     return terminate_resp
 
 
-def _follow_logs(file: TextIO,
-                 cluster_name: str,
-                 *,
-                 finish_stream: Callable[[], bool],
-                 exit_if_stream_end: bool = False,
-                 no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
+def _follow_replica_logs(
+        file: TextIO,
+        cluster_name: str,
+        *,
+        finish_stream: Callable[[], bool],
+        exit_if_stream_end: bool = False,
+        no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
     line = ''
     log_file = None
     no_new_content_cnt = 0
@@ -393,7 +402,7 @@ def _follow_logs(file: TextIO,
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
-                            for l in _follow_logs(
+                            for l in _follow_replica_logs(
                                     f,
                                     cluster_name,
                                     finish_stream=cluster_is_up,
@@ -412,11 +421,11 @@ def _follow_logs(file: TextIO,
             time.sleep(1)
 
 
-def stream_logs(service_name: str,
-                controller_port: int,
-                replica_id: int,
-                follow: bool,
-                skip_local_log_file_check: bool = False) -> str:
+def stream_replica_logs(service_name: str,
+                        controller_port: int,
+                        replica_id: int,
+                        follow: bool,
+                        skip_local_log_file_check: bool = False) -> str:
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
     local_log_file_name = generate_replica_local_log_file_name(
@@ -468,10 +477,10 @@ def stream_logs(service_name: str,
     finish_stream = (
         lambda: _get_replica_status() != status_lib.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
-        for line in _follow_logs(f,
-                                 replica_cluster_name,
-                                 finish_stream=finish_stream,
-                                 exit_if_stream_end=not follow):
+        for line in _follow_replica_logs(f,
+                                         replica_cluster_name,
+                                         finish_stream=finish_stream,
+                                         exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:
@@ -489,6 +498,32 @@ def stream_logs(service_name: str,
         return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                 f'{replica_id}.{colorama.Style.RESET_ALL}')
     return ''
+
+
+def _follow_logs(file: TextIO, exit_if_stream_end: bool) -> Iterator[str]:
+    line = ''
+    while True:
+        tmp = file.readline()
+        if tmp is not None and tmp != '':
+            line += tmp
+            if '\n' in line or '\r' in line:
+                yield line
+                line = ''
+        else:
+            if exit_if_stream_end:
+                break
+            time.sleep(1)
+
+
+def stream_serve_process_logs(service_name: str, stream_controller: bool,
+                              follow: bool) -> None:
+    if stream_controller:
+        log_file = generate_remote_controller_log_file_name(service_name)
+    else:
+        log_file = generate_remote_load_balancer_log_file_name(service_name)
+    with open(os.path.expanduser(log_file), 'r', newline='') as f:
+        for line in _follow_logs(f, exit_if_stream_end=not follow):
+            print(line, end='', flush=True)
 
 
 class ServeCodeGen:
@@ -518,17 +553,26 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_logs(cls,
-                    service_name: str,
-                    controller_port: int,
-                    replica_id: int,
-                    follow: bool,
-                    skip_local_log_file_check: bool = False) -> str:
+    def stream_replica_logs(cls,
+                            service_name: str,
+                            controller_port: int,
+                            replica_id: int,
+                            follow: bool,
+                            skip_local_log_file_check: bool = False) -> str:
         code = [
-            f'msg = serve_utils.stream_logs({service_name!r}, '
+            f'msg = serve_utils.stream_replica_logs({service_name!r}, '
             f'{controller_port}, {replica_id!r}, follow={follow}, '
             f'skip_local_log_file_check={skip_local_log_file_check})',
             'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def stream_serve_process_logs(cls, service_name: str,
+                                  stream_controller: bool, follow: bool) -> str:
+        code = [
+            f'serve_utils.stream_serve_process_logs({service_name!r}, '
+            f'{stream_controller}, follow={follow})',
         ]
         return cls._build(code)
 

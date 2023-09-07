@@ -5,6 +5,7 @@ import time
 
 import fastapi
 import requests
+from urllib3 import exceptions
 import uvicorn
 
 from sky import sky_logging
@@ -36,19 +37,25 @@ class SkyServeLoadBalancer:
         # This is the port where the replica app listens to.
         self.app_port = app_port
         self.load_balancing_policy = load_balancing_policy
+        self.setup_query_interval()
 
-        for i in range(3):
-            resp = requests.get(self.controller_url +
-                                '/controller/get_autoscaler_query_interval')
-            if resp.status_code == 200:
-                self.load_balancing_policy.set_query_interval(
-                    resp.json()['query_interval'])
-                break
-            if i == 2:
-                logger.error('Failed to get autoscaler query interval. '
-                             'Use default interval instead.')
-                self.load_balancing_policy.set_query_interval(None)
+    def setup_query_interval(self):
+        for _ in range(3):
+            try:
+                resp = requests.get(self.controller_url +
+                                    '/controller/get_autoscaler_query_interval')
+            except exceptions.MaxRetryError:
+                # Retry if cannot connect to controller
+                continue
+            else:
+                if resp.status_code == 200:
+                    self.load_balancing_policy.set_query_interval(
+                        resp.json()['query_interval'])
+                    return
             time.sleep(10)
+        logger.error('Failed to get autoscaler query interval. '
+                     'Use default interval instead.')
+        self.load_balancing_policy.set_query_interval(None)
 
     def _sync_with_controller(self):
         while True:

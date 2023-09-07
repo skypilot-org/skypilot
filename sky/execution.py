@@ -23,7 +23,6 @@ import uuid
 
 import colorama
 import filelock
-from rich import console as rich_console
 
 import sky
 from sky import backends
@@ -608,6 +607,19 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
+def _shared_vars_for_controller() -> Dict[str, Any]:
+    return {
+        'google_sdk_installation_commands': gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
+        'is_dev': env_options.Options.IS_DEVELOPER.get(),
+        'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
+        'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+        'logging_user_hash': common_utils.get_user_hash(),
+        # Should not use $USER here, as that env var can be empty when
+        # running in a container.
+        'user': getpass.getuser(),
+    }
+
+
 @usage_lib.entrypoint
 def spot_launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -676,16 +688,8 @@ def spot_launch(
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
             'uuid': dag_uuid,
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-            'is_dev': env_options.Options.IS_DEVELOPER.get(),
-            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-            'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
-            # Should not use $USER here, as that env var can be empty when
-            # running in a container.
-            'user': getpass.getuser(),
+            **_shared_vars_for_controller(),
         }
         controller_resources_config = copy.copy(
             spot.constants.CONTROLLER_RESOURCES)
@@ -1028,6 +1032,26 @@ def serve_up(
                 'Please check if there are some `sky serve up` process hanging '
                 'abnormally.') from e
 
+    # Generate ports for the controller and load balancer.
+    # Use file lock to make sure the ports are unique.
+    try:
+        # TODO(tian): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(serve.PORTS_GENERATION_FILE_LOCK_PATH,
+                               serve.PORTS_GENERATION_FILE_LOCK_TIMEOUT):
+            controller_port, load_balancer_port = (
+                serve.gen_ports_for_serve_process(controller_name))
+            service_handle.controller_port = controller_port
+            service_handle.load_balancer_port = load_balancer_port
+            global_user_state.set_service_handle(service_name, service_handle)
+    except filelock.Timeout as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Cannot generate controller and load balancer port for '
+                f'service {service_name!r}. Please check if there are some '
+                '`sky serve up` process hanging abnormally.') from e
+
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
     _maybe_translate_local_file_mounts_and_sync_up(task)
@@ -1048,12 +1072,21 @@ def serve_up(
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name)
+        controller_log_file = (
+            serve.generate_remote_controller_log_file_name(service_name))
+        load_balancer_log_file = (
+            serve.generate_remote_load_balancer_log_file_name(service_name))
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
             'service_dir': serve.generate_remote_service_dir_name(service_name),
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
+            'service_name': service_name,
+            'controller_port': controller_port,
+            'load_balancer_port': load_balancer_port,
+            'app_port': task.service.app_port,
+            'controller_log_file': controller_log_file,
+            'load_balancer_log_file': load_balancer_log_file,
+            **_shared_vars_for_controller(),
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
             service_name)
@@ -1063,65 +1096,31 @@ def serve_up(
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.set_resources(controller_resources)
 
-        controller_envs = {
-            'SKYPILOT_USER_ID': common_utils.get_user_hash(),
-            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
-            'SKYPILOT_USER': getpass.getuser(),
-            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
-            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'SKYPILOT_DISABLE_USAGE_COLLECTION':
-                env_options.Options.DISABLE_LOGGING.get(),
-        }
-        controller_task.update_envs(controller_envs)
-
         fore = colorama.Fore
         style = colorama.Style
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        # Only launch if controller is not existing.
-        print(f'{fore.YELLOW}Launching controller for {service_name}...'
+        print(f'\n{fore.YELLOW}Launching controller for {service_name}...'
               f'{style.RESET_ALL}')
-        _execute(
+        job_id = _execute(
             entrypoint=controller_task,
-            stream_logs=True,
+            stream_logs=False,
             cluster_name=controller_name,
-            retry_until_up=True,
+            detach_run=True,
             # We use autodown here to automatically cleanup the controller when
             # no service is running on it.
+            # TODO(tian): Maybe autostop to make cold start quicker?
             down=True,
+            retry_until_up=True,
         )
 
-        if controller_record is None:
-            # Try again after launch
-            controller_record = global_user_state.get_cluster_from_name(
-                controller_name)
-        if (controller_record is None or
-                controller_record['status'] != status_lib.ClusterStatus.UP):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            raise RuntimeError('Controller failed to launch. Please '
-                               'check the logs above.')
-
-        # Generate ports for the controller and load balancer.
-        # Use file lock to make sure the ports are unique.
-        # TODO(tian): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(serve.PORTS_GENERATION_FILE_LOCK_PATH,
-                               serve.PORTS_GENERATION_FILE_LOCK_TIMEOUT):
-            controller_port, load_balancer_port = (
-                serve.gen_ports_for_serve_process(controller_name))
-            service_handle.controller_port = controller_port
-            service_handle.load_balancer_port = load_balancer_port
-
-            handle = controller_record['handle']
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            backend = backend_utils.get_backend_from_handle(handle)
-            assert isinstance(backend, backends.CloudVmRayBackend), backend
-            service_handle.endpoint_ip = handle.head_ip
-            global_user_state.set_service_handle(service_name, service_handle)
-
-        console = rich_console.Console()
+        controller_record = global_user_state.get_cluster_from_name(
+            controller_name)
+        assert controller_record is not None, controller_name
+        handle = controller_record['handle']
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend), backend
+        service_handle.endpoint_ip = handle.head_ip
+        global_user_state.set_service_handle(service_name, service_handle)
 
         def _wait_until_job_is_running_on_controller(
                 job_id: Optional[int]) -> bool:
@@ -1139,64 +1138,19 @@ def serve_up(
                 backend.cancel_jobs(handle, jobs=[job_id])
             return False
 
-        # TODO(tian): Maybe merge this to sky-serve-controller.yaml.j2?
-        with console.status('[yellow]Launching controller process...[/yellow]'):
-            controller_job_id = _execute(
-                entrypoint=sky.Task(
-                    name=f'run-{service_name}-controller',
-                    envs=controller_envs,
-                    run='python -m sky.serve.controller --service-name '
-                    f'{service_name} --task-yaml {remote_task_yaml_path} '
-                    f'--port {controller_port}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_name,
-                detach_run=True,
-            )
-            if not _wait_until_job_is_running_on_controller(controller_job_id):
-                global_user_state.set_service_status(
-                    service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Controller failed to launch. Please check '
-                        f'the logs with sky serve logs {service_name} '
-                        '--controller')
-        print(f'{fore.GREEN}Launching controller process...done.'
-              f'{style.RESET_ALL}')
-        service_handle.controller_job_id = controller_job_id
-        global_user_state.set_service_handle(service_name, service_handle)
+        if not _wait_until_job_is_running_on_controller(job_id):
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Controller failed to launch. Please check '
+                    f'the logs with sky serve logs {service_name} '
+                    '--controller')
 
-        with console.status(
-                '[yellow]Launching load balancer process...[/yellow]'):
-            controller_addr = f'http://localhost:{controller_port}'
-            load_balancer_job_id = _execute(
-                entrypoint=sky.Task(
-                    name=f'run-{service_name}-load-balancer',
-                    envs=controller_envs,
-                    run='python -m sky.serve.load_balancer --task-yaml '
-                    f'{remote_task_yaml_path} --load-balancer-port '
-                    f'{load_balancer_port} --app-port {task.service.app_port} '
-                    f'--controller-addr {controller_addr}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_name,
-                detach_run=True,
-            )
-            if not _wait_until_job_is_running_on_controller(
-                    load_balancer_job_id):
-                global_user_state.set_service_status(
-                    service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'LoadBalancer failed to launch. Please check '
-                        f'the logs with sky serve logs {service_name} '
-                        '--load-balancer')
-        print(f'{fore.GREEN}Launching load balancer process...done.'
-              f'{style.RESET_ALL}')
-        service_handle.load_balancer_job_id = load_balancer_job_id
+        service_handle.job_id = job_id
         global_user_state.set_service_handle(service_name, service_handle)
+        print(f'{fore.GREEN}Launching controller for {service_name}...done.'
+              f'{style.RESET_ALL}')
 
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.REPLICA_INIT)
@@ -1303,10 +1257,8 @@ def serve_down(
             backend = backends.CloudVmRayBackend()
             # For the case when controller / load_balancer job failed to submit.
             jobs = []
-            if service_handle.controller_job_id is not None:
-                jobs.append(service_handle.controller_job_id)
-            if service_handle.load_balancer_job_id is not None:
-                jobs.append(service_handle.load_balancer_job_id)
+            if service_handle.job_id is not None:
+                jobs.append(service_handle.job_id)
             backend.cancel_jobs(handle, jobs=jobs, silent=True)
     # same as above.
     except Exception as e:  # pylint: disable=broad-except

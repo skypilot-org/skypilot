@@ -1,17 +1,63 @@
-# The template for skyserve controller
+# The template for the sky serve controller
 
 setup: |
-  # Install all cloud dependencies.
-  # This is for multicloud support. To allow controller launch on all clouds,
-  # we need to install all cloud dependencies.
-  # This also includes all serve dependencies.
-  pip show skypilot > /dev/null 2>&1 || pip install skypilot[all] > /dev/null 2>&1
+  # Install serve dependencies.
+  (pip list | grep uvicorn > /dev/null 2>&1 && \
+   pip list | grep fastapi > /dev/null 2>&1 ) || \
+   pip install uvicorn fastapi 2>&1 > /dev/null
 
-  # Install gcloud CLI.
+  # Following commands are borrowed from spot-controller.yaml.j2.
+  # NOTE(dev): Keep this align with spot-controller.yaml.j2.
+
+  # Install cli dependencies
+  # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
+  # TODO(zhwu): Keep the dependencies align with the ones in setup.py
+  (pip list | grep boto3 > /dev/null 2>&1 && \
+   pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
+   pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
+
+  (pip list | grep azure-cli > /dev/null 2>&1) || \
+   pip3 install azure-cli==2.31.0 azure-core 2>&1 > /dev/null
   {{google_sdk_installation_commands}}
+
+  pip list | grep oci  > /dev/null 2>&1 || pip install oci 2>&1 > /dev/null
+
+  # Internal: disable logging for manually logging into the spot controller for debugging.
+  {% if is_dev %}
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
 
 run: |
+  # Create working directory for this services.
   mkdir -p {{service_dir}}
+  # Start sky serve controller.
+  python -u -m sky.serve.controller --service-name {{service_name}} \
+    --task-yaml {{remote_task_yaml_path}} --port {{controller_port}} \
+    > {{controller_log_file}} 2>&1 &
+  # Wait for controller to start.
+  sleep 10
+  # Start sky serve load balancer.
+  python -u -m sky.serve.load_balancer --task-yaml {{remote_task_yaml_path}} \
+    --load-balancer-port {{load_balancer_port}} --app-port {{app_port}} \
+    --controller-addr http://localhost:{{controller_port}} \
+    > {{load_balancer_log_file}} 2>&1
+
+# Following environment variables are borrowed from spot-controller.yaml.j2.
+# NOTE(dev): Keep this align with spot-controller.yaml.j2.
+envs:
+  SKYPILOT_USER_ID: {{logging_user_hash}}
+  # skip cloud identity check for spot controller to avoid the overhead.
+  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
+  SKYPILOT_USER: {{user}}
+{% if is_dev %}
+  SKYPILOT_DEV: 1
+{% endif %}
+{% if is_debug %}
+  SKYPILOT_DEBUG: 1
+{% endif %}
+{% if disable_logging %}
+  SKYPILOT_DISABLE_USAGE_COLLECTION: 1
+{% endif %}
