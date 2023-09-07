@@ -8,7 +8,7 @@ resources:
   region: [us-west1, asia-east1]
 
   # spot_recovery: FAILOVER
-  # spot_recovery: EAGER_NEXT_REGION
+  spot_recovery: EAGER_NEXT_REGION
 
   # Ordered Accelerators List
   resources_ordered: True
@@ -23,3 +23,4 @@ resources:
 
 run: |
   nvidia-smi
+  sleep 10000
