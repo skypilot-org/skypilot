@@ -112,7 +112,6 @@ class DockerInitializer:
         self.runner = runner
         self.home_dir = None
         self.initialized = False
-        use_podman = docker_config.get('use_podman', False)
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
 
@@ -120,7 +119,7 @@ class DockerInitializer:
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
-            cmd = (f'docker exec {self.container_name} /bin/bash -c '
+            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c '
                    f'{shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
@@ -146,7 +145,7 @@ class DockerInitializer:
         # manually start the ssh service.
         if self._check_container_exited():
             self.initialized = True
-            self._run(f'docker start {self.container_name}')
+            self._run(f'{self.docker_cmd} start {self.container_name}')
             self._run('sudo service ssh start', run_env='docker')
             return self._run('whoami', run_env='docker').strip()
 
