@@ -25,9 +25,9 @@ class DockerLoginConfig:
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
         return cls(
-            username=d[constants.DOCKER_USERNAME_ENV_VAR],
-            password=d[constants.DOCKER_PASSWORD_ENV_VAR],
-            server=d[constants.DOCKER_SERVER_ENV_VAR],
+            username=d[constants.DOCKER_USERNAME_ENV_VAR].strip(),
+            password=d[constants.DOCKER_PASSWORD_ENV_VAR].strip(),
+            server=d[constants.DOCKER_SERVER_ENV_VAR].strip(),
         )
 
 
@@ -153,8 +153,8 @@ class DockerInitializer:
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
-            docker_login_config: DockerLoginConfig = self.docker_config[
-                'docker_login_config']
+            docker_login_config = DockerLoginConfig(
+                **self.docker_config['docker_login_config'])
             self._run(f'{self.docker_cmd} login --username '
                       f'{docker_login_config.username} '
                       f'--password {docker_login_config.password} '
