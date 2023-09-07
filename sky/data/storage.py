@@ -312,12 +312,12 @@ class AbstractStore:
 
     def csync_command(self,
                       csync_path: str,
-                      interval: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = 600) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
-          interval: int; runs the sync command every INTERVAL seconds
+          interval_seconds: int; runs the sync command every interval_seconds
         """
         raise NotImplementedError
 
@@ -362,7 +362,7 @@ class Storage(object):
 
         - (required) Storage name.
         - (required) Source.
-        - (optional) Sync interval for CSYNC mode.
+        - (optional) Sync every interval_seconds for CSYNC mode.
         - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
@@ -372,7 +372,7 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
-            interval: Optional[int],
+            interval_seconds: Optional[int],
             mode: Optional[storage_utils.StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None,
@@ -380,7 +380,7 @@ class Storage(object):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
-            self.interval = interval
+            self.interval_seconds = interval_seconds
             self.mode = mode
             # Only stores managed by sky are stored here in the
             # global_user_state
@@ -390,7 +390,7 @@ class Storage(object):
             return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
-                    f'\n\tinterval={self.interval},'
+                    f'\n\tinterval_seconds={self.interval_seconds},'
                     f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
@@ -410,7 +410,7 @@ class Storage(object):
             stores: Optional[Dict[StoreType, AbstractStore]] = None,
             persistent: Optional[bool] = True,
             mode: storage_utils.StorageMode = storage_utils.StorageMode.MOUNT,
-            interval: Optional[int] = None,
+            interval_seconds: Optional[int] = None,
             sync_on_reconstruction: bool = True) -> None:
         """Initializes a Storage object.
 
@@ -445,7 +445,7 @@ class Storage(object):
           mode: storage_utils.StorageMode; Specify how the storage object is
             manifested on the remote VM. Can be either MOUNT, COPY, or CSYNC.
             Defaults to MOUNT.
-          interval: int; Used for CSYNC mode only. Runs the sync command
+          interval_seconds: int; Used for CSYNC mode only. Runs the sync command
             continuously for every INTERVAL seconds.
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
@@ -457,7 +457,7 @@ class Storage(object):
         self.persistent = persistent
         self.mode = mode
         assert mode in storage_utils.StorageMode
-        self.interval = interval
+        self.interval_seconds = interval_seconds
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -529,11 +529,12 @@ class Storage(object):
                 for t, s in self.stores.items()
                 if s.is_sky_managed
             }
-            self.handle = self.StorageMetadata(storage_name=self.name,
-                                               source=self.source,
-                                               interval=self.interval,
-                                               mode=self.mode,
-                                               sky_stores=sky_managed_stores)
+            self.handle = self.StorageMetadata(
+                storage_name=self.name,
+                source=self.source,
+                interval_seconds=self.interval_seconds,
+                mode=self.mode,
+                sky_stores=sky_managed_stores)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
@@ -753,8 +754,8 @@ class Storage(object):
                               'sync_on_reconstruction', True))
 
         # For backward compatibility
-        if hasattr(metadata, 'interval'):
-            storage_obj.interval = metadata.interval
+        if hasattr(metadata, 'interval_seconds'):
+            storage_obj.interval_seconds = metadata.interval_seconds
         if hasattr(metadata, 'mode'):
             if metadata.mode:
                 storage_obj.mode = metadata.mode
@@ -948,7 +949,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        interval = config.pop('interval', None)
+        interval_seconds = config.pop('interval_seconds', None)
         force_delete = config.pop('_force_delete', False)
 
         if isinstance(mode_str, str):
@@ -966,7 +967,7 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode,
-                          interval=interval)
+                          interval_seconds=interval_seconds)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
 
@@ -996,7 +997,7 @@ class Storage(object):
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.mode == storage_utils.StorageMode.CSYNC:
-            add_if_not_none('interval', self.interval)
+            add_if_not_none('interval_seconds', self.interval_seconds)
         if self.force_delete:
             config['_force_delete'] = True
         return config
@@ -1330,15 +1331,15 @@ class S3Store(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = 600) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
-          interval: int; runs the sync command every INTERVAL seconds
+          interval_seconds: int; runs the sync command every INTERVAL seconds
         """
-        if interval is None:
-            interval = 600
+        if interval_seconds is None:
+            interval_seconds = 600
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -1350,7 +1351,7 @@ class S3Store(AbstractStore):
         else:
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
-                     f's3 {dst} --interval {interval} '
+                     f's3 {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(
             storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
@@ -1789,15 +1790,15 @@ class GcsStore(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = 600) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
           csync_path: str; Path to continuously sync the bucket to.
-          interval: int; runs the sync command every INTERVAL seconds
+          interval_seconds: int; runs the sync command every INTERVAL seconds
         """
-        if interval is None:
-            interval = 600
+        if interval_seconds is None:
+            interval_seconds = 600
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -1809,7 +1810,7 @@ class GcsStore(AbstractStore):
         else:
             dst = self.bucket.name
         csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
-                     f'gcs {dst} --interval {interval} '
+                     f'gcs {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(
             storage_utils.StorageMode.CSYNC, csync_path, csync_cmd)
@@ -2179,12 +2180,12 @@ class R2Store(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = 600) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
-        
+
         Args:
           csync_path: str; Path to continuously sync the bucket to.
-          interval: int; runs the sync command every INTERVAL seconds
+          interval_seconds: int; runs the sync command every INTERVAL seconds
         """
         raise NotImplementedError
 

@@ -1,4 +1,5 @@
 """Skystorage module"""
+import functools
 import os
 import pathlib
 import subprocess
@@ -20,87 +21,112 @@ _CSYNC_BASE_PATH = '~/.skystorage'
 _DB = None
 _CURSOR = None
 _CONN = None
+_BOOT_TIME = None
+
 
 def db(func):
-    @functools.wrap(func)
+
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if _DB is not None:
-            return
-        
-        _DB_PATH = os.path.expanduser('~/.sky/skystorage.db')
-        pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
-        
-        
+        global _DB, _CURSOR, _CONN, _BOOT_TIME
+
         def create_table(cursor, conn):
             cursor.execute("""\
                 CREATE TABLE IF NOT EXISTS running_csync (
                 csync_pid INTEGER PRIMARY KEY,
-                sync_pid INTEGER DEFAULT 0,
-                source_path TEXT)""")
-        
+                sync_pid INTEGER DEFAULT -1,
+                source_path TEXT,
+                boot_time FLOAT)""")
+
             conn.commit()
-        
-        global _DB, _CURSOR, _CONN
-        _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+
+        if _DB is None:
+            db_path = os.path.expanduser('~/.sky/skystorage.db')
+            pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+            _DB = db_utils.SQLiteConn(db_path, create_table)
+
         _CURSOR = _DB.cursor
         _CONN = _DB.conn
+        _BOOT_TIME = psutil.boot_time()
+
         return func(*args, **kwargs)
+
     return wrapper
 
 
+@db
 def _add_running_csync(csync_pid: int, source_path: str):
     """Given the process id of CSYNC, it should create a row with it"""
+    assert _CURSOR is not None
+    assert _CONN is not None
     _CURSOR.execute(
-        'INSERT INTO running_csync (csync_pid, source_path) VALUES (?, ?)',
-        (csync_pid, source_path))
+        'INSERT INTO running_csync (csync_pid, source_path, boot_time) VALUES (?, ?, ?)',
+        (csync_pid, source_path, _BOOT_TIME))
     _CONN.commit()
 
 
-def _get_all_csync_pid() -> List[Any]:
+@db
+def _get_all_running_csync_pid() -> List[Any]:
     """Returns all the registerd pid of CSYNC processes"""
-    _CURSOR.execute('SELECT csync_pid FROM running_csync')
+    assert _CURSOR is not None
+    _CURSOR.execute('SELECT csync_pid FROM running_csync WHERE boot_time=(?)',
+                    (_BOOT_TIME,))
     rows = _CURSOR.fetchall()
     csync_pids = [row[0] for row in rows]
     return csync_pids
 
 
+@db
 def _get_running_csync_source_path() -> List[Any]:
     """Returns all the registerd source path of CSYNC processes"""
-    _CURSOR.execute('SELECT source_path FROM running_csync')
+    assert _CURSOR is not None
+    _CURSOR.execute('SELECT source_path FROM running_csync WHERE boot_time=(?)',
+                    (_BOOT_TIME,))
     rows = _CURSOR.fetchall()
     source_paths = [row[0] for row in rows]
     return source_paths
 
 
+@db
 def _set_running_csync_sync_pid(csync_pid: int, sync_pid: Optional[int]):
     """Given the process id of CSYNC, sets the sync_pid column value"""
+    assert _CURSOR is not None
+    assert _CONN is not None
     _CURSOR.execute('UPDATE running_csync SET sync_pid=(?) WHERE csync_pid=(?)',
                     (sync_pid, csync_pid))
     _CONN.commit()
 
 
+@db
 def _get_running_csync_sync_pid(csync_pid: int) -> Optional[int]:
     """Given the process id of CSYNC, returns the sync_pid column value"""
-    _CURSOR.execute('SELECT sync_pid FROM running_csync WHERE csync_pid=(?)',
-                    (csync_pid,))
+    assert _CURSOR is not None
+    _CURSOR.execute(
+        'SELECT sync_pid FROM running_csync WHERE csync_pid=(?) AND boot_time=(?)',
+        (csync_pid, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
         return row[0]
     raise ValueError(f'CSYNC PID {csync_pid} not found.')
 
 
+@db
 def _delete_running_csync(csync_pid: int):
-    """Deletes the row with the given process id of CSYNC from running_csync
-    table"""
+    """Deletes the row with process id of CSYNC from running_csync table"""
+    assert _CURSOR is not None
+    assert _CONN is not None
     _CURSOR.execute('DELETE FROM running_csync WHERE csync_pid=(?)',
                     (csync_pid,))
     _CONN.commit()
 
 
+@db
 def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
     """Given the path, returns process ID of csync running on it"""
-    _CURSOR.execute('SELECT csync_pid FROM running_csync WHERE source_path=(?)',
-                    (path,))
+    assert _CURSOR is not None
+    _CURSOR.execute(
+        'SELECT csync_pid FROM running_csync WHERE source_path=(?) AND boot_time=(?)',
+        (path, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
         return row[0]
@@ -112,14 +138,14 @@ def main():
     pass
 
 
-def update_interval(interval: int, elapsed_time: int):
+def update_interval(interval_seconds: int, elapsed_time: int):
     """Updates the time interval for the next sync operation.
 
-    Given the originally set interval and the time elapsed during the
+    Given the originally set interval_seconds and the time elapsed during the
     sync operation, this function computes and returns the remaining time to
     wait before the next sync operation.
     """
-    diff = interval - elapsed_time
+    diff = interval_seconds - elapsed_time
     if diff <= 0:
         return 0
     else:
@@ -157,7 +183,7 @@ def run_sync(src: str,
              storetype: str,
              dst: str,
              num_threads: int,
-             interval: int,
+             interval_seconds: int,
              delete: bool,
              no_follow_symlinks: bool,
              csync_pid: int,
@@ -197,8 +223,8 @@ def run_sync(src: str,
                              f'at \'{storetype}\'')
             if max_retries > 0:
                 if backoff is None:
-                    # interval/2 is heuristically determined as initial backoff
-                    backoff = common_utils.Backoff(int(interval / 2))
+                    # interval_seconds/2 is heuristically determined as initial backoff
+                    backoff = common_utils.Backoff(int(interval_seconds / 2))
                 wait_time = backoff.current_backoff()
                 fout.write('Encountered an error while syncing '
                            f'{src_to_bucket}. Retrying'
@@ -206,17 +232,17 @@ def run_sync(src: str,
                            f'remaining. Check {log_path} for details.')
                 time.sleep(wait_time)
                 # reset sync pid as the sync process is terminated
-                _set_running_csync_sync_pid(csync_pid, 0)
-                run_sync(src, storetype, dst, num_threads, interval, delete,
-                         no_follow_symlinks, csync_pid, max_retries - 1,
+                _set_running_csync_sync_pid(csync_pid, -1)
+                run_sync(src, storetype, dst, num_threads, interval_seconds,
+                         delete, no_follow_symlinks, csync_pid, max_retries - 1,
                          backoff)
             else:
                 raise RuntimeError(f'Failed to sync {src_to_bucket} after '
                                    f'number of retries. Check {log_path} for'
                                    'details') from None
 
-    _set_running_csync_sync_pid(csync_pid, 0)
     #run necessary post-processes
+    _set_running_csync_sync_pid(csync_pid, -1)
     if storetype == 's3':
         # set number of threads back to its default value
         config_cmd = 'aws configure set default.s3.max_concurrent_requests 10'
@@ -228,7 +254,11 @@ def run_sync(src: str,
 @click.argument('storetype', required=True, type=str)
 @click.argument('destination', required=True, type=str)
 @click.option('--num-threads', required=False, default=10, type=int, help='')
-@click.option('--interval', required=False, default=600, type=int, help='')
+@click.option('--interval-seconds',
+              required=False,
+              default=600,
+              type=int,
+              help='')
 @click.option('--delete',
               required=False,
               default=False,
@@ -242,7 +272,7 @@ def run_sync(src: str,
               is_flag=True,
               help='')
 def csync(source: str, storetype: str, destination: str, num_threads: int,
-          interval: int, delete: bool, no_follow_symlinks: bool):
+          interval_seconds: int, delete: bool, no_follow_symlinks: bool):
     """Syncs the source to the bucket every INTERVAL seconds. Creates an entry
     of pid of the sync process in local database while sync command is runninng
     and removes it when completed.
@@ -252,8 +282,8 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         destination (str): The bucket or subdirectory in the bucket where the
             files should be synced.
         num_threads (int): The number of threads to use for the sync operation.
-        interval (int): The time interval, in seconds, at which to run the
-            sync operation.
+        interval_seconds (int): The time interval, in seconds, at which to run
+            the sync operation.
         delete (bool): Whether or not to delete files in the destination that
             are not present in the source.
         no_follow_symlinks (bool): Whether or not to follow symbolic links in
@@ -270,12 +300,12 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     _add_running_csync(csync_pid, full_src)
     while True:
         start_time = time.time()
-        run_sync(full_src, storetype, destination, num_threads, interval,
-                 delete, no_follow_symlinks, csync_pid)
+        run_sync(full_src, storetype, destination, num_threads,
+                 interval_seconds, delete, no_follow_symlinks, csync_pid)
         end_time = time.time()
-        # the time took to sync gets reflected to the INTERVAL
+        # the time took to sync gets reflected to the interval_seconds
         elapsed_time = int(end_time - start_time)
-        remaining_interval = update_interval(interval, elapsed_time)
+        remaining_interval = update_interval(interval_seconds, elapsed_time)
         # sync_pid column is set to 0 when sync is not running
         time.sleep(remaining_interval)
 
@@ -315,7 +345,7 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
     # behavior to take a source name to terminate only one daemon.
     # Call the function to terminate the csync processes here
     if all:
-        csync_pid_set = set(_get_all_csync_pid())
+        csync_pid_set = set(_get_all_running_csync_pid())
     else:
         csync_pid_set = set()
         for path in paths:
@@ -326,7 +356,8 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
             break
         sync_running_csync_set = set()
         for csync_pid in csync_pid_set:
-            if _get_running_csync_sync_pid(csync_pid):
+            # sync_pid is set to -1 when sync is not running
+            if _get_running_csync_sync_pid(csync_pid) != -1:
                 sync_running_csync_set.add(csync_pid)
         remove_process_set = csync_pid_set.difference(sync_running_csync_set)
         for csync_pid in remove_process_set:

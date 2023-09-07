@@ -142,7 +142,7 @@ def get_storage_schema():
                     mode.value for mode in storage_utils.StorageMode
                 ]
             },
-            'interval': {
+            'interval_seconds': {
                 'type': 'number'
             },
             '_force_delete': {

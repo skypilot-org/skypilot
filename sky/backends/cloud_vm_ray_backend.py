@@ -4545,7 +4545,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to sync
             store = list(storage_obj.stores.values())[0]
-            csync_cmd = store.csync_command(dst, storage_obj.interval)
+            csync_cmd = store.csync_command(dst, storage_obj.interval_seconds)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
