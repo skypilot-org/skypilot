@@ -16,7 +16,7 @@ class SkyResourcesSpec:
     def __init__(
         self,
         use_spot: bool = False,
-        spot_recovery: Optional[str]  = None, 
+        spot_recovery: Optional[str] = None,
     ):
         self._use_spot = use_spot
         self._spot_recovery = spot_recovery
@@ -50,15 +50,16 @@ class SkyResourcesSpec:
 
         if 'resources' not in config:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Resource YAML must have a "resources" section. '
-                                 f'Is it correct? Path: {yaml_path}')
+                raise ValueError(
+                    'Resource YAML must have a "resources" section. '
+                    f'Is it correct? Path: {yaml_path}')
 
         return SkyResourcesSpec.from_yaml_config(config['resources'])
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
-            Use spot:        {self.use_spot()}
-            Spot recovery:   {self.spot_recovery()}
+            Use spot:        {self.use_spot}
+            Spot recovery:   {self.spot_recovery}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)

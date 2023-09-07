@@ -247,8 +247,8 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, service_name: str, use_spot: bool, *args,
-                 **kwargs) -> None:
+    def __init__(self, task_yaml_path: str, service_name: str, use_spot: bool,
+                 *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
@@ -304,16 +304,16 @@ class SkyPilotInfraProvider(InfraProvider):
                 # This will prevent infinite loop of teardown and
                 # re-provision.
                 if info.status_property.is_scale_down_no_failure():
-                    # This means the cluster is deleted due to
-                    # a scale down or the cluster is recovering from preemption. Delete the replica info
-                    # so it won't count as a replica.
+                    # This means the cluster is deleted due to a scale down or
+                    # the cluster is recovering from preemption. Delete the
+                    # replica info so it won't count as a replica.
                     del self.replica_info[cluster_name]
                     if info.status_property.preempted:
                         logger.info(f'Cluster {cluster_name} removed from the '
-                                'replica info for preemption recovery.')
+                                    'replica info for preemption recovery.')
                     else:
                         logger.info(f'Cluster {cluster_name} removed from the '
-                                'replica info normally.')
+                                    'replica info normally.')
                 else:
                     logger.info(f'Termination of cluster {cluster_name} '
                                 'finished. Replica info is kept since some '
@@ -637,11 +637,11 @@ class SkyPilotInfraProvider(InfraProvider):
             if info.first_not_ready_time is None:
                 info.first_not_ready_time = time.time()
             if info.status_property.service_once_ready:
-                if self.use_spot:                    
+                if self.use_spot:
                     # Pull the actual cluster status from the cloud provider to
                     # determine whether the cluster is preempted.
-                    (cluster_status,
-                    handle) = backends.backend_utils.refresh_cluster_status_handle(
+                    (cluster_status, handle
+                    ) = backends.backend_utils.refresh_cluster_status_handle(
                         cluster_name,
                         force_refresh_statuses=set(status_lib.ClusterStatus))
 
@@ -649,15 +649,16 @@ class SkyPilotInfraProvider(InfraProvider):
                         # The cluster is (partially) preempted. It can be down, INIT
                         # or STOPPED, based on the interruption behavior of the cloud.
                         # Spot recovery is needed.
-                        cluster_status_str = ('' if cluster_status is None else
-                                            f' (status: {cluster_status.value})')
-                        logger.info(f'Cluster {cluster_name} is preempted: {cluster_status_str}.')
+                        cluster_status_str = (
+                            '' if cluster_status is None else
+                            f' (status: {cluster_status.value})')
+                        logger.info(
+                            f'Cluster {cluster_name} is preempted: {cluster_status_str}.'
+                        )
                         self._recover_from_preemption(cluster_name)
 
                         # TODO(tgriggs): This currently attempts preemption recovery infinitely. Add support for setting retry limits in the recovery policy.
                         continue
-
-
 
                 info.consecutive_failure_cnt += 1
                 if (info.consecutive_failure_cnt >=
