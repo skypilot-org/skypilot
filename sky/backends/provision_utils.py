@@ -258,9 +258,11 @@ def _wait_ssh_connection_indirect(
     # NOTE: Ray uses 'uptime' command and 10s timeout.
     command = [
         'ssh', '-T', '-i', ssh_private_key, f'{ssh_user}@{ip}', '-o',
-        'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=20s', '-o',
-        f'ProxyCommand={ssh_proxy_command}', 'echo'
+        'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=20s',
     ]
+    if ssh_proxy_command is not None:
+        command += ['-o', f'ProxyCommand={ssh_proxy_command}']
+    command += ['echo']
     proc = subprocess.run(command,
                           shell=False,
                           check=False,
@@ -379,7 +381,7 @@ def _post_provision_setup(
 
         status.update(
             runtime_preparation_str.format(step=2,
-                                           step_name='installing dependencies'))
+                                           step_name='dependencies'))
         instance_setup.setup_runtime_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
@@ -390,7 +392,7 @@ def _post_provision_setup(
 
         status.update(
             runtime_preparation_str.format(step=3,
-                                           step_name='starting runtime'))
+                                           step_name='runtime'))
         full_ray_setup = True
         if not provision_metadata.is_instance_just_booted(
                 head_instance.instance_id):
