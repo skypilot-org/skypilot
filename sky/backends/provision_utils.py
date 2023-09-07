@@ -43,7 +43,7 @@ class ClusterName:
 
     def __repr__(self) -> str:
         return repr(self.display_name)
-    
+
     def __str__(self) -> str:
         return self.display_name
 
@@ -444,7 +444,7 @@ def _post_provision_setup(
                                                  ssh_credentials)
 
     logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
-                f'{cluster_name}.{colorama.Style.RESET_ALL}')
+                f'{cluster_name}{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
 
