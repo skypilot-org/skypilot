@@ -991,6 +991,11 @@ def serve_up(
                              'only contains lower letters, numbers and dash): '
                              f'{serve.SERVICE_NAME_VALID_REGEX}')
 
+    if global_user_state.get_service_from_name(service_name) is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service name {service_name!r} is already '
+                             'taken. Please use a different name.')
+
     if task.service is None:
         raise RuntimeError('Service section not found.')
     controller_resources_config: Dict[str, Any] = copy.copy(
@@ -1207,8 +1212,11 @@ def serve_down(
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
-    # Already filtered all inexistent service in cli.py
-    assert service_record is not None, service_name
+
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} not found.')
+
     service_handle: serve.ServiceHandle = service_record['handle']
     controller_name = service_record['controller_name']
     global_user_state.set_service_status(service_name,
