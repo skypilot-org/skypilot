@@ -16,6 +16,7 @@ import copy
 import enum
 import getpass
 import os
+import re
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Union
@@ -983,6 +984,13 @@ def serve_up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
+    if re.fullmatch(serve.SERVICE_NAME_VALID_REGEX, service_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service name {service_name!r} is invalid: '
+                             f'ensure it is fully matched by regex (e.g., '
+                             'only contains lower letters, numbers and dash): '
+                             f'{serve.SERVICE_NAME_VALID_REGEX}')
+
     if task.service is None:
         raise RuntimeError('Service section not found.')
     controller_resources_config: Dict[str, Any] = copy.copy(
