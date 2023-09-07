@@ -4341,7 +4341,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Run `sky status` to see existing clusters.')
         else:
             logger.info(
-                f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+                f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
                 f'[{task.num_nodes}x {to_provision}].'
                 f'{colorama.Style.RESET_ALL}\n'
                 'Tip: to reuse an existing cluster, '
