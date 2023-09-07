@@ -5,6 +5,8 @@ resources:
   # zone: us-east-1d
   use_spot: True
 
+  region: [us-west1, asia-east1]
+
   # spot_recovery: FAILOVER
   # spot_recovery: EAGER_NEXT_REGION
 
