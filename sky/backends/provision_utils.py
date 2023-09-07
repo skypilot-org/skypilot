@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import pathlib
+import shlex
 import socket
 import subprocess
 import sys
@@ -266,7 +267,7 @@ def _wait_ssh_connection_indirect(
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
     if proc.returncode != 0:
-        logger.debug(f'Failed SSH to {ip} with command: {" ".join(command)}')
+        logger.debug(f'Failed SSH to {ip} with command: {shlex.join(command)}')
     return proc.returncode == 0
 
 
