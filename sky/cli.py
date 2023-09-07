@@ -4076,42 +4076,8 @@ def serve_up(
     app_port = int(task.service.app_port)
     task.set_resources(requested_resources.copy(ports=[app_port]))
 
-    controller_resources_config: Dict[str, Any] = copy.copy(
-        serve_lib.CONTROLLER_RESOURCES)
-    if task.service.controller_resources is not None:
-        controller_resources_config.update(task.service.controller_resources)
-    if 'ports' in controller_resources_config:
-        click.secho('Cannot specify ports for controller resources.', fg='red')
-        return
-    # TODO(tian): Open required ports only after #2485 is merged.
-    controller_resources_config['ports'] = [serve_lib.LOAD_BALANCER_PORT_RANGE]
-    try:
-        controller_resources = sky.Resources.from_yaml_config(
-            controller_resources_config)
-    except ValueError as e:
-        raise ValueError(
-            'Encountered error when parsing controller resources') from e
-
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
-
-    controller_name, new_controller = serve_lib.get_available_controller_name(
-        controller_resources)
-    controller_best_resources = None
-    if new_controller:
-        dummy_controller_task = sky.Task().set_resources(controller_resources)
-        click.secho('Launching a new controller.', fg='cyan')
-        click.secho('The controller will use the following resource:',
-                    fg='cyan')
-        with sky.Dag() as dag:
-            dag.add(dummy_controller_task)
-        sky.optimize(dag)
-        click.echo()
-        dummy_controller_task: sky.Task = dag.tasks[0]
-        controller_best_resources = dummy_controller_task.best_resources
-    else:
-        click.secho(f'Using existing controller {controller_name!r}.\n',
-                    fg='cyan')
 
     click.secho('Each replica will use the following resource:', fg='cyan')
     with sky.Dag() as dag:
@@ -4124,8 +4090,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_resources, controller_name,
-                 controller_best_resources)
+    sky.serve_up(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)

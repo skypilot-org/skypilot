@@ -7,7 +7,7 @@ import shlex
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
+from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional, Set,
                     TextIO, Tuple, TypeVar)
 
 import colorama
@@ -72,15 +72,16 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-def get_existing_controller_names() -> List[str]:
-    return global_user_state.get_cluster_names_start_with(
-        constants.CONTROLLER_PREFIX)
+def get_existing_controller_names() -> Set[str]:
+    return {
+        record['controller_name']
+        for record in global_user_state.get_services()
+    }
 
 
 # We use incremental controller number to make sure two simultaneous
 # `sky serve up` will take same controller name
-def generate_controller_cluster_name() -> str:
-    existing_controllers = get_existing_controller_names()
+def generate_controller_cluster_name(existing_controllers: Set[str]) -> str:
     index = 0
     while True:
         controller_name = (f'{constants.CONTROLLER_PREFIX}'
@@ -137,7 +138,7 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 
 
 def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
-    services = global_user_state.get_services_from_controller_cluster_name(
+    services = global_user_state.get_services_from_controller_name(
         controller_name)
     # Use `is None`` to filter out self and all services with
     # initialize status
@@ -189,35 +190,54 @@ def get_available_controller_name(
     for controller_name in existing_controllers:
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
-        # Corner case: controller is removed from local DB due to refresh
-        if controller_record is None:
-            continue
-        handle = controller_record['handle']
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        # TODO(tian): Maybe ignore controller resources when no new controller
-        # is launched, like spot implementation?
-        # If so, we could set controller resources in skypilot_config as well.
+        if controller_record is not None:
+            # If controller is already created, get its current resources.
+            handle = controller_record['handle']
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            # We make it a list to be consistent with the case when controller
+            # is not created yet.
+            all_resources = [handle.launched_resources]
+        else:
+            # Corner case: Multiple `sky serve up` are running simultaneously
+            # and the controller is not created yet. We created a resources
+            # for each initializing controller, and find the most demanding
+            # one to represent the controller resources.
+            service_records = (
+                global_user_state.get_services_from_controller_name(
+                    controller_name))
+            all_resources = [
+                service_record['handle'].requested_controller_resources
+                for service_record in service_records
+            ]
         # Filter out controllers that are more demanding than the requested
         # controller resources.
-        if controller_resources.less_demanding_than(handle.launched_resources):
+        less_demanding_than_all = True
+        max_memory_requirements = 0.
+        for r in all_resources:
+            if not controller_resources.less_demanding_than(r):
+                less_demanding_than_all = False
+                break
+            # We have a memory requirement for controller in default
+            # configuration, so every controller should have memory.
+            assert r.memory is not None
+            # Remove the '+' in memory requirement.
+            max_memory_requirements = max(max_memory_requirements,
+                                          float(r.memory.strip('+')))
+        if less_demanding_than_all:
             # Determine max number of services on this controller.
-            controller_cloud = handle.launched_resources.cloud
-            controller_instance_type = handle.launched_resources.instance_type
-            _, controller_memory = (
-                controller_cloud.get_vcpus_mem_from_instance_type(
-                    controller_instance_type))
-            max_services_num = int(controller_memory /
+            max_services_num = int(max_memory_requirements /
                                    constants.SERVICES_MEMORY_USAGE_GB)
             # Get current number of services on this controller.
             services_num_on_controller = len(
-                global_user_state.get_services_from_controller_cluster_name(
+                global_user_state.get_services_from_controller_name(
                     controller_name))
             # Only consider controllers that have available slots for services.
             if services_num_on_controller < max_services_num:
                 available_controller_to_service_num[controller_name] = (
                     services_num_on_controller)
     if not available_controller_to_service_num:
-        new_controller_name = generate_controller_cluster_name()
+        new_controller_name = generate_controller_cluster_name(
+            existing_controllers)
         clouds.Cloud.check_cluster_name_is_valid(new_controller_name)
         return new_controller_name, True
     # If multiple controllers are available, choose the one with most number of
@@ -232,6 +252,7 @@ class ServiceHandle(object):
     - (required) Service name.
     - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
+    - (required) Service requested controller resources.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
     - (optional) Controller port.
@@ -242,7 +263,7 @@ class ServiceHandle(object):
 
     This class is only used as a cache for information fetched from controller.
     """
-    _VERSION = 1
+    _VERSION = 0
 
     def __init__(
         self,
@@ -250,6 +271,7 @@ class ServiceHandle(object):
         service_name: str,
         policy: str,
         requested_resources: 'sky.Resources',
+        requested_controller_resources: 'sky.Resources',
         uptime: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
@@ -264,6 +286,7 @@ class ServiceHandle(object):
         self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
+        self.requested_controller_resources = requested_controller_resources
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
         self.controller_job_id = controller_job_id
@@ -277,6 +300,8 @@ class ServiceHandle(object):
                 f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
+                '\n\requested_controller_resources='
+                f'{self.requested_controller_resources},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
                 f'\n\tcontroller_job_id={self.controller_job_id},'

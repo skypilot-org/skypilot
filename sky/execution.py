@@ -970,9 +970,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
-    controller_resources: 'sky.Resources',
-    controller_name: Optional[str] = None,
-    chosen_controller_resources: Optional['sky.Resources'] = None,
 ):
     """Spin up a service.
 
@@ -981,51 +978,55 @@ def serve_up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
-        controller_resources: The resources requirement for the controller.
-        controller_name: The controller name. If not specified, first try to
-          get an available controller name. If not found, generate a new one.
-        chosen_controller_resources: The chosen resources fro optimizer for
-          the controller. If not specified, use the optimized
-          controller_resources.
     """
-    # Try again here for the case when user directly call this programmatic API.
-    if controller_name is None:
-        controller_name, _ = serve.get_available_controller_name(
-            controller_resources)
+    if task.service is None:
+        raise RuntimeError('Service section not found.')
+    controller_resources_config: Dict[str, Any] = copy.copy(
+        serve.CONTROLLER_RESOURCES)
+    if task.service.controller_resources is not None:
+        controller_resources_config.update(task.service.controller_resources)
+    if 'ports' in controller_resources_config:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify ports for controller resources.')
+    # TODO(tian): Open required ports only after #2485 is merged.
+    controller_resources_config['ports'] = [serve.LOAD_BALANCER_PORT_RANGE]
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Encountered error when parsing controller resources') from e
+
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
     service_handle = serve.ServiceHandle(
         service_name=service_name,
         policy=task.service.policy_str(),
-        requested_resources=requested_resources)
+        requested_resources=requested_resources,
+        requested_controller_resources=controller_resources)
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller
     # name.
-    # TODO(tian): remove pylint disabling when filelock
-    # version updated
-    # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(serve.CONTROLLER_SELECTION_FILE_LOCK_PATH,
-                           serve.CONTROLLER_SELECTION_FILE_LOCK_TIMEOUT):
-        current_controller_name, _ = serve.get_available_controller_name(
-            controller_resources)
-        # If the current controller name is not the same as the one we
-        # generated before, it means some service have been launched in
-        # the same time. We should raise an error here to avoid launching
-        # too much service on one controller.
-        # TODO(tian): Shall we transparently launch a new controller for user?
-        if current_controller_name != controller_name:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Failed to launch service {service_name} on controller '
-                    f'{controller_name}. It is likely due to simultaneously '
-                    'up multiple services exceeding single controller\'s '
-                    'threshold. Please try again.')
-        global_user_state.add_or_update_service(
-            service_name, None, controller_name, service_handle,
-            status_lib.ServiceStatus.CONTROLLER_INIT)
-    app_port = int(task.service.app_port)
+    try:
+        # TODO(tian): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(serve.CONTROLLER_SELECTION_FILE_LOCK_PATH,
+                               serve.CONTROLLER_SELECTION_FILE_LOCK_TIMEOUT):
+            controller_name, _ = serve.get_available_controller_name(
+                controller_resources)
+            global_user_state.add_or_update_service(
+                service_name, None, controller_name, service_handle,
+                status_lib.ServiceStatus.CONTROLLER_INIT)
+    except filelock.Timeout as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Cannot select controller for service {service_name!r}. '
+                'Please check if there are some `sky serve up` process hanging '
+                'abnormally.') from e
 
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
@@ -1060,9 +1061,7 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        # This is for the case when the best resources failed to provision.
         controller_task.set_resources(controller_resources)
-        controller_task.best_resources = chosen_controller_resources
 
         controller_envs = {
             'SKYPILOT_USER_ID': common_utils.get_user_hash(),
@@ -1075,15 +1074,13 @@ def serve_up(
         }
         controller_task.update_envs(controller_envs)
 
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching controller for {service_name}...'
-              f'{colorama.Style.RESET_ALL}')
-        # We use launch here to make sure:
-        #   1. The controller will be re-launch if it is in unhealthy status;
-        #   2. The setup is executed on the controller node (mainly for the race
-        #      condition, when multiple `sky serve up` is run in the same time,
-        #      we want to make sure each of them finished setup before execute
-        #      controller / load balancer process).
+        fore = colorama.Fore
+        style = colorama.Style
+        controller_record = global_user_state.get_cluster_from_name(
+            controller_name)
+        # Only launch if controller is not existing.
+        print(f'{fore.YELLOW}Launching controller for {service_name}...'
+              f'{style.RESET_ALL}')
         _execute(
             entrypoint=controller_task,
             stream_logs=True,
@@ -1092,18 +1089,18 @@ def serve_up(
             # We use autodown here to automatically cleanup the controller when
             # no service is running on it.
             down=True,
-            idle_minutes_to_autostop=20,
         )
 
-        cluster_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        if (cluster_record is None or
-                cluster_record['status'] != status_lib.ClusterStatus.UP):
+        if controller_record is None:
+            # Try again after launch
+            controller_record = global_user_state.get_cluster_from_name(
+                controller_name)
+        if (controller_record is None or
+                controller_record['status'] != status_lib.ClusterStatus.UP):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            raise RuntimeError(
-                f'{colorama.Fore.RED}Controller failed to launch. '
-                f'Please check the logs above.{colorama.Style.RESET_ALL}')
+            raise RuntimeError('Controller failed to launch. Please '
+                               'check the logs above.')
 
         # Generate ports for the controller and load balancer.
         # Use file lock to make sure the ports are unique.
@@ -1117,7 +1114,7 @@ def serve_up(
             service_handle.controller_port = controller_port
             service_handle.load_balancer_port = load_balancer_port
 
-            handle = cluster_record['handle']
+            handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backend_utils.get_backend_from_handle(handle)
             assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -1162,12 +1159,11 @@ def serve_up(
                     service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'{colorama.Fore.RED}Controller failed to launch. '
-                        'Please check the logs with sky serve logs '
-                        f'{service_name} --controller'
-                        f'{colorama.Style.RESET_ALL}')
-        print(f'{colorama.Fore.GREEN}Launching controller process...done.'
-              f'{colorama.Style.RESET_ALL}')
+                        f'Controller failed to launch. Please check '
+                        f'the logs with sky serve logs {service_name} '
+                        '--controller')
+        print(f'{fore.GREEN}Launching controller process...done.'
+              f'{style.RESET_ALL}')
         service_handle.controller_job_id = controller_job_id
         global_user_state.set_service_handle(service_name, service_handle)
 
@@ -1180,7 +1176,7 @@ def serve_up(
                     envs=controller_envs,
                     run='python -m sky.serve.load_balancer --task-yaml '
                     f'{remote_task_yaml_path} --load-balancer-port '
-                    f'{load_balancer_port} --app-port {app_port} '
+                    f'{load_balancer_port} --app-port {task.service.app_port} '
                     f'--controller-addr {controller_addr}'),
                 stream_logs=False,
                 handle=handle,
@@ -1194,20 +1190,19 @@ def serve_up(
                     service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'{colorama.Fore.RED}LoadBalancer failed to launch. '
-                        f'Please check the logs with sky serve logs '
-                        f'{service_name} --load-balancer'
-                        f'{colorama.Style.RESET_ALL}')
-        print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
-              f'{colorama.Style.RESET_ALL}')
+                        f'LoadBalancer failed to launch. Please check '
+                        f'the logs with sky serve logs {service_name} '
+                        '--load-balancer')
+        print(f'{fore.GREEN}Launching load balancer process...done.'
+              f'{style.RESET_ALL}')
         service_handle.load_balancer_job_id = load_balancer_job_id
         global_user_state.set_service_handle(service_name, service_handle)
 
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.REPLICA_INIT)
 
-        print(f'\n{colorama.Fore.CYAN}Service name: '
-              f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
+        print(f'\n{fore.CYAN}Service name: '
+              f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
@@ -1225,13 +1220,10 @@ def serve_up(
               f'{backend_utils.RESET_BOLD}'
               f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
               f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
-        print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
-              'Endpoint URL: '
-              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{handle.head_ip}:{load_balancer_port}'
-              f'{colorama.Style.RESET_ALL}')
-        print(f'{colorama.Fore.GREEN}Starting replica now...'
-              f'{colorama.Style.RESET_ALL}')
+        print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
+              f'{style.RESET_ALL}{fore.CYAN}'
+              f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
+        print(f'{fore.GREEN}Starting replica now...{style.RESET_ALL}')
         print('Please use the above command to find the latest status.')
 
 

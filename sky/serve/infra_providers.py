@@ -15,6 +15,7 @@ import requests
 from sky import backends
 from sky import global_user_state
 from sky import status_lib
+from sky.serve import constants
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.utils import env_options
@@ -578,12 +579,15 @@ class SkyPilotInfraProvider(InfraProvider):
                 readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
                 if self.post_data is not None:
                     msg += 'Post'
-                    response = requests.post(readiness_suffix,
-                                             json=self.post_data,
-                                             timeout=3)
+                    response = requests.post(
+                        readiness_suffix,
+                        json=self.post_data,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 else:
                     msg += 'Get'
-                    response = requests.get(readiness_suffix, timeout=3)
+                    response = requests.get(
+                        readiness_suffix,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 msg += (f' request to {replica_ip} returned status code '
                         f'{response.status_code}')
                 if response.status_code == 200:

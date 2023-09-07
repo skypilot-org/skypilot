@@ -13,7 +13,6 @@ from sky.serve.constants import PORTS_GENERATION_FILE_LOCK_TIMEOUT
 from sky.serve.constants import SERVE_PREFIX
 from sky.serve.constants import SERVE_STARTUP_TIMEOUT
 from sky.serve.serve_utils import gen_ports_for_serve_process
-from sky.serve.serve_utils import generate_controller_cluster_name
 from sky.serve.serve_utils import generate_controller_yaml_file_name
 from sky.serve.serve_utils import generate_remote_service_dir_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name

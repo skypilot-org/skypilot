@@ -635,7 +635,7 @@ def get_service_from_name(
     return None
 
 
-def get_services_from_controller_cluster_name(
+def get_services_from_controller_name(
         controller_name: str) -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'SELECT * FROM services WHERE controller_name=(?)',
