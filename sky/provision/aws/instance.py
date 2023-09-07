@@ -612,8 +612,8 @@ def get_cluster_metadata(region: str,
         tags.sort(key=lambda x: x[0])
         instances[inst.id] = common.InstanceMetadata(
             instance_id=inst.id,
-            private_ip=inst.private_ip_address,
-            public_ip=inst.public_ip_address,
+            internal_ip=inst.private_ip_address,
+            external_ip=inst.public_ip_address,
             tags=dict(tags),
         )
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))

@@ -1559,7 +1559,9 @@ def get_node_ips(cluster_yaml: str,
             on-prem clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
-        get_internal_ips: Whether to get internal IPs.
+        get_internal_ips: Whether to get internal IPs. When False, it is still
+            possible to get internal IPs if the cluster does not have external
+            IPs.
 
     Raises:
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
@@ -1577,7 +1579,7 @@ def get_node_ips(cluster_yaml: str,
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-        return metadata.get_ips(get_internal_ips)
+        return metadata.get_feasible_ips(get_internal_ips)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:

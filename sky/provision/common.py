@@ -60,16 +60,16 @@ class ProvisionMetadata(pydantic.BaseModel):
 class InstanceMetadata(pydantic.BaseModel):
     """Metadata from querying a cloud instance."""
     instance_id: str
-    private_ip: str
-    public_ip: Optional[str]
+    internal_ip: str
+    external_ip: Optional[str]
     tags: Dict[str, str]
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
         the public IP if it exist, otherwise it returns a private IP."""
-        if self.public_ip is not None:
-            return self.public_ip
-        return self.private_ip
+        if self.external_ip is not None:
+            return self.external_ip
+        return self.internal_ip
 
 
 class ClusterMetadata(pydantic.BaseModel):
@@ -82,25 +82,25 @@ class ClusterMetadata(pydantic.BaseModel):
         starts with head node IP, if head node exists.
 
         Returns:
-            A list of tuples (private_ip, public_ip) of all instances.
+            A list of tuples (internal_ip, external_ip) of all instances.
         """
         head_node_ip, other_ips = [], []
         for instance in self.instances.values():
-            pair = (instance.private_ip, instance.public_ip)
+            pair = (instance.internal_ip, instance.external_ip)
             if instance.instance_id == self.head_instance_id:
                 head_node_ip.append(pair)
             else:
                 other_ips.append(pair)
         return head_node_ip + other_ips
 
-    def has_public_ips(self) -> bool:
-        """True if the cluster has public IP."""
+    def has_external_ips(self) -> bool:
+        """True if the cluster has external IP."""
         ip_tuples = self.ip_tuples()
         if not ip_tuples:
             return False
         return ip_tuples[0][1] is not None
 
-    def get_ips(self, use_internal_ips: bool) -> List[str]:
+    def _get_ips(self, use_internal_ips: bool) -> List[str]:
         """Get public or private/internal IPs of all instances.
 
         It returns the IP of the head node first.
@@ -109,10 +109,10 @@ class ClusterMetadata(pydantic.BaseModel):
         ip_list = []
         if use_internal_ips:
             for pair in ip_tuples:
-                private_ip = pair[0]
-                if private_ip is None:
+                internal_ip = pair[0]
+                if internal_ip is None:
                     raise ValueError('Not all instances have private IPs')
-                ip_list.append(private_ip)
+                ip_list.append(internal_ip)
         else:
             for pair in ip_tuples:
                 public_ip = pair[1]
@@ -120,6 +120,10 @@ class ClusterMetadata(pydantic.BaseModel):
                     raise ValueError('Not all instances have public IPs')
                 ip_list.append(public_ip)
         return ip_list
+
+    def get_feasible_ips(self, force_internal_ips: bool = False) -> List[str]:
+        """Get external IPs if they exist, otherwise get internal ones."""
+        return self._get_ips(not self.has_external_ips() or force_internal_ips)
 
     def get_head_instance(self) -> Optional[InstanceMetadata]:
         """Get the instance metadata of the head node"""

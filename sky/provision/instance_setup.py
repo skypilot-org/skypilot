@@ -163,8 +163,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_metadata: common.ClusterMetadata,
                            ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the head node."""
-    ip_list = cluster_metadata.get_ips(
-        use_internal_ips=not cluster_metadata.has_public_ips())
+    ip_list = cluster_metadata.get_feasible_ips()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                  port=22,
                                                  **ssh_credentials)
@@ -207,8 +206,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     if len(cluster_metadata.instances) <= 1:
         return
     _hint_worker_log_path(cluster_name, cluster_metadata, 'ray_cluster')
-    ip_list = cluster_metadata.get_ips(
-        use_internal_ips=not cluster_metadata.has_public_ips())
+    ip_list = cluster_metadata.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list[1:], port_list=None, **ssh_credentials)
     worker_ids = [
@@ -217,7 +215,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     ]
     head_instance = cluster_metadata.get_head_instance()
     assert head_instance is not None, cluster_metadata
-    head_private_ip = head_instance.private_ip
+    head_private_ip = head_instance.internal_ip
 
     ray_options = (
         f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
@@ -275,8 +273,7 @@ def start_skylet_on_head_node(cluster_name: str,
                               ssh_credentials: Dict[str, str]) -> None:
     """Start skylet on the head node."""
     del cluster_name
-    ip_list = cluster_metadata.get_ips(
-        use_internal_ips=not cluster_metadata.has_public_ips())
+    ip_list = cluster_metadata.get_feasible_ips()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                  port=22,
                                                  **ssh_credentials)

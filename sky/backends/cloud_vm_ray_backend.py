@@ -2886,7 +2886,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Optimize the case where the cluster's IPs can be retrieved
                 # from cluster_metadata.
                 internal_ips, external_ips = zip(*cluster_metadata.ip_tuples())
-                if not cluster_metadata.has_public_ips():
+                if not cluster_metadata.has_external_ips():
                     external_ips = internal_ips
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           internal_ips=list(internal_ips),
