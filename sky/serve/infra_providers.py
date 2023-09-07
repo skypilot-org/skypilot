@@ -657,7 +657,9 @@ class SkyPilotInfraProvider(InfraProvider):
                         )
                         self._recover_from_preemption(cluster_name)
 
-                        # TODO(tgriggs): This currently attempts preemption recovery infinitely. Add support for setting retry limits in the recovery policy.
+                        # TODO(tgriggs): This currently attempts preemption recovery
+                        # infinitely. Add support for setting retry limits in the
+                        # recovery policy.
                         continue
 
                 info.consecutive_failure_cnt += 1
