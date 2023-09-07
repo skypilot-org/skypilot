@@ -13,3 +13,4 @@ from sky.serve.serve_utils import load_terminate_service_result
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceHandle
 from sky.serve.service_spec import SkyServiceSpec
+from sky.serve.resources_spec import SkyResourcesSpec

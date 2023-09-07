@@ -136,9 +136,11 @@ if __name__ == '__main__':
 
     # ======= Infra Provider =========
     service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
+    resources_spec = serve.SkyResourcesSpec.from_yaml(args.task_yaml)
     _infra_provider = infra_providers.SkyPilotInfraProvider(
         args.task_yaml,
         args.service_name,
+        resources_spec.use_spot,
         readiness_suffix=service_spec.readiness_suffix,
         initial_delay_seconds=service_spec.initial_delay_seconds,
         post_data=service_spec.post_data)
