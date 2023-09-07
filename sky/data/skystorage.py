@@ -60,8 +60,9 @@ def _add_running_csync(csync_pid: int, source_path: str):
     assert _CURSOR is not None
     assert _CONN is not None
     _CURSOR.execute(
-        'INSERT INTO running_csync (csync_pid, source_path, boot_time) VALUES (?, ?, ?)',
-        (csync_pid, source_path, _BOOT_TIME))
+        'INSERT INTO running_csync '
+        '(csync_pid, source_path, boot_time) '
+        'VALUES (?, ?, ?)', (csync_pid, source_path, _BOOT_TIME))
     _CONN.commit()
 
 
@@ -80,8 +81,9 @@ def _get_all_running_csync_pid() -> List[Any]:
 def _get_running_csync_source_path() -> List[Any]:
     """Returns all the registerd source path of CSYNC processes"""
     assert _CURSOR is not None
-    _CURSOR.execute('SELECT source_path FROM running_csync WHERE boot_time=(?)',
-                    (_BOOT_TIME,))
+    _CURSOR.execute(
+        'SELECT source_path FROM running_csync '
+        'WHERE boot_time=(?)', (_BOOT_TIME,))
     rows = _CURSOR.fetchall()
     source_paths = [row[0] for row in rows]
     return source_paths
@@ -92,8 +94,9 @@ def _set_running_csync_sync_pid(csync_pid: int, sync_pid: Optional[int]):
     """Given the process id of CSYNC, sets the sync_pid column value"""
     assert _CURSOR is not None
     assert _CONN is not None
-    _CURSOR.execute('UPDATE running_csync SET sync_pid=(?) WHERE csync_pid=(?)',
-                    (sync_pid, csync_pid))
+    _CURSOR.execute(
+        'UPDATE running_csync '
+        'SET sync_pid=(?) WHERE csync_pid=(?)', (sync_pid, csync_pid))
     _CONN.commit()
 
 
@@ -102,8 +105,8 @@ def _get_running_csync_sync_pid(csync_pid: int) -> Optional[int]:
     """Given the process id of CSYNC, returns the sync_pid column value"""
     assert _CURSOR is not None
     _CURSOR.execute(
-        'SELECT sync_pid FROM running_csync WHERE csync_pid=(?) AND boot_time=(?)',
-        (csync_pid, _BOOT_TIME))
+        'SELECT sync_pid FROM running_csync '
+        'WHERE csync_pid=(?) AND boot_time=(?)', (csync_pid, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
         return row[0]
@@ -125,8 +128,8 @@ def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
     """Given the path, returns process ID of csync running on it"""
     assert _CURSOR is not None
     _CURSOR.execute(
-        'SELECT csync_pid FROM running_csync WHERE source_path=(?) AND boot_time=(?)',
-        (path, _BOOT_TIME))
+        'SELECT csync_pid FROM running_csync '
+        'WHERE source_path=(?) AND boot_time=(?)', (path, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
         return row[0]
@@ -223,7 +226,8 @@ def run_sync(src: str,
                              f'at \'{storetype}\'')
             if max_retries > 0:
                 if backoff is None:
-                    # interval_seconds/2 is heuristically determined as initial backoff
+                    # interval_seconds/2 is heuristically determined
+                    # as initial backoff
                     backoff = common_utils.Backoff(int(interval_seconds / 2))
                 wait_time = backoff.current_backoff()
                 fout.write('Encountered an error while syncing '
@@ -241,12 +245,17 @@ def run_sync(src: str,
                                    f'number of retries. Check {log_path} for'
                                    'details') from None
 
-    #run necessary post-processes
-    _set_running_csync_sync_pid(csync_pid, -1)
-    if storetype == 's3':
-        # set number of threads back to its default value
-        config_cmd = 'aws configure set default.s3.max_concurrent_requests 10'
-        subprocess.check_output(config_cmd, shell=True)
+        #run necessary post-processes
+        _set_running_csync_sync_pid(csync_pid, -1)
+        if storetype == 's3':
+            # set number of threads back to its default value
+            config_cmd = \
+                'aws configure set default.s3.max_concurrent_requests 10'
+            subprocess.run(config_cmd,
+                           shell=True,
+                           check=True,
+                           stdout=fout,
+                           stderr=fout)
 
 
 @main.command()
