@@ -343,7 +343,7 @@ def _post_provision_setup(
 
         status.update('[bold cyan]Launching - Waiting for SSH access[/]')
         logger.debug(
-            f'\nWaiting for SSH to be available for "{cluster_name}" ...')
+            f'\nWaiting for SSH to be available for {cluster_name!r} ...')
         wait_for_ssh(cluster_metadata, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
         plural = '' if len(cluster_metadata.instances) == 1 else 's'
