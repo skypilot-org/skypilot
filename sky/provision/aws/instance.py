@@ -15,6 +15,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
+TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Max retries for general AWS API calls.
@@ -94,7 +95,12 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
 def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
                                                                           Any],
                       tags: Dict[str, str], count: int) -> List:
-    tags = {'Name': cluster_name, TAG_RAY_CLUSTER_NAME: cluster_name, **tags}
+    tags = {
+        'Name': cluster_name,
+        TAG_RAY_CLUSTER_NAME: cluster_name,
+        TAG_SKYPILOT_CLUSTER_NAME: cluster_name,
+        **tags
+    }
     conf = node_config.copy()
 
     tag_specs = [{
@@ -204,16 +210,13 @@ def run_instances(region: str, cluster_name: str,
 
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(config.tags).items()))
-    filters = [
-        {
-            'Name': 'instance-state-name',
-            'Values': ['pending', 'running', 'stopping', 'stopped'],
-        },
-        {
-            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
-        },
-    ]
+    filters = [{
+        'Name': 'instance-state-name',
+        'Values': ['pending', 'running', 'stopping', 'stopped'],
+    }, {
+        'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+        'Values': [cluster_name],
+    }]
     exist_instances = list(ec2.instances.filter(Filters=filters))
     exist_instances.sort(key=lambda x: x.id)
     head_instance_id = _get_head_instance_id(exist_instances)
@@ -246,15 +249,18 @@ def run_instances(region: str, cluster_name: str,
                 'Value': 'head'
             }, {
                 'Key': 'Name',
-                'Value': f'{cluster_name}-head'
+                'Value': f'sky-{cluster_name}-head'
             }]
         else:
             node_tag = [{
+                'Key': TAG_SKYPILOT_HEAD_NODE,
+                'Value': '0'
+            }, {
                 'Key': TAG_RAY_NODE_KIND,
                 'Value': 'worker'
             }, {
                 'Key': 'Name',
-                'Value': f'{cluster_name}-worker'
+                'Value': f'sky-{cluster_name}-worker'
             }]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],

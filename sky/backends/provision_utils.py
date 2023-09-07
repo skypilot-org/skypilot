@@ -43,6 +43,9 @@ class ClusterName:
 
     def __repr__(self) -> str:
         return repr(self.display_name)
+    
+    def __str__(self) -> str:
+        return self.display_name
 
 
 @contextlib.contextmanager
@@ -113,7 +116,7 @@ def _bulk_provision(
                                                    bootstrap_config)
         except Exception:
             logger.error('Failed to bootstrap configurations for '
-                         f'"{cluster_name}".')
+                         f'{cluster_name!r}.')
             raise
 
         try:
@@ -257,8 +260,15 @@ def _wait_ssh_connection_indirect(
     # commandline programs on both Unix-like and Windows platforms.
     # NOTE: Ray uses 'uptime' command and 10s timeout.
     command = [
-        'ssh', '-T', '-i', ssh_private_key, f'{ssh_user}@{ip}', '-o',
-        'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=20s',
+        'ssh',
+        '-T',
+        '-i',
+        ssh_private_key,
+        f'{ssh_user}@{ip}',
+        '-o',
+        'StrictHostKeyChecking=no',
+        '-o',
+        'ConnectTimeout=20s',
     ]
     if ssh_proxy_command is not None:
         command += ['-o', f'ProxyCommand={ssh_proxy_command}']
@@ -325,7 +335,7 @@ def _post_provision_setup(
 
     head_instance = cluster_metadata.get_head_instance()
     if head_instance is None:
-        raise RuntimeError(f'Provision failed for cluster "{cluster_name}". '
+        raise RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
                            'Could not find any head instance.')
 
     # TODO(suquark): Move wheel build here in future PRs.
@@ -380,8 +390,7 @@ def _post_provision_setup(
                                             wheel_hash=wheel_hash)
 
         status.update(
-            runtime_preparation_str.format(step=2,
-                                           step_name='dependencies'))
+            runtime_preparation_str.format(step=2, step_name='dependencies'))
         instance_setup.setup_runtime_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
             cluster_metadata, ssh_credentials)
@@ -391,8 +400,7 @@ def _post_provision_setup(
                                                       **ssh_credentials)
 
         status.update(
-            runtime_preparation_str.format(step=3,
-                                           step_name='runtime'))
+            runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
         if not provision_metadata.is_instance_just_booted(
                 head_instance.instance_id):
