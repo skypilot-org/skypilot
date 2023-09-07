@@ -188,15 +188,24 @@ def get_available_controller_name(
     # Only consider controllers that are less demanding than the requested
     # controller resources.
     for controller_name in existing_controllers:
+        # Filter out controllers that are more demanding than the requested
+        # controller resources.
+        less_demanding_than_all = True
+        max_memory_requirements = 0.
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
         if controller_record is not None:
             # If controller is already created, get its current resources.
             handle = controller_record['handle']
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            # We make it a list to be consistent with the case when controller
-            # is not created yet.
-            all_resources = [handle.launched_resources]
+            if not controller_resources.less_demanding_than(
+                    handle.launched_resources):
+                less_demanding_than_all = False
+            # Determine max number of services on this controller.
+            controller_cloud = handle.launched_resources.cloud
+            _, max_memory_requirements = (
+                controller_cloud.get_vcpus_mem_from_instance_type(
+                    handle.launched_resources.instance_type))
         else:
             # Corner case: Multiple `sky serve up` are running simultaneously
             # and the controller is not created yet. We created a resources
@@ -205,24 +214,14 @@ def get_available_controller_name(
             service_records = (
                 global_user_state.get_services_from_controller_name(
                     controller_name))
-            all_resources = [
-                service_record['handle'].requested_controller_resources
-                for service_record in service_records
-            ]
-        # Filter out controllers that are more demanding than the requested
-        # controller resources.
-        less_demanding_than_all = True
-        max_memory_requirements = 0.
-        for r in all_resources:
-            if not controller_resources.less_demanding_than(r):
-                less_demanding_than_all = False
-                break
-            # We have a memory requirement for controller in default
-            # configuration, so every controller should have memory.
-            assert r.memory is not None
-            # Remove the '+' in memory requirement.
-            max_memory_requirements = max(max_memory_requirements,
-                                          float(r.memory.strip('+')))
+            for service_record in service_records:
+                r = service_record['handle'].requested_controller_resources
+                if not controller_resources.less_demanding_than(r):
+                    less_demanding_than_all = False
+                    break
+                # Remove the '+' in memory requirement.
+                max_memory_requirements = max(max_memory_requirements,
+                                              float(r.memory.strip('+')))
         if less_demanding_than_all:
             # Determine max number of services on this controller.
             max_services_num = int(max_memory_requirements /
