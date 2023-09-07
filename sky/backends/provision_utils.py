@@ -248,6 +248,13 @@ def _wait_ssh_connection_direct(
                  f'{ssh_user}@{ip} echo')
     return False
 
+def _shlex_join(command: List[str]) -> str:
+    """Join a command list into a shell command string.
+    
+    This is copied from Python 3.8's shlex.join, which is not available in
+    Python 3.7.
+    """
+    return ' '.join(shlex.quote(arg) for arg in command)
 
 def _wait_ssh_connection_indirect(
         ip: str,
@@ -279,7 +286,7 @@ def _wait_ssh_connection_indirect(
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
     if proc.returncode != 0:
-        logger.debug(f'Failed SSH to {ip} with command: {shlex.join(command)}')
+        logger.debug(f'Failed SSH to {ip} with command: {_shlex_join(command)}')
     return proc.returncode == 0
 
 
