@@ -126,14 +126,14 @@ class Optimizer:
 
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
-                logger.info(
-                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order).'  # pylint: disable=line-too-long
-                )
                 resources_list = dag.tasks[0].get_resources_list()
-                logger.info([
+                accelerators_str = ', '.join([
                     r.get_accelerators_str() + r.get_spot_str()
                     for r in resources_list
                 ])
+                logger.info(
+                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
+                )
                 _ = Optimizer._set_resources_by_user_order(
                     dag=dag, blocked_resources=blocked_resources, quiet=quiet)
             else:
