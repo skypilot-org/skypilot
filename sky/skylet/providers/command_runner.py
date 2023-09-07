@@ -1,5 +1,4 @@
 """Sky's DockerCommandRunner."""
-import dataclasses
 import json
 import os
 from typing import Dict
