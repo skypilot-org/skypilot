@@ -251,7 +251,7 @@ def _wait_ssh_connection_direct(
 
 def _shlex_join(command: List[str]) -> str:
     """Join a command list into a shell command string.
-    
+
     This is copied from Python 3.8's shlex.join, which is not available in
     Python 3.7.
     """
