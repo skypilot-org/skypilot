@@ -17,23 +17,35 @@ logger = sky_logging.init_logger(__name__)
 
 _CSYNC_BASE_PATH = '~/.skystorage'
 
-_DB_PATH = os.path.expanduser('~/.sky/skystorage.db')
-pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
+_DB = None
+_CURSOR = None
+_CONN = None
 
-
-def create_table(cursor, conn):
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS running_csync (
-        csync_pid INTEGER PRIMARY KEY,
-        sync_pid INTEGER DEFAULT 0,
-        source_path TEXT)""")
-
-    conn.commit()
-
-
-_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
-_CURSOR = _DB.cursor
-_CONN = _DB.conn
+def db(func):
+    @functools.wrap(func)
+    def wrapper(*args, **kwargs):
+        if _DB is not None:
+            return
+        
+        _DB_PATH = os.path.expanduser('~/.sky/skystorage.db')
+        pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
+        
+        
+        def create_table(cursor, conn):
+            cursor.execute("""\
+                CREATE TABLE IF NOT EXISTS running_csync (
+                csync_pid INTEGER PRIMARY KEY,
+                sync_pid INTEGER DEFAULT 0,
+                source_path TEXT)""")
+        
+            conn.commit()
+        
+        global _DB, _CURSOR, _CONN
+        _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+        _CURSOR = _DB.cursor
+        _CONN = _DB.conn
+        return func(*args, **kwargs)
+    return wrapper
 
 
 def _add_running_csync(csync_pid: int, source_path: str):
