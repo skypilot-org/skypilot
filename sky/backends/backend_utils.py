@@ -124,7 +124,7 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 #   used for calculating the hash.
 # TODO(zhwu): Keep in sync with the fields used in https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/commands.py#L687-L701
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
-    'cluster_name', 'provider', 'auth', 'node_config'
+    'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
@@ -132,11 +132,19 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
 #    we use the new yaml's zone field, which is guaranteed to be the existing zone
 #    '1a'.
+# - docker_login_config: The docker_login_config field of the old yaml may be
+#   outdated or wrong. Users may want to fix the login config if a cluster fails
+#   to launch due to the login config.
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    # AWS with new provisioner has docker_login_config in the
+    # docker field, instead of the provider field.
+    ('docker', 'docker_login_config'),
+    # Other clouds
+    ('provider', 'docker_login_config'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
