@@ -405,7 +405,7 @@ def _post_provision_setup(
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:
-            logger.debug('Starting Ray on the whole cluster.')
+            logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
