@@ -1584,8 +1584,8 @@ class RetryingVmProvisioner(object):
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
                     log_dir=self.log_dir)
-                # NOTE: We handle the logic of '_ensure_cluster_ray_started'
-                # in '_post_provision_setup()'.
+                # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
+                # in 'provision_utils.post_provision_runtime_setup()' in the caller.
                 if provision_metadata is not None:
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
@@ -1597,7 +1597,7 @@ class RetryingVmProvisioner(object):
 
                 # NOTE: We try to cleanup the cluster even if the previous
                 # cluster does not exist. Also we are fast at
-                # cleaning up clusters now if there are not existing nodes.
+                # cleaning up clusters now if there is no existing node..
                 CloudVmRayBackend().post_teardown_cleanup(
                     handle, terminate=not is_prev_cluster_healthy)
                 # TODO(suquark): other clouds may have different zone
@@ -1788,7 +1788,8 @@ class RetryingVmProvisioner(object):
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
 
-    # TODO(suquark): Deprecate this method in future PRs.
+    # TODO(suquark): Deprecate this method
+    # once the `provision_utils` is adopted for all the clouds.
     @timeline.event
     def _gang_schedule_ray_up(
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
@@ -2855,14 +2856,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record['handle'] if record is not None else None
 
-            # We pass handle in the config dict for the new provisioner
             if 'provision_metadata' in config_dict:
                 # New provisioner is used here.
                 handle = config_dict['handle']
                 provision_metadata = config_dict['provision_metadata']
                 resources_vars = config_dict['resources_vars']
 
-                cluster_metadata = provision_utils.post_provision_setup(
+                # Setup SkyPilot runtime after the cluster is provisioned
+                # 1. Wait for SSH to be ready.
+                # 2. Mount the cloud credentials, skypilot wheel,
+                #    and other necessary files to the VM.
+                # 3. Run setup commands to install dependencies.
+                # 4. Starting ray cluster and skylet.
+                cluster_metadata = provision_utils.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     provision_utils.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
@@ -2872,26 +2878,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provision_metadata=provision_metadata,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
+                # We must query the IPs from the cloud provider, when the
+                # provisioning is done, to make sure the cluster IPs are
+                # up-to-date.
+                # The staled IPs may be caused by the node being restarted
+                # manually or by the cloud provider.
+                # Optimize the case where the cluster's IPs can be retrieved
+                # from cluster_metadata.
                 internal_ips, external_ips = zip(*cluster_metadata.ip_tuples())
+                if not cluster_metadata.has_external_ips():
+                    external_ips = internal_ips
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           internal_ips=list(internal_ips),
                                           external_ips=list(external_ips))
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
                 handle.docker_user = cluster_metadata.docker_user
 
-                # update launched resources
+                # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_metadata.region,
                     zone=provision_metadata.zone)
-                ip_list = cluster_metadata.get_feasible_ips()
-                if cluster_metadata.has_public_ips():
-                    ip_tuples = cluster_metadata.ip_tuples()
-                else:
-                    # This is a strange trick that our handle uses now.
-                    ip_tuples = list(zip(ip_list, ip_list))
-                handle.stable_internal_external_ips = ip_tuples
                 self._update_after_cluster_provisioned(
-                    handle, task, prev_cluster_status, ip_list,
+                    handle, task, prev_cluster_status, handle.external_ips(),
                     handle.external_ssh_ports(), lock_path)
                 return handle
 
@@ -2956,6 +2964,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
+
+            # For backward compatibility and robustness of skylet, it is checked
+            # and restarted if necessary.
+            logger.debug('Checking if skylet is running on the head node.')
+            with rich_utils.safe_status(
+                    '[bold cyan]Preparing SkyPilot runtime'):
+                self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
+
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
                                                    ssh_port_list, lock_path)
@@ -2971,12 +2987,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatibility and robustness of skylet, it is checked
-        # and restarted if necessary.
-        with rich_utils.safe_status(
-                '[bold cyan]Launching - Preparing SkyPilot runtime'):
-            self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
-
         # Update job queue to avoid stale jobs (when restarted), before
         # setting the cluster to be ready.
         if prev_cluster_status == status_lib.ClusterStatus.INIT:
@@ -2986,8 +2996,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                    handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
+            logger.debug('Update job queue on remote cluster.')
             with rich_utils.safe_status(
-                    '[bold cyan]Launching - Preparing Job Queue'):
+                    '[bold cyan]Preparing SkyPilot runtime'):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
@@ -4331,7 +4342,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Run `sky status` to see existing clusters.')
         else:
             logger.info(
-                f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
+                f'{colorama.Fore.CYAN}Creating a new cluster: {cluster_name!r} '
                 f'[{task.num_nodes}x {to_provision}].'
                 f'{colorama.Style.RESET_ALL}\n'
                 'Tip: to reuse an existing cluster, '

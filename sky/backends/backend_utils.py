@@ -1542,20 +1542,6 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     return head_ip
 
 
-def _query_cluster_ips(cloud_name: str, region: str, cluster_name: str,
-                       expected_num_nodes: int,
-                       get_internal_ips: bool) -> List[str]:
-    metadata = provision_lib.get_cluster_metadata(cloud_name, region,
-                                                  cluster_name)
-    if len(metadata.instances) < expected_num_nodes:
-        # Simulate the case when Ray head node is not up.
-        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-    if get_internal_ips:
-        return [pair[0] for pair in metadata.ip_tuples()]
-    # For compatibility: if there are no public IPs, then use private IPs.
-    return metadata.get_feasible_ips()
-
-
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
@@ -1573,7 +1559,9 @@ def get_node_ips(cluster_yaml: str,
             on-prem clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
-        get_internal_ips: Whether to get internal IPs.
+        get_internal_ips: Whether to get internal IPs. When False, it is still
+            possible to get internal IPs if the cluster does not have external
+            IPs.
 
     Raises:
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
@@ -1586,9 +1574,13 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
     if '.aws' in ray_config['provider']['module']:
-        return _query_cluster_ips('aws', ray_config['provider']['region'],
-                                  ray_config['cluster_name'],
-                                  expected_num_nodes, get_internal_ips)
+        metadata = provision_lib.get_cluster_metadata(
+            'aws', ray_config['provider']['region'], ray_config['cluster_name'])
+        if len(metadata.instances) < expected_num_nodes:
+            # Simulate the exception when Ray head node is not up.
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return metadata.get_feasible_ips(get_internal_ips)
+
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (

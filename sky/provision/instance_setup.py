@@ -48,6 +48,11 @@ _MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
 
 
 def _auto_retry(func):
+    """Decorator that retries the function if it fails.
+
+    This decorator is mostly for SSH disconnection issues, which might happen
+    during the setup of instances.
+    """
 
     @functools.wraps(func)
     def retry(*args, **kwargs):
@@ -144,12 +149,12 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
 
 
 @_log_start_end
-def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
-                                cluster_metadata: common.ClusterMetadata,
-                                ssh_credentials: Dict[str, str]) -> None:
+def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
+                             cluster_metadata: common.ClusterMetadata,
+                             ssh_credentials: Dict[str, str]) -> None:
     """Setup internal dependencies."""
     _hint_worker_log_path(cluster_name, cluster_metadata,
-                          'internal_dependencies_setup')
+                          'setup_runtime_on_cluster')
     # compute the digest
     digests = []
     for cmd in setup_commands:
@@ -177,7 +182,7 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
 
     _parallel_ssh_with_cache(_setup_node,
                              cluster_name,
-                             stage_name='internal_dependencies_setup',
+                             stage_name='setup_runtime_on_cluster',
                              digest=digest,
                              cluster_metadata=cluster_metadata,
                              ssh_credentials=ssh_credentials)
@@ -185,12 +190,14 @@ def internal_dependencies_setup(cluster_name: str, setup_commands: List[str],
 
 @_log_start_end
 @_auto_retry
-def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
-                        cluster_metadata: common.ClusterMetadata,
-                        ssh_credentials: Dict[str, str]) -> None:
+def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
+                           cluster_metadata: common.ClusterMetadata,
+                           ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the head node."""
-    ssh_runner = command_runner.SSHCommandRunner(
-        cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
+    ip_list = cluster_metadata.get_feasible_ips()
+    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
+                                                 port=22,
+                                                 **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, (cluster_name,
                                                            cluster_metadata)
     # Log the head node's output to the provision.log
@@ -222,10 +229,10 @@ def start_ray_head_node(cluster_name: str, custom_resource: Optional[str],
 
 @_log_start_end
 @_auto_retry
-def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
-                           custom_resource: Optional[str],
-                           cluster_metadata: common.ClusterMetadata,
-                           ssh_credentials: Dict[str, str]) -> None:
+def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
+                              custom_resource: Optional[str],
+                              cluster_metadata: common.ClusterMetadata,
+                              ssh_credentials: Dict[str, str]) -> None:
     """Start Ray on the worker nodes."""
     if len(cluster_metadata.instances) <= 1:
         return
@@ -239,7 +246,7 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
     ]
     head_instance = cluster_metadata.get_head_instance()
     assert head_instance is not None, cluster_metadata
-    head_private_ip = head_instance.private_ip
+    head_private_ip = head_instance.internal_ip
 
     ray_options = (
         f'--address={head_private_ip}:{constants.SKY_REMOTE_RAY_PORT} '
@@ -292,12 +299,15 @@ def start_ray_worker_nodes(cluster_name: str, no_restart: bool,
 
 @_log_start_end
 @_auto_retry
-def start_skylet(cluster_name: str, cluster_metadata: common.ClusterMetadata,
-                 ssh_credentials: Dict[str, str]) -> None:
-    """Start skylet on the header node."""
+def start_skylet_on_head_node(cluster_name: str,
+                              cluster_metadata: common.ClusterMetadata,
+                              ssh_credentials: Dict[str, str]) -> None:
+    """Start skylet on the head node."""
     del cluster_name
-    ssh_runner = command_runner.SSHCommandRunner(
-        cluster_metadata.get_feasible_ips()[0], port=22, **ssh_credentials)
+    ip_list = cluster_metadata.get_feasible_ips()
+    ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
+                                                 port=22,
+                                                 **ssh_credentials)
     assert cluster_metadata.head_instance_id is not None, cluster_metadata
     log_path_abs = str(provision_config.config.provision_log)
     logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')

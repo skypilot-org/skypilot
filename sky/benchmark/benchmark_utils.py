@@ -223,7 +223,7 @@ def _launch_with_log_suppress_exception(
             log_path=os.path.join(log_dir, f'{cluster}.log'),
             stream_logs=True,
             streaming_prefix=prefix,
-            start_streaming_at='Creating a new cluster: "',
+            start_streaming_at='Creating a new cluster: ',
             skip_lines=[
                 'Tip: to reuse an existing cluster, specify --cluster (-c).',
             ],
