@@ -248,6 +248,7 @@ def _wait_ssh_connection_direct(
                  f'{ssh_user}@{ip} echo')
     return False
 
+
 def _shlex_join(command: List[str]) -> str:
     """Join a command list into a shell command string.
     
@@ -255,6 +256,7 @@ def _shlex_join(command: List[str]) -> str:
     Python 3.7.
     """
     return ' '.join(shlex.quote(arg) for arg in command)
+
 
 def _wait_ssh_connection_indirect(
         ip: str,
