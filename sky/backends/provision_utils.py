@@ -377,15 +377,15 @@ def _post_provision_setup(
         if docker_config:
             status.update(
                 '[bold cyan]Lauching - Initializing docker container[/]')
-        docker_user = instance_setup.initialize_docker(
-            cluster_name.name_on_cloud,
-            docker_config=docker_config,
-            cluster_metadata=cluster_metadata,
-            ssh_credentials=ssh_credentials)
-        if docker_user is not None:
-            cluster_metadata.docker_user = docker_user
-            ssh_credentials['docker_user'] = docker_user
-        logger.debug(f'Docker user: {docker_user}')
+            docker_user = instance_setup.initialize_docker(
+                cluster_name.name_on_cloud,
+                docker_config=docker_config,
+                cluster_metadata=cluster_metadata,
+                ssh_credentials=ssh_credentials)
+            if docker_user is not None:
+                cluster_metadata.docker_user = docker_user
+                ssh_credentials['docker_user'] = docker_user
+            logger.debug(f'Docker user: {docker_user}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because

@@ -3,7 +3,7 @@
 import dataclasses
 import shlex
 import typing
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -57,17 +57,19 @@ def check_bind_mounts_cmd(cname, docker_cmd):
 def check_docker_image(cname, docker_cmd):
     return _check_helper(cname, '.Config.Image', docker_cmd)
 
-
 def docker_start_cmds(
     image,
     container_name,
     user_options,
     docker_cmd,
 ):
-    """Generating docker start command without --rm.
+    """Generating docker start command.
 
-    The code is borrowed from `ray.autoscaler._private.docker`. The only
-    difference is that we don't use `--rm` flag here.
+    The code is borrowed from `ray.autoscaler._private.command_runner`. 
+    We made the following two changes:
+      1. Remove `--rm` to keep the container after `ray stop` is executed.
+      2. Remove mount options, as all the file mounts will be handled after
+        the container is started, through `rsync` command.
     """
 
     # for click, used in ray cli
@@ -105,13 +107,14 @@ def _with_interactive(cmd):
 class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
-    def __init__(self, docker_config:Dict[str, Any],
+    def __init__(self, docker_config: Dict[str, Any],
                  runner: 'command_runner.SSHCommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
         self.runner = runner
         self.home_dir = None
         self.initialized = False
+        # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
         self.docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
@@ -120,8 +123,9 @@ class DockerInitializer:
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
-            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c '
-                   f'{shlex.quote(cmd)} ')
+            cmd = (
+                f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
+                f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
         rc, stdout, stderr = self.runner.run(cmd,
@@ -182,8 +186,7 @@ class DockerInitializer:
                     f'A container with name {self.container_name} is running '
                     f'image {running_image} instead of {specific_image} (which '
                     'was provided in the YAML)')
-
-        if not container_running:
+        else:
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
