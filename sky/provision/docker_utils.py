@@ -66,7 +66,7 @@ def docker_start_cmds(
 ):
     """Generating docker start command.
 
-    The code is borrowed from `ray.autoscaler._private.command_runner`. 
+    The code is borrowed from `ray.autoscaler._private.command_runner`.
     We made the following two changes:
       1. Remove `--rm` to keep the container after `ray stop` is executed.
       2. Remove mount options, as all the file mounts will be handled after
