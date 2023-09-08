@@ -490,6 +490,7 @@ class SkyPilotInfraProvider(InfraProvider):
         # TODO(tgriggs): Hook in policy strategy options here.
         logger.info(f'Beginning recovery for preempted cluster {cluster_name}.')
         self.replica_info[cluster_name].status_property.preempted = True
+        # Logs are not synced because the cluster is no longer up.
         self._teardown_cluster(cluster_name, sync_down_logs=False)
 
     def _scale_down(self, n: int) -> None:
@@ -640,7 +641,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 if self.use_spot:
                     # Pull the actual cluster status from the cloud provider to
                     # determine whether the cluster is preempted.
-                    (cluster_status, handle
+                    (cluster_status, _
                     ) = backends.backend_utils.refresh_cluster_status_handle(
                         cluster_name,
                         force_refresh_statuses=set(status_lib.ClusterStatus))
@@ -653,7 +654,7 @@ class SkyPilotInfraProvider(InfraProvider):
                             '' if cluster_status is None else
                             f' (status: {cluster_status.value})')
                         logger.info(
-                            f'Cluster {cluster_name} is preempted: {cluster_status_str}.'
+                            f'Cluster {cluster_name} is preempted{cluster_status_str}.'
                         )
                         self._recover_from_preemption(cluster_name)
 
