@@ -257,7 +257,7 @@ class DockerInitializer:
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
                 f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                'image with Docker installed.')
+                f'image with {self.docker_cmd.capitalize()} installed.')
 
     def _check_container_status(self):
         if self.initialized:
