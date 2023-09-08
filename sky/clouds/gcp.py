@@ -83,6 +83,14 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+_IMAGE_NOT_FOUND_UX_MESSAGE = (
+    'Image {image_id!r} not found in GCP.\n\n'
+    'To find GCP images: https://cloud.google.com/compute/docs/images\n'
+    'Format: projects/<project-id>/global/images/<image-name>\n'
+    'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n\n'  # pylint: disable=line-too-long
+    'Or machine image: https://cloud.google.com/compute/docs/machine-images\n'
+    'Format: projects/<project-id>/global/machineImages/<machine-image-name>')
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -362,7 +370,9 @@ class GCP(clouds.Cloud):
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
-                raise ValueError(f'Image {image_id!r} not found in GCP.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(image_id=image_id))
             project = image_attrs[1]
             image_name = image_attrs[-1]
             # We support both GCP's Machine Images and Custom Images, both
@@ -390,8 +400,9 @@ class GCP(clouds.Cloud):
                                      f'{image_id!r}') from None
             if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id!r} not found in '
-                                     'GCP.') from None
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(
+                            image_id=image_id)) from None
             raise
 
     @classmethod

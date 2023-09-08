@@ -241,8 +241,10 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} not found in '
-                                 f'AWS region {region}') from None
+                raise ValueError(
+                    f'Image {image_id!r} not found in AWS region {region}.\n'
+                    f'To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id\n'  # pylint: disable=line-too-long
+                    'Example: ami-0729d913a335efca7') from None
         return image_size
 
     @classmethod
