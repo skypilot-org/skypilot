@@ -57,6 +57,7 @@ def check_bind_mounts_cmd(cname, docker_cmd):
 def check_docker_image(cname, docker_cmd):
     return _check_helper(cname, '.Config.Image', docker_cmd)
 
+
 def docker_start_cmds(
     image,
     container_name,
@@ -123,9 +124,8 @@ class DockerInitializer:
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
-            cmd = (
-                f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
-                f' {shlex.quote(cmd)} ')
+            cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
+                   f' {shlex.quote(cmd)} ')
 
         logger.debug(f'+ {cmd}')
         rc, stdout, stderr = self.runner.run(cmd,
