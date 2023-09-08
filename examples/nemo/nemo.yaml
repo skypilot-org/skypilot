@@ -8,6 +8,11 @@
 #
 # Usage:
 #   sky launch -c nemo nemo.yaml
+#
+#   # Or try on spot A100 GPUs:
+#   sky launch -c nemo nemo.yaml --use-spot --gpus A100:1
+#
+#   # Terminate cluster after you're done
 #   sky down nemo
 
 resources:
