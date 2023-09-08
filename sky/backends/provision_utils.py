@@ -466,7 +466,7 @@ def _post_provision_setup(
                                                  cluster_metadata,
                                                  ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully launched cluster: '
+    logger.info(f'{colorama.Fore.GREEN}Successfully provisioned cluster: '
                 f'{cluster_name}{colorama.Style.RESET_ALL}')
     return cluster_metadata
 
