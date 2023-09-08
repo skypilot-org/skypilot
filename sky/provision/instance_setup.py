@@ -191,7 +191,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # Reference: https://github.com/skypilot-org/skypilot/issues/2441
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
+           f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
+           _DUMP_RAY_PORTS)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
