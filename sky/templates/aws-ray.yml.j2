@@ -14,6 +14,15 @@ docker:
     {%- if custom_resources is not none %}
       --gpus all
     {%- endif %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
 {%- endif %}
 
 provider:
@@ -94,7 +103,7 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - |
+              - |-
                 skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
