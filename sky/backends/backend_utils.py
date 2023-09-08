@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import collections
+import copy
 from datetime import datetime
 import difflib
 import enum
@@ -2639,16 +2640,18 @@ def _refresh_service_record_no_lock(
     record = global_user_state.get_service_from_name(service_name)
     if record is None:
         return None, None
+    record_with_default = copy.copy(record)
+    record_with_default['replica_info'] = []
     service_handle: serve_lib.ServiceHandle = record['handle']
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
-        return record, 'Failed to refresh replica info due to network error.'
+        return record_with_default, 'Failed to refresh replica info due to network error.'
 
     if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
-        return record, None
+        return record_with_default, None
 
     controller_name = record['controller_name']
     cluster_record = global_user_state.get_cluster_from_name(controller_name)
@@ -2656,15 +2659,15 @@ def _refresh_service_record_no_lock(
             cluster_record['status'] != status_lib.ClusterStatus.UP):
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_name!r} '
-                        'is not found or UP.')
+        return record_with_default, (f'Controller cluster {controller_name!r} '
+                                     'is not found or UP.')
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     if service_handle.controller_port is None:
-        return record, 'Controller task is not successfully launched.'
+        return record_with_default, 'Controller task is not successfully launched.'
 
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)
@@ -2675,8 +2678,9 @@ def _refresh_service_record_no_lock(
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        return record, ('Failed to refresh replica info from the controller. '
-                        f'Using the cached record. Reason: {stderr}')
+        return record_with_default, (
+            'Failed to refresh replica info from the controller. '
+            f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.uptime = latest_info['uptime']
@@ -2709,10 +2713,6 @@ def _refresh_service_record(
         with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
                                SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
             record, msg = _refresh_service_record_no_lock(service_name)
-            # Handle the case when not successfully refresh the service status.
-            if record is not None:
-                if 'replica_info' not in record:
-                    record['replica_info'] = []
             return record, msg
     except filelock.Timeout:
         msg = ('Failed get the lock for service '

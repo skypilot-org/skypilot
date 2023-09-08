@@ -153,6 +153,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [],
     'oci': ['oci'],
     'kubernetes': ['kubernetes'],
+    'serve': ['uvicorn', 'fastapi'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

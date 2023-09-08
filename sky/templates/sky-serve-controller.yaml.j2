@@ -1,32 +1,14 @@
 # The template for the sky serve controller
 
 setup: |
-  # Install serve dependencies.
-  (pip list | grep uvicorn > /dev/null 2>&1 && \
-   pip list | grep fastapi > /dev/null 2>&1 ) || \
-   pip install uvicorn fastapi 2>&1 > /dev/null
+  # Install all cloud dependencies.
+  # This is for multicloud support. To allow controller launch on all clouds,
+  # we need to install all cloud dependencies.
+  # This also includes all serve dependencies.
+  pip install skypilot[all] > /dev/null 2>&1
 
-  # Following commands are borrowed from spot-controller.yaml.j2.
-  # NOTE(dev): Keep this align with spot-controller.yaml.j2.
-
-  # Install cli dependencies
-  # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
-  # TODO(zhwu): Keep the dependencies align with the ones in setup.py
-  (pip list | grep boto3 > /dev/null 2>&1 && \
-   pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
-   pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
-
-  (pip list | grep azure-cli > /dev/null 2>&1) || \
-   pip install azure-cli==2.31.0 azure-core 2>&1 > /dev/null
-
+  # Install gcloud CLI.
   {{google_sdk_installation_commands}}
-
-  pip list | grep oci  > /dev/null 2>&1 || pip install oci 2>&1 > /dev/null
-
-  # Internal: disable logging for manually logging into the spot controller for debugging.
-  {% if is_dev %}
-  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
-  {% endif %}
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}

@@ -47,11 +47,10 @@ class SkyServeLoadBalancer:
             except exceptions.MaxRetryError:
                 # Retry if cannot connect to controller
                 continue
-            else:
-                if resp.status_code == 200:
-                    self.load_balancing_policy.set_query_interval(
-                        resp.json()['query_interval'])
-                    return
+            if resp.status_code == 200:
+                self.load_balancing_policy.set_query_interval(
+                    resp.json()['query_interval'])
+                return
             time.sleep(10)
         logger.error('Failed to get autoscaler query interval. '
                      'Use default interval instead.')

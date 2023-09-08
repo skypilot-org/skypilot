@@ -1027,32 +1027,20 @@ def serve_up(
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller
     # name.
-    try:
-        # TODO(tian): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(serve.CONTROLLER_SELECTION_FILE_LOCK_PATH,
-                               serve.CONTROLLER_SELECTION_FILE_LOCK_TIMEOUT):
-            controller_name, _ = serve.get_available_controller_name(
-                controller_resources)
-            global_user_state.add_or_update_service(
-                service_name, None, controller_name, service_handle,
-                status_lib.ServiceStatus.CONTROLLER_INIT)
-    except filelock.Timeout as e:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Cannot select controller for service {service_name!r}. '
-                'Please check if there are some `sky serve up` process hanging '
-                'abnormally.') from e
-
-    # Generate ports for the controller and load balancer.
+    # In the same time, generate ports for the controller and load balancer.
     # Use file lock to make sure the ports are unique.
     try:
         # TODO(tian): remove pylint disabling when filelock
         # version updated
         # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(serve.PORTS_GENERATION_FILE_LOCK_PATH,
-                               serve.PORTS_GENERATION_FILE_LOCK_TIMEOUT):
+        with filelock.FileLock(serve.CONTROLLER_FILE_LOCK_PATH,
+                               serve.CONTROLLER_FILE_LOCK_TIMEOUT):
+            controller_name, _ = serve.get_available_controller_name(
+                controller_resources)
+            global_user_state.add_or_update_service(
+                service_name, None, controller_name, service_handle,
+                status_lib.ServiceStatus.CONTROLLER_INIT)
+
             controller_port, load_balancer_port = (
                 serve.gen_ports_for_serve_process(controller_name))
             service_handle.controller_port = controller_port
@@ -1061,9 +1049,9 @@ def serve_up(
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Cannot generate controller and load balancer port for '
-                f'service {service_name!r}. Please check if there are some '
-                '`sky serve up` process hanging abnormally.') from e
+                f'Cannot select controller for service {service_name!r}. '
+                'Please check if there are some `sky serve up` process hanging '
+                'abnormally.') from e
 
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
