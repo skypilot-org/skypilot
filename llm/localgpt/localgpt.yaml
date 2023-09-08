@@ -7,7 +7,7 @@
 #   * Open http://localhost:5111 in your browser
 
 resources:
-  accelerators: T4:1
+  accelerators: L4:1
 
 setup: |
   conda activate py39
