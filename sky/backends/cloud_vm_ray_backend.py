@@ -4587,8 +4587,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
             storage_mounts_metadata[dst] = storage_obj.handle
-        global_user_state.set_cluster_storage_mounts_metadata(
-            cluster_name, storage_mounts_metadata)
+        lock_path = \
+            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name)
+        with filelock.FileLock(lock_path):
+            global_user_state.set_cluster_storage_mounts_metadata(
+                cluster_name, storage_mounts_metadata)
 
     def _get_cluster_storage_mounts_metadata(
             self,
@@ -4598,9 +4601,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         After retrieving storage_mounts_metadata, it converts back the
         StorageMetadata to Storage object and restores 'storage_mounts'
         """
-        storage_mounts_metadata = \
-            global_user_state.get_cluster_storage_mounts_metadata(
-            cluster_name)
+        lock_path = \
+            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name)
+        with filelock.FileLock(lock_path):
+            storage_mounts_metadata = \
+                global_user_state.get_cluster_storage_mounts_metadata(
+                cluster_name)
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}

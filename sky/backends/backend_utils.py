@@ -110,6 +110,10 @@ SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Filelocks for updating cluster's file_mounts.
+CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
+    '~/.sky/.{}_file_mounts.lock')
+
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
@@ -2904,6 +2908,6 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                 f'Details: {stderr}')
 
     logger.info(f'CSYNC termination initiated for {cluster_name}. If a '
-                'sync process is currently running, we will wait for it '
-                'to complete before terminating the CSYNC daemon...\n')
+                'sync process is currently running, CSYNC will terminate '
+                'after it completes.\n')
     subprocess_utils.run_in_parallel(_run_csync_terminate, runners)
