@@ -1121,12 +1121,19 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            #if data_utils.s5cmd_installed():
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {base_dir_path} '
-                            f's3://{self.name}')
+            if data_utils.s5cmd_installed():
+                includes = ' '.join(
+                    [f'--include "*/{file_name}"' for file_name in file_names])
+                sync_command = ('s5cmd sync '
+                                f'--destination-region {self.region} '
+                                f'--no-follow-symlinks {includes} '
+                                f'{base_dir_path}/ s3://{self.name}')
+            else:
+                includes = ' '.join(
+                    [f'--include "{file_name}"' for file_name in file_names])
+                sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                                f'{includes} {base_dir_path} '
+                                f's3://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
