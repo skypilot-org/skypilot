@@ -1131,9 +1131,10 @@ class S3Store(AbstractStore):
             else:
                 includes = ' '.join(
                     [f'--include "{file_name}"' for file_name in file_names])
-                sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                                f'{includes} {base_dir_path} '
-                                f's3://{self.name}')
+                sync_command = (
+                    'aws s3 sync --no-follow-symlinks --exclude="*" '
+                    f'{includes} {base_dir_path} '
+                    f's3://{self.name}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1141,8 +1142,6 @@ class S3Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
             if data_utils.s5cmd_installed():
                 # s5cmd copies the directory itself as well without
                 # '/' appeneded to the end of src path unlike aws s3 sync
@@ -1150,16 +1149,22 @@ class S3Store(AbstractStore):
                     src_dir_path += '/'
                 if dest_dir_name and not dest_dir_name.endswith('/'):
                     dest_dir_name += '/'
+                excludes = ' '.join([
+                    f'--exclude "*/{file_name}"' for file_name in excluded_list
+                ])
                 sync_command = (
                     f's5cmd sync --destination-region {self.region} '
                     f'--no-follow-symlinks {excludes} {src_dir_path} '
                     f's3://{self.name}/{dest_dir_name}')
+
             else:
                 logger.info('Consider installing \'s5cmd\' for improved '
                             'performance on syncing local machine to '
                             's3 bucket. For more info: '
                             'https://github.com/peak/s5cmd#installation')
                 # we exclude .git directory from the sync
+                excludes = ' '.join(
+                    [f'--exclude "{file_name}"' for file_name in excluded_list])
                 sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                                 f'{src_dir_path} '
                                 f's3://{self.name}/{dest_dir_name}')
