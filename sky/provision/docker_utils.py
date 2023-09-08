@@ -105,7 +105,7 @@ def _with_interactive(cmd):
 class DockerInitializer:
     """Initializer for docker containers on a remote node."""
 
-    def __init__(self, docker_config: dict,
+    def __init__(self, docker_config:Dict[str, Any],
                  runner: 'command_runner.SSHCommandRunner', log_path: str):
         self.docker_config = docker_config
         self.container_name = docker_config['container_name']
@@ -257,7 +257,7 @@ class DockerInitializer:
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
                 f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                'image with Docker installed.')
+                f'image with {self.docker_cmd.capitalize()} installed.')
 
     def _check_container_status(self):
         if self.initialized:
