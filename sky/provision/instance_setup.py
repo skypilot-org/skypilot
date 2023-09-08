@@ -129,7 +129,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
     @_auto_retry
     def _initialize_docker(runner: command_runner.SSHCommandRunner,
                            metadata: common.InstanceMetadata, log_path: str):
-        del metadata
+        del metadata  # Unused.
         docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                                      log_path).initialize()
         logger.debug(f'Initialized docker user: {docker_user}')
