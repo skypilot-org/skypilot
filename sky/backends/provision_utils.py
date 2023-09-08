@@ -382,9 +382,13 @@ def _post_provision_setup(
                 docker_config=docker_config,
                 cluster_metadata=cluster_metadata,
                 ssh_credentials=ssh_credentials)
-            if docker_user is not None:
-                cluster_metadata.docker_user = docker_user
-                ssh_credentials['docker_user'] = docker_user
+            if docker_user is None:
+                raise RuntimeError(
+                    f'Failed to retrieve docker user for {cluster_name!r}. '
+                    'Please check your docker configuration.')
+            
+            cluster_metadata.docker_user = docker_user
+            ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
 
         # We mount the metadata with sky wheel for speedup.

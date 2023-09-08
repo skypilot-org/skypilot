@@ -140,8 +140,9 @@ class DockerInitializer:
             rc,
             cmd,
             error_msg='Failed to run docker setup commands',
-            stderr=stdout + stderr)
-        return stdout
+            stderr=stdout + stderr,
+            stream_logs=False)
+        return stdout.strip()
 
     def initialize(self) -> str:
         specific_image = self.docker_config['image']
@@ -156,7 +157,7 @@ class DockerInitializer:
             self.initialized = True
             self._run(f'{self.docker_cmd} start {self.container_name}')
             self._run('sudo service ssh start', run_env='docker')
-            return self._run('whoami', run_env='docker').strip()
+            return self._run('whoami', run_env='docker')
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
@@ -184,7 +185,7 @@ class DockerInitializer:
         if container_running:
             running_image = (self._run(
                 check_docker_image(self.container_name,
-                                   self.docker_cmd)).strip())
+                                   self.docker_cmd)))
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
@@ -253,14 +254,14 @@ class DockerInitializer:
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.
-        docker_user = self._run('whoami', run_env='docker').strip()
+        docker_user = self._run('whoami', run_env='docker')
         self.initialized = True
         return docker_user
 
     def _check_docker_installed(self):
         no_exist = 'NoExist'
         cleaned_output = self._run(
-            f'command -v {self.docker_cmd} || echo {no_exist!r}').strip()
+            f'command -v {self.docker_cmd} || echo {no_exist!r}')
         if no_exist in cleaned_output or 'docker' not in cleaned_output:
             logger.error(
                 f'{self.docker_cmd.capitalize()} not installed. Please use an '
@@ -271,7 +272,7 @@ class DockerInitializer:
             return True
         output = (self._run(
             check_docker_running_cmd(self.container_name,
-                                     self.docker_cmd)).strip())
+                                     self.docker_cmd)))
         # Checks for the false positive where 'true' is in the container name
         return 'true' in output.lower(
         ) and 'no such object' not in output.lower()
@@ -282,7 +283,7 @@ class DockerInitializer:
             if self.home_dir is None:
                 self.home_dir = (self._run(
                     f'{self.docker_cmd} exec {self.container_name} '
-                    'printenv HOME',).strip())
+                    'printenv HOME',))
 
             if any_char:
                 return string.replace('~/', self.home_dir + '/')
@@ -297,15 +298,17 @@ class DockerInitializer:
             return run_options
 
         runtime_output = (self._run(f'{self.docker_cmd} ' +
-                                    'info -f "{{.Runtimes}}"').strip())
+                                    'info -f "{{.Runtimes}}"'))
         if 'nvidia-container-runtime' in runtime_output:
             try:
                 self._run('nvidia-smi')
                 return run_options + ['--runtime=nvidia']
             except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    'Nvidia Container Runtime is present, but no GPUs found.')
-                logger.debug(f'nvidia-smi error: {e}')
+                logger.debug(
+                    'Nvidia Container Runtime is present in the docker image'
+                    'specified, but no GPUs found on the cluster. It should '
+                    'still if the cluster is expected to have no GPU.\n'
+                    f'  Details for nvidia-smi: {e}')
                 return run_options
 
         return run_options
@@ -319,7 +322,7 @@ class DockerInitializer:
                             f'`run_option`: {run_opt}')
                 return run_options
         try:
-            shm_output = self._run('cat /proc/meminfo || true').strip()
+            shm_output = self._run('cat /proc/meminfo || true')
             available_memory = int([
                 ln for ln in shm_output.split('\n') if 'MemAvailable' in ln
             ][0].split()[1])
@@ -344,6 +347,6 @@ class DockerInitializer:
             return True
         output = (self._run(
             check_docker_running_cmd(self.container_name,
-                                     self.docker_cmd)).strip())
+                                     self.docker_cmd)))
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()

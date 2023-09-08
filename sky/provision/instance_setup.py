@@ -146,6 +146,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
         cluster_metadata=cluster_metadata,
         ssh_credentials=ssh_credentials)
     logger.debug(f'All docker users: {docker_users}')
+    assert len(set(docker_users)) == 1, docker_users
     return docker_users[0]
 
 
