@@ -56,5 +56,3 @@ run: |
     model.task_name=cola \
     trainer.max_epochs=10 \
     trainer.num_nodes=${num_nodes}
-  
-  
