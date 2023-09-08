@@ -124,6 +124,10 @@ class DockerInitializer:
         if run_env == 'docker':
             cmd = self._docker_expand_user(cmd, any_char=True)
             cmd = ' '.join(_with_interactive(cmd))
+            # SkyPilot: We do not include `-it` flag here, as that will cause
+            # an error: `the input device is not a TTY`, and it works without
+            # `-it` flag.
+            # TODO(zhwu): ray use the `-it` flag, we need to check why.
             cmd = (f'{self.docker_cmd} exec {self.container_name} /bin/bash -c'
                    f' {shlex.quote(cmd)} ')
 
