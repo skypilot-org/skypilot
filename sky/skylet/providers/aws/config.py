@@ -1012,22 +1012,26 @@ def _update_inbound_rules(target_security_group, sgids, config):
     ip_permissions = _create_default_inbound_rules(
         sgids, user_specified_rules, extended_rules
     )
-    try:
-        target_security_group.authorize_ingress(IpPermissions=ip_permissions)
-    except botocore.exceptions.ClientError as e:
-        if str(e) == _DUPLICATED_INBOUND_RULES_MSG:
-            logger.warning(
-                f"{cf.bold(target_security_group.group_name)} already has "
-                f"ingress rules matching {cf.bold(ip_permissions)}. "
-                "Skipping ingress rule update."
-            )
-        else:
-            handle_boto_error(
-                e,
-                "Failed to update security group {} with inbound rules.",
-                cf.bold(target_security_group.group_name),
-            )
-            raise e
+    failed_rules = []
+    errs = []
+    for ip_permission in ip_permissions:
+        try:
+            target_security_group.authorize_ingress(IpPermissions=[ip_permission])
+        except botocore.exceptions.ClientError as e:
+            if str(e) == _DUPLICATED_INBOUND_RULES_MSG:
+                logger.warning(
+                    f"{cf.bold(target_security_group.group_name)} already has "
+                    f"ingress rules matching {cf.bold(ip_permission)}. "
+                    "Skipping ingress rule update."
+                )
+            else:
+                failed_rules.append(ip_permission)
+                errs.append(e)
+    if failed_rules:
+        raise RuntimeError(
+            f"Failed to update security group {target_security_group.group_name} "
+            f"with inbound rules: {failed_rules}. Errors: {errs}"
+        )
 
 
 def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=None):
