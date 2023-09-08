@@ -24,6 +24,7 @@ _MAX_RETRY = 5
 
 # Increase the limit of the number of open files for the raylet process,
 # as the `ulimit` may not take effect at this point, because it requires
+# all the sessions to be reloaded. This is a workaround.
 _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); '
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
@@ -172,6 +173,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     # Log the head node's output to the provision.log
     log_path_abs = str(provision_config.config.provision_log)
     ray_options = (
+        # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+        f'--disable-usage-stats '
         f'--port={constants.SKY_REMOTE_RAY_PORT} '
         f'--dashboard-port={constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
         f'--object-manager-port=8076 '
@@ -179,10 +182,16 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials
+    # from environment variables set by user. SkyPilot's ray cluster should use
+    # the `~/.aws/` credentials, as that is the one used to create the cluster,
+    # and the autoscaler module started by the `ray start` command should use
+    # the same credentials. Otherwise, `ray status` will fail to fetch the
+    # available nodes.
+    # Reference: https://github.com/skypilot-org/skypilot/issues/2441
     cmd = ('ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
-           'ray start --disable-usage-stats --head '
-           f'{ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
+           f'ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,
@@ -223,6 +232,8 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     if custom_resource:
         ray_options += f' --resources=\'{custom_resource}\''
 
+    # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
+    # `start_ray_on_head_node`.
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +

@@ -38,15 +38,6 @@ provider:
     - {{port}}
 {%- endfor %}
 {%- endif %}
-{%- if docker_login_config is not none %}
-  # We put docker login config in provider section because ray's schema disabled
-  # additionalProperties for docker config.
-  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
-  docker_login_config:
-    username: {{docker_login_config.username}}
-    password: {{docker_login_config.password}}
-    server: {{docker_login_config.server}}
-{%- endif %}
   use_internal_ips: {{use_internal_ips}}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
@@ -136,9 +127,6 @@ file_mounts: {
 {%- endfor %}
 }
 
-rsync_exclude: []
-
-initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -171,38 +159,7 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
 
-# Command to start ray on the head node. You don't need to change this.
-# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
-# connection, which is expensive. Try your best to co-locate commands into fewer
-# items! The same comment applies for worker_start_ray_commands.
-#
-# Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 1
-head_start_ray_commands:
-  # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials from environment
-  #   variables set by user. SkyPilot's ray cluster should use the `~/.aws/` credentials, as that is
-  #   the one used to create the cluster, and the autoscaler module started by the `ray start` command
-  #   should use the same credentials. Otherwise, `ray status` will fail to fetch the available nodes. Reference: https://github.com/skypilot-org/skypilot/issues/2441
-  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
-  # all the sessions to be reloaded. This is a workaround.
-  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-    {{dump_port_command}};
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.
 
-{%- if num_nodes > 1 %}
-worker_start_ray_commands:
-  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-{%- else %}
-worker_start_ray_commands: []
-{%- endif %}
 
-head_node: {}
-worker_nodes: {}
-
-# These fields are required for external cloud providers.
-head_setup_commands: []
-worker_setup_commands: []
-cluster_synced_files: []
-file_mounts_sync_continuously: False
