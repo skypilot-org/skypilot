@@ -244,7 +244,7 @@ def _wait_ssh_connection_direct(
         pass
     except Exception:  # pylint: disable=broad-except
         pass
-    logger.debug(f'Failed SSH to {ip}. Try: ssh -i {ssh_private_key} '
+    logger.debug(f'Waiting for SSH to {ip}. Try: ssh -i {ssh_private_key} '
                  '-o StrictHostKeyChecking=no -o ConnectTimeout=20s -o '
                  f'{ssh_user}@{ip} echo')
     return False
@@ -289,7 +289,8 @@ def _wait_ssh_connection_indirect(
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL)
     if proc.returncode != 0:
-        logger.debug(f'Failed SSH to {ip} with command: {_shlex_join(command)}')
+        logger.debug(
+            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}')
     return proc.returncode == 0
 
 
