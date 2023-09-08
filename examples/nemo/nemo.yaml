@@ -49,7 +49,7 @@ run: |
   
   # Run glue_benchmark.py
   python -m torch.distributed.run \
-    --nproc_per_node=1 \
+    --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
     --nnodes=${num_nodes} \
     --node_rank=${SKYPILOT_NODE_RANK} \
     --master_addr=${master_addr} \
