@@ -184,8 +184,7 @@ class DockerInitializer:
         container_running = self._check_container_status()
         if container_running:
             running_image = (self._run(
-                check_docker_image(self.container_name,
-                                   self.docker_cmd)))
+                check_docker_image(self.container_name, self.docker_cmd)))
             if running_image != specific_image:
                 logger.error(
                     f'A container with name {self.container_name} is running '
@@ -271,8 +270,7 @@ class DockerInitializer:
         if self.initialized:
             return True
         output = (self._run(
-            check_docker_running_cmd(self.container_name,
-                                     self.docker_cmd)))
+            check_docker_running_cmd(self.container_name, self.docker_cmd)))
         # Checks for the false positive where 'true' is in the container name
         return 'true' in output.lower(
         ) and 'no such object' not in output.lower()
@@ -346,7 +344,6 @@ class DockerInitializer:
         if self.initialized:
             return True
         output = (self._run(
-            check_docker_running_cmd(self.container_name,
-                                     self.docker_cmd)))
+            check_docker_running_cmd(self.container_name, self.docker_cmd)))
         return 'false' in output.lower(
         ) and 'no such object' not in output.lower()

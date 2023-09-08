@@ -386,7 +386,7 @@ def _post_provision_setup(
                 raise RuntimeError(
                     f'Failed to retrieve docker user for {cluster_name!r}. '
                     'Please check your docker configuration.')
-            
+
             cluster_metadata.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
