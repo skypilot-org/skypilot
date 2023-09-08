@@ -140,7 +140,7 @@ Available fields:
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
-      # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
       # Or machine image: https://cloud.google.com/compute/docs/machine-images
       # image_id: projects/my-project/global/machineImages/my-machine-image
       #
