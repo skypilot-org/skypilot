@@ -548,7 +548,7 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
             print(line, end='', flush=True)
 
 
-def cleanup_utility_files(service_name: str) -> None:
+def cleanup_service_files(service_name: str) -> None:
     """Cleanup utility files for a service."""
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
@@ -607,9 +607,9 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cleanup_utility_files(cls, service_name: str) -> str:
+    def cleanup_service_files(cls, service_name: str) -> str:
         code = [
-            f'serve_utils.cleanup_utility_files({service_name!r})',
+            f'serve_utils.cleanup_service_files({service_name!r})',
         ]
         return cls._build(code)
 

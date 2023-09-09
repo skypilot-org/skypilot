@@ -1,5 +1,7 @@
 """Constants used for SkyServe."""
 
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
+
 CONTROLLER_PREFIX = 'sky-serve-controller-'
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
@@ -24,6 +26,8 @@ SERVE_STARTUP_TIMEOUT = 60
 # We need 200 GB disk space to enable using Azure as controller, since its image
 # size is 150 GB. Also, we need 32 GB memory to run our controller and load
 # balancer jobs since it is very memory demanding.
+# TODO(tian): We might need to be careful that service logs can take a lot of
+# disk space. Maybe we could use a larger disk size or migrate to cloud storage.
 CONTROLLER_RESOURCES = {'disk_size': 200, 'memory': '32+'}
 
 # Our ray jobs is very memory demanding and number of services on a single

@@ -2797,10 +2797,15 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
-    """Returns the accelerator dict of the task"""
+def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+    """Returns the resources dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
-    resources_dict = None
+    resources_dict = {
+        # We set CPU resource for sky serve controller to a smaller value
+        # to support a larger number of services.
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND if
+                task.is_sky_serve_controller_task else DEFAULT_TASK_CPU_DEMAND)
+    }
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2808,21 +2813,14 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        resources_dict = resources.accelerators
-    if task.is_sky_serve_controller_task:
-        if resources_dict is None:
-            resources_dict = dict()
-        resources_dict['CPU'] = serve_lib.SERVICES_TASK_CPU_DEMAND
+    if resources is not None and resources.accelerators is not None:
+        resources_dict.update(resources.accelerators)
     return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
-    if resources_dict is None:
-        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
-    else:
-        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
 

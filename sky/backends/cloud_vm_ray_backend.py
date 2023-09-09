@@ -287,7 +287,7 @@ class RayCodeGen:
     def add_gang_scheduling_placement_group_and_setup(
         self,
         num_nodes: int,
-        resources_dict: Optional[Dict[str, float]],
+        resources_dict: Dict[str, float],
         stable_cluster_internal_ips: List[str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
@@ -305,18 +305,16 @@ class RayCodeGen:
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
-        default_task_cpu_demand = backend_utils.DEFAULT_TASK_CPU_DEMAND
-        if resources_dict is not None and 'CPU' in resources_dict:
-            default_task_cpu_demand = resources_dict.pop('CPU')
-            if not resources_dict:
-                # Set to None here for the sake of the code below.
-                resources_dict = None
+        task_cpu_demand = resources_dict.pop('CPU')
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{'CPU': default_task_cpu_demand} for _ in range(num_nodes)]
+        bundles = [{'CPU': task_cpu_demand} for _ in range(num_nodes)]
 
-        if resources_dict is not None:
+        if resources_dict:
+            assert len(resources_dict) == 1, \
+                ('There can only be one type of accelerator per instance.'
+                 f' Found: {resources_dict}.')
             acc_name = list(resources_dict.keys())[0]
             acc_count = list(resources_dict.values())[0]
             gpu_dict = {'GPU': acc_count}
@@ -420,7 +418,7 @@ class RayCodeGen:
                     return ray.util.get_node_ip_address()
                 gang_scheduling_id_to_ip = ray.get([
                     check_ip.options(
-                            num_cpus={default_task_cpu_demand},
+                            num_cpus={task_cpu_demand},
                             scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
                                 placement_group=pg,
                                 placement_group_bundle_index=i
@@ -458,7 +456,7 @@ class RayCodeGen:
                      bash_script: Optional[str],
                      task_name: Optional[str],
                      job_run_id: Optional[str],
-                     ray_resources_dict: Optional[Dict[str, float]],
+                     ray_resources_dict: Dict[str, float],
                      log_dir: str,
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0,
@@ -470,20 +468,15 @@ class RayCodeGen:
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
-        default_task_cpu_demand = backend_utils.DEFAULT_TASK_CPU_DEMAND
-        if ray_resources_dict is not None and 'CPU' in ray_resources_dict:
-            default_task_cpu_demand = ray_resources_dict.pop('CPU')
-            if not ray_resources_dict:
-                # Set to None here for the sake of the code below.
-                ray_resources_dict = None
+        task_cpu_demand = ray_resources_dict.pop('CPU')
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
         options = []
-        options.append(f'num_cpus={default_task_cpu_demand}')
+        options.append(f'num_cpus={task_cpu_demand}')
 
         num_gpus = 0.0
-        if ray_resources_dict is not None:
+        if ray_resources_dict:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')

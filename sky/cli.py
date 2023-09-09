@@ -2673,6 +2673,25 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                        'to terminate (see caveats above).')
 
 
+def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+    services = global_user_state.get_services_from_controller_name(
+        controller_name)
+    if services:
+        service_names = [service['name'] for service in services]
+        with ux_utils.print_exception_no_traceback():
+            plural = '' if len(service_names) == 1 else 's'
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.RED}Tearing down the sky serve controller '
+                f'is not supported, as it is currently serving the following '
+                f'service{plural}: {", ".join(service_names)}. Please teardown '
+                f'the service{plural} first with {colorama.Style.BRIGHT}sky '
+                f'serve down {" ".join(service_names)}'
+                f'{colorama.Style.RESET_ALL}.')
+    msg = (f'Tearing down sky serve controller: {controller_name}. It will '
+           'increase cold start time for your next `sky serve up` commands.')
+    click.echo(msg)
+
+
 def _down_or_stop_clusters(
         names: List[str],
         apply_to_all: Optional[bool],
@@ -2752,10 +2771,29 @@ def _down_or_stop_clusters(
                     f'{names_str} is currently not supported.\n'
                     'Please omit the cluster(s) with reserved prefix '
                     f'{name_to_reserved_prefix.values()}.')
-            raise click.UsageError(
-                f'{operation} cluster(s) with reserved prefix '
-                f'{reserve_prefix_str} is not supported. To teardown a '
-                'service, please use `sky serve down`.')
+            if not down:
+                raise click.UsageError(
+                    f'{operation} cluster(s) with reserved prefix '
+                    f'{reserve_prefix_str} is not supported. To teardown a '
+                    'service, please use `sky serve down`.')
+            else:
+                if len(name_to_reserved_prefix) > 1:
+                    raise click.UsageError(
+                        f'{operation} multiple clusters with reserved prefix '
+                        f'{reserve_prefix_str} is currently not supported.\n'
+                        'Please omit all but one of the clusters.')
+                # We can only teardown one reserved cluster (sky serve
+                # controller) for now.
+                _hint_or_raise_for_down_sky_serve_controller(
+                    list(name_to_reserved_prefix.keys())[0])
+                confirm_str = 'delete'
+                user_input = click.prompt(
+                    f'To proceed, please type {colorama.Style.BRIGHT}'
+                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
+                    type=str)
+                if user_input != confirm_str:
+                    raise click.Abort()
+                no_confirm = True
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
         if len(reserved_clusters) > 0:

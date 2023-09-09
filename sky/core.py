@@ -30,16 +30,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_SERVE_TAIL_LOGS_USAGE = """\
-Usage: core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
-One and only one of <target> must be specified: controller, load_balancer, or \
-replica_id.
-To tail controller logs:
-    core.serve_tail_logs(service_name, controller=True) # follow default to True
-To print replica 3 logs:
-    core.serve_tail_logs(service_name, replica_id=3, follow=False)
-"""
-
 # ======================
 # = Cluster Management =
 # ======================
@@ -134,10 +124,26 @@ def serve_tail_logs(service_name: str,
                     load_balancer: bool = False,
                     replica_id: Optional[int] = None,
                     follow: bool = True) -> None:
+    """Tail logs for a service.
+
+    Usage:
+        core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
+
+    One and only one of <target> must be specified: controller, load_balancer,
+    or replica_id.
+
+    To tail controller logs:
+        # follow default to True
+        core.serve_tail_logs(service_name, controller=True)
+
+    To print replica 3 logs:
+        core.serve_tail_logs(service_name, replica_id=3, follow=False)
+    """
     have_replica_id = replica_id is not None
     if (controller + load_balancer + have_replica_id) != 1:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(_SERVE_TAIL_LOGS_USAGE)
+            raise ValueError('One and only one of controller, load_balancer, '
+                             'or replica_id must be specified.')
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         with ux_utils.print_exception_no_traceback():

@@ -1058,9 +1058,9 @@ def serve_up(
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Timeout when obtaining controller lock for service {service_name!r}.'
-                ' Please check if there are some `sky serve up` process hanging'
-                ' abnormally.') from e
+                'Timeout when obtaining controller lock for service '
+                f'{service_name!r}. Please check if there are some '
+                '`sky serve up` process hanging abnormally.') from e
 
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
@@ -1108,7 +1108,8 @@ def serve_up(
         controller_task.set_resources(controller_resources)
 
         # Set this flag to modify default ray task CPU usage to custom value
-        # instead of default 0.5 vCPU.
+        # instead of default 0.5 vCPU. We need to set it to a smaller value
+        # to support a larger number of services.
         controller_task.is_sky_serve_controller_task = True
 
         controller_task.update_envs(_shared_controller_env_vars())
@@ -1125,7 +1126,7 @@ def serve_up(
             # We use autostop here to reduce cold start time, since in most
             # cases the controller resources requirement will be the default
             # value and a previous controller could be reused.
-            idle_minutes_to_autostop=1,
+            idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
 
@@ -1290,11 +1291,11 @@ def serve_down(
                 jobs.append(service_handle.job_id)
             backend.cancel_jobs(handle, jobs=jobs, silent=True)
 
-            # Cleanup all utility files on controller of this service.
-            # We have a 1-min grace period for the controller to autostop,
+            # Cleanup all files on controller related to this service.
+            # We have a 10-min grace period for the controller to autostop,
             # so it should be fine if this is the last service on the
             # controller and its job is the only one running.
-            code = serve.ServeCodeGen.cleanup_utility_files(service_name)
+            code = serve.ServeCodeGen.cleanup_service_files(service_name)
             returncode, _, stderr = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True,

@@ -3,6 +3,7 @@ import os
 
 from sky.serve.constants import CONTROLLER_FILE_LOCK_PATH
 from sky.serve.constants import CONTROLLER_FILE_LOCK_TIMEOUT
+from sky.serve.constants import CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 from sky.serve.constants import CONTROLLER_PREFIX
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_SYNC_INTERVAL
