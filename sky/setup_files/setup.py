@@ -56,11 +56,8 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray requires click>=7.0. Also, click 8.1.x makes our rendered CLI
-    # docs display weird blockquotes.
-    # TODO(zongheng): investigate how to make click 8.1.x display nicely and
-    # remove the upper bound.
-    'click <= 8.0.4, >= 7.0',
+    # NOTE: ray requires click>=7.0.
+    'click >= 7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
     # the latest version.
     'colorama < 0.4.5',
@@ -71,7 +68,6 @@ install_requires = [
     'jinja2 >= 3.0',
     'jsonschema',
     'networkx',
-    'oauth2client',
     'pandas',
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
@@ -104,11 +100,9 @@ install_requires = [
     # >=1.10.8 is needed for ray>=2.6. See
     # https://github.com/ray-project/ray/issues/35661
     'pydantic <2.0, >=1.10.8',
-    # Cython 3.0 release breaks PyYAML installed by aws-cli.
-    # https://github.com/yaml/pyyaml/issues/601
-    # https://github.com/aws/aws-cli/issues/8036
+    # Cython 3.0 release breaks PyYAML 5.4.* (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
-    'pyyaml > 3.13, <= 5.3.1'
+    'pyyaml > 3.13, != 5.4.*'
 ]
 
 local_ray = [  # Lower version of ray will cause dependency conflict for
@@ -121,7 +115,7 @@ local_ray = [  # Lower version of ray will cause dependency conflict for
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
-    # botocore does not work with urllib3>=2.0.0, accuroding to https://github.com/boto/botocore/issues/2926
+    # botocore does not work with urllib3>=2.0.0, according to https://github.com/boto/botocore/issues/2926
     # We have to explicitly pin the version to optimize the time for
     # poetry install. See https://github.com/orgs/python-poetry/discussions/7937
     'urllib3<2',
@@ -131,8 +125,6 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # 'Crypto' module used in authentication.py for AWS.
-    'pycryptodome==3.12.0',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
