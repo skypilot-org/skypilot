@@ -171,14 +171,79 @@ def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
     return controller_port, load_balancer_port
 
 
+def _get_service_num_on_controller_if_available(
+        controller_name: str,
+        requested_controller_resources: 'sky.Resources') -> Optional[int]:
+    """Get number of services on the controller if it is available.
+
+    A controller is available if requested controller resources is less
+    demanding than the controller resources, and have available slots for
+    services. Max number of services on a controller is determined by the memory
+    of the controller, since ray job and our skypilot code is very memory
+    demanding (~1GB/service).
+
+    Args:
+        controller_name: The name of the controller.
+        requested_controller_resources: The resources requested for controller.
+
+    Returns:
+        Number of services on the controller if it is available, otherwise None.
+    """
+    controller_available = False
+    max_memory_requirements = 0.
+    controller_record = global_user_state.get_cluster_from_name(controller_name)
+    if controller_record is not None:
+        # If controller is already created, use its launched resources.
+        handle = controller_record['handle']
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        if requested_controller_resources.less_demanding_than(
+                handle.launched_resources):
+            controller_available = True
+        # Determine max number of services on this controller.
+        controller_cloud = handle.launched_resources.cloud
+        _, max_memory_requirements = (
+            controller_cloud.get_vcpus_mem_from_instance_type(
+                handle.launched_resources.instance_type))
+    else:
+        # Corner case: Multiple `sky serve up` are running simultaneously
+        # and the controller is not created yet. We created a resources
+        # for each initializing controller, and find the most demanding
+        # one to represent the controller resources.
+        service_records = (global_user_state.get_services_from_controller_name(
+            controller_name))
+        for service_record in service_records:
+            r = service_record['handle'].requested_controller_resources
+            # If any service is more demanding than the requested resources,
+            # then the controller is available since it must be launched
+            # with the most demanding resources, which is more demanding
+            # than the requested resources.
+            if requested_controller_resources.less_demanding_than(r):
+                controller_available = True
+                # Don't break here since we still want to find the max
+                # memory requirements.
+            # Remove the '+' in memory requirement.
+            max_memory_requirements = max(max_memory_requirements,
+                                          float(r.memory.strip('+')))
+    if controller_available:
+        # Determine max number of services on this controller.
+        max_services_num = int(max_memory_requirements /
+                               constants.SERVICES_MEMORY_USAGE_GB)
+        # Get current number of services on this controller.
+        services_num_on_controller = len(
+            global_user_state.get_services_from_controller_name(
+                controller_name))
+        # Only consider controllers that have available slots for services.
+        if services_num_on_controller < max_services_num:
+            return services_num_on_controller
+    return None
+
+
 def get_available_controller_name(
         controller_resources: 'sky.Resources') -> Tuple[str, bool]:
     """Get available controller name to use.
 
-    Only consider controllers that are less demanding than the requested
-    controller resources, and have available slots for services. Max number of
-    services on a controller is determined by the memory of the controller,
-    since ray job and our skypilot code is very memory demanding (~1GB/service).
+    Only consider controllers that satisfy the requested controller resources,
+    and have available slots for services.
     If multiple controllers are available, choose the one with most number of
     services to decrease the number of controllers.
 
@@ -193,55 +258,13 @@ def get_available_controller_name(
     existing_controllers = get_existing_controller_names()
     available_controller_to_service_num = dict()
     # Get a mapping from controller name to number of services on it.
-    # Only consider controllers that are less demanding than the requested
-    # controller resources.
     for controller_name in existing_controllers:
-        # Filter out controllers that are more demanding than the requested
-        # controller resources.
-        less_demanding_than_all = True
-        max_memory_requirements = 0.
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        if controller_record is not None:
-            # If controller is already created, use its launched resources.
-            handle = controller_record['handle']
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            if not controller_resources.less_demanding_than(
-                    handle.launched_resources):
-                less_demanding_than_all = False
-            # Determine max number of services on this controller.
-            controller_cloud = handle.launched_resources.cloud
-            _, max_memory_requirements = (
-                controller_cloud.get_vcpus_mem_from_instance_type(
-                    handle.launched_resources.instance_type))
-        else:
-            # Corner case: Multiple `sky serve up` are running simultaneously
-            # and the controller is not created yet. We created a resources
-            # for each initializing controller, and find the most demanding
-            # one to represent the controller resources.
-            service_records = (
-                global_user_state.get_services_from_controller_name(
-                    controller_name))
-            for service_record in service_records:
-                r = service_record['handle'].requested_controller_resources
-                if not controller_resources.less_demanding_than(r):
-                    less_demanding_than_all = False
-                    break
-                # Remove the '+' in memory requirement.
-                max_memory_requirements = max(max_memory_requirements,
-                                              float(r.memory.strip('+')))
-        if less_demanding_than_all:
-            # Determine max number of services on this controller.
-            max_services_num = int(max_memory_requirements /
-                                   constants.SERVICES_MEMORY_USAGE_GB)
-            # Get current number of services on this controller.
-            services_num_on_controller = len(
-                global_user_state.get_services_from_controller_name(
-                    controller_name))
-            # Only consider controllers that have available slots for services.
-            if services_num_on_controller < max_services_num:
-                available_controller_to_service_num[controller_name] = (
-                    services_num_on_controller)
+        services_num_on_controller = (
+            _get_service_num_on_controller_if_available(controller_name,
+                                                        controller_resources))
+        if services_num_on_controller is not None:
+            available_controller_to_service_num[controller_name] = (
+                services_num_on_controller)
     if not available_controller_to_service_num:
         new_controller_name = generate_controller_cluster_name(
             existing_controllers)
