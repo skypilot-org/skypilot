@@ -1032,7 +1032,7 @@ def serve_up(
     # make sure even in race condition, we can still get the correct controller
     # name.
     # In the same time, generate ports for the controller and load balancer.
-    # Use file lock to make sure the ports are unique.
+    # Use file lock to make sure the ports are unique to each service.
     try:
         # TODO(tian): remove pylint disabling when filelock
         # version updated
