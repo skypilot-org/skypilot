@@ -146,6 +146,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
+# The maximum number of retries for workdir / file mounts, to handle transient
+# network issues.
 MAX_DATA_TRANSFER_RETRY = 3
 
 
@@ -1412,15 +1414,17 @@ def parallel_data_transfer_to_nodes(
                                                 log_path=log_path,
                                                 stream_logs=stream_logs,
                                                 require_outputs=True)
-                if rc == 255:
-                    if retry_cnt >= MAX_DATA_TRANSFER_RETRY:
-                        break
+                if rc == 255 and retry_cnt < MAX_DATA_TRANSFER_RETRY:
                     retry_cnt += 1
                     backoff_seconds = backoff.current_backoff()
                     logger.warning(
                         f'{action_message}: connection error on {runner.ip}. '
-                        f'Retrying in {backoff_seconds:.2f}s...')
+                        f'Retrying in {backoff_seconds:.2f}s...\n'
+                        f'  Details: {stdout + stderr}')
                     time.sleep(backoff_seconds)
+                    continue
+                break
+
             err_msg = ('Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
                        'Ensure that the network is stable, then retry.')

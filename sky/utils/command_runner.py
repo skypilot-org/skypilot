@@ -357,6 +357,7 @@ class SSHCommandRunner:
         Raises:
             exceptions.CommandError: rsync command failed.
         """
+        assert max_retry >= 1, f'max_retry must be >= 1, got {max_retry}.'
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used
@@ -408,7 +409,7 @@ class SSHCommandRunner:
             ])
         command = ' '.join(rsync_command)
 
-        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+        backoff = common_utils.Backoff()
         while max_retry >= 0:
             returncode, _, stderr = log_lib.run_with_log(
                 command,

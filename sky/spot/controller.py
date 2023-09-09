@@ -143,9 +143,9 @@ class SpotController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.FileMountError: This will be raised when the underlying
-                `sky.launch` fails due to file mount errors that cannot be a
-                preemption.
+            exceptions.FileMountSyncError: This will be raised when the
+                underlying `sky.launch` fails due to file mount errors that
+                cannot be a preemption.
             exceptions.SpotJobReachedMaxRetryError: This will be raised when
                 all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
@@ -372,7 +372,7 @@ class SpotController:
                     job_id=self._job_id,
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
-        except exceptions.FileMountError as e:
+        except exceptions.FileMountSyncError as e:
             # Please refer to the docstring of self._run_one_task for the cases
             # when this exception can occur.
             logger.error(common_utils.format_exception(e))

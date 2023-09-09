@@ -116,7 +116,7 @@ class NotSupportedError(Exception):
     pass
 
 
-class FileMountError(Exception):
+class FileMountSyncError(Exception):
     """Raised when a file mount fails."""
     pass
 

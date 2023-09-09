@@ -64,7 +64,7 @@ class Backend(Generic[_ResourceHandleType]):
         try:
             return self._sync_workdir(handle, workdir)
         except Exception as e:  # pylint: disable=broad-except
-            raise exceptions.FileMountError(
+            raise exceptions.FileMountSyncError(
                 f'Failed to sync workdir for {handle.get_cluster_name()!r}:'
                 f' {common_utils.format_exception(e)}') from e
 
@@ -80,7 +80,7 @@ class Backend(Generic[_ResourceHandleType]):
             return self._sync_file_mounts(handle, all_file_mounts,
                                           storage_mounts)
         except Exception as e:  # pylint: disable=broad-except
-            raise exceptions.FileMountError(
+            raise exceptions.FileMountSyncError(
                 f'Failed to sync file mounts for {handle.get_cluster_name()!r}:'
                 f' {common_utils.format_exception(e)}') from e
 
