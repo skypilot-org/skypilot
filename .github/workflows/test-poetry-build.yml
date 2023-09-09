@@ -36,7 +36,7 @@ jobs:
           python = "3.10.x"
 
           [tool.poetry.group.dev.dependencies]
-          skypilot = {git = "${{ github.event.pull_request.head.repo.html_url }}", branch = "${{ github.head_ref }}"}
+          skypilot = {git = "${{ github.event.pull_request.head.repo.html_url }}.git", branch = "${{ github.head_ref }}"}
 
           [build-system]
           requires = ["poetry-core"]
