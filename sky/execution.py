@@ -1277,11 +1277,31 @@ def serve_down(
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backends.CloudVmRayBackend()
+
+            # Cancel the controller and load balancer jobs.
             # For the case when controller / load_balancer job failed to submit.
             jobs = []
             if service_handle.job_id is not None:
                 jobs.append(service_handle.job_id)
             backend.cancel_jobs(handle, jobs=jobs, silent=True)
+
+            # Cleanup all utility files on controller of this service.
+            # We have a 1-min grace period for the controller to autostop,
+            # so it should be fine if this is the last service on the
+            # controller and its job is the only one running.
+            code = serve.ServeCodeGen.cleanup_utility_files(service_name)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when cleaning up utility files on controller '
+                       f'of service {service_name}'),
+                stderr,
+                stream_logs=False)
+
     # same as above.
     except Exception as e:  # pylint: disable=broad-except
         if purge:
