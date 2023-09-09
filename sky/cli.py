@@ -2687,8 +2687,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
                 f'the service{plural} first with {colorama.Style.BRIGHT}sky '
                 f'serve down {" ".join(service_names)}'
                 f'{colorama.Style.RESET_ALL}.')
-    msg = (f'Tearing down sky serve controller: {controller_name}. It will '
-           'increase cold start time for your next `sky serve up` commands.')
+    msg = (f'Tearing down sky serve controller: {controller_name}.')
     click.echo(msg)
 
 
