@@ -15,6 +15,7 @@ import requests
 from sky import backends
 from sky import global_user_state
 from sky import status_lib
+from sky.serve import constants
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.utils import env_options
@@ -195,11 +196,13 @@ class InfraProvider:
 
     def __init__(
             self,
+            controller_port: int,
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
+        self.controller_port = controller_port
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
@@ -414,7 +417,8 @@ class SkyPilotInfraProvider(InfraProvider):
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
-        fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_launch_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
@@ -442,17 +446,18 @@ class SkyPilotInfraProvider(InfraProvider):
                            'exists. Skipping.')
             return
 
+        replica_id = serve_utils.get_replica_id_from_cluster_name(cluster_name)
         if sync_down_logs:
             logger.info(f'Syncing down logs for cluster {cluster_name}...')
-            replica_id = serve_utils.get_replica_id_from_cluster_name(
-                cluster_name)
-            code = serve_utils.ServeCodeGen.stream_logs(
+            code = serve_utils.ServeCodeGen.stream_replica_logs(
                 self.service_name,
+                self.controller_port,
                 replica_id,
                 follow=False,
                 skip_local_log_file_check=True)
             local_log_file_name = (
-                serve_utils.generate_replica_local_log_file_name(cluster_name))
+                serve_utils.generate_replica_local_log_file_name(
+                    self.service_name, replica_id))
             with open(local_log_file_name, 'w') as f:
                 try:
                     subprocess.run(code, shell=True, check=True, stdout=f)
@@ -466,7 +471,8 @@ class SkyPilotInfraProvider(InfraProvider):
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']
-        fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_down_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
@@ -573,12 +579,15 @@ class SkyPilotInfraProvider(InfraProvider):
                 readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
                 if self.post_data is not None:
                     msg += 'Post'
-                    response = requests.post(readiness_suffix,
-                                             json=self.post_data,
-                                             timeout=3)
+                    response = requests.post(
+                        readiness_suffix,
+                        json=self.post_data,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 else:
                     msg += 'Get'
-                    response = requests.get(readiness_suffix, timeout=3)
+                    response = requests.get(
+                        readiness_suffix,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 msg += (f' request to {replica_ip} returned status code '
                         f'{response.status_code}')
                 if response.status_code == 200:

@@ -16,19 +16,18 @@ import copy
 import enum
 import getpass
 import os
+import re
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
-import requests
-from rich import console as rich_console
+import filelock
 
 import sky
 from sky import backends
 from sky import clouds
-from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -184,7 +183,7 @@ def _execute(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
-) -> None:
+) -> Optional[int]:
     """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
@@ -222,6 +221,10 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+
+    Returns:
+      A job id (int) if the job is submitted successfully and backend is
+      CloudVmRayBackend, otherwise None.
     """
     dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -326,6 +329,7 @@ def _execute(
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
+    job_id = None
     try:
         if Stage.PROVISION in stages:
             if handle is None:
@@ -338,7 +342,7 @@ def _execute(
 
         if dryrun and handle is None:
             logger.info('Dryrun finished.')
-            return
+            return None
 
         if Stage.SYNC_WORKDIR in stages and not dryrun:
             if task.workdir is not None:
@@ -363,7 +367,10 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run, dryrun=dryrun)
+                job_id = backend.execute(handle,
+                                         task,
+                                         detach_run,
+                                         dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -393,6 +400,7 @@ def _execute(
                 not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
             print()
             print('\x1b[?25h', end='')  # Show cursor.
+    return job_id
 
 
 @timeline.event
@@ -600,6 +608,20 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
+def _shared_controller_env_vars() -> Dict[str, Any]:
+    return {
+        'SKYPILOT_USER_ID': common_utils.get_user_hash(),
+        'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': 1,
+        # Should not use $USER here, as that env var can be empty when
+        # running in a container.
+        'SKYPILOT_USER': getpass.getuser(),
+        'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
+        'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
+        'SKYPILOT_DISABLE_USAGE_COLLECTION':
+            env_options.Options.DISABLE_LOGGING.get(),
+    }
+
+
 @usage_lib.entrypoint
 def spot_launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -670,17 +692,11 @@ def spot_launch(
             'uuid': dag_uuid,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-            'is_dev': env_options.Options.IS_DEVELOPER.get(),
-            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-            'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
-            # Should not use $USER here, as that env var can be empty when
-            # running in a container.
-            'user': getpass.getuser(),
         }
         controller_resources_config = copy.copy(
             spot.constants.CONTROLLER_RESOURCES)
+        spot_env_vars = _shared_controller_env_vars()
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
@@ -728,12 +744,16 @@ def spot_launch(
                     proxy_command_key, ssh_proxy_command)
 
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                prefix = spot.SPOT_TASK_YAML_PREFIX
+                remote_user_config_path = (
+                    f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
                     'user_config_path': tmpfile.name,
-                    'env_var_skypilot_config':
-                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                    'remote_user_config_path': remote_user_config_path,
                 })
+                spot_env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
+                    remote_user_config_path)
 
             # Override the controller resources with the ones specified in the
             # config.
@@ -772,6 +792,8 @@ def spot_launch(
 
         controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
+
+        controller_task.update_envs(spot_env_vars)
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name} from spot controller...'
@@ -962,8 +984,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
-    controller_resources: 'sky.Resources',
-    controller_best_resources: 'sky.Resources',
 ):
     """Spin up a service.
 
@@ -972,27 +992,78 @@ def serve_up(
     Args:
         task: sky.Task to serve up.
         service_name: Name of the service.
-        controller_resources: The resources requirement for the controller.
-        controller_best_resources: The optimized resources for the controller.
     """
-    controller_cluster_name = serve.generate_controller_cluster_name(
-        service_name)
-    controller_best_resources.cloud.check_cluster_name_is_valid(
-        controller_cluster_name)
+    if re.fullmatch(serve.SERVICE_NAME_VALID_REGEX, service_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service name {service_name!r} is invalid: '
+                             f'ensure it is fully matched by regex (e.g., '
+                             'only contains lower letters, numbers and dash): '
+                             f'{serve.SERVICE_NAME_VALID_REGEX}')
+
+    if global_user_state.get_service_from_name(service_name) is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service name {service_name!r} is already '
+                             'taken. Please use a different name.')
+
+    if task.service is None:
+        raise RuntimeError('Service section not found.')
+    controller_resources_config: Dict[str, Any] = copy.copy(
+        serve.CONTROLLER_RESOURCES)
+    if task.service.controller_resources is not None:
+        controller_resources_config.update(task.service.controller_resources)
+    if 'ports' in controller_resources_config:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify ports for controller resources.')
+    # TODO(tian): Open required ports only after #2485 is merged.
+    controller_resources_config['ports'] = [serve.LOAD_BALANCER_PORT_RANGE]
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Encountered error when parsing controller resources') from e
+
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
     service_handle = serve.ServiceHandle(
-        controller_cluster_name=controller_cluster_name,
+        service_name=service_name,
         policy=task.service.policy_str(),
         requested_resources=requested_resources,
-        replica_info=[])
-    global_user_state.add_or_update_service(
-        service_name, None, service_handle,
-        status_lib.ServiceStatus.CONTROLLER_INIT)
-    app_port = int(task.service.app_port)
+        requested_controller_resources=controller_resources)
+    # Use filelock here to make sure only one process can write to database
+    # at the same time. Then we generate available controller name again to
+    # make sure even in race condition, we can still get the correct controller
+    # name.
+    # In the same time, generate ports for the controller and load balancer.
+    # Use file lock to make sure the ports are unique to each service.
+    try:
+        # TODO(tian): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(serve.CONTROLLER_FILE_LOCK_PATH,
+                               serve.CONTROLLER_FILE_LOCK_TIMEOUT):
+            controller_name, _ = serve.get_available_controller_name(
+                controller_resources)
+            global_user_state.add_or_update_service(
+                service_name, None, controller_name, service_handle,
+                status_lib.ServiceStatus.CONTROLLER_INIT)
 
-    # TODO(tian): Use skyserve constants.
+            controller_port, load_balancer_port = (
+                serve.gen_ports_for_serve_process(controller_name))
+            service_handle.controller_port = controller_port
+            service_handle.load_balancer_port = load_balancer_port
+            global_user_state.set_service_handle(service_name, service_handle)
+    except filelock.Timeout as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Timeout when obtaining controller lock for service '
+                f'{service_name!r}. Please check if there are some '
+                '`sky serve up` process hanging abnormally.') from e
+
+    # TODO(tian): Use skyserve constants, or maybe refactor these constants
+    # out of spot constants since their name is mostly not spot-specific.
     _maybe_translate_local_file_mounts_and_sync_up(task)
     ephemeral_storage = []
     if task.storage_mounts is not None:
@@ -1011,11 +1082,22 @@ def serve_up(
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name)
+        controller_log_file = (
+            serve.generate_remote_controller_log_file_name(service_name))
+        load_balancer_log_file = (
+            serve.generate_remote_load_balancer_log_file_name(service_name))
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
+            'service_dir': serve.generate_remote_service_dir_name(service_name),
+            'service_name': service_name,
+            'controller_port': controller_port,
+            'load_balancer_port': load_balancer_port,
+            'app_port': task.service.app_port,
+            'controller_log_file': controller_log_file,
+            'load_balancer_log_file': load_balancer_log_file,
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
             service_name)
@@ -1023,130 +1105,81 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
-        # This is for the case when the best resources failed to provision.
         controller_task.set_resources(controller_resources)
-        controller_task.best_resources = controller_best_resources
 
-        controller_envs = {
-            'SKYPILOT_USER_ID': common_utils.get_user_hash(),
-            'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': True,
-            'SKYPILOT_USER': getpass.getuser(),
-            'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
-            'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'SKYPILOT_DISABLE_USAGE_COLLECTION':
-                env_options.Options.DISABLE_LOGGING.get(),
-        }
-        controller_task.update_envs(controller_envs)
+        # Set this flag to modify default ray task CPU usage to custom value
+        # instead of default 0.5 vCPU. We need to set it to a smaller value
+        # to support a larger number of services.
+        controller_task.is_sky_serve_controller_task = True
 
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching controller for {service_name}...'
-              f'{colorama.Style.RESET_ALL}')
+        controller_task.update_envs(_shared_controller_env_vars())
 
-        _execute(
+        fore = colorama.Fore
+        style = colorama.Style
+        print(f'\n{fore.YELLOW}Launching controller for {service_name}...'
+              f'{style.RESET_ALL}')
+        job_id = _execute(
             entrypoint=controller_task,
-            stream_logs=True,
-            cluster_name=controller_cluster_name,
+            stream_logs=False,
+            cluster_name=controller_name,
+            detach_run=True,
+            # We use autostop here to reduce cold start time, since in most
+            # cases the controller resources requirement will be the default
+            # value and a previous controller could be reused.
+            idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
 
-        cluster_record = global_user_state.get_cluster_from_name(
-            controller_cluster_name)
-        if (cluster_record is None or
-                cluster_record['status'] != status_lib.ClusterStatus.UP):
+        controller_record = global_user_state.get_cluster_from_name(
+            controller_name)
+        if controller_record is None:
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}Controller failed to launch. '
-                  f'Please check the logs above.{colorama.Style.RESET_ALL}')
-            return
-
-        handle = cluster_record['handle']
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Controller failed to launch. Please check the logs above.')
+        handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        endpoint = f'{handle.head_ip}:{app_port}'
-        service_handle.endpoint = endpoint
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend), backend
+        service_handle.endpoint_ip = handle.head_ip
         global_user_state.set_service_handle(service_name, service_handle)
 
-        console = rich_console.Console()
-
-        def _wait_until_job_is_running(cluster_name: str,
-                                       job_id: int,
-                                       retry_time: int = 30) -> bool:
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-            backend = backend_utils.get_backend_from_handle(handle)
-            assert isinstance(backend, backends.CloudVmRayBackend), backend
-            for _ in range(retry_time):
+        def _wait_until_job_is_running_on_controller(
+                job_id: Optional[int]) -> bool:
+            if job_id is None:
+                return False
+            for _ in range(serve.SERVE_STARTUP_TIMEOUT):
                 job_statuses = backend.get_job_status(handle, [job_id],
                                                       stream_logs=False)
                 job_status = job_statuses.get(str(job_id), None)
                 if job_status == job_lib.JobStatus.RUNNING:
                     return True
                 time.sleep(1)
+            # Cancel any jobs that are still pending after timeout.
+            if job_status == job_lib.JobStatus.PENDING:
+                backend.cancel_jobs(handle, jobs=[job_id])
             return False
 
-        # NOTICE: The job submission order cannot be changed since the
-        # `sky serve logs` CLI will identify the controller job with
-        # the first job submitted and the load balancer job with the second
-        # job submitted.
-        with console.status('[yellow]Launching controller process...[/yellow]'):
-            _execute(
-                entrypoint=sky.Task(
-                    name='run-controller',
-                    envs=controller_envs,
-                    run='python -m sky.serve.controller --service-name '
-                    f'{service_name} --task-yaml {remote_task_yaml_path} '
-                    f'--port {serve.CONTROLLER_PORT}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_cluster_name,
-                detach_run=True,
-            )
-            controller_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, 1)
-        if not controller_job_is_running:
+        if not _wait_until_job_is_running_on_controller(job_id):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}Controller failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--controller{colorama.Style.RESET_ALL}')
-            return
-        print(f'{colorama.Fore.GREEN}Launching controller process...done.'
-              f'{colorama.Style.RESET_ALL}')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Controller failed to launch. Please check '
+                    f'the logs with sky serve logs {service_name} '
+                    '--controller')
 
-        with console.status(
-                '[yellow]Launching load balancer process...[/yellow]'):
-            controller_addr = f'http://localhost:{serve.CONTROLLER_PORT}'
-            _execute(
-                entrypoint=sky.Task(
-                    name='run-load-balancer',
-                    envs=controller_envs,
-                    run='python -m sky.serve.load_balancer --task-yaml '
-                    f'{remote_task_yaml_path} --port {app_port} '
-                    f'--controller-addr {controller_addr}'),
-                stream_logs=False,
-                handle=handle,
-                stages=[Stage.EXEC],
-                cluster_name=controller_cluster_name,
-                detach_run=True,
-            )
-            load_balancer_job_is_running = _wait_until_job_is_running(
-                controller_cluster_name, 2)
-        if not load_balancer_job_is_running:
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            print(f'{colorama.Fore.RED}LoadBalancer failed to launch. '
-                  f'Please check the logs with sky serve logs {service_name} '
-                  f'--load-balancer{colorama.Style.RESET_ALL}')
-            return
-        print(f'{colorama.Fore.GREEN}Launching load balancer process...done.'
-              f'{colorama.Style.RESET_ALL}')
+        service_handle.job_id = job_id
+        global_user_state.set_service_handle(service_name, service_handle)
+        print(f'{fore.GREEN}Launching controller for {service_name}...done.'
+              f'{style.RESET_ALL}')
 
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.REPLICA_INIT)
 
-        print(f'\n{colorama.Fore.CYAN}Service name: '
-              f'{colorama.Style.BRIGHT}{service_name}{colorama.Style.RESET_ALL}'
+        print(f'\n{fore.CYAN}Service name: '
+              f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
               f'{backend_utils.RESET_BOLD}'
@@ -1164,13 +1197,10 @@ def serve_up(
               f'{backend_utils.RESET_BOLD}'
               f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
               f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
-        print(f'\n{colorama.Style.BRIGHT}{colorama.Fore.CYAN}'
-              'Endpoint URL: '
-              f'{colorama.Style.RESET_ALL}{colorama.Fore.CYAN}'
-              f'{endpoint}'
-              f'{colorama.Style.RESET_ALL}')
-        print(f'{colorama.Fore.GREEN}Starting replica now...'
-              f'{colorama.Style.RESET_ALL}')
+        print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
+              f'{style.RESET_ALL}{fore.CYAN}'
+              f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
+        print(f'{fore.GREEN}Starting replica now...{style.RESET_ALL}')
         print('Please use the above command to find the latest status.')
 
 
@@ -1187,34 +1217,41 @@ def serve_down(
         purge: If true, ignore errors when cleaning up the controller.
     """
     service_record = global_user_state.get_service_from_name(service_name)
-    # Already filtered all inexistent service in cli.py
-    assert service_record is not None, service_name
-    controller_cluster_name = service_record['handle'].controller_cluster_name
+
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} not found.')
+
+    service_handle: serve.ServiceHandle = service_record['handle']
+    controller_name = service_record['controller_name']
     global_user_state.set_service_status(service_name,
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
-    handle = global_user_state.get_handle_from_cluster_name(
-        controller_cluster_name)
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
     if handle is not None:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            code = serve.ServeCodeGen.terminate_service()
+            if service_handle.controller_port is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Controller job of service {service_name} not found.')
+
+            code = serve.ServeCodeGen.terminate_service(
+                service_handle.controller_port)
             returncode, terminate_service_payload, stderr = backend.run_on_head(
                 handle,
                 code,
                 require_outputs=True,
                 stream_logs=False,
                 separate_stderr=True)
-            try:
-                subprocess_utils.handle_returncode(
-                    returncode,
-                    code, ('Failed when submit terminate request to controller '
-                           f'of service {service_name}'),
-                    stderr,
-                    stream_logs=False)
-            except exceptions.CommandError as e:
-                raise RuntimeError(e.error_msg) from e
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when submit terminate request to controller '
+                       f'of service {service_name}'),
+                stderr,
+                stream_logs=False)
+
             resp = serve.load_terminate_service_result(
                 terminate_service_payload)
             if resp.status_code != 200:
@@ -1227,8 +1264,10 @@ def serve_down(
                     'Unexpected message when tearing down replica of service '
                     f'{service_name}: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
-        except (RuntimeError, ValueError,
-                requests.exceptions.ConnectionError) as e:
+
+        # We want to make sure no matter what error happens, we can still
+        # clean up the record if purge is True.
+        except Exception as e:  # pylint: disable=broad-except
             if purge:
                 logger.warning('Ignoring error when cleaning replicas of '
                                f'{service_name}: {e}')
@@ -1238,28 +1277,42 @@ def serve_down(
         if not purge:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Cannot find controller cluster of service {service_name}.'
-                )
+                    f'Cannot find controller of service {service_name}.')
 
     try:
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backends.CloudVmRayBackend()
-            backend.cancel_jobs(handle, jobs=None, cancel_all=True, silent=True)
-    except (ValueError, exceptions.ClusterNotUpError,
-            exceptions.CommandError) as e:
+
+            # Cancel the controller and load balancer jobs.
+            # For the case when controller / load_balancer job failed to submit.
+            jobs = []
+            if service_handle.job_id is not None:
+                jobs.append(service_handle.job_id)
+            backend.cancel_jobs(handle, jobs=jobs, silent=True)
+
+            # Cleanup all files on controller related to this service.
+            # We have a 10-min grace period for the controller to autostop,
+            # so it should be fine if this is the last service on the
+            # controller and its job is the only one running.
+            code = serve.ServeCodeGen.cleanup_service_files(service_name)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when cleaning up utility files on controller '
+                       f'of service {service_name}'),
+                stderr,
+                stream_logs=False)
+
+    # same as above.
+    except Exception as e:  # pylint: disable=broad-except
         if purge:
             logger.warning('Ignoring error when stopping controller and '
                            f'load balancer jobs of service {service_name}: {e}')
-        else:
-            raise RuntimeError(e) from e
-
-    try:
-        core.down(controller_cluster_name, purge=purge)
-    except (RuntimeError, ValueError) as e:
-        if purge:
-            logger.warning('Ignoring error when terminating controller VM of '
-                           f'service {service_name}: {e}')
         else:
             raise RuntimeError(e) from e
 
