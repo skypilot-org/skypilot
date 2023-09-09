@@ -476,7 +476,7 @@ class RayCodeGen:
         options.append(f'num_cpus={task_cpu_demand}')
 
         num_gpus = 0.0
-        if ray_resources_dict:
+        if len(ray_resources_dict) > 0:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
