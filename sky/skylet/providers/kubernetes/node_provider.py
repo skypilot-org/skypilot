@@ -214,6 +214,9 @@ class KubernetesNodeProvider(NodeProvider):
                         self.namespace,
                         field_selector=(f'involvedObject.name={pod_name},'
                                         'involvedObject.kind=Pod'))
+                    # Events created in the past hours are kept by
+                    # Kubernetes python client and we want to surface
+                    # the latest event message
                     events_desc_by_time = \
                         sorted(events.items,
                         key=lambda e: e.metadata.creation_timestamp,
