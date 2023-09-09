@@ -25,7 +25,7 @@ jobs:
       - name: Create foo package
         run: |
           mkdir foo
-          MASTER_REPO_URL = ${{ github.server_url }}/${{ github.repository.html_url }}
+          MASTER_REPO_URL = ${{ github.server_url }}/${{ github.repository }}
           REPO_URL = ${{ github.event.pull_request.head.repo.html_url }}
           if [ -z "$REPO_URL" ]; then
             # This is a push, not a PR, so use the repo URL
