@@ -47,12 +47,12 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
     # pylint: disable=import-outside-toplevel
-    from oauth2client.client import GoogleCredentials
+    import google.auth
 
-    oauth_credentials = GoogleCredentials.get_application_default()
+    credentials, _ = google.auth.default()
     storagetransfer = gcp.build('storagetransfer',
                                 'v1',
-                                credentials=oauth_credentials)
+                                credentials=credentials)
 
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
