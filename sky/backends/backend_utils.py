@@ -2640,7 +2640,10 @@ def _refresh_service_record_no_lock(
     local_record = global_user_state.get_service_from_name(service_name)
     if local_record is None:
         return None, None
-    record = copy.copy(local_record)
+
+    # We use a copy of the record with default value of replica_info to return
+    # when there is an error.
+    record = copy.deepcopy(local_record)
     record['replica_info'] = []
     service_handle: serve_lib.ServiceHandle = local_record['handle']
 
@@ -2655,6 +2658,9 @@ def _refresh_service_record_no_lock(
 
     controller_name = local_record['controller_name']
     cluster_record = global_user_state.get_cluster_from_name(controller_name)
+
+    # We don't check controller status here since it might be in INIT status
+    # when other services is starting up and launching the controller.
     if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
@@ -2698,8 +2704,8 @@ def _refresh_service_record_no_lock(
             latest_info['replica_info'])
 
     global_user_state.add_or_update_service(**local_record)
-    record['replica_info'] = latest_info['replica_info']
-    return record, None
+    local_record['replica_info'] = latest_info['replica_info']
+    return local_record, None
 
 
 def _refresh_service_record(

@@ -1101,6 +1101,9 @@ def serve_up(
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.set_resources(controller_resources)
+
+        # Set this flag to modify default ray task CPU usage to custom value
+        # instead of default 0.5 vCPU.
         controller_task.is_sky_serve_controller_task = True
 
         controller_task.update_envs(_shared_controller_env_vars())
@@ -1227,6 +1230,7 @@ def serve_down(
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Controller job of service {service_name} not found.')
+
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
             returncode, terminate_service_payload, stderr = backend.run_on_head(
@@ -1235,15 +1239,13 @@ def serve_down(
                 require_outputs=True,
                 stream_logs=False,
                 separate_stderr=True)
-            try:
-                subprocess_utils.handle_returncode(
-                    returncode,
-                    code, ('Failed when submit terminate request to controller '
-                           f'of service {service_name}'),
-                    stderr,
-                    stream_logs=False)
-            except exceptions.CommandError as e:
-                raise RuntimeError(e.error_msg) from e
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when submit terminate request to controller '
+                       f'of service {service_name}'),
+                stderr,
+                stream_logs=False)
+
             resp = serve.load_terminate_service_result(
                 terminate_service_payload)
             if resp.status_code != 200:
@@ -1256,6 +1258,7 @@ def serve_down(
                     'Unexpected message when tearing down replica of service '
                     f'{service_name}: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
+
         # We want to make sure no matter what error happens, we can still
         # clean up the record if purge is True.
         except Exception as e:  # pylint: disable=broad-except
@@ -1268,8 +1271,7 @@ def serve_down(
         if not purge:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Cannot find controller cluster of service {service_name}.'
-                )
+                    f'Cannot find controller of service {service_name}.')
 
     try:
         if handle is not None:
