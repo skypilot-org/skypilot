@@ -311,7 +311,7 @@ class RayCodeGen:
         # by default.
         bundles = [{'CPU': task_cpu_demand} for _ in range(num_nodes)]
 
-        if resources_dict:
+        if len(resources_dict) > 0:
             assert len(resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {resources_dict}.')

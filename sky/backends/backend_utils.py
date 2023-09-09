@@ -2799,7 +2799,8 @@ def get_backend_from_handle(
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     """Returns the resources dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
+    # TODO: CPU and other memory resources are not supported yet
+    # except for sky serve controller task.
     resources_dict = {
         # We set CPU resource for sky serve controller to a smaller value
         # to support a larger number of services.
