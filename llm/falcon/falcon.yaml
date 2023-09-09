@@ -12,7 +12,7 @@ envs:
 
 file_mounts:
   /results: # Change if the output_dir parameter is changed below
-    name: $OUTPUT_BUCKET_NAME # Change to your own bucket name
+    name: $OUTPUT_BUCKET_NAME
     mode: MOUNT
 
 setup: |

@@ -35,14 +35,14 @@ Steps for training on your cloud(s):
 2.  **Training the Falcon model using spot instances**:
 
 ```bash
-sky spot launch -n falcon train.yaml
+sky spot launch -n falcon falcon.yaml
 ```
 
 Currently, such `A100-80GB:1` spot instances are only available on AWS and GCP.
 
 [Optional] **To use on-demand `A100-80GB:1` instances**, which are currently available on Lambda Cloud, Azure, and GCP:
 ```bash
-sky launch -c falcon -s train.yaml --no-use-spot
+sky launch -c falcon -s falcon.yaml --no-use-spot
 ```
 
 For reference, below is a loss graph you may expect to see, and the amount of time and the approximate cost of fine-tuning each of the models over 500 epochs (assuming a spot instance A100 GPU rate at $1.1 / hour and a A100-80GB rate of $1.61 / hour):
