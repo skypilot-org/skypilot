@@ -86,7 +86,11 @@ class _DagContext(threading.local):
             self._current_dag = None
         return old_dag
 
-    def get_current_dag(self):
+    def get_current_dag(self) -> Dag:
+        if self._current_dag is None:
+            raise ValueError('No dag is currently active. Please use the '
+                             'operator under the context as the following:\n'
+                             '  with sky.Dag() as dag:\n')
         return self._current_dag
 
 
