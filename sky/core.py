@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
+import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -23,6 +24,9 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import serve
 
 logger = sky_logging.init_logger(__name__)
 
@@ -115,9 +119,36 @@ def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
-                    follow: bool) -> None:
-    service_name = service_record['name']
+def serve_tail_logs(service_name: str,
+                    controller: bool = False,
+                    load_balancer: bool = False,
+                    replica_id: Optional[int] = None,
+                    follow: bool = True) -> None:
+    """Tail logs for a service.
+
+    Usage:
+        core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
+
+    One and only one of <target> must be specified: controller, load_balancer,
+    or replica_id.
+
+    To tail controller logs:
+        # follow default to True
+        core.serve_tail_logs(service_name, controller=True)
+
+    To print replica 3 logs:
+        core.serve_tail_logs(service_name, replica_id=3, follow=False)
+    """
+    have_replica_id = replica_id is not None
+    if (controller + load_balancer + have_replica_id) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('One and only one of controller, load_balancer, '
+                             'or replica_id must be specified.')
+    service_record = global_user_state.get_service_from_name(service_name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist. '
+                             'Cannot stream logs.')
     if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
@@ -127,15 +158,20 @@ def serve_tail_logs(service_record: Dict[str, Any], replica_id: int,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r}\'s controller failed. '
                              'Cannot tail logs.')
-    controller_cluster_name = service_record['handle'].controller_cluster_name
-    handle = global_user_state.get_handle_from_cluster_name(
-        controller_cluster_name)
+    service_handle: 'serve.ServiceHandle' = service_record['handle']
+    controller_name = service_record['controller_name']
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
     if handle is None:
         raise ValueError(f'Cannot find controller for service {service_name}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle, service_name, replica_id, follow=follow)
+    backend.tail_serve_logs(handle,
+                            service_handle,
+                            controller,
+                            load_balancer,
+                            replica_id,
+                            follow=follow)
 
 
 @usage_lib.entrypoint
