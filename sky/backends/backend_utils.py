@@ -2655,12 +2655,11 @@ def _refresh_service_record_no_lock(
 
     controller_name = local_record['controller_name']
     cluster_record = global_user_state.get_cluster_from_name(controller_name)
-    if (cluster_record is None or
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
+    if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
         return record, (f'Controller cluster {controller_name!r} '
-                        'is not found or UP.')
+                        'is not found.')
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
@@ -2795,7 +2794,7 @@ def get_backend_from_handle(
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
+    resources_dict = None
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2804,8 +2803,12 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
     if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+        resources_dict = resources.accelerators
+    if task.is_sky_serve_controller_task:
+        if resources_dict is None:
+            resources_dict = dict()
+        resources_dict['CPU'] = serve_lib.SERVICES_TASK_CPU_DEMAND
+    return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:

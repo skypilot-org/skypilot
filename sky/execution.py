@@ -1101,6 +1101,7 @@ def serve_up(
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.set_resources(controller_resources)
+        controller_task.is_sky_serve_controller_task = True
 
         controller_task.update_envs(_shared_controller_env_vars())
 

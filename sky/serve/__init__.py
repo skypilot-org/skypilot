@@ -11,6 +11,7 @@ from sky.serve.constants import LOAD_BALANCER_PORT_RANGE
 from sky.serve.constants import SERVE_PREFIX
 from sky.serve.constants import SERVE_STARTUP_TIMEOUT
 from sky.serve.constants import SERVICE_NAME_VALID_REGEX
+from sky.serve.constants import SERVICES_TASK_CPU_DEMAND
 from sky.serve.serve_utils import gen_ports_for_serve_process
 from sky.serve.serve_utils import generate_controller_yaml_file_name
 from sky.serve.serve_utils import generate_remote_controller_log_file_name

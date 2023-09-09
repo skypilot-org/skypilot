@@ -287,7 +287,7 @@ class RayCodeGen:
     def add_gang_scheduling_placement_group_and_setup(
         self,
         num_nodes: int,
-        accelerator_dict: Optional[Dict[str, float]],
+        resources_dict: Optional[Dict[str, float]],
         stable_cluster_internal_ips: List[str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
@@ -305,16 +305,20 @@ class RayCodeGen:
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
+        default_task_cpu_demand = backend_utils.DEFAULT_TASK_CPU_DEMAND
+        if resources_dict is not None and 'CPU' in resources_dict:
+            default_task_cpu_demand = resources_dict.pop('CPU')
+            if not resources_dict:
+                # Set to None here for the sake of the code below.
+                resources_dict = None
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{
-            'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND
-        } for _ in range(num_nodes)]
+        bundles = [{'CPU': default_task_cpu_demand} for _ in range(num_nodes)]
 
-        if accelerator_dict is not None:
-            acc_name = list(accelerator_dict.keys())[0]
-            acc_count = list(accelerator_dict.values())[0]
+        if resources_dict is not None:
+            acc_name = list(resources_dict.keys())[0]
+            acc_count = list(resources_dict.values())[0]
             gpu_dict = {'GPU': acc_count}
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve
@@ -323,7 +327,7 @@ class RayCodeGen:
                 gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
-                    **accelerator_dict,
+                    **resources_dict,
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
@@ -416,7 +420,7 @@ class RayCodeGen:
                     return ray.util.get_node_ip_address()
                 gang_scheduling_id_to_ip = ray.get([
                     check_ip.options(
-                            num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
+                            num_cpus={default_task_cpu_demand},
                             scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
                                 placement_group=pg,
                                 placement_group_bundle_index=i
@@ -466,11 +470,17 @@ class RayCodeGen:
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
+        default_task_cpu_demand = backend_utils.DEFAULT_TASK_CPU_DEMAND
+        if ray_resources_dict is not None and 'CPU' in ray_resources_dict:
+            default_task_cpu_demand = ray_resources_dict.pop('CPU')
+            if not ray_resources_dict:
+                # Set to None here for the sake of the code below.
+                ray_resources_dict = None
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
         options = []
-        options.append(f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}')
+        options.append(f'num_cpus={default_task_cpu_demand}')
 
         num_gpus = 0.0
         if ray_resources_dict is not None:
@@ -4526,7 +4536,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
 
-        accelerator_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -4535,7 +4545,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
-            accelerator_dict,
+            resources_dict,
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
@@ -4584,7 +4594,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
-        accelerator_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -4602,7 +4612,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
-            accelerator_dict,
+            resources_dict,
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
@@ -4634,7 +4644,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 env_vars=task.envs,
                 task_name=task.name,
                 job_run_id=job_run_id,
-                ray_resources_dict=accelerator_dict,
+                ray_resources_dict=resources_dict,
                 log_dir=log_dir,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
