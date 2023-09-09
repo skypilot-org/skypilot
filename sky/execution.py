@@ -608,16 +608,17 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
-def _shared_vars_for_controller() -> Dict[str, Any]:
+def _shared_controller_env_vars() -> Dict[str, Any]:
     return {
-        'google_sdk_installation_commands': gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-        'is_dev': env_options.Options.IS_DEVELOPER.get(),
-        'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
-        'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-        'logging_user_hash': common_utils.get_user_hash(),
+        'SKYPILOT_USER_ID': common_utils.get_user_hash(),
+        'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': 1,
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
-        'user': getpass.getuser(),
+        'SKYPILOT_USER': getpass.getuser(),
+        'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
+        'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
+        'SKYPILOT_DISABLE_USAGE_COLLECTION':
+            env_options.Options.DISABLE_LOGGING.get(),
     }
 
 
@@ -689,8 +690,9 @@ def spot_launch(
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
             'uuid': dag_uuid,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
-            **_shared_vars_for_controller(),
         }
         controller_resources_config = copy.copy(
             spot.constants.CONTROLLER_RESOURCES)
@@ -785,6 +787,8 @@ def spot_launch(
 
         controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
+
+        controller_task.update_envs(_shared_controller_env_vars())
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name} from spot controller...'
@@ -1080,6 +1084,8 @@ def serve_up(
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'service_dir': serve.generate_remote_service_dir_name(service_name),
             'service_name': service_name,
             'controller_port': controller_port,
@@ -1087,7 +1093,6 @@ def serve_up(
             'app_port': task.service.app_port,
             'controller_log_file': controller_log_file,
             'load_balancer_log_file': load_balancer_log_file,
-            **_shared_vars_for_controller(),
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
             service_name)
@@ -1096,6 +1101,8 @@ def serve_up(
                                     output_path=controller_yaml_path)
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.set_resources(controller_resources)
+
+        controller_task.update_envs(_shared_controller_env_vars())
 
         fore = colorama.Fore
         style = colorama.Style
