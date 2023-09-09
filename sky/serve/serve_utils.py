@@ -150,16 +150,14 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
     services = global_user_state.get_services_from_controller_name(
         controller_name)
-    # Use `is None`` to filter out self and all services with
-    # initialize status
-    existing_controller_ports, existing_load_balancer_ports = [], []
+    # Use `is None` to filter out self and all services with initialize status
+    existing_controller_ports, existing_load_balancer_ports = set(), set()
     for service in services:
         service_handle: ServiceHandle = service['handle']
         if service_handle.controller_port is not None:
-            existing_controller_ports.append(service_handle.controller_port)
+            existing_controller_ports.add(service_handle.controller_port)
         if service_handle.load_balancer_port is not None:
-            existing_load_balancer_ports.append(
-                service_handle.load_balancer_port)
+            existing_load_balancer_ports.add(service_handle.load_balancer_port)
     # Cannot expose controller to public internet.
     # We opened 30001-31000 for controller VM, so load balancer port
     # should be in this range and controller port should not be in

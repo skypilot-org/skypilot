@@ -2660,7 +2660,7 @@ def _refresh_service_record_no_lock(
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
         return record, (f'Controller cluster {controller_name!r} '
-                                     'is not found or UP.')
+                        'is not found or UP.')
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
@@ -2678,9 +2678,8 @@ def _refresh_service_record_no_lock(
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        return record, (
-            'Failed to refresh replica info from the controller. '
-            f'Using the cached record. Reason: {stderr}')
+        return record, ('Failed to refresh replica info from the controller. '
+                        f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.uptime = latest_info['uptime']
