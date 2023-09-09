@@ -31,7 +31,6 @@ from peft.tuners.lora import LoraLayer
 
 from trl import SFTTrainer
 
-
 ########################################################################
 # This is a fully working simple example to use trl's RewardTrainer.
 #
@@ -40,7 +39,6 @@ from trl import SFTTrainer
 # adapters on the model.
 #
 ########################################################################
-
 
 # Define and parse arguments.
 
@@ -51,7 +49,8 @@ class ScriptArguments:
     These arguments vary depending on how many GPUs you have, what their capacity and features are, and what size model you want to train.
     """
 
-    local_rank: Optional[int] = field(default=-1, metadata={"help": "Used for multi-gpu"})
+    local_rank: Optional[int] = field(default=-1,
+                                      metadata={"help": "Used for multi-gpu"})
 
     per_device_train_batch_size: Optional[int] = field(default=4)
     per_device_eval_batch_size: Optional[int] = field(default=1)
@@ -91,7 +90,9 @@ class ScriptArguments:
     )
     num_train_epochs: Optional[int] = field(
         default=1,
-        metadata={"help": "The number of training epochs for the reward model."},
+        metadata={
+            "help": "The number of training epochs for the reward model."
+        },
     )
     fp16: Optional[bool] = field(
         default=False,
@@ -115,18 +116,25 @@ class ScriptArguments:
     )
     lr_scheduler_type: str = field(
         default="constant",
-        metadata={"help": "Learning rate schedule. Constant a bit better than cosine, and has advantage for analysis"},
+        metadata={
+            "help": "Learning rate schedule. Constant a bit better than cosine, and has advantage for analysis"
+        },
     )
-    max_steps: int = field(default=10000, metadata={"help": "How many optimizer update steps to take"})
-    warmup_ratio: float = field(default=0.03, metadata={"help": "Fraction of steps to do a warmup for"})
+    max_steps: int = field(
+        default=10000,
+        metadata={"help": "How many optimizer update steps to take"})
+    warmup_ratio: float = field(
+        default=0.03, metadata={"help": "Fraction of steps to do a warmup for"})
     group_by_length: bool = field(
         default=True,
         metadata={
             "help": "Group sequences into batches with same length. Saves memory and speeds up training considerably."
         },
     )
-    save_steps: int = field(default=10, metadata={"help": "Save checkpoint every X updates steps."})
-    logging_steps: int = field(default=10, metadata={"help": "Log every X updates steps."})
+    save_steps: int = field(
+        default=10, metadata={"help": "Save checkpoint every X updates steps."})
+    logging_steps: int = field(default=10,
+                               metadata={"help": "Log every X updates steps."})
     output_dir: Optional[str] = field(
         default="/results",
         metadata={"help": "Directory where model checkpoints will be stored."},
@@ -151,14 +159,17 @@ def create_and_prepare_model(args):
         major, _ = torch.cuda.get_device_capability()
         if major >= 8:
             print("=" * 80)
-            print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
+            print(
+                "Your GPU supports bfloat16, you can accelerate training with the argument --bf16"
+            )
             print("=" * 80)
 
     device_map = {"": 0}
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_name, quantization_config=bnb_config, device_map=device_map, trust_remote_code=True
-    )
+    model = AutoModelForCausalLM.from_pretrained(args.model_name,
+                                                 quantization_config=bnb_config,
+                                                 device_map=device_map,
+                                                 trust_remote_code=True)
 
     peft_config = LoraConfig(
         lora_alpha=script_args.lora_alpha,
@@ -174,7 +185,8 @@ def create_and_prepare_model(args):
         ],  # , "word_embeddings", "lm_head"],
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name,
+                                              trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
 
     return model, peft_config, tokenizer
@@ -211,7 +223,6 @@ trainer = SFTTrainer(
     args=training_arguments,
     packing=script_args.packing,
 )
-
 
 for name, module in trainer.model.named_modules():
     if isinstance(module, LoraLayer):

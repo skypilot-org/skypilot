@@ -15,8 +15,11 @@ sky check
 ```
 See the Falcon SkyPilot YAML for [training](train.yaml). Serving is currently a work in progress and a YAML will be provided for that soon! We are also working on adding an evaluation step to evaluate the model you finetuned compared to the base model.
 
-## Finetuning Falcon with SkyPilot
-Finetuning Falcon-7B and Falcon-40B require GPUs with 80GB memory, but Falcon-7b-sharded requires only 40GB memory. In other words, if your GPU does not have over 40 GB memory, i.e. `accelerators: A100:1`, we suggest using `ybelkada/falcon-7b-sharded-bf16`. `tiiuae/falcon-7b` and `tiiuae/falcon-40b` will need 80 GB memory. In our examples, we use A100-80GB and A100. 
+## Running Falcon on SkyPilot
+Finetuning `Falcon-7B` and `Falcon-40B` require GPUs with 80GB memory, 
+but `Falcon-7b-sharded` requires only 40GB memory.
+In other words, if your GPU does not have over 40 GB memory (e.g., Nvidia A100), we suggest using `ybelkada/falcon-7b-sharded-bf16`. 
+`tiiuae/falcon-7b` and `tiiuae/falcon-40b` will need 80 GB memory (e.g., Nvidia A100-80GB). 
 
 Try `sky show-gpus --all` for supported GPUs.
 
@@ -26,9 +29,9 @@ We can start the finetuning of Falcon model on Open Assistant's [Guanaco](https:
 
 Steps for training on your cloud(s):
 
-1. In [train.yaml](train.yaml):
+1. In [train.yaml](train.yaml), set the following variables in `envs`:
 
-    - Replace the bucket name with some unique name, so the SkyPilot can create a bucket for you to store the model weights. See `# Change to your own bucket` in the YAML file. 
+    - Replace the `OUTPUT_BUCKET_NAME` with a unique name. SkyPilot will create this bucket for you to store the model weights.
     - Replace the `WANDB_API_KEY` to your own key. 
     - Replace the `MODEL_NAME` with your desired base model. 
 
