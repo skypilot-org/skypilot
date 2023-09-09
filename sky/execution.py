@@ -696,6 +696,7 @@ def spot_launch(
         }
         controller_resources_config = copy.copy(
             spot.constants.CONTROLLER_RESOURCES)
+        spot_env_vars = _shared_controller_env_vars()
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
@@ -743,12 +744,16 @@ def spot_launch(
                     proxy_command_key, ssh_proxy_command)
 
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                prefix = spot.SPOT_TASK_YAML_PREFIX
+                remote_user_config_path = (
+                    f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
                     'user_config_path': tmpfile.name,
-                    'env_var_skypilot_config':
-                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                    'remote_user_config_path': remote_user_config_path,
                 })
+                spot_env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
+                    remote_user_config_path)
 
             # Override the controller resources with the ones specified in the
             # config.
@@ -788,7 +793,7 @@ def spot_launch(
         controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
 
-        controller_task.update_envs(_shared_controller_env_vars())
+        controller_task.update_envs(spot_env_vars)
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name} from spot controller...'
