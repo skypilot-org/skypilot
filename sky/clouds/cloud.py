@@ -3,16 +3,18 @@ import collections
 import enum
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
     from sky import status_lib
-    from sky import resources
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -28,6 +30,10 @@ class CloudImplementationFeatures(enum.Enum):
     AUTOSTOP = 'autostop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
+    DOCKER_IMAGE = 'docker_image'
+    SPOT_INSTANCE = 'spot_instance'
+    CUSTOM_DISK_TIER = 'custom_disk_tier'
+    OPEN_PORTS = 'open_ports'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -46,28 +52,6 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     """A zone, typically grouped under a region."""
     name: str
     region: Region
-
-
-class _CloudRegistry(dict):
-    """Registry of clouds."""
-
-    def from_str(self, name: Optional[str]) -> Optional['Cloud']:
-        if name is None:
-            return None
-        if name.lower() not in self:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Cloud {name!r} is not a valid cloud among '
-                                 f'{list(self.keys())}')
-        return self.get(name.lower())
-
-    def register(self, cloud_cls: Type['Cloud']) -> Type['Cloud']:
-        name = cloud_cls.__name__.lower()
-        assert name not in self, f'{name} already registered'
-        self[name] = cloud_cls()
-        return cloud_cls
-
-
-CLOUD_REGISTRY = _CloudRegistry()
 
 
 class Cloud:
@@ -91,7 +75,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
         This method is used by check_cluster_name_is_valid() to check if the
@@ -219,7 +203,7 @@ class Cloud:
 
     def make_deploy_resources_variables(
         self,
-        resources: 'resources.Resources',
+        resources: 'resources_lib.Resources',
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -285,16 +269,59 @@ class Cloud:
                                                   region,
                                                   clouds=cls._REPR.lower())
 
-    def get_feasible_launchable_resources(self, resources):
-        """Returns a list of feasible and launchable resources.
+    def get_feasible_launchable_resources(
+        self,
+        resources: 'resources_lib.Resources',
+        num_nodes: int = 1
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """Returns ([feasible and launchable resources], [fuzzy candidates]).
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
         cloud's offerings only w.r.t. accelerators constraints.
 
         Launchable resources require a cloud and an instance type be assigned.
+
+        Fuzzy candidates example: when the requested GPU is A100:1 but is not
+        available in a cloud/region, the fuzzy candidates are results of a fuzzy
+        search in the catalog that are offered in the location. E.g.,
+          ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
         """
+        if resources.is_launchable():
+            self._check_instance_type_accelerators_combination(resources)
+        resources_required_features = resources.get_required_cloud_features()
+        if num_nodes > 1:
+            resources_required_features.add(
+                CloudImplementationFeatures.MULTI_NODE)
+        try:
+            self.check_features_are_supported(resources_required_features)
+        except exceptions.NotSupportedError:
+            # TODO(zhwu): The resources are now silently filtered out. We
+            # should have some logging telling the user why the resources
+            # are not considered.
+            return ([], [])
+        return self._get_feasible_launchable_resources(resources)
+
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """See get_feasible_launchable_resources()."""
         raise NotImplementedError
+
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        """"
+        Returns the number of available resources per reservation for the given
+        instance type in the given region/zone.
+        Default implementation returns 0 for non-implemented clouds.
+        """
+        del instance_type, region, zone
+        return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -369,7 +396,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.
@@ -395,8 +423,8 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
-    def need_cleanup_after_preemption(self,
-                                      resource: 'resources.Resources') -> bool:
+    def need_cleanup_after_preemption(
+            self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -423,6 +451,17 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._cloud_unsupported_features()
+
+        # Docker image is not compatible with ssh proxy command.
+        if skypilot_config.get_nested(
+            (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
+            unsupported_features2reason.update({
+                CloudImplementationFeatures.DOCKER_IMAGE: (
+                    f'Docker image is not supported in {cls._REPR} when proxy '
+                    'command is set. Please remove proxy command in the config.'
+                ),
+            })
+
         unsupported_features = set(unsupported_features2reason.keys())
         unsupported_features = requested_features.intersection(
             unsupported_features)
@@ -449,8 +488,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_length()
-        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
@@ -458,14 +496,6 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if (max_cluster_name_len_limit is not None and
-                len(cluster_name) > max_cluster_name_len_limit):
-            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -478,23 +508,68 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    # pylint: disable=unused-argument
-    def check_quota_available(cls,
-                              region: str,
-                              instance_type: str,
-                              use_spot: bool = False) -> bool:
-        """Check if quota is available for `instance_type` in `region`.
+    def _check_instance_type_accelerators_combination(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Errors out if the accelerator is not supported by the instance type.
 
-        (Currently, check_quota_available is only implemented for AWS.)
+        This function is overridden by GCP for host-accelerator logic.
+
+        Raises:
+            ResourcesMismatchError: If the accelerator is not supported.
+        """
+        assert resources.is_launchable(), resources
+
+        def _equal_accelerators(
+                acc_requested: Optional[Dict[str, int]],
+                acc_from_instance_type: Optional[Dict[str, int]]) -> bool:
+            """Check the requested accelerators equals to the instance type
+
+            Check the requested accelerators equals to the accelerators
+            from the instance type (both the accelerator type and the
+            count).
+            """
+            if acc_requested is None:
+                return acc_from_instance_type is None
+            if acc_from_instance_type is None:
+                return False
+
+            for acc in acc_requested:
+                if acc not in acc_from_instance_type:
+                    return False
+                if acc_requested[acc] != acc_from_instance_type[acc]:
+                    return False
+            return True
+
+        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
+            resources.instance_type))
+        if not _equal_accelerators(resources.accelerators,
+                                   acc_from_instance_type):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Infeasible resource demands found:'
+                    '\n  Instance type requested: '
+                    f'{resources.instance_type}\n'
+                    f'  Accelerators for {resources.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {resources.accelerators}\n'
+                    f'To fix: either only specify instance_type, or '
+                    'change the accelerators field to be consistent.')
+
+    @classmethod
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if quota is available based on `resources`.
 
         The _retry_zones function in cloud_vm_ray_backend goes through different
-        candidate regions and attempts to provision the requested instance_type
-        accelerators in the region, until a successful provisioning happens
-        or all regions with the requested accelerator have been looked at.
-        Previously, SkyPilot would attempt to provision resources in all of
-        these regions. However, many regions would have a zero quota or
-        inadequate quota, meaning these attempted provisions were destined
-        to fail from the get-go.
+        candidate regions and attempts to provision the requested
+        `instance_type` or `accelerator` accelerators in the `region`
+        (the `instance_type` or `accelerator`, and `region`, as defined in
+        `resources`) until a successful provisioning happens or all regions
+        with the requested accelerator have been looked at. Previously,
+        SkyPilot would attempt to provision resources in all of these regions.
+        However, many regions would have a zero quota or inadequate quota,
+        meaning these attempted provisions were destined to fail from
+        the get-go.
 
         Checking the quota is substantially faster than attempting a failed
         provision (~1 second vs 30+ seconds) so this function attempts to
@@ -506,7 +581,7 @@ class Cloud:
         quota utilization because many cloud providers' APIs don't have a
         built-in command for checking the real-time utilization. Checking
         real-time utilization is a more difficult endeavor that involves
-        monitoring etc., so we are holding off on that for now.
+        observability etc., so we are holding off on that for now.
 
         If for at any point the function fails, whether it's because we can't
         import the necessary dependencies or a query using a cloud provider's
@@ -526,6 +601,7 @@ class Cloud:
         Returns:
             False if the quota is found to be zero, and true otherwise.
         """
+        del resources  # unused
 
         return True
 
@@ -543,6 +619,10 @@ class Cloud:
         Returns:
             A list of ClusterStatus representing the status of all the
             alive nodes in the cluster.
+
+        Raises:
+            exceptions.ClusterStatusFetchingError: raised if the status of the
+                cluster cannot be fetched.
         """
         raise NotImplementedError
 
@@ -557,8 +637,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.
 
@@ -567,7 +647,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def maybe_move_image(cls, image_name: str, source_region: str,
+    def maybe_move_image(cls, image_id: str, source_region: str,
                          target_region: str, source_zone: Optional[str],
                          target_zone: Optional[str]) -> str:
         """Move an image if required.

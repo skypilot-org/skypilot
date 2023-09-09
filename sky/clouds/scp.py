@@ -9,11 +9,11 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
+from sky import sky_logging
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.scp import scp_utils
-from sky import exceptions
-from sky import sky_logging
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -45,6 +45,16 @@ class SCP(clouds.Cloud):
         clouds.CloudImplementationFeatures.MULTI_NODE: _MULTI_NODE,
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             (f'Migrating disk is not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            (f'Docker image is not supported in {_REPR}. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            (f'Spot instances are not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            (f'Custom disk tiers are not supported in {_REPR}.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            (f'Opening ports is not supported in {_REPR}.'),
     }
 
     _INDENT_PREFIX = '    '
@@ -55,7 +65,7 @@ class SCP(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -228,9 +238,12 @@ class SCP(clouds.Cloud):
             'No image found in catalog for region '
             f'{region_name}. Try setting a valid image_id.')
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        # Check if the host VM satisfies the min/max disk size limits.
+        is_allowed = self._is_disk_size_allowed(resources)
+        if not is_allowed:
             return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -326,7 +339,7 @@ class SCP(clouds.Cloud):
             accelerator, acc_count, region, zone, 'scp')
 
     @staticmethod
-    def is_disk_size_allowed(resources):
+    def _is_disk_size_allowed(resources):
         if (resources.disk_size and
             (resources.disk_size < _SCP_MIN_DISK_SIZE_GB or
              resources.disk_size > _SCP_MAX_DISK_SIZE_GB)):
@@ -334,8 +347,8 @@ class SCP(clouds.Cloud):
                         f' {_SCP_MIN_DISK_SIZE_GB} GB '
                         f'and {_SCP_MAX_DISK_SIZE_GB} GB. '
                         f'Input: {resources.disk_size}')
-            return False, []
-        return True, [resources]
+            return False
+        return True
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],

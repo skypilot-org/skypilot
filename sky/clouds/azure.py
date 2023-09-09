@@ -1,9 +1,11 @@
 """Azure."""
+import base64
 import functools
 import json
 import os
 import re
 import subprocess
+import textwrap
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -56,15 +58,20 @@ class Azure(clouds.Cloud):
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
+    _INDENT_PREFIX = ' ' * 4
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {cls._REPR}.',
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {cls._REPR}.',
         }
 
     @classmethod
-    def _max_cluster_name_length(cls) -> int:
+    def max_cluster_name_length(cls) -> int:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,
@@ -233,10 +240,33 @@ class Azure(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
-        from sky.clouds.service_catalog import azure_catalog  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds.service_catalog import azure_catalog
         gen_version = azure_catalog.get_gen_version_from_instance_type(
             r.instance_type)
         image_config = self._get_image_config(gen_version, r.instance_type)
+        # Setup commands to eliminate the banner and restart sshd.
+        # This script will modify /etc/ssh/sshd_config and add a bash script
+        # into .bashrc. The bash script will restart sshd if it has not been
+        # restarted, identified by a file /tmp/__restarted is existing.
+        # pylint: disable=line-too-long
+        cloud_init_setup_commands = base64.b64encode(
+            textwrap.dedent("""\
+            #cloud-config
+            runcmd:
+              - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
+              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+            write_files:
+              - path: /etc/apt/apt.conf.d/20auto-upgrades
+                content: |
+                  APT::Periodic::Update-Package-Lists "0";
+                  APT::Periodic::Download-Upgradeable-Packages "0";
+                  APT::Periodic::AutocleanInterval "0";
+                  APT::Periodic::Unattended-Upgrade "0";
+              - path: /etc/apt/apt.conf.d/10cloudinit-disable
+                content: |
+                  APT::Periodic::Enable "0";
+            """).encode('utf-8')).decode('utf-8')
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -245,26 +275,30 @@ class Azure(clouds.Cloud):
             # Azure does not support specific zones.
             'zones': None,
             **image_config,
-            'disk_tier': Azure._get_disk_type(r.disk_tier)
+            'disk_tier': Azure._get_disk_type(r.disk_tier),
+            'cloud_init_setup_commands': cloud_init_setup_commands
         }
 
-    def get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
 
         def failover_disk_tier(
                 instance_type: str,
                 disk_tier: Optional[str]) -> Tuple[bool, Optional[str]]:
-            """Figure out the actual disk tier to be used
+            """Figure out the actual disk tier to be used.
 
             Check the disk_tier specified by the user with the instance type to
             be used. If not valid, return False.
+
             When the disk_tier is not specified, failover through the possible
             disk tiers.
 
             Returns:
-                A tuple of a boolean value and an optional string to represent the
-                instance_type to use. If the boolean value is False, the specified
-                configuration is not a valid combination, and should not be used
-                for launching a VM.
+                A tuple of a boolean value and an optional string to represent
+                the instance_type to use. If the boolean value is False, the
+                specified configuration is not a valid combination, and should
+                not be used for launching a VM.
             """
             if disk_tier is not None:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
@@ -282,17 +316,17 @@ class Azure(clouds.Cloud):
             else:
                 return True, None
 
-        if resources.use_spot:
-            # TODO(zhwu): our azure subscription offer ID does not support spot.
-            # Need to support it.
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
+            ok, disk_tier = failover_disk_tier(resources.instance_type,
+                                               resources.disk_tier)
+            if not ok:
+                return ([], [])
+            # Treat Resources(Azure, Standard_NC4as_T4_v3, T4) as
+            # Resources(Azure, Standard_NC4as_T4_v3).
             resources = resources.copy(
                 accelerators=None,
-                disk_tier=failover_disk_tier(resources.instance_type,
-                                             resources.disk_tier),
+                disk_tier=disk_tier,
             )
             return ([resources], [])
 
@@ -350,9 +384,9 @@ class Azure(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         help_str = (
             ' Run the following commands:'
-            '\n      $ az login'
-            '\n      $ az account set -s <subscription_id>'
-            '\n    For more info: '
+            f'\n{cls._INDENT_PREFIX}  $ az login'
+            f'\n{cls._INDENT_PREFIX}  $ az account set -s <subscription_id>'
+            f'\n{cls._INDENT_PREFIX}For more info: '
             'https://docs.microsoft.com/en-us/cli/azure/get-started-with-azure-cli'  # pylint: disable=line-too-long
         )
         # This file is required because it will be synced to remote VMs for
@@ -365,18 +399,23 @@ class Azure(clouds.Cloud):
 
         try:
             _run_output('az --version')
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
-                'Azure CLI returned error. Run the following commands:'
-                '\n      $ pip install skypilot[azure]'
-                '\n    Credentials may also need to be set.' + help_str)
+                'Azure CLI `az --version` errored. Run the following commands:'
+                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[azure]'
+                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set.'
+                f'{help_str}\n'
+                f'{cls._INDENT_PREFIX}Details: '
+                f'{common_utils.format_exception(e)}')
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
         try:
             cls.get_current_user_identity()
-        except exceptions.CloudUserIdentityError:
-            return False, 'Azure credential is not set.' + help_str
+        except exceptions.CloudUserIdentityError as e:
+            return False, (f'Getting user\'s Azure identity failed.{help_str}\n'
+                           f'{cls._INDENT_PREFIX}Details: '
+                           f'{common_utils.format_exception(e)}')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

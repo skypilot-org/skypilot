@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-import colorama
 import glob
 import hashlib
 import os
@@ -11,6 +10,7 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import pandas as pd
 
 from sky import exceptions
@@ -19,6 +19,7 @@ from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -68,6 +69,26 @@ _quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
+def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
+    az_mapping_path = common.get_catalog_path(
+        f'aws/az_mappings-{aws_user_hash}.csv')
+    if not os.path.exists(az_mapping_path):
+        az_mappings = None
+        if aws_user_hash != 'default':
+            # Fetch az mapping from AWS.
+            print(
+                f'\r{colorama.Style.DIM}AWS: Fetching availability zones '
+                f'mapping...{colorama.Style.RESET_ALL}',
+                end='')
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        else:
+            return None
+        az_mappings.to_csv(az_mapping_path, index=False)
+    else:
+        az_mappings = pd.read_csv(az_mapping_path)
+    return az_mappings
+
+
 def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
@@ -114,23 +135,12 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
             'Failed to get AWS user identity. Using the latest mapping '
             f'file for user {aws_user_hash!r}.')
 
-    az_mapping_path = common.get_catalog_path(
-        f'aws/az_mappings-{aws_user_hash}.csv')
-    if not os.path.exists(az_mapping_path):
-        az_mappings = None
-        if aws_user_hash != 'default':
-            # Fetch az mapping from AWS.
-            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        else:
-            # Returning the original dataframe directly, as no cloud
-            # identity can be fetched which suggests there are no
-            # credentials.
-            return df
-        az_mappings.to_csv(az_mapping_path, index=False)
-    else:
-        az_mappings = pd.read_csv(az_mapping_path)
+    az_mappings = _get_az_mappings(aws_user_hash)
+    if az_mappings is None:
+        # Returning the original dataframe directly, as no cloud
+        # identity can be fetched which suggests there are no
+        # credentials.
+        return df
     # Use inner join to drop rows with unknown AZ IDs, which are likely
     # because the user does not have access to that Region. Otherwise,
     # there will be rows with NaN in the AvailabilityZone column.
@@ -141,20 +151,28 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_df() -> pd.DataFrame:
-    if config.get_use_default_catalog():
-        return _default_df
-    else:
-        global _user_df
-        with _apply_az_mapping_lock:
-            if _user_df is None:
+    global _user_df
+    with _apply_az_mapping_lock:
+        if _user_df is None:
+            try:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
-        return _user_df
+            except RuntimeError as e:
+                if config.get_use_default_catalog_if_failed():
+                    logger.warning('Failed to fetch availability zone mapping. '
+                                   f'{common_utils.format_exception(e)}')
+                    return _default_df
+                else:
+                    raise
+    return _user_df
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
-    # Get the quota code from the accelerator instance type
-    # This will be used in the botocore command to check for
-    # a non-zero quota
+    """Get the quota code based on `instance_type` and `use_spot`.
+
+    The quota code is fetched from `_quotas_df` based on the instance type
+    specified, and will then be utilized in a botocore API command in order
+    to check its quota.
+    """
 
     if use_spot:
         spot_header = 'SpotInstanceCode'
@@ -235,9 +253,11 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
-    accelerators with sorted prices and a list of candidates with fuzzy search.
+    accelerators/cpus/memory with sorted prices and a list of candidates with
+    fuzzy search.
     """
     return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,

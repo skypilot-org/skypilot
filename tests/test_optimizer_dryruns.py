@@ -1,5 +1,6 @@
 import tempfile
 import textwrap
+import time
 from typing import Callable, List, Optional
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 import sky
 from sky import clouds
 from sky import exceptions
+from sky.utils import kubernetes_utils
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -75,6 +77,20 @@ def _make_resources(
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
         config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+
+    monkeypatch.setattr(
+        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+        lambda *_args, **_kwargs: [])
+
+    # Monkey patch Kubernetes resource detection since it queries
+    # the cluster to detect available cluster resources.
+    monkeypatch.setattr(
+        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
+        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
+    monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
+                        lambda *_args, **_kwargs: [True, []])
+    monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',
+                        lambda *_args, **_kwargs: [True, ''])
 
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
@@ -329,11 +345,32 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
         ('m4.2xlarge', 'V100'),
     ]
     for instance, acc in bad_instance_and_accs:
-        with pytest.raises(ValueError) as e:
+        with pytest.raises(exceptions.ResourcesMismatchError) as e:
             _test_resources_launch(monkeypatch,
                                    sky.AWS(),
                                    instance_type=instance,
                                    accelerators=acc)
+        assert 'Infeasible resource demands found' in str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='n2-standard-8',
+                               accelerators={'V100': 1})
+        assert 'can only be attached to N1 VMs,' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               instance_type='a2-highgpu-1g',
+                               accelerators={'A100': 2})
+        assert 'cannot be attached to' in str(e.value), str(e.value)
+
+    with pytest.raises(exceptions.ResourcesMismatchError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.AWS(),
+                               instance_type='p3.16xlarge',
+                               accelerators={'V100': 1})
         assert 'Infeasible resource demands found' in str(e.value)
 
 
@@ -346,11 +383,20 @@ def test_instance_type_matches_accelerators(monkeypatch):
                            sky.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
-    # Partial use: Instance has 8 V100s, while the task needs 1 of them.
+
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           accelerators='tpu-v3-8')
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='a2-highgpu-1g',
+                           accelerators='a100')
+
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='p3.16xlarge',
-                           accelerators={'V100': 1})
+                           accelerators={'V100': 8})
 
 
 def test_invalid_instance_type(monkeypatch):
@@ -401,6 +447,13 @@ def test_invalid_region(monkeypatch):
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
+
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        _test_resources_launch(monkeypatch,
+                               sky.GCP(),
+                               region='us-west1',
+                               accelerators='tpu-v3-8')
+        assert 'No launchable resource found' in str(e.value)
 
 
 def test_invalid_zone(monkeypatch):
@@ -599,3 +652,42 @@ def test_parse_valid_envs_yaml(monkeypatch):
           GOOD123: 123
         """)
     _test_parse_task_yaml(spec)
+
+
+def test_invalid_accelerators_regions(enable_all_clouds, monkeypatch):
+    task = sky.Task(run='echo hi')
+    task.set_resources(
+        sky.Resources(
+            sky.AWS(),
+            accelerators='A100:8',
+            region='us-west-1',
+        ))
+    with pytest.raises(exceptions.ResourcesUnavailableError) as e:
+        sky.launch(task, cluster_name='should-fail', dryrun=True)
+        assert 'No launchable resource found for' in str(e.value), str(e.value)
+
+
+def _test_optimize_speed(resources: sky.Resources):
+    with sky.Dag() as dag:
+        task = sky.Task(run='echo hi')
+        task.set_resources(resources)
+    start = time.time()
+    sky.optimize(dag)
+    end = time.time()
+    assert end - start < 5.0, (f'optimize took too long for {resources}, '
+                               f'{end - start} seconds')
+
+
+def test_optimize_speed(enable_all_clouds, monkeypatch):
+    _test_optimize_speed(sky.Resources(cpus=4))
+    for cloud in clouds.CLOUD_REGISTRY.values():
+        if cloud.is_same_cloud(sky.Local()):
+            continue
+        _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
+    _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='V100:1'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
+    _test_optimize_speed(
+        sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))

@@ -1,6 +1,9 @@
-import pytest
 import tempfile
 from typing import List
+from unittest.mock import patch
+
+import pandas as pd
+import pytest
 
 # Usage: use
 #   @pytest.mark.slow
@@ -19,7 +22,8 @@ from typing import List
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
+    'kubernetes'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -35,6 +39,7 @@ cloud_to_pytest_keyword = {
     'ibm': 'ibm',
     'scp': 'scp',
     'oci': 'oci',
+    'kubernetes': 'kubernetes'
 }
 
 
@@ -128,25 +133,30 @@ def pytest_collection_modifyitems(config, items):
                 in item.keywords) and config.getoption('--managed-spot'):
             item.add_marker(skip_marks['managed_spot'])
 
+    # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
     # launch API to one launch every 10 seconds.
-    serial_mark = pytest.mark.xdist_group(name='serial_lambda_cloud')
+    # We run Kubernetes tests serially because the Kubernetes cluster may have
+    # limited resources (e.g., just 8 cpus).
+    serial_mark = pytest.mark.xdist_group(
+        name=f'serial_{generic_cloud_keyword}')
     # Handle generic tests
-    if generic_cloud == 'lambda':
+    if generic_cloud in ['lambda', 'kubernetes']:
         for item in items:
             if (_is_generic_test(item) and
-                    'no_lambda_cloud' not in item.keywords):
+                    f'no_{generic_cloud_keyword}' not in item.keywords):
                 item.add_marker(serial_mark)
                 # Adding the serial mark does not update the item.nodeid,
                 # but item.nodeid is important for pytest.xdist_group, e.g.
                 #   https://github.com/pytest-dev/pytest-xdist/blob/master/src/xdist/scheduler/loadgroup.py
                 # This is a hack to update item.nodeid
-                item._nodeid = f'{item.nodeid}@serial_lambda_cloud'
-    # Handle Lambda Cloud specific tests
+                item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'
+    # Handle generic cloud specific tests
     for item in items:
-        if 'lambda_cloud' in item.keywords:
-            item.add_marker(serial_mark)
-            item._nodeid = f'{item.nodeid}@serial_lambda_cloud'  # See comment on item.nodeid above
+        if generic_cloud in ['lambda', 'kubernetes']:
+            if generic_cloud_keyword in item.keywords:
+                item.add_marker(serial_mark)
+                item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'  # See comment on item.nodeid above
 
 
 def _is_generic_test(item) -> bool:
@@ -172,6 +182,8 @@ def generic_cloud(request) -> str:
 @pytest.fixture
 def enable_all_clouds(monkeypatch):
     from sky import clouds
+    from sky.utils import kubernetes_utils
+
     # Monkey-patching is required because in the test environment, no cloud is
     # enabled. The optimizer checks the environment to find enabled clouds, and
     # only generates plans within these clouds. The tests assume that all three
@@ -193,6 +205,32 @@ def enable_all_clouds(monkeypatch):
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
         config_file_backup.name)
     monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+
+    az_mappings = pd.read_csv('tests/default_aws_az_mappings.csv')
+
+    def _get_az_mappings(_):
+        return az_mappings
+
+    monkeypatch.setattr(
+        'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
+        _get_az_mappings)
+
+    monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
+                        lambda _: None)
+
+    monkeypatch.setattr(
+        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
+        lambda *_args, **_kwargs: [])
+
+    # Monkey patch Kubernetes resource detection since it queries
+    # the cluster to detect available cluster resources.
+    monkeypatch.setattr(
+        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
+        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
+    monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
+                        lambda *_args, **_kwargs: [True, []])
+    monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',
+                        lambda *_args, **_kwargs: [True, ''])
 
 
 @pytest.fixture
