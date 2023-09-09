@@ -1,6 +1,6 @@
-# Finetuning Falcon: The Top LLM Chatbot on OpenLLM Leaderboard
+# Finetuning Falcon with SkyPilot
 
-This README contains instructions on how to use SkyPilot to finetune Falcon-7B and Falcon-40B, an open-source LLM that rivals many current closed-source models, including ChatGPT. Notably, it currently tops the charts of the [Open LLM Leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard).
+This README contains instructions on how to use SkyPilot to finetune Falcon-7B and Falcon-40B, an open-source LLM that rivals many current closed-source models, including ChatGPT. 
 
 * [Blog post](https://huggingface.co/blog/falcon)
 * [Repo](https://huggingface.co/tiiuae/falcon-40b)
@@ -49,11 +49,11 @@ For reference, below is a loss graph you may expect to see, and the amount of ti
 
 <img width="524" alt="image" src="https://imgur.com/BDlHink.png">
 
-1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $3.3.
+1. `ybelkada/falcon-7b-sharded-bf16`: 2.5 to 3 hours using 1 A100 spot GPU; total cost ≈ $3.3.
 
-2. `tiiuae/falcon-7b`: 2.5 to 3 hours using 1 A100 GPU; total cost ≈ $3.3.
+2. `tiiuae/falcon-7b`: 2.5 to 3 hours using 1 A100 spot GPU; total cost ≈ $3.3.
 
-3. `tiiuae/falcon-40b`: 10 hours using 1 A100-80GB; total cost ≈ $16.10.
+3. `tiiuae/falcon-40b`: 10 hours using 1 A100-80GB spot GPU; total cost ≈ $16.10.
 
 
 ## Q&A
