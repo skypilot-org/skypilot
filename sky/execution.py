@@ -1053,9 +1053,9 @@ def serve_up(
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Cannot select controller for service {service_name!r}. '
-                'Please check if there are some `sky serve up` process hanging '
-                'abnormally.') from e
+                f'Getting controller lock timeout for service {service_name!r}.'
+                ' Please check if there are some `sky serve up` process hanging'
+                ' abnormally.') from e
 
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
