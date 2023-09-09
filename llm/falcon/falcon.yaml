@@ -37,6 +37,6 @@ run: |
   --bf16 \
   --group_by_length \
   --bnb_4bit_compute_dtype bfloat16 \
-  --max_steps 10 \
+  --max_steps 500 \
   --dataset_name timdettmers/openassistant-guanaco \
   --output_dir /results
