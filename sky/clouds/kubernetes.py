@@ -1,5 +1,4 @@
 """Kubernetes."""
-import hashlib
 import json
 import os
 import typing
@@ -408,9 +407,6 @@ class Kubernetes(clouds.Cloud):
 
             user = current_context['context']['user']
             cluster = current_context['context']['cluster']
-            return [
-                hashlib.md5(
-                    f'{cluster}_{user}_{namespace}'.encode()).hexdigest()
-            ]
+            return [f'{cluster}_{user}_{namespace}']
         except k8s.config.config_exception.ConfigException:
             return None
