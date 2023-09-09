@@ -1058,7 +1058,7 @@ def serve_up(
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                f'Getting controller lock timeout for service {service_name!r}.'
+                f'Timeout when obtaining controller lock for service {service_name!r}.'
                 ' Please check if there are some `sky serve up` process hanging'
                 ' abnormally.') from e
 
