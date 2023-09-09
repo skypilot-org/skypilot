@@ -1113,10 +1113,10 @@ def serve_up(
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
-            # We use autodown here to automatically cleanup the controller when
-            # no service is running on it.
-            # TODO(tian): Maybe autostop to make cold start quicker?
-            down=True,
+            # We use autostop here to reduce cold start time, since in most
+            # cases the controller resources requirement will be the default
+            # value and a previous controller could be reused.
+            idle_minutes_to_autostop=1,
             retry_until_up=True,
         )
 
