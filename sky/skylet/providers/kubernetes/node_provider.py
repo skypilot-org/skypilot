@@ -212,8 +212,13 @@ class KubernetesNodeProvider(NodeProvider):
                     pod_name = new_node._metadata._name
                     events = kubernetes.core_api().list_namespaced_event(
                         self.namespace,
-                        field_selector=f"involvedObject.name={pod_name}")
-                    for event in events.items:
+                        field_selector=(f'involvedObject.name={pod_name},'
+                                        'involvedObject.kind=Pod'))
+                    events_desc_by_time = \
+                        sorted(events.items,
+                        key=lambda e: e.metadata.creation_timestamp,
+                        reverse=True)
+                    for event in events_desc_by_time:
                         if event.reason == 'FailedScheduling':
                             event_message = event.message
                             break
