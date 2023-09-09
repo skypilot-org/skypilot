@@ -89,7 +89,7 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
                 task.name = f'{dag.name}-{task_id}'
 
 
-def fill_default_spot_config_in_dag(dag: dag_lib.Dag):
+def fill_default_spot_config_in_dag(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
         assert len(task_.resources) == 1, task_
         resources = list(task_.resources)[0]
