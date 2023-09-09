@@ -51,7 +51,7 @@ setup: |
       # Download the wikipedia dataset (takes ~15 min)
       axel -n 20 https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
       
-      # Preprocess the wikipedia dataset (takes ~1 hour)
+      # Preprocess the wikipedia dataset (takes ~2 hours)
       pip install wikiextractor
       python -m wikiextractor.WikiExtractor enwiki-latest-pages-articles.xml.bz2 --json
       find text -name 'wiki_*' -exec cat {} \; > train_data.jsonl
