@@ -1,0 +1,145 @@
+# Distributed training a GPT style model with Nvidia NeMo
+#
+# Usage:
+#   sky launch -c nemo_gpt3 nemo_gpt3.yaml
+#
+#   # Or try on spot A100 GPUs:
+#   sky launch -c nemo_gpt3 nemo_gpt3.yaml --use-spot --gpus A100:1
+#
+#   # Terminate cluster after you're done
+#   sky down nemo_gpt3
+
+resources:
+  accelerators: V100:1
+
+num_nodes: 2
+
+envs:
+  DATASET_ROOT: $HOME/wiki/
+
+setup: |
+  conda activate nemo
+  if [ $? -eq 0 ]; then
+      echo "Nemo conda env exists"
+  else
+      conda create -y --name nemo python==3.10.12
+      conda activate nemo
+  
+      # Install PyTorch
+      pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+      
+      # Install nemo
+      sudo apt-get update
+      sudo apt-get install -y libsndfile1 ffmpeg
+      pip install Cython
+      pip install nemo_toolkit['all']
+    
+      # Clone the NeMo repo to get the examples
+      git clone https://github.com/NVIDIA/NeMo.git
+  fi
+  
+  # ======== Download and preprocess the wikipedia dataset ========
+  if [ -f ${DATASET_ROOT}/train_data.jsonl ]; then
+      echo "Dataset exists"
+  else
+      # Install axel for faster downloads
+      sudo apt-get install -y axel
+  
+      mkdir -p ${DATASET_ROOT}
+      cd ${DATASET_ROOT}
+  
+      # Download the wikipedia dataset (takes ~15 min)
+      axel -n 20 https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
+      
+      # Preprocess the wikipedia dataset (takes ~1 hour)
+      pip install wikiextractor
+      python -m wikiextractor.WikiExtractor enwiki-latest-pages-articles.xml.bz2 --json
+      find text -name 'wiki_*' -exec cat {} \; > train_data.jsonl
+  fi
+  
+  # ======== Download tokenizer files ========
+  # Check if the tokenizer files exist
+  if [ -f ${DATASET_ROOT}/gpt2-vocab.json ]; then
+      echo "Tokenizer files exist"
+  else
+      # Download the tokenizer files
+      cd {DATASET_ROOT}
+      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json
+      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt
+  fi
+  
+  # ======== Convert data to mmap format ========
+  # Check if the mmap files exist
+  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_0.npy ]; then
+      echo "Mmap files exist"
+  else
+      # Convert the data to mmap format
+      cd ${DATASET_ROOT}
+      python $HOME/sky_workdir/NeMo/scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
+        --input=train_data.jsonl \
+        --json-keys=text \
+        --tokenizer-library=megatron \
+        --vocab gpt2-vocab.json \
+        --dataset-impl mmap \
+        --tokenizer-type GPT2BPETokenizer \
+        --merge-file gpt2-merges.txt \
+        --output-prefix=hfbpe_gpt_training_data \
+        --append-eod \
+        --workers=32
+  fi
+
+run: |
+  conda activate nemo
+  
+  # Get the number of nodes and master address from SkyPilot envvars
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  
+  # TODO - make this distributed
+  python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
+    --config-path=NeMo/examples/nlp/language_modeling/conf \
+    --config-name=megatron_gpt_config \
+    trainer.devices=1 \
+    trainer.num_nodes=1 \
+    trainer.max_epochs=null \
+    trainer.max_steps=300000 \
+    trainer.val_check_interval=300 \
+    trainer.log_every_n_steps=50 \
+    trainer.limit_val_batches=50 \
+    trainer.limit_test_batches=50 \
+    trainer.accumulate_grad_batches=1 \
+    trainer.precision=16 \
+    model.micro_batch_size=6 \
+    model.global_batch_size=192 \
+    model.tensor_model_parallel_size=1 \
+    model.pipeline_model_parallel_size=1 \
+    model.max_position_embeddings=1024 \
+    model.encoder_seq_length=1024 \
+    model.hidden_size=768 \
+    model.ffn_hidden_size=3072 \
+    model.num_layers=12 \
+    model.num_attention_heads=12 \
+    model.init_method_std=0.021 \
+    model.hidden_dropout=0.1 \
+    model.layernorm_epsilon=1e-5 \
+    model.tokenizer.vocab_file=gpt2-vocab.json \
+    model.tokenizer.merge_file=gpt2-merges.txt \
+    model.data.data_prefix=[1.0,hfbpe_gpt_training_data_text_document] \
+    model.data.num_workers=2 \
+    model.data.seq_length=1024 \
+    model.data.splits_string=\'980,10,10\' \
+    model.optim.name=fused_adam \
+    model.optim.lr=6e-4 \
+    model.optim.betas=[0.9,0.95] \
+    model.optim.weight_decay=0.1 \
+    model.optim.sched.name=CosineAnnealing \
+    model.optim.sched.warmup_steps=750 \
+    model.optim.sched.constant_steps=80000 \
+    model.optim.sched.min_lr=6e-5 \
+    exp_manager.resume_if_exists=True \
+    exp_manager.resume_ignore_no_checkpoint=True \
+    exp_manager.create_checkpoint_callback=True \
+    exp_manager.checkpoint_callback_params.monitor=val_loss \
+    exp_manager.checkpoint_callback_params.save_top_k=3 \
+    exp_manager.checkpoint_callback_params.mode=min \
+    exp_manager.checkpoint_callback_params.always_save_nemo=False
