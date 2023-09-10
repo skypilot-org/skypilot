@@ -4039,7 +4039,9 @@ def serve_up(
             prompt = (f'Service {service_name!r} has failed. '
                       'Please clean up the service and try again.')
         else:
-            prompt = f'Service {service_name!r} already exists.'
+            prompt = (f'Service {service_name!r} already exists. '
+                      'Updating a service will be supported in the future. '
+                      'For now, `sky serve down` first and try again.')
         click.secho(prompt, fg='red')
         return
 
@@ -4326,16 +4328,13 @@ def serve_down(
             sky.serve_down(name, purge)
         except RuntimeError as e:
             message = (
-                f'{colorama.Fore.RED}Tearing down service {name}...failed. '
+                f'{colorama.Fore.RED}Tearing down service {name!r}...failed. '
                 'Please manually clean up the replicas and then use --purge '
                 f'to clean up the controller.{colorama.Style.RESET_ALL}'
                 f'\nReason: {common_utils.format_exception(e)}.')
-        except (exceptions.NotSupportedError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
-            message = str(e)
         else:
             message = (
-                f'{colorama.Fore.GREEN}Tearing down service {name}...done.'
+                f'{colorama.Fore.GREEN}Tearing down service {name!r}...done.'
                 f'{colorama.Style.RESET_ALL}')
             success_progress = True
 

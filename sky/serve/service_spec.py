@@ -193,10 +193,10 @@ class SkyServiceSpec:
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
-            Readiness probe method:        {self.probe_str()}
-            Replica autoscaling policy:    {self.policy_str()}
-            Service initial delay seconds: {self.initial_delay_seconds}
-            Replica auto restart:          {self.auto_restart}
+            Readiness probe method:          {self.probe_str()}
+            Readiness initial delay seconds: {self.initial_delay_seconds}
+            Replica autoscaling policy:      {self.policy_str()}
+            Replica auto restart:            {self.auto_restart}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)

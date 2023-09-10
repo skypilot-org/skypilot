@@ -1116,7 +1116,7 @@ def serve_up(
 
         fore = colorama.Fore
         style = colorama.Style
-        print(f'\n{fore.YELLOW}Launching controller for {service_name}...'
+        print(f'\n{fore.YELLOW}Launching controller for {service_name!r}...'
               f'{style.RESET_ALL}')
         job_id = _execute(
             entrypoint=controller_task,
@@ -1172,7 +1172,7 @@ def serve_up(
 
         service_handle.job_id = job_id
         global_user_state.set_service_handle(service_name, service_handle)
-        print(f'{fore.GREEN}Launching controller for {service_name}...done.'
+        print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
               f'{style.RESET_ALL}')
 
         global_user_state.set_service_status(
@@ -1200,7 +1200,7 @@ def serve_up(
         print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
               f'{style.RESET_ALL}{fore.CYAN}'
               f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
-        print(f'{fore.GREEN}Starting replica now...{style.RESET_ALL}')
+        print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
         print('Please use the above command to find the latest status.')
 
 
@@ -1235,7 +1235,8 @@ def serve_down(
             if service_handle.controller_port is None:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Controller job of service {service_name} not found.')
+                        f'Controller job of service {service_name!r} not found.'
+                    )
 
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
@@ -1248,7 +1249,7 @@ def serve_down(
             subprocess_utils.handle_returncode(
                 returncode,
                 code, ('Failed when submit terminate request to controller '
-                       f'of service {service_name}'),
+                       f'of service {service_name!r}'),
                 stderr,
                 stream_logs=False)
 
@@ -1256,13 +1257,13 @@ def serve_down(
                 terminate_service_payload)
             if resp.status_code != 200:
                 raise RuntimeError('Failed to terminate replica of service '
-                                   f'{service_name} due to request '
+                                   f'{service_name!r} due to request '
                                    f'failure: {resp.text}')
             msg = resp.json()['message']
             if msg:
                 raise RuntimeError(
                     'Unexpected message when tearing down replica of service '
-                    f'{service_name}: {msg}. Please login to the controller '
+                    f'{service_name!r}: {msg}. Please login to the controller '
                     'and make sure the service is properly cleaned.')
 
         # We want to make sure no matter what error happens, we can still
@@ -1270,14 +1271,14 @@ def serve_down(
         except Exception as e:  # pylint: disable=broad-except
             if purge:
                 logger.warning('Ignoring error when cleaning replicas of '
-                               f'{service_name}: {e}')
+                               f'{service_name!r}: {e}')
             else:
                 raise RuntimeError(e) from e
     else:
         if not purge:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
-                    f'Cannot find controller of service {service_name}.')
+                    f'Cannot find controller of service {service_name!r}.')
 
     try:
         if handle is not None:
@@ -1303,16 +1304,17 @@ def serve_down(
                                                         separate_stderr=True)
             subprocess_utils.handle_returncode(
                 returncode,
-                code, ('Failed when cleaning up utility files on controller '
-                       f'of service {service_name}'),
+                code, ('Failed when cleaning up service files on controller '
+                       f'of service {service_name!r}'),
                 stderr,
                 stream_logs=False)
 
     # same as above.
     except Exception as e:  # pylint: disable=broad-except
         if purge:
-            logger.warning('Ignoring error when stopping controller and '
-                           f'load balancer jobs of service {service_name}: {e}')
+            logger.warning(
+                'Ignoring error when stopping controller and '
+                f'load balancer jobs of service {service_name!r}: {e}')
         else:
             raise RuntimeError(e) from e
 
