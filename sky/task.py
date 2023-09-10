@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -44,7 +45,7 @@ _RUN_FN_CHECK_FAIL_MSG = (
     'a list of node ip addresses (List[str]). Got {run_sig}')
 
 
-def _is_valid_name(name: str) -> bool:
+def _is_valid_name(name: Optional[str]) -> bool:
     """Checks if the task name is valid.
 
     Valid is defined as either NoneType or str with ASCII characters which may
@@ -107,7 +108,7 @@ def _fill_in_env_vars_in_file_mounts(
 def _with_docker_login_config(
     resources_set: Set['resources_lib.Resources'],
     task_envs: Dict[str, str],
-) -> 'resources_lib.Resources':
+) -> Set['resources_lib.Resources']:
     all_keys = {
         constants.DOCKER_USERNAME_ENV_VAR,
         constants.DOCKER_PASSWORD_ENV_VAR,
@@ -223,10 +224,10 @@ class Task:
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
 
-        self.inputs = None
-        self.outputs = None
-        self.estimated_inputs_size_gigabytes = None
-        self.estimated_outputs_size_gigabytes = None
+        self.inputs: Optional[str] = None
+        self.outputs: Optional[str] = None
+        self.estimated_inputs_size_gigabytes: Optional[float] = None
+        self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
         # Resources that this task cannot run on.
@@ -423,7 +424,7 @@ class Task:
           ValueError: if the path gets loaded into a str instead of a dict; or
             if there are any other parsing errors.
         """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
@@ -503,16 +504,17 @@ class Task:
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
 
-    def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
+    def set_inputs(self, inputs: str,
+                   estimated_size_gigabytes: float) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.
         self.inputs = inputs
         self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_inputs(self):
+    def get_inputs(self) -> Optional[str]:
         return self.inputs
 
-    def get_estimated_inputs_size_gigabytes(self):
+    def get_estimated_inputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_inputs_size_gigabytes
 
     def get_inputs_cloud(self):
@@ -528,15 +530,16 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
 
-    def set_outputs(self, outputs, estimated_size_gigabytes) -> 'Task':
+    def set_outputs(self, outputs: str,
+                    estimated_size_gigabytes: float) -> 'Task':
         self.outputs = outputs
         self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_outputs(self):
+    def get_outputs(self) -> Optional[str]:
         return self.outputs
 
-    def get_estimated_outputs_size_gigabytes(self):
+    def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
     def set_resources(
@@ -804,6 +807,7 @@ class Task:
         if storage_cloud is None:
             storage_cloud = clouds.CLOUD_REGISTRY.from_str(
                 enabled_storage_clouds[0])
+            assert storage_cloud is not None, enabled_storage_clouds[0]
 
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type

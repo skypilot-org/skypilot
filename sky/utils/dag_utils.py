@@ -1,7 +1,8 @@
 """Utilities for loading and dumping DAGs from/to YAML files."""
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
+from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
@@ -86,3 +87,18 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
         for task_id, task in enumerate(dag.tasks):
             if task.name is None:
                 task.name = f'{dag.name}-{task_id}'
+
+
+def fill_default_spot_config_in_dag(dag: dag_lib.Dag) -> None:
+    for task_ in dag.tasks:
+        assert len(task_.resources) == 1, task_
+        resources = list(task_.resources)[0]
+
+        change_default_value: Dict[str, Any] = {}
+        if not resources.use_spot_specified:
+            change_default_value['use_spot'] = True
+        if resources.spot_recovery is None:
+            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+
+        new_resources = resources.copy(**change_default_value)
+        task_.set_resources({new_resources})
