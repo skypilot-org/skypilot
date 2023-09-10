@@ -50,6 +50,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -1360,8 +1361,8 @@ class RetryingVmProvisioner(object):
         assert 'tpu-create-script' in config_dict, \
             'Expect TPU provisioning with gcloud.'
         try:
-            with log_utils.safe_rich_status('[bold cyan]Provisioning TPU '
-                                            f'[green]{tpu_name}[/]'):
+            with rich_utils.safe_status('[bold cyan]Provisioning TPU '
+                                        f'[green]{tpu_name}[/]'):
                 subprocess_utils.run(f'bash {config_dict["tpu-create-script"]}',
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)
@@ -1528,9 +1529,10 @@ class RetryingVmProvisioner(object):
             if zones and len(zones) == 1:
                 launched_resources = launched_resources.copy(zone=zones[0].name)
 
-            prev_cluster_ips = None
+            prev_cluster_ips, prev_ssh_ports = None, None
             if prev_handle is not None:
                 prev_cluster_ips = prev_handle.stable_internal_external_ips
+                prev_ssh_ports = prev_handle.stable_ssh_ports
             # Record early, so if anything goes wrong, 'sky status' will show
             # the cluster name and users can appropriately 'sky down'.  It also
             # means a second 'sky launch -c <name>' will attempt to reuse.
@@ -1547,10 +1549,11 @@ class RetryingVmProvisioner(object):
                 launched_resources=launched_resources,
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'),
-                # Use the previous cluster's IPs if available to optimize
-                # the case where the cluster is restarted, i.e., no need to
-                # query the IPs from the cloud provider.
-                stable_internal_external_ips=prev_cluster_ips)
+                # Use the previous cluster's IPs and ports if available to
+                # optimize the case where the cluster is restarted, i.e., no
+                # need to query IPs and ports from the cloud provider.
+                stable_internal_external_ips=prev_cluster_ips,
+                stable_ssh_ports=prev_ssh_ports)
             usage_lib.messages.usage.update_final_cluster_status(
                 status_lib.ClusterStatus.INIT)
 
@@ -2318,12 +2321,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
+        """Updates the cluster SSH ports cached in the handle."""
         # TODO(romilb): Replace this with a call to the cloud class to get ports
         # Use port 22 for everything except Kubernetes
         if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
             head_ssh_port = 22
         else:
-            svc_name = f'{self.cluster_name}-ray-head-ssh'
+            svc_name = f'{self.cluster_name_on_cloud}-ray-head-ssh'
             retry_cnt = 0
             while True:
                 try:
@@ -2365,6 +2369,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             external_ips: The external IPs to use for the cluster. Similar to
                 internal_ips, it is an optimization to avoid retrieving the
                 external IPs from the cloud provider.
+
+        Raises:
+            exceptions.FetchIPError: if we failed to get the IPs. e.reason is
+                HEAD or WORKER.
         """
 
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
@@ -2875,8 +2883,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.update_final_cluster_status(
             status_lib.ClusterStatus.UP)
 
-        # For backward compatibility and robustness of skylet, it is restarted
-        with log_utils.safe_rich_status('Updating remote skylet'):
+        # For backward compatibility and robustness of skylet, it is checked
+        # and restarted if necessary.
+        with rich_utils.safe_status(
+                '[bold cyan]Launching - Preparing SkyPilot runtime'):
             self.run_on_head(handle, _MAYBE_SKYLET_RESTART_CMD)
 
         # Update job queue to avoid stale jobs (when restarted), before
@@ -2888,7 +2898,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_owner = onprem_utils.get_job_owner(handle.cluster_yaml,
                                                    handle.docker_user)
             cmd = job_lib.JobLibCodeGen.update_status(job_owner)
-            with log_utils.safe_rich_status('[bold cyan]Preparing Job Queue'):
+            with rich_utils.safe_status(
+                    '[bold cyan]Launching - Preparing Job Queue'):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
@@ -2989,7 +3000,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         tail_cmd = f'tail -n100 -f {log_path}'
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        with log_utils.safe_rich_status('[bold cyan]Syncing[/]'):
+        with rich_utils.safe_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     def _sync_file_mounts(
@@ -3018,7 +3029,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
             temp_envs = copy.deepcopy(task.envs)
             cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
-                handle.cluster_name)
+                handle.cluster_name_on_cloud)
             task.update_envs(cloud_env_vars)
 
             # Re update the envs with the original envs to give priority to
@@ -3809,8 +3820,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # autoscaler.
             resource_group = config['provider']['resource_group']
             terminate_cmd = f'az group delete -y --name {resource_group}'
-            with log_utils.safe_rich_status(f'[bold cyan]Terminating '
-                                            f'[green]{cluster_name}'):
+            with rich_utils.safe_status(f'[bold cyan]Terminating '
+                                        f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(
                     terminate_cmd,
                     log_abs_path,
@@ -3907,8 +3918,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
-                with log_utils.safe_rich_status(f'[bold cyan]{teardown_verb} '
-                                                f'[green]{cluster_name}'):
+                with rich_utils.safe_status(f'[bold cyan]{teardown_verb} '
+                                            f'[green]{cluster_name}'):
                     # FIXME(zongheng): support retries. This call can fail for
                     # example due to GCP returning list requests per limit
                     # exceeded.
@@ -3981,7 +3992,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
-            with log_utils.safe_rich_status('[bold cyan]Terminating TPU...'):
+            with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
                 tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
                     ['bash', handle.tpu_delete_script],
                     log_abs_path,

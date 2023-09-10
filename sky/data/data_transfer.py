@@ -27,7 +27,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.data import data_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -47,12 +47,12 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
     """
     # pylint: disable=import-outside-toplevel
-    from oauth2client.client import GoogleCredentials
+    import google.auth
 
-    oauth_credentials = GoogleCredentials.get_application_default()
+    credentials, _ = google.auth.default()
     storagetransfer = gcp.build('storagetransfer',
                                 'v1',
-                                credentials=oauth_credentials)
+                                credentials=credentials)
 
     session = aws.session()
     aws_credentials = session.get_credentials().get_frozen_credentials()
@@ -97,7 +97,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
-    with log_utils.safe_rich_status('Transferring'):
+    with rich_utils.safe_status('Transferring'):
         for _ in range(MAX_POLLS):
             result = (storagetransfer.transferOperations().get(
                 name=operation['name']).execute())

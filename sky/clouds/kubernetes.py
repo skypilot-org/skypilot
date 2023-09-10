@@ -229,7 +229,8 @@ class Kubernetes(clouds.Cloud):
         return deploy_vars
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -264,18 +265,17 @@ class Kubernetes(clouds.Cloud):
             acc_type, acc_count = list(accelerators.items())[0]
 
             # Parse into KubernetesInstanceType
-            k8s_instance_type = kubernetes_utils.KubernetesInstanceType.\
-                from_instance_type(
-                default_instance_type)
+            k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
+                                 from_instance_type(default_instance_type))
 
             gpu_task_cpus = k8s_instance_type.cpus
             # Special handling to bump up memory multiplier for GPU instances
-            gpu_task_memory = float(resources.memory.strip('+')) \
-                if resources.memory is not None \
-                else gpu_task_cpus * self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU
-            chosen_instance_type = kubernetes_utils.KubernetesInstanceType.\
-                from_resources(
-                gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name
+            gpu_task_memory = (float(resources.memory.strip('+')) if
+                               resources.memory is not None else gpu_task_cpus *
+                               self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
+            chosen_instance_type = (
+                kubernetes_utils.KubernetesInstanceType.from_resources(
+                    gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
 
         # Check if requested instance type will fit in the cluster.
         # TODO(romilb): This will fail early for autoscaling clusters.

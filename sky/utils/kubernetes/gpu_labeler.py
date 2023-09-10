@@ -9,7 +9,7 @@ from kubernetes import config
 import yaml
 
 import sky
-from sky.utils import log_utils
+from sky.utils import rich_utils
 
 
 def prerequisite_check() -> Tuple[bool, str]:
@@ -43,8 +43,8 @@ def cleanup() -> Tuple[bool, str]:
 
     success = False
     reason = ''
-    with log_utils.safe_rich_status('Cleaning up existing GPU labeling '
-                                    'resources'):
+    with rich_utils.safe_status('Cleaning up existing GPU labeling '
+                                'resources'):
         try:
             subprocess.run(del_command.split(), check=True, capture_output=True)
             success = True
@@ -64,7 +64,7 @@ def label():
     manifest_dir = os.path.join(sky_dir, 'utils/kubernetes')
 
     # Apply the RBAC manifest using kubectl since it contains multiple resources
-    with log_utils.safe_rich_status('Setting up GPU labeling'):
+    with rich_utils.safe_status('Setting up GPU labeling'):
         rbac_manifest_path = os.path.join(manifest_dir,
                                           'k8s_gpu_labeler_setup.yaml')
         try:
@@ -75,7 +75,7 @@ def label():
             print('Error setting up GPU labeling: ' + output)
             return
 
-    with log_utils.safe_rich_status('Creating GPU labeler jobs'):
+    with rich_utils.safe_status('Creating GPU labeler jobs'):
         config.load_kube_config()
 
         v1 = client.CoreV1Api()
