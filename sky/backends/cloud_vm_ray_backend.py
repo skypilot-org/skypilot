@@ -1707,7 +1707,8 @@ class RetryingVmProvisioner(object):
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml, cluster_handle.docker_user)
-        all_ips = cluster_handle.external_ips()
+        # Do not use cache IP, since the TPU Pod IPs may change.
+        all_ips = cluster_handle.external_ips(use_cache_ip=False)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
         if all_ips is None or len(all_ips) != num_tpu_devices:
@@ -2458,9 +2459,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return None
 
     def external_ips(self,
-                     max_attempts: int = _FETCH_IP_MAX_ATTEMPTS) -> List[str]:
+                     max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
+                     use_cache_ip: bool = True) -> List[str]:
         external_ips = self.cached_external_ips
-        if external_ips is not None:
+        if use_cache_ip and external_ips is not None:
             return external_ips
         self.update_cluster_ips(max_attempts=max_attempts)
         external_ips = self.cached_external_ips
