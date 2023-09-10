@@ -1753,10 +1753,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                 is_skyserve_controller = False
                 for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
                     if cluster_name.startswith(prefix):
-                        is_skyserve_controller = True
+                        skyserve_controllers.append(cluster_record)
                         break
-                if is_skyserve_controller:
-                    skyserve_controllers.append(cluster_record)
                 else:
                     nonreserved_cluster_records.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
