@@ -1,4 +1,7 @@
-#SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
+# SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
+#
+# Usage:
+#   ..
 
 resources:
   accelerators: V100:1
