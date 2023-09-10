@@ -59,7 +59,8 @@ class FluidstackNodeProvider(NodeProvider):
 
         for instance in running_instances:
             for key, value in tag_filters.items():
-                if instance['tags'].get(key, None) == value:
+                tag = instance['tags'].get(key, None)
+                if tag and tag == value:
                     self.cached_nodes[instance['id']] = instance
         return self.cached_nodes
 
@@ -137,12 +138,6 @@ class FluidstackNodeProvider(NodeProvider):
                 raise FluidstackAPIError('Failed to launch instance')
             if instance['status'] == 'Running':
                 break
-
-        ########
-        # TODO #
-        ########
-        # May need to poll list_instances() to wait for booting
-        # to finish before returning.
 
     @synchronized
     def set_node_tags(self, node_id, tags):

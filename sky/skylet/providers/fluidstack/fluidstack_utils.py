@@ -59,6 +59,8 @@ class FluidstackClient:
         for instance in instances:
             if type(instance['tags']) == str:
                 instance['tags'] = json.loads(instance['tags'])
+            if not instance['tags']:
+                instance['tags'] = {}
         return instances
 
     def create_instance(
@@ -121,7 +123,7 @@ class FluidstackClient:
         ]
 
         def get_regions(plans: List) -> dict:
-            '''Return a list of regions where the plan is available.'''
+            """Return a list of regions where the plan is available."""
             regions = {}
             for plan in plans:
                 for region in plan.get('regions', []):
