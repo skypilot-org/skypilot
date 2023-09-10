@@ -4227,7 +4227,7 @@ def serve_status(all: bool, service_name: Optional[str]):
       # Only show status of my-service
       sky serve status my-service
     """
-    service_records = core.service_status(service_name)
+    service_records = core.serve_status(service_name)
     if service_name is not None and not service_records:
         click.secho(f'Service {service_name!r} not found.', fg='red')
         return
