@@ -88,7 +88,7 @@ _IMAGE_NOT_FOUND_UX_MESSAGE = (
     '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
     'Format: projects/<project-id>/global/images/<image-name>\n'
     'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n'  # pylint: disable=line-too-long
-    '\nOr machine image: https://cloud.google.com/compute/docs/machine-images\n'
+    '\nTo find machine images: https://cloud.google.com/compute/docs/machine-images\n'
     'Format: projects/<project-id>/global/machineImages/<machine-image-name>\n'
     '\nYou can query image id using:\n'
     'gcloud compute images list --project <project-id> --no-standard-images')
