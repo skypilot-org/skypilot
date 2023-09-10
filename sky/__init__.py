@@ -41,6 +41,7 @@ from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
+from sky.status_lib import ReplicaStatus
 from sky.status_lib import ServiceStatus
 from sky.task import Task
 

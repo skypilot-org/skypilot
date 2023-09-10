@@ -1008,9 +1008,22 @@ def serve_status(
               service,
             'handle': (serve.ServiceHandle) handle of the service,
             'status': (sky.ServiceStatus) service status,
+            'replica_info': (List[Dict[str, Any]]) replica information,
         }
 
-    For possible service statuses, please refer to sky.cli.serve_status.
+    Each entry in replica_info has the following fields:
+
+    .. code-block:: python
+
+        {
+            'replica_id': (int) replica id,
+            'name': (str) replica name,
+            'status': (sky.ReplicaStatus) replica status,
+            'handle': (ResourceHandle) handle of the replica cluster,
+        }
+
+    For possible service statuses and replica statuses, please refer to
+    sky.cli.serve_status.
 
     Args:
         service_names: a list of service names to query. If None, query all
