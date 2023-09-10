@@ -77,6 +77,7 @@ RESET_BOLD = '\033[0m'
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
+_RAY_AUTOSCALER_STATUS_INDICATOR = 'Autoscaler status:'
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
@@ -985,7 +986,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_AND_CLUSTER_TYPE_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
@@ -1196,31 +1197,46 @@ def _count_healthy_nodes_from_ray(output: str,
                                  ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
 
-    def get_ready_nodes(pattern, output):
+    def get_ready_nodes_counts(pattern, output):
         result = pattern.findall(output)
-        # On-prem/local case is handled differently.
-        # `ray status` produces different output for local case, and
-        # we poll for number of nodes launched instead of counting for
-        # head and number of worker nodes separately (it is impossible
-        # to distinguish between head and worker node for local case).
-        if is_local_cloud:
-            # In the local case, ready_workers mean the total number
-            # of nodes launched, including head.
-            return len(result)
-        if len(result) == 0:
+        if not result:
             return 0
         assert len(result) == 1, result
         return int(result[0])
+    
+    # Check if the ray cluster is started with ray autoscaler. In new
+    # provisioner (#1702) and local mode, we started the ray cluster without ray
+    # autoscaler.
+    # If ray cluster is started with ray autoscaler, the output will be:
+    #  1 ray.head.default
+    #  ...
+    # TODO(zhwu): once we deprecate the old provisioner, we can remove this
+    # check.
+    ray_autoscaler_head = get_ready_nodes_counts(_LAUNCHED_HEAD_PATTERN, output)
+    is_local_ray_cluster = ray_autoscaler_head == 0
 
-    if is_local_cloud:
+    if is_local_ray_cluster or is_local_cloud:
+        # Ray cluster is launched with new provisioner
+        # For new provisioner and local mode, the output will be:
+        #  1 node_xxxx
+        #  1 node_xxxx
         ready_head = 0
-        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN, output)
-    else:
-        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
-        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
-        ready_reserved_workers = get_ready_nodes(
-            _LAUNCHED_RESERVED_WORKER_PATTERN, output)
-        ready_workers += ready_reserved_workers
+        ready_workers = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+        ready_workers = len(ready_workers)
+        if is_local_ray_cluster:
+            ready_head = 1
+            ready_workers -= 1
+        return ready_head, ready_workers
+
+    # Count number of nodes by parsing the output of `ray status`. The output
+    # looks like:
+    #   1 ray.head.default
+    #   2 ray.worker.default
+    ready_head = ray_autoscaler_head
+    ready_workers = get_ready_nodes_counts(_LAUNCHED_WORKER_PATTERN, output)
+    ready_reserved_workers = get_ready_nodes_counts(
+        _LAUNCHED_RESERVED_WORKER_PATTERN, output)
+    ready_workers += ready_reserved_workers
     assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
     return ready_head, ready_workers
 
@@ -1240,26 +1256,6 @@ def get_docker_user(ip: str, cluster_config_file: str) -> str:
     docker_user = whoami_stdout.strip()
     logger.debug(f'Docker container user: {docker_user}')
     return docker_user
-
-
-def _count_healthy_nodes_from_ray_new_provisioner(output: str,
-                                                  is_local_cloud: bool = False
-                                                 ) -> Tuple[int, int]:
-    """Count the number of healthy nodes from the output of `ray status`."""
-    ready_head, ready_workers = _count_healthy_nodes_from_ray(output, True)
-
-    if is_local_cloud:
-        return ready_head, ready_workers
-    # NOTE: There will not be a "head node" in Ray status, if the cluster
-    # is not provisioned by Ray. But since we run "ray status" on the head
-    # node, we know that #head_node is 1, and the remaining nodes are worker
-    # nodes.
-    if ready_workers > 1:
-        ready_head += 1
-        ready_workers -= 1
-        assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
-        return ready_head, ready_workers
-    return ready_head, ready_workers
 
 
 @timeline.event
@@ -2069,13 +2065,7 @@ def _update_cluster_status_no_lock(
                     f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
-            if isinstance(handle.launched_resources.cloud, clouds.AWS):
-                # Use the new provisioner for AWS.
-                ready_head, ready_workers = _count_healthy_nodes_from_ray_new_provisioner(
-                    output)
-            else:
-                ready_head, ready_workers = _count_healthy_nodes_from_ray(
-                    output)
+            ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
 
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
