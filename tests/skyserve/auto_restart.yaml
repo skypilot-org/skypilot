@@ -3,7 +3,7 @@ resources:
   zone: us-central1-a
   cpus: 2+
 
-workdir: sky/serve/examples/http_server
+workdir: examples/serve/http_server
 
 run: python3 server.py --port 8080
 

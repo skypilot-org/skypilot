@@ -2,7 +2,7 @@ resources:
   cloud: azure
   cpus: 2+
 
-workdir: sky/serve/examples/http_server
+workdir: examples/serve/http_server
 
 # Use 8081 to test jupyterhub service is terminated
 run: python3 server.py --port 8081
