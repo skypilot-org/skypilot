@@ -1067,8 +1067,7 @@ def serve_up(
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        if 'resources' in task_config and 'spot_recovery' in task_config[
-                'resources']:
+        if ('resources' in task_config and 'spot_recovery' in task_config['resources']):
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
