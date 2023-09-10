@@ -986,7 +986,7 @@ def write_cluster_config(
 
     # Dump the Ray ports to a file for Ray job submission
     dump_port_command = (
-        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_AND_CLUSTER_TYPE_STR}, '
+        f'python -c \'import json, os; json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
@@ -1203,7 +1203,7 @@ def _count_healthy_nodes_from_ray(output: str,
             return 0
         assert len(result) == 1, result
         return int(result[0])
-    
+
     # Check if the ray cluster is started with ray autoscaler. In new
     # provisioner (#1702) and local mode, we started the ray cluster without ray
     # autoscaler.
