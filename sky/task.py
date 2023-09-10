@@ -530,7 +530,8 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
 
-    def set_outputs(self, outputs: str, estimated_size_gigabytes: float) -> 'Task':
+    def set_outputs(self, outputs: str,
+                    estimated_size_gigabytes: float) -> 'Task':
         self.outputs = outputs
         self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
         return self
