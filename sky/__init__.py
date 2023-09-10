@@ -87,7 +87,6 @@ __all__ = [
     'exec',
     'spot_launch',
     'serve_up',
-    'serve_down',
     # core APIs
     'status',
     'start',
@@ -108,4 +107,6 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # core APIs Serve Management
+    'serve_down',
 ]
