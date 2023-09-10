@@ -243,7 +243,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Image {image_id!r} not found in AWS region {region}.\n'
-                    f'\nTo find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id\n'  # pylint: disable=line-too-long
+                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
                     'Example: ami-0729d913a335efca7') from None
         return image_size
 
