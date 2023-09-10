@@ -4190,9 +4190,10 @@ def serve_status(all: bool, service_names: List[str]):
     """
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
+    query_services: Optional[List[str]] = None
     if service_names:
-        service_names = _get_glob_services(service_names)
-    service_records = core.serve_status(service_names)
+        query_services = _get_glob_services(service_names)
+    service_records = core.serve_status(query_services)
     status_utils.show_service_table(service_records, all)
     click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Replicas{colorama.Style.RESET_ALL}')
