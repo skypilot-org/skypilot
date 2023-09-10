@@ -1037,6 +1037,9 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
+    yaml_only: bool = False,
+    task_only: bool = False,
+    entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     cluster: Optional[str] = None,
     workdir: Optional[str] = None,
@@ -1067,14 +1070,21 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        click.secho(f'{entrypoint_name} from YAML spec: ',
+                    fg='yellow',
+                    nl=False)
         click.secho(entrypoint, bold=True)
     else:
+        if yaml_only:
+            raise click.UsageError(
+                f'Expected a yaml file, but got {entrypoint}.')
         if not entrypoint:
             entrypoint = None
         else:
             # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
+            click.secho(f'{entrypoint_name} from command: ',
+                        fg='yellow',
+                        nl=False)
             click.secho(entrypoint, bold=True)
 
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
@@ -1097,6 +1107,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
+            if task_only:
+                raise click.UsageError(
+                    f'Expected a single task, but got {len(dag.tasks)} tasks.')
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.
@@ -1750,7 +1763,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
                 reserved_clusters.append(cluster_record)
             else:
-                is_skyserve_controller = False
                 for prefix in backend_utils.SKY_RESERVED_CLUSTER_PREFIXES:
                     if cluster_name.startswith(prefix):
                         skyserve_controllers.append(cluster_record)
@@ -4003,6 +4015,7 @@ def serve():
 @click.argument('entrypoint',
                 required=True,
                 type=str,
+                nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 @click.option('--service-name',
               '-n',
@@ -4016,8 +4029,9 @@ def serve():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# TODO(tian): Support the task_option overrides for the service.
 def serve_up(
-    entrypoint: str,
+    entrypoint: List[str],
     service_name: Optional[str],
     yes: bool,
 ):
@@ -4050,61 +4064,10 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
-    shell_splits = shlex.split(entrypoint)
-    yaml_file_provided = (len(shell_splits) == 1 and
-                          (shell_splits[0].endswith('yaml') or
-                           shell_splits[0].endswith('.yml')))
-    if not yaml_file_provided:
-        raise click.UsageError('ENTRYPOINT must points to a valid YAML file.')
+    task = _make_task_or_dag_from_entrypoint_with_overrides(
+        entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
+    assert isinstance(task, sky.Task)
 
-    is_yaml = True
-    config: Optional[List[Dict[str, Any]]] = None
-    try:
-        with open(entrypoint, 'r') as f:
-            try:
-                config = list(yaml.safe_load_all(f))
-                if config:
-                    # FIXME(zongheng): in a chain DAG YAML it only returns the
-                    # first section. OK for downstream but is weird.
-                    result = config[0]
-                else:
-                    result = {}
-                if isinstance(result, str):
-                    invalid_reason = (
-                        'cannot be parsed into a valid YAML file. '
-                        'Please check syntax.')
-                    is_yaml = False
-            except yaml.YAMLError as e:
-                if yaml_file_provided:
-                    logger.debug(e)
-                    invalid_reason = ('contains an invalid configuration. '
-                                      ' Please check syntax.')
-                is_yaml = False
-    except OSError:
-        entry_point_path = os.path.expanduser(entrypoint)
-        if not os.path.exists(entry_point_path):
-            invalid_reason = ('does not exist. Please check if the path'
-                              ' is correct.')
-        elif not os.path.isfile(entry_point_path):
-            invalid_reason = ('is not a file. Please check if the path'
-                              ' is correct.')
-        else:
-            invalid_reason = ('yaml.safe_load() failed. Please check if the'
-                              ' path is correct.')
-        is_yaml = False
-    if not is_yaml:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'{entrypoint!r} looks like a yaml path but {invalid_reason}')
-
-    click.secho('Service from YAML spec: ', fg='yellow', nl=False)
-    click.secho(entrypoint, bold=True)
-    usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-    dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
-    if len(dag.tasks) > 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Multiple tasks found in the YAML file.')
-    task: sky.Task = dag.tasks[0]
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file.')
@@ -4118,10 +4081,10 @@ def serve_up(
     app_port = int(task.service.app_port)
     task.set_resources(requested_resources.copy(ports=[app_port]))
 
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('\nService Spec:', fg='cyan')
     click.echo(task.service)
 
-    click.secho('Each replica will use the following resource (estimated):',
+    click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
