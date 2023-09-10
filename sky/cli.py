@@ -4049,16 +4049,15 @@ def serve_up(
             prompt = (f'Service {service_name!r} already exists. '
                       'Updating a service will be supported in the future. '
                       'For now, `sky serve down` first and try again.')
-        click.secho(prompt, fg='red')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(prompt)
 
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = (len(shell_splits) == 1 and
                           (shell_splits[0].endswith('yaml') or
                            shell_splits[0].endswith('.yml')))
     if not yaml_file_provided:
-        click.secho('ENTRYPOINT must points to a valid YAML file.', fg='red')
-        return
+        raise click.UsageError('ENTRYPOINT must points to a valid YAML file.')
 
     is_yaml = True
     config: Optional[List[Dict[str, Any]]] = None
@@ -4096,22 +4095,21 @@ def serve_up(
                               ' path is correct.')
         is_yaml = False
     if not is_yaml:
-        click.secho(
-            f'{entrypoint!r} looks like a yaml path but {invalid_reason}',
-            fg='red')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{entrypoint!r} looks like a yaml path but {invalid_reason}')
 
     click.secho('Service from YAML spec: ', fg='yellow', nl=False)
     click.secho(entrypoint, bold=True)
     usage_lib.messages.usage.update_user_task_yaml(entrypoint)
     dag = dag_utils.load_chain_dag_from_yaml(entrypoint)
     if len(dag.tasks) > 1:
-        click.secho('Multiple tasks found in the YAML file.', fg='red')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Multiple tasks found in the YAML file.')
     task: sky.Task = dag.tasks[0]
     if task.service is None:
-        click.secho('Service section not found in the YAML file.', fg='red')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the YAML file.')
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     if requested_resources.ports is not None:
@@ -4125,7 +4123,8 @@ def serve_up(
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
-    click.secho('Each replica will use the following resource:', fg='cyan')
+    click.secho('Each replica will use the following resource (estimated):',
+                fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
     sky.optimize(dag)
@@ -4229,8 +4228,8 @@ def serve_status(all: bool, service_name: Optional[str]):
     """
     service_records = core.serve_status(service_name)
     if service_name is not None and not service_records:
-        click.secho(f'Service {service_name!r} not found.', fg='red')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} not found.')
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)

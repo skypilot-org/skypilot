@@ -1,5 +1,6 @@
 """User interface with the SkyServe."""
 import base64
+import collections
 import os
 import pickle
 import re
@@ -277,6 +278,18 @@ def get_available_controller_name(
     # services.
     return max(available_controller_to_service_num,
                key=lambda k: available_controller_to_service_num[k]), False
+
+
+def replica_info_to_service_status(
+        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
+    status2num = collections.Counter([i['status'] for i in replica_info])
+    # If one replica is READY, the service is READY.
+    if status2num[status_lib.ReplicaStatus.READY] > 0:
+        return status_lib.ServiceStatus.READY
+    if sum(status2num[status]
+           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
+        return status_lib.ServiceStatus.FAILED
+    return status_lib.ServiceStatus.REPLICA_INIT
 
 
 class ServiceHandle(object):

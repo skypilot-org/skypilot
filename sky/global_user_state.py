@@ -281,11 +281,9 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
-def add_or_update_service(name: str, launched_at: Optional[int],
-                          controller_name: str, handle: 'serve.ServiceHandle',
+def add_or_update_service(name: str, launched_at: int, controller_name: str,
+                          handle: 'serve.ServiceHandle',
                           status: status_lib.ServiceStatus) -> None:
-    if launched_at is None:
-        launched_at = int(time.time())
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
         '(name, launched_at, controller_name, handle, status) '

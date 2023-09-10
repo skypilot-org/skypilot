@@ -1038,8 +1038,11 @@ def serve_up(
             controller_name, _ = serve.get_available_controller_name(
                 controller_resources)
             global_user_state.add_or_update_service(
-                service_name, None, controller_name, service_handle,
-                status_lib.ServiceStatus.CONTROLLER_INIT)
+                service_name,
+                launched_at=int(time.time()),
+                controller_name=controller_name,
+                handle=service_handle,
+                status=status_lib.ServiceStatus.CONTROLLER_INIT)
 
             controller_port, load_balancer_port = (
                 serve.gen_ports_for_serve_process(controller_name))
@@ -1067,7 +1070,8 @@ def serve_up(
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        if ('resources' in task_config and 'spot_recovery' in task_config['resources']):
+        if ('resources' in task_config and
+                'spot_recovery' in task_config['resources']):
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(

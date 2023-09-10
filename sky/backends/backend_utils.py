@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import collections
 import copy
 from datetime import datetime
 import difflib
@@ -1483,7 +1482,7 @@ def generate_cluster_name():
 
 
 def generate_service_name():
-    return f'service-{uuid.uuid4().hex[:4]}'
+    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def get_cleaned_username(username: str = '') -> str:
@@ -2645,18 +2644,6 @@ def get_clusters(
     return kept_records
 
 
-def _service_status_from_replica_info(
-        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
-    status2num = collections.Counter([i['status'] for i in replica_info])
-    # If one replica is READY, the service is READY.
-    if status2num[status_lib.ReplicaStatus.READY] > 0:
-        return status_lib.ServiceStatus.READY
-    if sum(status2num[status]
-           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
-        return status_lib.ServiceStatus.FAILED
-    return status_lib.ServiceStatus.REPLICA_INIT
-
-
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Refresh the service, and return the possibly updated record.
@@ -2731,7 +2718,7 @@ def _refresh_service_record_no_lock(
             status_lib.ServiceStatus.SHUTTING_DOWN,
             status_lib.ServiceStatus.CONTROLLER_INIT,
     ]:
-        local_record['status'] = _service_status_from_replica_info(
+        local_record['status'] = serve_lib.replica_info_to_service_status(
             latest_info['replica_info'])
 
     global_user_state.add_or_update_service(**local_record)
