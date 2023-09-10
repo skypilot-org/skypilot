@@ -2743,13 +2743,31 @@ def _refresh_service_record(
 
 # TODO(tian): Maybe aggregate services using same controller to reduce SSH
 # overhead?
-def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
-    if service_name is None:
-        service_names = [
-            record['name'] for record in global_user_state.get_services()
-        ]
-    else:
-        service_names = [service_name]
+def refresh_service_status(
+        service_names: Optional[Union[str, List[str]]]) -> List[Dict[str, Any]]:
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    records = global_user_state.get_services()
+    if service_names is not None:
+        if isinstance(service_names, str):
+            service_names = [service_names]
+        new_records = []
+        not_exist_service_names = []
+        for service_name in service_names:
+            for record in records:
+                if record['name'] == service_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_service_names.append(service_name)
+        if not_exist_service_names:
+            services_str = ', '.join(not_exist_service_names)
+            logger.info(f'Service(s) not found: {bright}{services_str}{reset}.')
+        records = new_records
+
+    service_names = [record['name'] for record in records]
 
     plural = 's' if len(service_names) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -2764,9 +2782,8 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
         record, msg = _refresh_service_record(service_name)
         if msg is not None:
             progress.stop()
-            print(
-                f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
-                f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+            print(f'{yellow}Error occurred when refreshing service '
+                  f'{service_name}: {msg}{reset}')
             progress.start()
         progress.update(task, advance=1)
         return record

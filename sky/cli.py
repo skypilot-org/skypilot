@@ -147,7 +147,7 @@ def _get_glob_services(service_names: List[str]) -> List[str]:
         glob_service_name = global_user_state.get_glob_service_names(
             service_name)
         if not glob_service_name:
-            click.echo(f'Service {service_name!r} not found.')
+            click.echo(f'Service {service_name} not found.')
         glob_service_names.extend(glob_service_name)
     return list(set(glob_service_names))
 
@@ -4106,13 +4106,14 @@ def serve_up(
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.argument('service_name',
+@click.argument('service_names',
                 required=False,
                 type=str,
+                nargs=-1,
                 **_get_shell_complete_args(_complete_service_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, service_name: Optional[str]):
+def serve_status(all: bool, service_names: List[str]):
     """Show statuses of SkyServe service.
 
     Show detailed statuses of the service. If SERVICE_NAME is not provided,
@@ -4187,12 +4188,11 @@ def serve_status(all: bool, service_name: Optional[str]):
       # Only show status of my-service
       sky serve status my-service
     """
-    service_records = core.serve_status(service_name)
-    if service_name is not None and not service_records:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} not found.')
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
+    if service_names:
+        service_names = _get_glob_services(service_names)
+    service_records = core.serve_status(service_names)
     status_utils.show_service_table(service_records, all)
     click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Replicas{colorama.Style.RESET_ALL}')
@@ -4206,8 +4206,9 @@ def serve_status(all: bool, service_name: Optional[str]):
 
 @serve.command('down', cls=_DocumentedCodeCommand)
 @click.argument('service_names',
-                nargs=-1,
                 required=False,
+                type=str,
+                nargs=-1,
                 **_get_shell_complete_args(_complete_service_name))
 @click.option('--all',
               '-a',

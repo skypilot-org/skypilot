@@ -989,8 +989,38 @@ def storage_delete(name: str) -> None:
 
 
 @usage_lib.entrypoint
-def serve_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
-    return backend_utils.refresh_service_status(service_name)
+def serve_status(
+    service_names: Optional[Union[str,
+                                  List[str]]] = None) -> List[Dict[str, Any]]:
+    """Get service statuses.
+
+    If service_names is given, return those services. Otherwise, return all
+    services.
+
+    Each returned value has the following fields:
+
+    .. code-block:: python
+
+        {
+            'name': (str) service name,
+            'launched_at': (int) timestamp of creation,
+            'controller_name': (str) name of the controller cluster of the
+              service,
+            'handle': (serve.ServiceHandle) handle of the service,
+            'status': (sky.ServiceStatus) service status,
+        }
+
+    For possible service statuses, please refer to sky.cli.serve_status.
+
+    Args:
+        service_names: a list of service names to query. If None, query all
+            services.
+
+    Returns:
+        A list of dicts, with each dict containing the information of a service.
+        If a service is not found, it will be omitted from the returned list.
+    """
+    return backend_utils.refresh_service_status(service_names)
 
 
 @usage_lib.entrypoint
