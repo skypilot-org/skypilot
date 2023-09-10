@@ -4123,7 +4123,7 @@ def serve_up(
     click.echo()
 
     if not yes:
-        prompt = f'Launching a new service {service_name}. Proceed?'
+        prompt = f'Launching a new service {service_name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
