@@ -15,21 +15,20 @@ from sky.clouds.oci import OCI
 from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.kubernetes import Kubernetes
 
-
 __all__ = [
-    "IBM",
-    "AWS",
-    "Azure",
-    "Cloud",
-    "GCP",
-    "Lambda",
-    "Local",
-    "SCP",
-    "OCI",
-    "Fluidstack",
-    "Kubernetes",
-    "CloudImplementationFeatures",
-    "Region",
-    "Zone",
-    "CLOUD_REGISTRY",
+    'IBM',
+    'AWS',
+    'Azure',
+    'Cloud',
+    'GCP',
+    'Lambda',
+    'Local',
+    'SCP',
+    'OCI',
+    'Fluidstack',
+    'Kubernetes',
+    'CloudImplementationFeatures',
+    'Region',
+    'Zone',
+    'CLOUD_REGISTRY',
 ]

@@ -268,9 +268,7 @@ def get_vcpus_mem_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
 ) -> Tuple[Optional[float], Optional[float]]:
-   
     df = _get_instance_type(df, instance_type, None)
- 
     if len(df) == 0:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
