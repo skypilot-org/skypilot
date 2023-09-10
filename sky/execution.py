@@ -975,7 +975,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 def serve_up(
     task: 'sky.Task',
     service_name: str,
-):
+) -> None:
     """Spin up a service.
 
     Please refer to the sky.cli.serve_up for the document.

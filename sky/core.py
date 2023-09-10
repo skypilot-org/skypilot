@@ -1083,7 +1083,7 @@ def serve_tail_logs(service_name: str,
 def serve_down(
     service_name: str,
     purge: bool,
-):
+) -> None:
     """Teardown a service.
 
     Please refer to the sky.cli.serve_down for the document.
