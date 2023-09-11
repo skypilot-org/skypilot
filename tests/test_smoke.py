@@ -2794,6 +2794,32 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.gcp
+def test_skyserve_spot_nonrecovery():
+    """Tests that spot recovery doesn't occur for non-preemption failures"""
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    test = Test(
+        f'test-skyserve-spot-nonrecovery-gcp',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot_recovery/nonrecovery.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            # After failure due to user bug, the service should fail instead of 
+            # triggering spot recovery.
+            '(while true; do'
+            f'    output=$(sky serve status {name});'
+            '     echo "$output" | grep -q "FAILED" && break;'
+            '     echo "$output" | grep -q "PROVISIONING" && exit 1;'
+            '     sleep 10;'
+            f'done)',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
 def test_skyserve_replica_failure():
     """Test skyserve with manually interrupting some replica"""
     name = _get_service_name()
