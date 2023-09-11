@@ -1037,11 +1037,14 @@ def serve_status(
 
 
 @usage_lib.entrypoint
-def serve_tail_logs(service_name: str,
-                    controller: bool = False,
-                    load_balancer: bool = False,
-                    replica_id: Optional[int] = None,
-                    follow: bool = True) -> None:
+def serve_tail_logs(
+    service_name: str,
+    *,
+    controller: bool = False,
+    load_balancer: bool = False,
+    replica_id: Optional[int] = None,
+    follow: bool = True,
+) -> None:
     """Tail logs for a service.
 
     Usage:
@@ -1080,7 +1083,9 @@ def serve_tail_logs(service_name: str,
     controller_name = service_record['controller_name']
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
     if handle is None:
-        raise ValueError(f'Cannot find controller for service {service_name}.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot find controller for service {service_name}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -1093,10 +1098,7 @@ def serve_tail_logs(service_name: str,
 
 
 @usage_lib.entrypoint
-def serve_down(
-    service_name: str,
-    purge: bool,
-) -> None:
+def serve_down(service_name: str, purge: bool = False) -> None:
     """Teardown a service.
 
     Please refer to the sky.cli.serve_down for the document.
@@ -1124,8 +1126,8 @@ def serve_down(
             if service_handle.controller_port is None:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'Controller job of service {service_name!r} not found.'
-                    )
+                        f'Controller job of service {service_name!r} '
+                        'not found.')
 
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
@@ -1145,15 +1147,18 @@ def serve_down(
             resp = serve.load_terminate_service_result(
                 terminate_service_payload)
             if resp.status_code != 200:
-                raise RuntimeError('Failed to terminate replica of service '
-                                   f'{service_name!r} due to request '
-                                   f'failure: {resp.text}')
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Failed to terminate replica of service '
+                                       f'{service_name!r} due to request '
+                                       f'failure: {resp.text}')
             msg = resp.json()['message']
             if msg:
-                raise RuntimeError(
-                    'Unexpected message when tearing down replica of service '
-                    f'{service_name!r}: {msg}. Please login to the controller '
-                    'and make sure the service is properly cleaned.')
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Unexpected message when tearing down replica of '
+                        f'service {service_name!r}: {msg}. Please login to '
+                        'the controller and make sure the service is properly '
+                        'cleaned up.')
 
         # We want to make sure no matter what error happens, we can still
         # clean up the record if purge is True.
@@ -1162,7 +1167,8 @@ def serve_down(
                 logger.warning('Ignoring error when cleaning replicas of '
                                f'{service_name!r}: {e}')
             else:
-                raise RuntimeError(e) from e
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(e) from e
     else:
         if not purge:
             with ux_utils.print_exception_no_traceback():
@@ -1205,7 +1211,8 @@ def serve_down(
                 'Ignoring error when stopping controller and '
                 f'load balancer jobs of service {service_name!r}: {e}')
         else:
-            raise RuntimeError(e) from e
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(e) from e
 
     # TODO(tian): Maybe add a post_cleanup function?
     controller_yaml_path = serve.generate_controller_yaml_file_name(

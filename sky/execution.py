@@ -974,7 +974,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 @usage_lib.entrypoint
 def serve_up(
     task: 'sky.Task',
-    service_name: str,
+    service_name: Optional[str] = None,
 ) -> None:
     """Spin up a service.
 
@@ -984,6 +984,9 @@ def serve_up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
+    if service_name is None:
+        service_name = backend_utils.generate_service_name()
+
     if re.fullmatch(serve.SERVICE_NAME_VALID_REGEX, service_name) is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service name {service_name!r} is invalid: '
@@ -997,7 +1000,8 @@ def serve_up(
                              'taken. Please use a different name.')
 
     if task.service is None:
-        raise RuntimeError('Service section not found.')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
     controller_resources_config: Dict[str, Any] = copy.copy(
         serve.CONTROLLER_RESOURCES)
     if task.service.controller_resources is not None:

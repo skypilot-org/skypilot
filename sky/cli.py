@@ -4371,9 +4371,9 @@ def serve_logs(
             'One and only one of --controller, --load-balancer, '
             '[REPLICA_ID] can be specified.')
     core.serve_tail_logs(service_name,
-                         controller,
-                         load_balancer,
-                         replica_id,
+                         controller=controller,
+                         load_balancer=load_balancer,
+                         replica_id=replica_id,
                          follow=follow)
 
 
