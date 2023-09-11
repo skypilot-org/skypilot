@@ -17,6 +17,7 @@ logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'  # legacy tag for backward compatibility
+TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Max retries for general AWS API calls.
 BOTO_MAX_RETRIES = 12
 # Max retries for creating an instance.
@@ -179,10 +180,13 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
 
 def _get_head_instance_id(instances: List) -> Optional[str]:
     head_instance_id = None
+    head_node_markers = (
+        (TAG_SKYPILOT_HEAD_NODE, '1'),
+        (TAG_RAY_NODE_KIND, 'head'),  # backward compat with Ray
+    )
     for inst in instances:
         for t in inst.tags:
-            # backward compat with Ray
-            if (t['Key'], t['Value']) == (TAG_RAY_NODE_KIND, 'head'):
+            if (t['Key'], t['Value']) in head_node_markers:
                 if head_instance_id is not None:
                     logger.warning(
                         'There are multiple head nodes in the cluster '
@@ -238,6 +242,9 @@ def run_instances(region: str, cluster_name: str,
     def _create_node_tag(target_instance, is_head: bool = True) -> str:
         if is_head:
             node_tag = [{
+                'Key': TAG_SKYPILOT_HEAD_NODE,
+                'Value': '1'
+            }, {
                 'Key': TAG_RAY_NODE_KIND,
                 'Value': 'head'
             }, {
@@ -246,6 +253,9 @@ def run_instances(region: str, cluster_name: str,
             }]
         else:
             node_tag = [{
+                'Key': TAG_SKYPILOT_HEAD_NODE,
+                'Value': '0'
+            }, {
                 'Key': TAG_RAY_NODE_KIND,
                 'Value': 'worker'
             }, {
