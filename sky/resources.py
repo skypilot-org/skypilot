@@ -678,10 +678,6 @@ class Resources:
                 raise ValueError(
                     'Cannot specify spot_recovery without use_spot set to True.'
                 )
-        if self._use_spot and self._use_managed_demand:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify both use_spot and use_managed_demand')
         if self._spot_recovery not in spot.SPOT_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

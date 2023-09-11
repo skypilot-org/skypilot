@@ -993,7 +993,7 @@ def _fill_in_launchable_resources(
         List[resources_lib.Resources])
     if blocked_resources is None:
         blocked_resources = []
-    for resources in task.get_resources():
+    for resources in task.get_resources_both_spot_and_demand():
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:

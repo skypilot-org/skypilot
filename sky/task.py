@@ -576,6 +576,18 @@ class Task:
     def get_resources(self):
         return self.resources
 
+    def get_resources_both_spot_and_demand(self):
+
+        return_resoruces = set()
+        for r in self.resources:
+            if r.use_managed_demand is True:
+                return_resoruces.add(
+                    r.copy(use_spot=False, use_managed_demand=True))
+            if r.use_spot is True:
+                return_resoruces.add(
+                    r.copy(use_spot=True, use_managed_demand=False))
+        return return_resoruces
+
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).

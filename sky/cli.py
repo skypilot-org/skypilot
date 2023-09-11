@@ -3553,6 +3553,7 @@ def spot_launch(
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    use_managed_demand: Optional[bool],
     image_id: Optional[str],
     spot_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
