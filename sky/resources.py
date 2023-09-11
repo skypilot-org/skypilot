@@ -52,6 +52,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
+        use_managed_demand: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
@@ -139,6 +140,7 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
+        self._use_managed_demand = use_managed_demand
         self._spot_recovery = None
         if spot_recovery is not None:
             if spot_recovery.strip().lower() != 'none':
@@ -343,6 +345,10 @@ class Resources:
     @property
     def use_spot(self) -> bool:
         return self._use_spot
+
+    @property
+    def use_managed_demand(self) -> bool:
+        return self._use_managed_demand
 
     @property
     def use_spot_specified(self) -> bool:
@@ -659,11 +665,15 @@ class Resources:
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
             return
-        if not self._use_spot:
+        if not self._use_spot and not self._use_managed_demand:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify spot_recovery without use_spot set to True.'
                 )
+        if self._use_spot and self._use_managed_demand:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both use_spot and use_managed_demand')
         if self._spot_recovery not in spot.SPOT_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -1029,6 +1039,8 @@ class Resources:
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
+            use_managed_demand=override.pop('use_managed_demand',
+                                            self.use_managed_demand),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
@@ -1093,6 +1105,9 @@ class Resources:
                 config.pop('accelerator_args'))
         if config.get('use_spot') is not None:
             resources_fields['use_spot'] = config.pop('use_spot')
+        if config.get('use_managed_demand') is not None:
+            resources_fields['use_managed_demand'] = config.pop(
+                'use_managed_demand')
         if config.get('spot_recovery') is not None:
             resources_fields['spot_recovery'] = config.pop('spot_recovery')
         if config.get('disk_size') is not None:
@@ -1135,6 +1150,7 @@ class Resources:
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
         config['spot_recovery'] = self.spot_recovery
+        config['use_managed_demand'] = self.use_managed_demand
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)

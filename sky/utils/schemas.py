@@ -58,6 +58,9 @@ def get_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
+            'use_managed_demand': {
+                'type': 'boolean',
+            },
             'spot_recovery': {
                 'type': 'string',
             },

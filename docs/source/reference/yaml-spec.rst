@@ -64,6 +64,9 @@ Available fields:
       # If unspecified, defaults to False (on-demand instances).
       use_spot: False
 
+      # Launch a managed on-demand job.
+      use_managed_demand: False
+
       # The recovery strategy for spot jobs (optional).
       # `use_spot` must be True for this to have any effect. For now, only
       # `FAILOVER` strategy is supported.
