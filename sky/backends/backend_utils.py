@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import collections
+import copy
 from datetime import datetime
 import difflib
 import enum
@@ -2636,35 +2637,45 @@ def _refresh_service_record_no_lock(
         A tuple of a possibly updated record and an error message if any error
         occurred when refreshing the service.
     """
-    record = global_user_state.get_service_from_name(service_name)
-    if record is None:
+    local_record = global_user_state.get_service_from_name(service_name)
+    if local_record is None:
         return None, None
-    service_handle: serve_lib.ServiceHandle = record['handle']
+
+    # We use a copy of the record with default value of replica_info to return
+    # when there is an error.
+    record = copy.deepcopy(local_record)
+    record['replica_info'] = []
+    service_handle: serve_lib.ServiceHandle = local_record['handle']
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    if not service_handle.endpoint:
+    if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = service_handle.controller_cluster_name
-    cluster_record = global_user_state.get_cluster_from_name(
-        controller_cluster_name)
-    if (cluster_record is None or
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
+    controller_name = local_record['controller_name']
+    cluster_record = global_user_state.get_cluster_from_name(controller_name)
+
+    # We don't check controller status here since it might be in INIT status
+    # when other services is starting up and launching the controller.
+    if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_cluster_name!r} '
-                        'is not found or UP.')
+        return record, (f'Controller cluster {controller_name!r} '
+                        'is not found.')
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_lib.ServeCodeGen.get_latest_info()
+    if service_handle.controller_port is None:
+        return record, 'Controller task is not successfully launched.'
+
+    code = serve_lib.ServeCodeGen.get_latest_info(
+        service_handle.controller_port)
     returncode, latest_info_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -2676,19 +2687,25 @@ def _refresh_service_record_no_lock(
                         f'Using the cached record. Reason: {stderr}')
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    service_handle.replica_info = latest_info['replica_info']
     service_handle.uptime = latest_info['uptime']
 
     # When the service is shutting down, there is a period of time which the
     # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
-    if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        record['status'] = _service_status_from_replica_info(
+    # For controller init, there is a small chance that the controller is
+    # running but the load balancer is not. In this case, the service status
+    # shouldn't be refreshed too.
+    if local_record['status'] not in [
+            status_lib.ServiceStatus.SHUTTING_DOWN,
+            status_lib.ServiceStatus.CONTROLLER_INIT,
+    ]:
+        local_record['status'] = _service_status_from_replica_info(
             latest_info['replica_info'])
 
-    global_user_state.add_or_update_service(**record)
-    return record, None
+    global_user_state.add_or_update_service(**local_record)
+    local_record['replica_info'] = latest_info['replica_info']
+    return local_record, None
 
 
 def _refresh_service_record(
@@ -2706,6 +2723,8 @@ def _refresh_service_record(
         return global_user_state.get_service_from_name(service_name), msg
 
 
+# TODO(tian): Maybe aggregate services using same controller to reduce SSH
+# overhead?
 def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
     if service_name is None:
         service_names = [
@@ -2778,10 +2797,16 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
-    """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
+def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+    """Returns the resources dict of the task"""
+    # TODO: CPU and other memory resources are not supported yet
+    # except for sky serve controller task.
+    resources_dict = {
+        # We set CPU resource for sky serve controller to a smaller value
+        # to support a larger number of services.
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND if
+                task.is_sky_serve_controller_task else DEFAULT_TASK_CPU_DEMAND)
+    }
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2789,17 +2814,14 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+    if resources is not None and resources.accelerators is not None:
+        resources_dict.update(resources.accelerators)
+    return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
-    if resources_dict is None:
-        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
-    else:
-        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
 
