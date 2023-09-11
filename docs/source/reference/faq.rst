@@ -75,29 +75,23 @@ If you have edited the ``file_mounts`` section (e.g., by adding some files) and 
 
 To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
 
+How can I launch a VS Code tunnel using a SkyPilot task definition?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-What are the required IAM permissons on GCP for SkyPilot?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To use SkyPilot, your GCP account needs to be granted the following IAM roles:
-
-.. code-block:: yaml
-
-  roles/browser
-  roles/compute.admin
-  roles/iam.serviceAccountAdmin
-  roles/iam.serviceAccountUser
-  roles/serviceusage.serviceUsageConsumer
-  roles/storage.admin
-
-Optionally, to use TPUs, add the following role:
+To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:
 
 .. code-block:: yaml
+    
+    setup: |
+      sudo snap install --classic code
+      # if `snap` is not available, you can try the following commands instead:
+      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
+      # sudo apt install ./vscode.deb -y
+      # rm vscode.deb
+    run: |
+      code tunnel --accept-server-license-terms
 
-  roles/tpu.admin
-
-You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
-
+Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
 
 (Advanced) How to make SkyPilot use all global regions?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

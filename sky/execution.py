@@ -15,10 +15,10 @@ Current task launcher:
 import copy
 import enum
 import getpass
-import tempfile
 import os
+import tempfile
+from typing import Any, List, Optional, Union
 import uuid
-from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -28,19 +28,22 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
-from sky import skypilot_config
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.usage import usage_lib
 from sky.skylet import constants
+from sky.usage import usage_lib
 from sky.utils import common_utils
-from sky.utils import env_options, timeline
+from sky.utils import dag_utils
+from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -84,6 +87,7 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
         entrypoint = copy.deepcopy(entrypoint)
         with sky.Dag() as dag:
             dag.add(entrypoint)
+            dag.name = entrypoint.name
         return dag
     else:
         raise TypeError(
@@ -94,6 +98,7 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
     # TODO: rename actual methods to be consistent.
+    CLONE_DISK = enum.auto()
     OPTIMIZE = enum.auto()
     PROVISION = enum.auto()
     SYNC_WORKDIR = enum.auto()
@@ -102,6 +107,55 @@ class Stage(enum.Enum):
     PRE_EXEC = enum.auto()
     EXEC = enum.auto()
     DOWN = enum.auto()
+
+
+def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
+                                   cluster_name: Optional[str],
+                                   task: 'sky.Task') -> 'sky.Task':
+    if clone_disk_from is None:
+        return task
+    task, handle = backend_utils.check_can_clone_disk_and_override_task(
+        clone_disk_from, cluster_name, task)
+    original_cloud = handle.launched_resources.cloud
+    assert original_cloud is not None, handle.launched_resources
+    task_resources = list(task.resources)[0]
+
+    with rich_utils.safe_status('Creating image from source cluster '
+                                f'{clone_disk_from!r}'):
+        image_id = original_cloud.create_image_from_cluster(
+            clone_disk_from,
+            handle.cluster_name_on_cloud,
+            region=handle.launched_resources.region,
+            zone=handle.launched_resources.zone,
+        )
+        rich_utils.force_update_status(
+            f'Migrating image {image_id} to target region '
+            f'{task_resources.region}...')
+        source_region = handle.launched_resources.region
+        target_region = task_resources.region
+        assert source_region is not None, handle.launched_resources
+        assert target_region is not None, task_resources
+
+        image_id = original_cloud.maybe_move_image(
+            image_id,
+            source_region=source_region,
+            target_region=target_region,
+            source_zone=handle.launched_resources.zone,
+            target_zone=task_resources.zone,
+        )
+    logger.info(
+        f'{colorama.Fore.GREEN}'
+        f'Successfully created image {image_id!r} for {clone_disk_from!r} '
+        f'on {original_cloud}.{colorama.Style.RESET_ALL}\n'
+        'Overriding task\'s image_id.')
+    task_resources = task_resources.copy(image_id=image_id,
+                                         _is_image_managed=True)
+    task.set_resources(task_resources)
+    # Set the best_resources to None to trigger a re-optimization, so that
+    # the new task_resources is used.
+    task.best_resources = None
+    logger.debug(f'Overridden task resources: {task.resources}')
+    return task
 
 
 def _execute(
@@ -119,6 +173,7 @@ def _execute(
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
@@ -226,6 +281,10 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
+    if Stage.CLONE_DISK in stages:
+        task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,
+                                              task)
+
     if not cluster_exists:
         if (Stage.PROVISION in stages and task.use_spot and
                 not _is_launched_by_spot_controller):
@@ -270,24 +329,24 @@ def _execute(
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
 
-        if dryrun:
-            logger.info('Dry run finished.')
+        if dryrun and handle is None:
+            logger.info('Dryrun finished.')
             return
 
-        if Stage.SYNC_WORKDIR in stages:
+        if Stage.SYNC_WORKDIR in stages and not dryrun:
             if task.workdir is not None:
                 backend.sync_workdir(handle, task.workdir)
 
-        if Stage.SYNC_FILE_MOUNTS in stages:
+        if Stage.SYNC_FILE_MOUNTS in stages and not dryrun:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
             logger.info('Setup commands skipped.')
-        elif Stage.SETUP in stages:
+        elif Stage.SETUP in stages and not dryrun:
             backend.setup(handle, task, detach_setup=detach_setup)
 
-        if Stage.PRE_EXEC in stages:
+        if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 backend.set_autostop(handle,
@@ -297,12 +356,12 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run)
+                backend.execute(handle, task, detach_run, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
 
-        if Stage.DOWN in stages:
+        if Stage.DOWN in stages and not dryrun:
             if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
@@ -338,6 +397,7 @@ def launch(
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
@@ -387,6 +447,9 @@ def launch(
         detach_run: If True, as soon as a job is submitted, return from this
             function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
+        clone_disk_from: [Experimental] if set, clone the disk from the
+            specified cluster. This is useful to migrate the cluster to a
+            different availability zone or region.
 
     Example:
         .. code-block:: python
@@ -421,6 +484,7 @@ def launch(
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
+
     _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -435,6 +499,7 @@ def launch(
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
         _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 
@@ -506,7 +571,8 @@ def exec(  # pylint: disable=redefined-builtin
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='executing tasks',
-        check_cloud_vm_ray_backend=False)
+        check_cloud_vm_ray_backend=False,
+        dryrun=dryrun)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,
@@ -545,63 +611,54 @@ def spot_launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     entrypoint = task
-    task_uuid = str(uuid.uuid4().hex[:4])
+    dag_uuid = str(uuid.uuid4().hex[:4])
 
     dag = _convert_to_dag(entrypoint)
-    assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
-                                 dag)
-    task = dag.tasks[0]
-    assert len(task.resources) == 1, task
-    resources = list(task.resources)[0]
+    assert dag.is_chain(), ('Only single-task or chain DAG is '
+                            'allowed for spot_launch.', dag)
 
-    change_default_value: Dict[str, Any] = {}
-    if not resources.use_spot_specified:
-        change_default_value['use_spot'] = True
-    if resources.spot_recovery is None:
-        change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
-    new_resources = resources.copy(**change_default_value)
-    task.set_resources({new_resources})
+    task_names = set()
+    for task_ in dag.tasks:
+        if task_.name in task_names:
+            raise ValueError(
+                f'Task name {task_.name!r} is duplicated in the DAG. Either '
+                'change task names to be unique, or specify the DAG name only '
+                'and comment out the task names (so that they will be auto-'
+                'generated) .')
+        task_names.add(task_.name)
 
-    if task.run is None:
-        print(f'{colorama.Fore.GREEN}'
-              'Skipping the managed spot task as the run section is not set.'
-              f'{colorama.Style.RESET_ALL}')
-        return
+    dag_utils.fill_default_spot_config_in_dag(dag)
 
-    task = _maybe_translate_local_file_mounts_and_sync_up(task)
+    for task_ in dag.tasks:
+        _maybe_translate_local_file_mounts_and_sync_up(task_)
 
-    if name is None:
-        if task.name is not None:
-            name = task.name
-        else:
-            name = backend_utils.generate_cluster_name()
-    # Override the task name with the specified name or generated name, so that
-    # the controller process can retrieve the task name from the task config.
-    task.name = name
-
-    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
-
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
         vars_to_fill = {
             'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
             'user_yaml_path': f.name,
             'user_config_path': None,
             'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task_name>-<spot job ID>
-            'task_name': name,
-            'uuid': task_uuid,
-            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            'dag_name': dag.name,
+            'uuid': dag_uuid,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'is_dev': env_options.Options.IS_DEVELOPER.get(),
             'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
             'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
-            'user': os.environ.get('USER', None),
+            # Should not use $USER here, as that env var can be empty when
+            # running in a container.
+            'user': getpass.getuser(),
         }
+        controller_resources_config = copy.copy(
+            spot.constants.CONTROLLER_RESOURCES)
         if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
             # 'skypilot_config' module. Don't simply read the on-disk file as
@@ -656,17 +713,46 @@ def spot_launch(
                         skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
+            # Override the controller resources with the ones specified in the
+            # config.
+            custom_controller_resources_config = skypilot_config.get_nested(
+                ('spot', 'controller', 'resources'), None)
+            if custom_controller_resources_config is not None:
+                controller_resources_config.update(
+                    custom_controller_resources_config)
+        try:
+            controller_resources = sky.Resources.from_yaml_config(
+                controller_resources_config)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Spot controller resources is not valid, please check '
+                    '~/.sky/config.yaml file and make sure '
+                    'spot.controller.resources is a valid resources spec. '
+                    'Details:\n'
+                    f'  {common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
+
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{task_uuid}.yaml')
+                                 f'{name}-{dag_uuid}.yaml')
         backend_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=yaml_path)
         controller_task = task_lib.Task.from_yaml(yaml_path)
-        controller_task.spot_task = task
+        assert len(controller_task.resources) == 1, controller_task
+        # Backward compatibility: if the user changed the
+        # spot-controller.yaml.j2 to customize the controller resources,
+        # we should use it.
+        controller_task_resources = list(controller_task.resources)[0]
+        if not controller_task_resources.is_empty():
+            controller_resources = controller_task_resources
+        controller_task.set_resources(controller_resources)
+
+        controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {name} from spot controller...'
+              f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
@@ -680,8 +766,7 @@ def spot_launch(
         )
 
 
-def _maybe_translate_local_file_mounts_and_sync_up(
-        task: task_lib.Task) -> task_lib.Task:
+def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -694,7 +779,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
-    task = copy.deepcopy(task)
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -850,5 +934,3 @@ def _maybe_translate_local_file_mounts_and_sync_up(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.force_delete = True
-
-    return task

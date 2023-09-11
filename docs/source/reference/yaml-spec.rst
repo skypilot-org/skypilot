@@ -1,7 +1,7 @@
 .. _yaml-spec:
 
 Task YAML
-==================
+=========
 
 SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
@@ -80,6 +80,16 @@ Available fields:
       #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
       disk_tier: 'medium'
 
+      # Ports to expose (optional).
+      # All ports specified here will be exposed to the public Internet. Under the hood,
+      # a firewall rule / inbound rule is automatically added to allow inbound traffic to 
+      # these ports. Applies to all VMs of a cluster created with this field set. 
+      # Currently only TCP protocol is supported.
+      # Could be an integer or a range.
+      ports:
+        - 8080
+        - 10022-10040
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
@@ -102,8 +112,18 @@ Available fields:
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
-      # will use the default debian-based image suitable for machine learning tasks.
+      # instances. Only supported for AWS and GCP (for non-docker image). If not
+      # specified, SkyPilot will use the default debian-based image suitable for
+      # machine learning tasks.
+      #
+      # Docker support
+      # You can specify docker image to use by setting the image_id to
+      # `docker:<image name>` for Azure, AWS and GCP. For example,
+      #   image_id: docker:ubuntu:latest
+      # Currently, only debian and ubuntu images are supported.
+      # If you want to use a docker image in a private registry, you can specify your
+      # username, password, and registry server as task environment variable. For
+      # details, please refer to the `envs` section below.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
@@ -112,7 +132,7 @@ Available fields:
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
-      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
+      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys;
       # useful when you have the custom images in multiple regions):
       #   image_id:
       #     us-east-1: ami-0729d913a335efca7
@@ -120,7 +140,9 @@ Available fields:
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
-      # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
+      # Or machine image: https://cloud.google.com/compute/docs/machine-images
+      # image_id: projects/my-project/global/machineImages/my-machine-image
       #
       # IBM
       # Create a private VPC image and paste its ID in the following format:
@@ -131,6 +153,29 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
+
+    # Environment variables (optional). These values can be accessed in the
+    # `file_mounts`, `setup`, and `run` sections below.
+    #
+    # Values set here can be overridden by a CLI flag:
+    # `sky launch/exec --env ENV=val` (if ENV is present).
+    #
+    # If you want to use a docker image in a private registry, you can specify your
+    # username, password, and registry server as task environment variable. For example:
+    #   envs:
+    #     SKYPILOT_DOCKER_USERNAME: <username>
+    #     SKYPILOT_DOCKER_PASSWORD: <password>
+    #     SKYPILOT_DOCKER_SERVER: <registry server>
+    # SkyPilot will execute `docker login --username <username> --password <password> <registry server>`
+    # before pulling the docker image. For `docker login`, see https://docs.docker.com/engine/reference/commandline/login/
+    # You could also specify any of them through the CLI flag if you don't want to store them in
+    # your yaml file or if you want to generate them for constantly changing password. For example:
+    #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+    # For more information about docker support in SkyPilot, please refer to the `image_id` section above.
+    envs:
+      MY_BUCKET: skypilot-temp-gcs-test
+      MY_LOCAL_PATH: tmp-workdir
+      MODEL_SIZE: 13b
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
@@ -143,7 +188,7 @@ Available fields:
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
       # as persistent (it will not be deleted after the completion of this task).
-      # Symlink contents are copied over.
+      # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
@@ -155,6 +200,12 @@ Available fields:
 
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset
+
+      # Demoing env var usage.
+      /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
+      /mydir:
+        name: ${MY_BUCKET}  # Name of the bucket.
+        mode: MOUNT
 
     # Setup script (optional) to execute on every `sky launch`.
     # This is executed before the 'run' commands.
@@ -170,3 +221,6 @@ Available fields:
     run: |
       echo "Beginning task."
       python train.py
+
+      # Demoing env var usage.
+      echo Env var MODEL_SIZE has value: ${MODEL_SIZE}

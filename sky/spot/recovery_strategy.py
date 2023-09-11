@@ -1,14 +1,21 @@
-"""The strategy to handle launching/recovery/termination of spot clusters."""
+"""The strategy to handle launching/recovery/termination of spot clusters.
+
+In the YAML file, the user can specify the strategy to use for spot jobs.
+
+resources:
+    spot_recovery: EAGER_NEXT_REGION
+"""
 import time
 import traceback
 import typing
 from typing import Optional, Tuple
 
 import sky
+from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import backends
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -99,19 +106,24 @@ class StrategyExecutor:
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
-    def launch(self) -> Optional[float]:
+    def launch(self) -> float:
         """Launch the spot cluster for the first time.
 
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's submit timestamp, or None if failed.
+        Returns: The job's submit timestamp, on success (otherwise, an
+            exception is raised).
 
         Raises: Please refer to the docstring of self._launch().
         """
+
         if self.retry_until_up:
-            return self._launch(max_retry=None)
-        return self._launch()
+            job_submit_at = self._launch(max_retry=None)
+        else:
+            job_submit_at = self._launch()
+        assert job_submit_at is not None
+        return job_submit_at
 
     def recover(self) -> float:
         """Relaunch the spot cluster after failure and wait until job starts.
@@ -153,13 +165,12 @@ class StrategyExecutor:
                        all=True,
                        _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
-            logger.info(
-                'Failed to cancel the job on the cluster. The cluster '
-                'might be already down or the head node is preempted.'
-                '\n  Detailed exception: '
-                f'{common_utils.format_exception(e)}\n'
-                'Terminating the cluster again to make sure there is no '
-                'remaining job on the worker nodes.')
+            logger.info('Failed to cancel the job on the cluster. The cluster '
+                        'might be already down or the head node is preempted.'
+                        '\n  Detailed exception: '
+                        f'{common_utils.format_exception(e)}\n'
+                        'Terminating the cluster explicitly to ensure no '
+                        'remaining job process interferes with recovery.')
             terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
@@ -177,7 +188,8 @@ class StrategyExecutor:
             try:
                 cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
-                        self.cluster_name, force_refresh=True))
+                        self.cluster_name,
+                        force_refresh_statuses=set(status_lib.ClusterStatus)))
             except Exception as e:  # pylint: disable=broad-except
                 # If any unexpected error happens, retry the job checking
                 # loop.
@@ -186,7 +198,7 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != global_user_state.ClusterStatus.UP:
+            if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
@@ -226,7 +238,9 @@ class StrategyExecutor:
             time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
         return None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -277,7 +291,8 @@ class StrategyExecutor:
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
             except (exceptions.InvalidClusterNameError,
-                    exceptions.NoCloudAccessError) as e:
+                    exceptions.NoCloudAccessError,
+                    exceptions.ResourcesMismatchError) as e:
                 logger.error('Failure happened before provisioning. '
                              f'{common_utils.format_exception(e)}')
                 if raise_on_failure:
@@ -348,8 +363,9 @@ class StrategyExecutor:
             time.sleep(gap_seconds)
 
 
-class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
-    """Failover strategy: wait in same region and failover after timout."""
+class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
+                               default=False):
+    """Failover strategy: wait in same region and failover after timeout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
@@ -363,7 +379,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
 
-    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+    def _launch(self,
+                max_retry: Optional[int] = 3,
+                raise_on_failure: bool = True) -> Optional[float]:
         job_submitted_at = super()._launch(max_retry, raise_on_failure)
         if job_submitted_at is not None:
             # Only record the cloud/region if the launch is successful.
@@ -374,6 +392,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
+        else:
+            self._launched_cloud_region = None
         return job_submitted_at
 
     def recover(self) -> float:
@@ -386,9 +406,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # Step 1
         self._try_cancel_all_jobs()
 
-        # Retry the entire block until the cluster is up, so that the ratio of
-        # the time spent in the current region and the time spent in the other
-        # region is consistent during the retry.
         while True:
             # Add region constraint to the task, to retry on the same region
             # first (if valid).
@@ -411,11 +428,98 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             # Step 2
             logger.debug('Terminating unhealthy spot cluster and '
                          'reset cloud region.')
-            self._launched_cloud_region = None
             terminate_cluster(self.cluster_name)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
+                         'cloud/region.')
+            # Not using self.launch to avoid the retry until up logic.
+            job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
+                                            raise_on_failure=False)
+            if job_submitted_at is None:
+                # Failed to launch the cluster.
+                if self.retry_until_up:
+                    gap_seconds = self.RETRY_INIT_GAP_SECONDS
+                    logger.info('Retrying to recover the spot cluster in '
+                                f'{gap_seconds:.1f} seconds.')
+                    time.sleep(gap_seconds)
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'Failed to recover the spot cluster after retrying '
+                        f'{self._MAX_RETRY_CNT} times.')
+
+            return job_submitted_at
+
+
+class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
+                                    name='EAGER_NEXT_REGION',
+                                    default=True):
+    """Eager failover strategy.
+
+    This strategy is an extension of the FAILOVER strategy. Instead of waiting
+    in the same region when the preemption happens, it immediately terminates
+    the cluster and relaunches it in a different region. This is based on the
+    observation that the preemption is likely to happen again shortly in the
+    same region, so trying other regions first is more likely to get a longer
+    running cluster.
+
+    Example: Assume the user has access to 3 regions, R1, R2, R3, in that price
+    order. Then the following are some possible event sequences:
+
+        R1Z1 (preempted) -> R2 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (failed to launch)
+                                                  -> R1Z2 (success)
+
+        R1Z1 (preempted) -> R2 (failed to launch) -> R3 (failed to launch)
+                                                  -> R1Z1 (success)
+    """
+
+    def recover(self) -> float:
+        # 1. Terminate the current cluster
+        # 2. Launch again by explicitly blocking the previously launched region
+        # (this will failover through the entire search space except the
+        # previously launched region)
+        # 3. (If step 2 failed) Retry forever: Launch again with no blocked
+        # locations (this will failover through the entire search space)
+        #
+        # The entire search space is defined by the original task request,
+        # task.resources.
+
+        # Step 1
+        logger.debug('Terminating unhealthy spot cluster and '
+                     'reset cloud region.')
+        terminate_cluster(self.cluster_name)
+
+        # Step 2
+        logger.debug('Relaunch the cluster skipping the previously launched '
+                     'cloud/region.')
+        if self._launched_cloud_region is not None:
+            task = self.dag.tasks[0]
+            requested_resources = list(task.resources)[0]
+            if (requested_resources.region is None and
+                    requested_resources.zone is None):
+                # Optimization: We only block the previously launched region,
+                # if the requested resources does not specify a region or zone,
+                # because, otherwise, we will spend unnecessary time for
+                # skipping the only specified region/zone.
+                launched_cloud, launched_region = self._launched_cloud_region
+                task.blocked_resources = {
+                    requested_resources.copy(cloud=launched_cloud,
+                                             region=launched_region)
+                }
+                # Not using self.launch to avoid the retry until up logic.
+                job_submitted_at = self._launch(raise_on_failure=False)
+                task.blocked_resources = None
+                if job_submitted_at is not None:
+                    return job_submitted_at
+
+        while True:
+            # Step 3
+            logger.debug('Relaunch the cluster without constraining to prior '
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,

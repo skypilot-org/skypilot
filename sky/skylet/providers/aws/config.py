@@ -862,8 +862,13 @@ def _check_ami(config):
 
 
 def _upsert_security_groups(config, node_types):
+    start_time = time.time()
+    logger.info("Creating or updating security groups...")
     security_groups = _get_or_create_vpc_security_groups(config, node_types)
     _upsert_security_group_rules(config, security_groups)
+    end_time = time.time()
+    elapsed = end_time - start_time
+    logger.info(f"Security groups created or updated in {elapsed:.5f} seconds.")
 
     return security_groups
 
@@ -953,6 +958,7 @@ def _get_security_groups(config, vpc_ids, group_names):
 
 
 def _create_security_group(config, vpc_id, group_name):
+    logger.info(f"Creating security group '{group_name}'...")
     client = _client("ec2", config)
     client.create_security_group(
         Description="Auto-created security group for Ray workers",
@@ -995,21 +1001,47 @@ def _update_inbound_rules(target_security_group, sgids, config):
     extended_rules = (
         config["provider"].get("security_group", {}).get("IpPermissions", [])
     )
-    ip_permissions = _create_default_inbound_rules(sgids, extended_rules)
+    user_specified_rules = _retrieve_user_specified_rules(
+        config["provider"].get("ports", [])
+    )
+    ip_permissions = _create_default_inbound_rules(
+        sgids, user_specified_rules, extended_rules
+    )
     target_security_group.authorize_ingress(IpPermissions=ip_permissions)
 
 
-def _create_default_inbound_rules(sgids, extended_rules=None):
+def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=None):
     if extended_rules is None:
         extended_rules = []
     intracluster_rules = _create_default_intracluster_inbound_rules(sgids)
     ssh_rules = _create_default_ssh_inbound_rules()
     merged_rules = itertools.chain(
+        user_specified_rules,
         intracluster_rules,
         ssh_rules,
         extended_rules,
     )
     return list(merged_rules)
+
+
+def _retrieve_user_specified_rules(ports):
+    rules = []
+    for port in ports:
+        if isinstance(port, int):
+            from_port = to_port = port
+        else:
+            from_port, to_port = port.split("-")
+            from_port = int(from_port)
+            to_port = int(to_port)
+        rules.append(
+            {
+                "FromPort": from_port,
+                "ToPort": to_port,
+                "IpProtocol": "tcp",
+                "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+            }
+        )
+    return rules
 
 
 def _create_default_intracluster_inbound_rules(intracluster_sgids):

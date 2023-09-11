@@ -4,7 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
-from sky.clouds import cloud
+from sky.clouds import cloud_registry
 from sky.data import storage
 
 
@@ -17,7 +17,8 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(cloud.CLOUD_REGISTRY.keys())
+                'case_insensitive_enum': list(
+                    cloud_registry.CLOUD_REGISTRY.keys())
             },
             'region': {
                 'type': 'string',
@@ -65,6 +66,16 @@ def get_resources_schema():
             },
             'disk_tier': {
                 'type': 'string',
+            },
+            'ports': {
+                'type': 'array',
+                'items': {
+                    'anyOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'integer',
+                    }]
+                }
             },
             'accelerator_args': {
                 'type': 'object',
@@ -150,6 +161,9 @@ def get_task_schema():
             'workdir': {
                 'type': 'string',
             },
+            'event_callback': {
+                'type': 'string',
+            },
             'num_nodes': {
                 'type': 'integer',
             },
@@ -170,7 +184,13 @@ def get_task_schema():
             'envs': {
                 'type': 'object',
                 'required': [],
-                'additionalProperties': True,
+                'patternProperties': {
+                    # Checks env keys are valid env var names.
+                    '^[a-zA-Z_][a-zA-Z0-9_]*$': {
+                        'type': 'string'
+                    }
+                },
+                'additionalProperties': False,
             },
             # inputs and outputs are experimental
             'inputs': {

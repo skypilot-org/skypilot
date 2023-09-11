@@ -10,7 +10,7 @@ python examples/<name>.py
 ```
 
 Machine learning examples:
-
+- [**`dvc_pipeline.yaml`**](./dvc/dvc_pipeline.yaml): Use [DVC](https://dvc.org) to easily run ML pipelines on the cloud and version-control the results in git and cloud buckets. An existing [DVC remote](https://dvc.org/doc/user-guide/data-management/remote-storage) and [DVC pipeline](https://dvc.org/doc/start/data-management/data-pipelines) are prerequisites. A detailed tutorial is available [here](https://alex000kim.com/posts/2023-08-10-ml-experiments-in-cloud-skypilot-dvc/).
 
 - [**`huggingface_glue_imdb_app.yaml`**](./huggingface_glue_imdb_app.yaml): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
 

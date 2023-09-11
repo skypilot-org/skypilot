@@ -1,17 +1,23 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+import functools
+from typing import Dict, List, Optional, Set, Union
+
+import colorama
 from typing_extensions import Literal
 
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
+from sky.skylet import constants
+from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky import skypilot_config
 
 logger = sky_logging.init_logger(__name__)
 
@@ -19,33 +25,23 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 
 class Resources:
-    """A cloud resource bundle.
+    """Resources: compute requirements of Tasks.
 
-    Used
-      * for representing resource requests for tasks/apps
-      * as a "filter" to get concrete launchable instances
-      * for calculating billing
-      * for provisioning on a cloud
+    This class is immutable once created (to ensure some validations are done
+    whenever properties change). To update the property of an instance of
+    Resources, use `resources.copy(**new_properties)`.
 
-    Examples:
+    Used:
 
-        # Fully specified cloud and instance type (is_launchable() is True).
-        sky.Resources(clouds.AWS(), 'p3.2xlarge')
-        sky.Resources(clouds.GCP(), 'n1-standard-16')
-        sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+    * for representing resource requests for tasks/apps
+    * as a "filter" to get concrete launchable instances
+    * for calculating billing
+    * for provisioning on a cloud
 
-        # Specifying required resources; the system decides the cloud/instance
-        # type. The below are equivalent:
-        sky.Resources(accelerators='V100')
-        sky.Resources(accelerators='V100:1')
-        sky.Resources(accelerators={'V100': 1})
-
-        # TODO:
-        sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 9
+    _VERSION = 12
 
     def __init__(
         self,
@@ -57,12 +53,82 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
-        disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
+        disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        ports: Optional[List[Union[int, str]]] = None,
+        # Internal use only.
+        _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
+        _is_image_managed: Optional[bool] = None,
     ):
+        """Initialize a Resources object.
+
+        All fields are optional.  ``Resources.is_launchable`` decides whether
+        the Resources is fully specified to launch an instance.
+
+        Examples:
+          .. code-block:: python
+
+            # Fully specified cloud and instance type (is_launchable() is True).
+            sky.Resources(clouds.AWS(), 'p3.2xlarge')
+            sky.Resources(clouds.GCP(), 'n1-standard-16')
+            sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
+
+            # Specifying required resources; the system decides the
+            # cloud/instance type. The below are equivalent:
+            sky.Resources(accelerators='V100')
+            sky.Resources(accelerators='V100:1')
+            sky.Resources(accelerators={'V100': 1})
+            sky.Resources(cpus='2+', memory='16+', accelerators='V100')
+
+        Args:
+          cloud: the cloud to use.
+          instance_type: the instance type to use.
+          cpus: the number of CPUs required for the task.
+            If a str, must be a string of the form ``'2'`` or ``'2+'``, where
+            the ``+`` indicates that the task requires at least 2 CPUs.
+          memory: the amount of memory in GiB required. If a
+            str, must be a string of the form ``'16'`` or ``'16+'``, where
+            the ``+`` indicates that the task requires at least 16 GB of memory.
+          accelerators: the accelerators required. If a str, must be
+            a string of the form ``'V100'`` or ``'V100:2'``, where the ``:2``
+            indicates that the task requires 2 V100 GPUs. If a dict, must be a
+            dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
+          accelerator_args: accelerator-specific arguments. For example,
+            ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+          use_spot: whether to use spot instances. If None, defaults to
+            False.
+          spot_recovery: the spot recovery strategy to use for the managed
+            spot to recover the cluster from preemption. Refer to
+            `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
+            for more details.
+          region: the region to use.
+          zone: the zone to use.
+          image_id: the image ID to use. If a str, must be a string
+            of the image id from the cloud, such as AWS:
+            ``'ami-1234567890abcdef0'``, GCP:
+            ``'projects/my-project-id/global/images/my-image-name'``;
+            Or, a image tag provided by SkyPilot, such as AWS:
+            ``'skypilot:gpu-ubuntu-2004'``. If a dict, must be a dict mapping
+            from region to image ID, such as:
+
+            .. code-block:: python
+
+              {
+                'us-west1': 'ami-1234567890abcdef0',
+                'us-east1': 'ami-1234567890abcdef0'
+              }
+
+          disk_size: the size of the OS disk in GiB.
+          disk_tier: the disk performance tier to use. If None, defaults to
+            ``'medium'``.
+          ports: the ports to open on the instance.
+          _docker_login_config: the docker configuration to use. This include
+            the docker username, password, and registry server. If None, skip
+            docker login.
+        """
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
@@ -75,7 +141,8 @@ class Resources:
         self._use_spot = use_spot if use_spot is not None else False
         self._spot_recovery = None
         if spot_recovery is not None:
-            self._spot_recovery = spot_recovery.upper()
+            if spot_recovery.strip().lower() != 'none':
+                self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -98,8 +165,11 @@ class Resources:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
                 }
+        self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+        self._ports = ports
+        self._docker_login_config = _docker_login_config
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -108,11 +178,17 @@ class Resources:
         self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
-        self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
         self._try_validate_disk_tier()
+        self._try_validate_ports()
 
+    # When querying the accelerators inside this func (we call self.accelerators
+    # which is a @property), we will check the cloud's catalog, which can error
+    # if it fails to fetch some account specific catalog information (e.g., AWS
+    # zone mapping). It is fine to use the default catalog as this function is
+    # only for display purposes.
+    @service_catalog.fallback_to_default_catalog
     def __repr__(self) -> str:
         """Returns a string representation for display.
 
@@ -174,6 +250,10 @@ class Resources:
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
+        ports = ''
+        if self.ports is not None:
+            ports = f', ports={self.ports}'
+
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
         else:
@@ -185,7 +265,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{disk_size}')
+            f'{disk_tier}{disk_size}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -241,6 +321,7 @@ class Resources:
         return self._memory
 
     @property
+    @functools.lru_cache(maxsize=1)
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
 
@@ -282,6 +363,14 @@ class Resources:
     @property
     def disk_tier(self) -> str:
         return self._disk_tier
+
+    @property
+    def ports(self) -> Optional[List[Union[int, str]]]:
+        return self._ports
+
+    @property
+    def is_image_managed(self) -> Optional[bool]:
+        return self._is_image_managed
 
     def _set_cpus(
         self,
@@ -447,7 +536,8 @@ class Resources:
         may have restricted the regions to be considered (e.g., a
         ssh_proxy_command dict with region names as keys).
         """
-        assert self.is_launchable()
+        assert self.is_launchable(), self
+
         regions = self._cloud.regions_with_offering(self._instance_type,
                                                     self.accelerators,
                                                     self._use_spot,
@@ -473,6 +563,18 @@ class Resources:
                 continue
             # TODO: filter out the zones not available in the vpc_name
             filtered_regions.append(region)
+
+        # Friendlier UX. Otherwise users only get a generic
+        # ResourcesUnavailableError message without mentioning
+        # ssh_proxy_command.
+        if not filtered_regions:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.warning(
+                f'{yellow}Request {self} cannot be satisfied by any feasible '
+                'region. To fix, check that ssh_proxy_command\'s region keys '
+                f'include the regions to use.{reset}')
+
         return filtered_regions
 
     def _try_validate_instance_type(self) -> None:
@@ -554,56 +656,6 @@ class Resources:
                             f'memory. {self.instance_type} has {mem} GB '
                             f'memory, but {self.memory} is requested.')
 
-    def _try_validate_accelerators(self) -> None:
-        """Validate accelerators against the instance type and region/zone."""
-        acc_requested = self.accelerators
-        if (isinstance(self.cloud, clouds.GCP) and
-                self.instance_type is not None):
-            # Do this check even if acc_requested is None.
-            clouds.GCP.check_host_accelerator_compatibility(
-                self.instance_type, acc_requested)
-
-        if acc_requested is None:
-            return
-
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
-            # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self._instance_type))
-            if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Infeasible resource demands found:\n'
-                        f'  Instance type requested: {self._instance_type}\n'
-                        f'  Accelerators for {self._instance_type}: '
-                        f'{acc_from_instance_type}\n'
-                        f'  Accelerators requested: {acc_requested}\n'
-                        f'To fix: either only specify instance_type, or change '
-                        'the accelerators field to be consistent.')
-            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
-            # because e.g., the instance may have 4 GPUs, while the task
-            # specifies to use 1 GPU.
-
-        # Validate whether accelerator is available in specified region/zone.
-        acc, acc_count = list(acc_requested.items())[0]
-        # Fractional accelerators are temporarily bumped up to 1.
-        if 0 < acc_count < 1:
-            acc_count = 1
-        if self.region is not None or self.zone is not None:
-            if not self._cloud.accelerator_in_region_or_zone(
-                    acc, acc_count, self.region, self.zone):
-                error_str = (f'Accelerator "{acc}" is not available in '
-                             '"{}".')
-                if self.zone:
-                    error_str = error_str.format(self.zone)
-                else:
-                    error_str = error_str.format(self.region)
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(error_str)
-
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
             return
@@ -638,8 +690,30 @@ class Resources:
                         'Local/On-prem mode does not support custom '
                         'images.')
 
+    def extract_docker_image(self) -> Optional[str]:
+        if self.image_id is None:
+            return None
+        if len(self.image_id) == 1 and self.region in self.image_id:
+            image_id = self.image_id[self.region]
+            if image_id.startswith('docker:'):
+                return image_id[len('docker:'):]
+        return None
+
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
+            return
+
+        if self.extract_docker_image() is not None:
+            # TODO(tian): validate the docker image exists / of reasonable size
+            if self.accelerators is not None:
+                for acc in self.accelerators.keys():
+                    if acc.lower().startswith('tpu'):
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Docker image is not supported for TPU VM.')
+            if self.cloud is not None:
+                self.cloud.check_features_are_supported(
+                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
         if self.cloud is None:
@@ -647,13 +721,15 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
 
+        # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         if not self._cloud.is_same_cloud(
-                clouds.IBM()) and not self._cloud.is_same_cloud(
-                    clouds.AWS()) and not self._cloud.is_same_cloud(
-                        clouds.GCP()):
+                clouds.AWS()) and not self._cloud.is_same_cloud(
+                    clouds.GCP()) and not self._cloud.is_same_cloud(
+                        clouds.IBM()) and not self._cloud.is_same_cloud(
+                            clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id is only supported for AWS, GCP and IBM, please '
+                    'image_id is only supported for AWS/GCP/IBM/OCI, please '
                     'explicitly specify the cloud.')
 
         if self._region is not None:
@@ -709,6 +785,52 @@ class Resources:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)
 
+    def _try_validate_ports(self) -> None:
+        if self.ports is None:
+            return
+        if skypilot_config.get_nested(('aws', 'security_group_name'),
+                                      None) is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify ports when AWS security group name is '
+                    'specified.')
+        if self.cloud is not None:
+            self.cloud.check_features_are_supported(
+                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+        for port in self.ports:
+            if isinstance(port, int):
+                if port < 1 or port > 65535:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port number '
+                            'between 1 and 65535.')
+            elif isinstance(port, str):
+                port_range = port.split('-')
+                if len(port_range) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a port range '
+                            'such as 10022-10040.')
+                try:
+                    from_port = int(port_range[0])
+                    to_port = int(port_range[1])
+                except ValueError as e:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use a integer inside'
+                            ' the range.') from e
+                if (from_port < 1 or from_port > 65535 or to_port < 1 or
+                        to_port > 65535):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid port {port}. Please use port '
+                            'numbers between 1 and 65535.')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid port {port}. Please use an integer or '
+                        'a range such as 10022-10040.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -720,6 +842,47 @@ class Resources:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
+
+    def make_deploy_variables(
+            self, region: clouds.Region,
+            zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
+        """Converts planned sky.Resources to resource variables.
+
+        These variables are devided into two categories: cloud-specific and
+        cloud-agnostic. The cloud-specific variables are generated by the
+        cloud.make_deploy_resources_variables() method, and the cloud-agnostic
+        variables are generated by this method.
+        """
+        cloud_specific_variables = self.cloud.make_deploy_resources_variables(
+            self, region, zones)
+        docker_image = self.extract_docker_image()
+        return dict(
+            cloud_specific_variables,
+            **{
+                # Docker config
+                # Docker image. The image name used to pull the image, e.g.
+                # ubuntu:latest.
+                'docker_image': docker_image,
+                # Docker container name. The name of the container. Default to
+                # `sky_container`.
+                'docker_container_name':
+                    constants.DEFAULT_DOCKER_CONTAINER_NAME,
+                # Docker login config (if any). This helps pull the image from
+                # private registries.
+                'docker_login_config': self._docker_login_config
+            })
+
+    def get_reservations_available_resources(
+            self, specific_reservations: Set[str]) -> Dict[str, int]:
+        """Returns the number of available reservation resources."""
+        if self.use_spot:
+            # GCP's & AWS's reservations do not support spot instances. We
+            # assume other clouds behave the same. We can move this check down
+            # to each cloud if any cloud supports reservations for spot.
+            return {}
+        return self.cloud.get_reservations_available_resources(
+            self._instance_type, self._region, self._zone,
+            specific_reservations)
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
@@ -794,6 +957,23 @@ class Resources:
                 return types.index(self.disk_tier) < types.index(
                     other.disk_tier)
 
+        if self.ports is not None:
+            if other.ports is None:
+                return False
+
+            def parse_ports(ports):
+                port_set = set()
+                for p in ports:
+                    if isinstance(p, int):
+                        port_set.add(p)
+                    else:
+                        from_port, to_port = p.split('-')
+                        port_set.update(range(int(from_port), int(to_port) + 1))
+                return port_set
+
+            if not parse_ports(self.ports) <= parse_ports(other.ports):
+                return False
+
         # self <= other
         return True
 
@@ -829,6 +1009,11 @@ class Resources:
             self.accelerators is None,
             self.accelerator_args is None,
             not self._use_spot_specified,
+            self.disk_size == _DEFAULT_DISK_SIZE_GB,
+            self.disk_tier is None,
+            self._image_id is None,
+            self.ports is None,
+            self._docker_login_config is None,
         ])
 
     def copy(self, **override) -> 'Resources':
@@ -849,6 +1034,11 @@ class Resources:
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
+            ports=override.pop('ports', self.ports),
+            _docker_login_config=override.pop('_docker_login_config',
+                                              self._docker_login_config),
+            _is_image_managed=override.pop('_is_image_managed',
+                                           self._is_image_managed),
         )
         assert len(override) == 0
         return resources
@@ -863,6 +1053,20 @@ class Resources:
             if None not in self.image_id and region not in self.image_id:
                 return False
         return True
+
+    def get_required_cloud_features(
+            self) -> Set[clouds.CloudImplementationFeatures]:
+        """Returns the set of cloud features required by this Resources."""
+        features = set()
+        if self.use_spot:
+            features.add(clouds.CloudImplementationFeatures.SPOT_INSTANCE)
+        if self.disk_tier is not None:
+            features.add(clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if self.extract_docker_image() is not None:
+            features.add(clouds.CloudImplementationFeatures.DOCKER_IMAGE)
+        if self.ports is not None:
+            features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
+        return features
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
@@ -888,6 +1092,9 @@ class Resources:
         resources_fields['zone'] = config.pop('zone', None)
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
+        resources_fields['ports'] = config.pop('ports', None)
+        resources_fields['_docker_login_config'] = config.pop('_docker_login_config', None)
+        resources_fields['_is_image_managed'] = config.pop('_is_image_managed', None)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -928,6 +1135,10 @@ class Resources:
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
+        add_if_not_none('ports', self.ports)
+        add_if_not_none('_docker_login_config', self._docker_login_config)
+        if self._is_image_managed is not None:
+            config['_is_image_managed'] = self._is_image_managed
         return config
 
     def __setstate__(self, state):
@@ -989,5 +1200,14 @@ class Resources:
 
         if version < 9:
             self._disk_tier = None
+
+        if version < 10:
+            self._is_image_managed = None
+
+        if version < 11:
+            self._ports = None
+
+        if version < 12:
+            self._docker_login_config = None
 
         self.__dict__.update(state)

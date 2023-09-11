@@ -1,0 +1,31 @@
+# Run localGPT on your documents on any cloud using SkyPilot
+# Usage:
+#   sky launch -c localgpt localgpt.yaml
+#
+#   * Wait to see `INFO:werkzeug:Press CTRL+C to quit` before proceeding
+#   * In a new terminal, run `ssh -L 5111:localhost:5111 localgpt`
+#   * Open http://localhost:5111 in your browser
+
+resources:
+  accelerators: A100:1
+
+setup: |
+  conda activate py39
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -y -n py39 python=3.9
+    conda activate py39
+    git clone https://github.com/PromtEngineer/localGPT.git
+    cd localGPT/
+    git checkout 5ab5e1921adb45a2df8d61f189a3fb4e9b401e58
+    pip install -r requirements.txt
+    # bitsandbytes>0.39.1 fails on GCP, see issue:
+    # https://github.com/TimDettmers/bitsandbytes/issues/620
+    pip install -U bitsandbytes==0.39.1
+  fi
+
+run: |
+  conda activate py39
+  cd localGPT/
+  python run_localGPT_API.py & python localGPTUI/localGPTUI.py --port 5111 --host 0.0.0.0

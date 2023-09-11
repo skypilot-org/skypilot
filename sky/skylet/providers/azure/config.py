@@ -81,6 +81,32 @@ def _configure_resource_group(config):
     with open(template_path, "r") as template_fp:
         template = json.load(template_fp)
 
+    # Setup firewall rules for ports
+    nsg_resource = None
+    for resource in template["resources"]:
+        if resource["type"] == "Microsoft.Network/networkSecurityGroups":
+            nsg_resource = resource
+            break
+    assert nsg_resource is not None, "Could not find NSG resource in template"
+    ports = config["provider"].get("ports", None)
+    if ports is not None:
+        ports = [str(port) for port in ports if port != 22]
+        nsg_resource["properties"]["securityRules"].append(
+            {
+                "name": "user-ports",
+                "properties": {
+                    "priority": 1001,
+                    "protocol": "TCP",
+                    "access": "Allow",
+                    "direction": "Inbound",
+                    "sourceAddressPrefix": "*",
+                    "sourcePortRange": "*",
+                    "destinationAddressPrefix": "*",
+                    "destinationPortRanges": ports,
+                },
+            }
+        )
+
     logger.info("Using cluster name: %s", config["cluster_name"])
 
     # set unique id for resources in this cluster
@@ -135,28 +161,7 @@ def _configure_resource_group(config):
 
 
 def _configure_key_pair(config):
-    ssh_user = config["auth"]["ssh_user"]
-    public_key = None
-    # search if the keys exist
-    for key_type in ["ssh_private_key", "ssh_public_key"]:
-        try:
-            key_path = Path(config["auth"][key_type]).expanduser()
-        except KeyError:
-            raise Exception("Config must define {}".format(key_type))
-        except TypeError:
-            raise Exception("Invalid config value for {}".format(key_type))
-
-        assert key_path.is_file(), "Could not find ssh key: {}".format(key_path)
-
-        if key_type == "ssh_public_key":
-            with open(key_path, "r") as f:
-                public_key = f.read()
-
-    for node_type in config["available_node_types"].values():
-        azure_arm_parameters = node_type["node_config"].setdefault(
-            "azure_arm_parameters", {}
-        )
-        azure_arm_parameters["adminUsername"] = ssh_user
-        azure_arm_parameters["publicKey"] = public_key
-
+    # SkyPilot: The original checks and configurations are no longer
+    # needed, since we have already set them up in the upper level
+    # SkyPilot codes. See sky/templates/azure-ray.yml.j2
     return config

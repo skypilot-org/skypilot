@@ -3,8 +3,11 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import requests
+
 from sky import clouds
 from sky import exceptions
+from sky import status_lib
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
 
@@ -34,6 +37,14 @@ class Lambda(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
+            f'Docker image is not supported in {_REPR}. '
+            'You can try running docker command inside the `run` section in task.yaml.'
+        ),
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is not supported in {_REPR}.',
     }
 
     @classmethod
@@ -42,7 +53,7 @@ class Lambda(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -160,10 +171,9 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
-        if resources.use_spot or resources.disk_tier is not None:
-            return ([], [])
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud
@@ -225,6 +235,10 @@ class Lambda(clouds.Cloud):
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_cloud/lambda_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Lambda Cloud credentials. '
+                           'Check your network connection '
+                           'and try again.')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -263,3 +277,24 @@ class Lambda(clouds.Cloud):
                                 disk_tier: str) -> None:
         raise exceptions.NotSupportedError(
             'Lambda does not support disk tiers.')
+
+    @classmethod
+    def query_status(cls, name: str, tag_filters: Dict[str, str],
+                     region: Optional[str], zone: Optional[str],
+                     **kwargs) -> List[status_lib.ClusterStatus]:
+        status_map = {
+            'booting': status_lib.ClusterStatus.INIT,
+            'active': status_lib.ClusterStatus.UP,
+            'unhealthy': status_lib.ClusterStatus.INIT,
+            'terminated': None,
+        }
+        # TODO(ewzeng): filter by hash_filter_string to be safe
+        status_list = []
+        vms = lambda_utils.LambdaCloudClient().list_instances()
+        possible_names = [f'{name}-head', f'{name}-worker']
+        for node in vms:
+            if node.get('name') in possible_names:
+                node_status = status_map[node['status']]
+                if node_status is not None:
+                    status_list.append(node_status)
+        return status_list

@@ -1,4 +1,24 @@
-"""Module to enable a single SkyPilot key for all VMs in each cloud."""
+"""Module to enable a single SkyPilot key for all VMs in each cloud.
+
+The `setup_<cloud>_authentication` functions will be called on every cluster
+provisioning request.
+
+Specifically, after the ray yaml template file `<cloud>-ray.yml.j2` is filled in
+with resource specific information, these functions are called with the filled
+in ray yaml config as input,
+1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
+   `skypilot:ssh_public_key_content` with the actual username and public key
+   content, i.e., `_replace_ssh_info_in_config`.
+2. Setup the `authorized_keys` on the remote VM with the public key content,
+   by cloud-init or directly using cloud provider's API.
+
+The local machine's public key should not be uploaded to the
+`~/.ssh/sky-key.pub` on the remote VM, because it will cause private/public
+key pair mismatch when the user tries to launch new VM from that remote VM
+using SkyPilot, e.g., the node is used as a spot controller. (Lambda cloud
+is an exception, due to the limitation of the cloud provider. See the
+comments in setup_lambda_authentication)
+"""
 import copy
 import functools
 import os
@@ -6,23 +26,23 @@ import re
 import socket
 import subprocess
 import sys
-import time
 from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
 import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp, ibm
+from sky.adaptors import gcp
+from sky.adaptors import ibm
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.lambda_cloud import lambda_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -45,11 +65,12 @@ def _generate_rsa_key_pair() -> Tuple[str, str]:
     private_key = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption()).decode('utf-8')
+        encryption_algorithm=serialization.NoEncryption()).decode(
+            'utf-8').strip()
 
     public_key = key.public_key().public_bytes(
         serialization.Encoding.OpenSSH,
-        serialization.PublicFormat.OpenSSH).decode('utf-8')
+        serialization.PublicFormat.OpenSSH).decode('utf-8').strip()
 
     return public_key, private_key
 
@@ -71,7 +92,7 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
-    """Returns the aboslute public and private key paths."""
+    """Returns the aboslute private and public key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     if not os.path.exists(private_key_path):
@@ -88,8 +109,8 @@ def get_or_generate_keys() -> Tuple[str, str]:
     return private_key_path, public_key_path
 
 
-def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
-                                           public_key: str) -> Dict[str, Any]:
+def _replace_ssh_info_in_config(config: Dict[str, Any],
+                                public_key: str) -> Dict[str, Any]:
     config_str = common_utils.dump_yaml_str(config)
     config_str = config_str.replace('skypilot:ssh_user',
                                     config['auth']['ssh_user'])
@@ -102,34 +123,9 @@ def _replace_cloud_init_ssh_info_in_config(config: Dict[str, Any],
 def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    config = _replace_cloud_init_ssh_info_in_config(config, public_key)
+        public_key = f.read().strip()
+    config = _replace_ssh_info_in_config(config, public_key)
     return config
-
-
-# Reference:
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
-def _wait_for_compute_global_operation(project_name: str, operation_name: str,
-                                       compute: Any) -> None:
-    """Poll for global compute operation until finished."""
-    logger.debug('wait_for_compute_global_operation: '
-                 'Waiting for operation {} to finish...'.format(operation_name))
-    max_polls = 10
-    poll_interval = 5
-    for _ in range(max_polls):
-        result = compute.globalOperations().get(
-            project=project_name,
-            operation=operation_name,
-        ).execute()
-        if 'error' in result:
-            raise Exception(result['error'])
-
-        if result['status'] == 'DONE':
-            logger.debug('wait_for_compute_global_operation: '
-                         'Operation done.')
-            break
-        time.sleep(poll_interval)
-    return result
 
 
 # Snippets of code inspired from
@@ -140,7 +136,9 @@ def _wait_for_compute_global_operation(project_name: str, operation_name: str,
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
 def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    private_key_path, public_key_path = get_or_generate_keys()
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -148,7 +146,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                         'v1',
                         credentials=None,
                         cache_discovery=False)
-    user = config['auth']['ssh_user']
 
     try:
         project = compute.projects().get(project=project_id).execute()
@@ -192,31 +189,56 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
     if project_oslogin.lower() == 'true':
-        # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path), (
-            'GCP credential backup file '
-            f'{sky_backup_config_path!r} does not exist.')
 
-        with open(sky_backup_config_path, 'r') as infile:
-            for line in infile:
-                if line.startswith('account'):
-                    account = line.split('=')[1].strip()
-                    break
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} does not contain the '
-                        'account information.')
-        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+        # Try to get the os-login user from `gcloud`, as this is the most
+        # accurate way to figure out how this gcp user is meant to log in.
+        proc = subprocess.run(
+            'gcloud compute os-login describe-profile --format yaml',
+            shell=True,
+            stdout=subprocess.PIPE,
+            check=False)
+        os_login_username = None
+        if proc.returncode == 0:
+            try:
+                profile = yaml.safe_load(proc.stdout)
+                username = profile['posixAccounts'][0]['username']
+                if username:
+                    os_login_username = username
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug('Failed to parse gcloud os-login profile.\n'
+                             f'{common_utils.format_exception(e)}')
+                pass
+
+        if os_login_username is None:
+            # As a fallback, read the account information from the credential
+            # file. This works most of the time, but fails if the user's
+            # os-login username is not a straightforward translation of their
+            # email address, for example because their email address changed
+            # within their google workspace after the os-login credentials
+            # were established.
+            config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+            sky_backup_config_path = os.path.expanduser(
+                clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+            assert os.path.exists(sky_backup_config_path), (
+                'GCP credential backup file '
+                f'{sky_backup_config_path!r} does not exist.')
+
+            with open(sky_backup_config_path, 'r') as infile:
+                for line in infile:
+                    if line.startswith('account'):
+                        account = line.split('=')[1].strip()
+                        break
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'GCP authentication failed, as the oslogin is '
+                            f'enabled but the file {config_path} does not '
+                            'contain the account information.')
+            os_login_username = account.replace('@', '_').replace('.', '_')
+        config['auth']['ssh_user'] = os_login_username
 
         # Add ssh key to GCP with oslogin
         subprocess.run(
@@ -242,71 +264,14 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr.decode('utf-8'))
-        return config
-
-    # OS Login is not enabled for the project. Add the ssh key directly to the
-    # metadata.
-    # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
-    # issue. A blocker is that the cloud init is not installed in the debian
-    # image by default.
-    project_keys: str = next(  # type: ignore
-        (item for item in project['commonInstanceMetadata'].get('items', [])
-         if item['key'] == 'ssh-keys'), {}).get('value', '')
-    ssh_keys = project_keys.split('\n') if project_keys else []
-
-    # Get public key from file.
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-
-    # Check if ssh key in Google Project's metadata
-    public_key_token = public_key.split(' ')[1]
-
-    key_found = False
-    for key in ssh_keys:
-        key_list = key.split(' ')
-        if len(key_list) != 3:
-            continue
-        if user == key_list[-1] and os.path.exists(
-                private_key_path) and key_list[1] == public_key.split(' ')[1]:
-            key_found = True
-
-    if not key_found:
-        new_ssh_key = '{user}:ssh-rsa {public_key_token} {user}'.format(
-            user=user, public_key_token=public_key_token)
-        metadata = project['commonInstanceMetadata'].get('items', [])
-
-        ssh_key_index = [
-            k for k, v in enumerate(metadata) if v['key'] == 'ssh-keys'
-        ]
-        assert len(ssh_key_index) <= 1
-
-        if len(ssh_key_index) == 0:
-            metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
-        else:
-            first_ssh_key_index = ssh_key_index[0]
-            metadata[first_ssh_key_index]['value'] += '\n' + new_ssh_key
-
-        project['commonInstanceMetadata']['items'] = metadata
-
-        operation = compute.projects().setCommonInstanceMetadata(
-            project=project['name'],
-            body=project['commonInstanceMetadata']).execute()
-        _wait_for_compute_global_operation(project['name'], operation['name'],
-                                           compute)
-    return config
+    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    get_or_generate_keys()
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
-    return config
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
+    return _replace_ssh_info_in_config(config, public_key)
 
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -316,7 +281,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     lambda_client = lambda_utils.LambdaCloudClient()
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     with open(public_key_path, 'r') as f:
-        public_key = f.read()
+        public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
     name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
     if not exists:
@@ -326,6 +291,10 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
+    # TODO(zhwu): we need to avoid uploading the public ssh key to the
+    # nodes, as that will cause problem when the node is used as spot
+    # controller, i.e., the public and private key on the node may
+    # not match.
     file_mounts = config['file_mounts']
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
@@ -350,7 +319,7 @@ def setup_ibm_authentication(config):
     with open(os.path.abspath(os.path.expanduser(public_key_path)),
               'r',
               encoding='utf-8') as file:
-        ssh_key_data = file.read()
+        ssh_key_data = file.read().strip()
     # pylint: disable=E1136
     try:
         res = client.create_key(public_key=ssh_key_data,
@@ -391,12 +360,47 @@ def setup_ibm_authentication(config):
     return config
 
 
-def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    private_key_path, public_key_path = get_or_generate_keys()
-    config['auth']['ssh_private_key'] = private_key_path
-    config['auth']['ssh_public_key'] = public_key_path
+# Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
+def setup_oci_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
 
-    file_mounts = config['file_mounts']
-    file_mounts[public_key_path] = public_key_path
-    config['file_mounts'] = file_mounts
+    return _replace_ssh_info_in_config(config, public_key)
+
+
+def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
+    return _replace_ssh_info_in_config(config, public_key)
+
+
+def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+
+    # Run kubectl command to add the public key to the cluster.
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    cmd = f'kubectl create secret generic {key_label} ' \
+          f'--from-file=ssh-publickey={public_key_path}'
+    try:
+        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode('utf-8')
+        suffix = f'\nError message: {output}'
+        if 'already exists' in output:
+            logger.debug(
+                f'Key {key_label} already exists in the cluster, using it...')
+        elif any(err in output for err in ['connection refused', 'timeout']):
+            with ux_utils.print_exception_no_traceback():
+                raise ConnectionError(
+                    'Failed to connect to the cluster. Check if your '
+                    'cluster is running, your kubeconfig is correct '
+                    'and you can connect to it using: '
+                    f'kubectl get namespaces.{suffix}') from e
+        else:
+            logger.error(suffix)
+            raise
+
     return config

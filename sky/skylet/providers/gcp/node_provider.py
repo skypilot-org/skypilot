@@ -3,7 +3,7 @@ import time
 import copy
 from functools import wraps
 from threading import RLock
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import googleapiclient
 
@@ -12,7 +12,10 @@ from sky.skylet.providers.gcp.config import (
     construct_clients_from_provider_config,
     get_node_type,
 )
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.skylet.providers.command_runner import DockerLoginConfig
 
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.tags import (
     TAG_RAY_LAUNCH_CONFIG,
     TAG_RAY_NODE_KIND,
@@ -291,6 +294,7 @@ class GCPNodeProvider(NodeProvider):
     @_retry
     def terminate_node(self, node_id: str):
         with self.lock:
+            result = None
             resource = self._get_resource_depending_on_node_name(node_id)
             try:
                 if self.cache_stopped_nodes:
@@ -338,7 +342,8 @@ class GCPNodeProvider(NodeProvider):
                     )
                 else:
                     raise http_error from None
-            return result
+
+        return result
 
     @_retry
     def _get_node(self, node_id: str) -> GCPNode:
@@ -362,3 +367,31 @@ class GCPNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_gcp(cluster_config)
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
+                )
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)

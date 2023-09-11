@@ -5,23 +5,24 @@ from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
+from sky import backends
 from sky import clouds
 from sky import dag
-from sky import task
-from sky import backends
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky import status_lib
+from sky import task
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import log_utils
+from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -168,12 +169,12 @@ def _start(
         cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if not force and cluster_status == global_user_state.ClusterStatus.UP:
+    if not force and cluster_status == status_lib.ClusterStatus.UP:
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
-        global_user_state.ClusterStatus.INIT,
-        global_user_state.ClusterStatus.STOPPED), cluster_status
+        status_lib.ClusterStatus.INIT,
+        status_lib.ClusterStatus.STOPPED), cluster_status
 
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -535,6 +536,9 @@ def cancel(
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
+
+    When `all` is False and `job_ids` is None, cancel the latest running job.
+
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
@@ -551,15 +555,15 @@ def cancel(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    if not job_ids and not all:
-        raise ValueError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster_name} -s`) or the --all flag.')
-
     backend_utils.check_cluster_name_not_reserved(
         cluster_name, operation_str='Cancelling jobs')
 
+    if all and job_ids:
+        raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
+                         'all jobs, set `job_ids` to None.')
+
     # Check the status of the cluster.
+    handle = None
     try:
         handle = backend_utils.check_cluster_available(
             cluster_name,
@@ -572,10 +576,14 @@ def cancel(
                 isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
         if (e.handle is None or e.handle.head_ip is None):
             raise
+        handle = e.handle
         # Even if the cluster is not UP, we can still try to cancel the job if
         # the head node is still alive. This is useful when a spot cluster's
         # worker node is preempted, but we can still cancel the job on the head
         # node.
+
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
 
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -583,16 +591,24 @@ def cancel(
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
-        job_ids = None
-    else:
-        assert job_ids is not None, 'job_ids should not be None'
+    elif job_ids is None:
+        # all = False, job_ids is None => cancel the latest running job.
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
+    elif len(job_ids):
+        # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
+    else:
+        # all = False, len(job_ids) == 0 => no jobs to cancel.
+        return
 
-    backend.cancel_jobs(handle, job_ids)
+    backend.cancel_jobs(handle, job_ids, all)
 
 
 @usage_lib.entrypoint
@@ -776,19 +792,17 @@ def spot_queue(refresh: bool,
     controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
+            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.INIT
     ]):
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        log_utils.force_update_rich_status(
-            '[cyan] Checking spot jobs - restarting '
-            'controller[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+                                       'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
-        controller_status = global_user_state.ClusterStatus.UP
-        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
+        controller_status = status_lib.ClusterStatus.UP
+        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as
@@ -821,7 +835,13 @@ def spot_queue(refresh: bool,
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
-        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
     return jobs
 
 
@@ -903,7 +923,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(msg,

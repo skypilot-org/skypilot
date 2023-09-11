@@ -22,3 +22,10 @@ python_version = "3.8"
 follow_imports = "skip"
 ignore_missing_imports = true
 allow_redefinition = true
+
+[tool.isort]
+profile = "google"
+line_length = 80
+multi_line_output = 0
+combine_as_imports = true
+use_parentheses = true
