@@ -98,6 +98,7 @@ def create_table(cursor, conn):
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
         launched_at INTEGER,
+        controller_name TEXT,
         handle BLOB,
         status TEXT)""")
     # For backward compatibility.
@@ -281,17 +282,19 @@ def add_or_update_cluster(cluster_name: str,
 
 
 def add_or_update_service(name: str, launched_at: Optional[int],
-                          handle: 'serve.ServiceHandle',
+                          controller_name: str, handle: 'serve.ServiceHandle',
                           status: status_lib.ServiceStatus) -> None:
     if launched_at is None:
         launched_at = int(time.time())
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, launched_at, handle, status) '
+        '(name, launched_at, controller_name, handle, status) '
         'VALUES ('
         # name
         '?, '
         # launched_at
+        '?, '
+        # controller_name
         '?, '
         # handle
         '?, '
@@ -303,6 +306,8 @@ def add_or_update_service(name: str, launched_at: Optional[int],
             name,
             # launched_at
             launched_at,
+            # controller_name
+            controller_name,
             # handle
             pickle.dumps(handle),
             # status
@@ -610,11 +615,12 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     # Explicitly specify the number of fields to unpack, so that
     # we can add new fields to the database in the future without
     # breaking the previous code.
-    name, launched_at, handle, status = row[:4]
+    name, launched_at, controller_name, handle, status = row[:5]
     # TODO: use namedtuple instead of dict
     return {
         'name': name,
         'launched_at': launched_at,
+        'controller_name': controller_name,
         'handle': pickle.loads(handle),
         'status': status_lib.ServiceStatus[status],
     }
@@ -627,6 +633,18 @@ def get_service_from_name(
     for row in rows:
         return _get_service_from_row(row)
     return None
+
+
+def get_services_from_controller_name(
+        controller_name: str) -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT * FROM services WHERE controller_name=(?)',
+        (controller_name,)).fetchall()
+    records = []
+    for row in rows:
+        record = _get_service_from_row(row)
+        records.append(record)
+    return records
 
 
 def get_handle_from_service_name(

@@ -5,6 +5,7 @@ import time
 
 import fastapi
 import requests
+from urllib3 import exceptions
 import uvicorn
 
 from sky import sky_logging
@@ -26,26 +27,34 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(
-        self, controller_url: str, port: int,
+        self, controller_url: str, load_balancer_port: int, app_port: int,
         load_balancing_policy: load_balancing_policies.LoadBalancingPolicy
     ) -> None:
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
-        self.port = port
+        # This is the port where the load balancer listens to.
+        self.load_balancer_port = load_balancer_port
+        # This is the port where the replica app listens to.
+        self.app_port = app_port
         self.load_balancing_policy = load_balancing_policy
+        self.setup_query_interval()
 
-        for i in range(3):
-            resp = requests.get(self.controller_url +
-                                '/controller/get_autoscaler_query_interval')
+    def setup_query_interval(self):
+        for _ in range(3):
+            try:
+                resp = requests.get(self.controller_url +
+                                    '/controller/get_autoscaler_query_interval')
+            except exceptions.MaxRetryError:
+                # Retry if cannot connect to controller
+                continue
             if resp.status_code == 200:
                 self.load_balancing_policy.set_query_interval(
                     resp.json()['query_interval'])
-                break
-            if i == 2:
-                logger.error('Failed to get autoscaler query interval. '
-                             'Use default interval instead.')
-                self.load_balancing_policy.set_query_interval(None)
+                return
             time.sleep(10)
+        logger.error('Failed to get autoscaler query interval. '
+                     'Use default interval instead.')
+        self.load_balancing_policy.set_query_interval(None)
 
     def _sync_with_controller(self):
         while True:
@@ -83,7 +92,7 @@ class SkyServeLoadBalancer:
                                         'Use "sky serve status [SERVICE_ID]" '
                                         'to check the replica status.')
 
-        path = f'http://{replica_ip}:{self.port}{request.url.path}'
+        path = f'http://{replica_ip}:{self.app_port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -96,10 +105,10 @@ class SkyServeLoadBalancer:
             target=self._sync_with_controller, daemon=True)
         sync_controller_thread.start()
 
-        logger.info(
-            f'SkyServe Load Balancer started on http://0.0.0.0:{self.port}')
+        logger.info('SkyServe Load Balancer started on '
+                    f'http://0.0.0.0:{self.load_balancer_port}')
 
-        uvicorn.run(self.app, host='0.0.0.0', port=self.port)
+        uvicorn.run(self.app, host='0.0.0.0', port=self.load_balancer_port)
 
 
 if __name__ == '__main__':
@@ -109,10 +118,13 @@ if __name__ == '__main__':
                         type=str,
                         help='Task YAML file',
                         required=True)
-    parser.add_argument('--port',
-                        '-p',
+    parser.add_argument('--load-balancer-port',
                         type=int,
                         help='Port to run the load balancer on.',
+                        required=True)
+    parser.add_argument('--app-port',
+                        type=int,
+                        help='Port that runs app on replica.',
                         required=True)
     parser.add_argument('--controller-addr',
                         type=str,
@@ -126,6 +138,7 @@ if __name__ == '__main__':
     # ======= SkyServeLoadBalancer =========
     load_balancer = SkyServeLoadBalancer(
         controller_url=args.controller_addr,
-        port=args.port,
+        load_balancer_port=args.load_balancer_port,
+        app_port=args.app_port,
         load_balancing_policy=_load_balancing_policy)
     load_balancer.run()

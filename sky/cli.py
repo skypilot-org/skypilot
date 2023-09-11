@@ -1770,7 +1770,8 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
         if skyserve_controllers:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}\n'
                        f'SkyServe Controllers{colorama.Style.RESET_ALL}')
-            status_utils.show_status_table(skyserve_controllers, all)
+            num_pending_autostop += status_utils.show_status_table(
+                skyserve_controllers, all)
             hints.append(
                 f'* To see detailed service status: {colorama.Style.BRIGHT}'
                 f'sky serve status{colorama.Style.RESET_ALL}')
@@ -2672,6 +2673,24 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                        'to terminate (see caveats above).')
 
 
+def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+    services = global_user_state.get_services_from_controller_name(
+        controller_name)
+    if services:
+        service_names = [service['name'] for service in services]
+        with ux_utils.print_exception_no_traceback():
+            plural = '' if len(service_names) == 1 else 's'
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.RED}Tearing down the sky serve controller '
+                f'is not supported, as it is currently serving the following '
+                f'service{plural}: {", ".join(service_names)}. Please teardown '
+                f'the service{plural} first with {colorama.Style.BRIGHT}sky '
+                f'serve down {" ".join(service_names)}'
+                f'{colorama.Style.RESET_ALL}.')
+    msg = (f'Tearing down sky serve controller: {controller_name}.')
+    click.echo(msg)
+
+
 def _down_or_stop_clusters(
         names: List[str],
         apply_to_all: Optional[bool],
@@ -2751,10 +2770,29 @@ def _down_or_stop_clusters(
                     f'{names_str} is currently not supported.\n'
                     'Please omit the cluster(s) with reserved prefix '
                     f'{name_to_reserved_prefix.values()}.')
-            raise click.UsageError(
-                f'{operation} cluster(s) with reserved prefix '
-                f'{reserve_prefix_str} is not supported. To teardown a '
-                'service, please use `sky serve down`.')
+            if not down:
+                raise click.UsageError(
+                    f'{operation} cluster(s) with reserved prefix '
+                    f'{reserve_prefix_str} is not supported. To teardown a '
+                    'service, please use `sky serve down`.')
+            else:
+                if len(name_to_reserved_prefix) > 1:
+                    raise click.UsageError(
+                        f'{operation} multiple clusters with reserved prefix '
+                        f'{reserve_prefix_str} is currently not supported.\n'
+                        'Please omit all but one of the clusters.')
+                # We can only teardown one reserved cluster (sky serve
+                # controller) for now.
+                _hint_or_raise_for_down_sky_serve_controller(
+                    list(name_to_reserved_prefix.keys())[0])
+                confirm_str = 'delete'
+                user_input = click.prompt(
+                    f'To proceed, please type {colorama.Style.BRIGHT}'
+                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
+                    type=str)
+                if user_input != confirm_str:
+                    raise click.Abort()
+                no_confirm = True
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
         if len(reserved_clusters) > 0:
@@ -4075,33 +4113,8 @@ def serve_up(
     app_port = int(task.service.app_port)
     task.set_resources(requested_resources.copy(ports=[app_port]))
 
-    controller_resources_config: Dict[str, Any] = copy.copy(
-        serve_lib.CONTROLLER_RESOURCES)
-    if task.service.controller_resources is not None:
-        controller_resources_config.update(task.service.controller_resources)
-    # TODO(tian): We might need a thorough design on this.
-    if 'ports' not in controller_resources_config:
-        controller_resources_config['ports'] = []
-    controller_resources_config['ports'].append(app_port)
-    try:
-        controller_resources = sky.Resources.from_yaml_config(
-            controller_resources_config)
-    except ValueError as e:
-        raise ValueError(
-            'Encountered error when parsing controller resources') from e
-
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
-
-    dummy_controller_task = sky.Task().set_resources(controller_resources)
-    click.secho('The controller will use the following resource:', fg='cyan')
-    with sky.Dag() as dag:
-        dag.add(dummy_controller_task)
-    sky.optimize(dag)
-    click.echo()
-
-    dummy_controller_task: sky.Task = dag.tasks[0]
-    controller_best_resources = dummy_controller_task.best_resources
 
     click.secho('Each replica will use the following resource:', fg='cyan')
     with sky.Dag() as dag:
@@ -4114,8 +4127,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name, controller_resources,
-                 controller_best_resources)
+    sky.serve_up(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4217,8 +4229,7 @@ def serve_status(all: bool, service_name: Optional[str]):
                f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
-        service_handle: serve_lib.ServiceHandle = service_record['handle']
-        for replica_record in service_handle.replica_info:
+        for replica_record in service_record['replica_info']:
             replica_record['service_name'] = service_record['name']
             replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
@@ -4314,17 +4325,18 @@ def serve_down(
         try:
             sky.serve_down(name, purge)
         except RuntimeError as e:
-            message = (f'{colorama.Fore.RED}Teardown service {name}...failed. '
-                       'Please manually clean up the replicas and then use '
-                       '--purge to clean up the controller.'
-                       f'{colorama.Style.RESET_ALL}'
-                       f'\nReason: {common_utils.format_exception(e)}.')
+            message = (
+                f'{colorama.Fore.RED}Tearing down service {name}...failed. '
+                'Please manually clean up the replicas and then use --purge '
+                f'to clean up the controller.{colorama.Style.RESET_ALL}'
+                f'\nReason: {common_utils.format_exception(e)}.')
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             message = str(e)
         else:
-            message = (f'{colorama.Fore.GREEN}Teardown service {name}...done.'
-                       f'{colorama.Style.RESET_ALL}')
+            message = (
+                f'{colorama.Fore.GREEN}Tearing down service {name}...done.'
+                f'{colorama.Style.RESET_ALL}')
             success_progress = True
 
         progress.stop()
@@ -4390,17 +4402,11 @@ def serve_logs(
         raise click.UsageError(
             'One and only one of --controller, --load-balancer, '
             '[REPLICA_ID] can be specified.')
-    service_record = global_user_state.get_service_from_name(service_name)
-    if service_record is None:
-        click.secho(f'Service {service_name!r} not found.', fg='red')
-        return
-    controller_cluster_name = service_record['handle'].controller_cluster_name
-    if controller:
-        core.tail_logs(controller_cluster_name, job_id=1, follow=follow)
-    elif load_balancer:
-        core.tail_logs(controller_cluster_name, job_id=2, follow=follow)
-    else:
-        core.serve_tail_logs(service_record, replica_id, follow=follow)
+    core.serve_tail_logs(service_name,
+                         controller,
+                         load_balancer,
+                         replica_id,
+                         follow=follow)
 
 
 # ==============================

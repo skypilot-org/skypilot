@@ -4,16 +4,18 @@ import os
 import pickle
 import re
 import shlex
+import shutil
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
-                    TextIO, TypeVar)
+from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional, Set,
+                    TextIO, Tuple, TypeVar)
 
 import colorama
 import requests
 
 from sky import backends
+from sky import clouds
 from sky import global_user_state
 from sky import status_lib
 from sky.data import storage as storage_lib
@@ -23,7 +25,7 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import sky
 
-_CONTROLLER_URL = f'http://localhost:{constants.CONTROLLER_PORT}'
+_CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -71,21 +73,71 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-def generate_controller_cluster_name(service_name: str) -> str:
-    return constants.CONTROLLER_PREFIX + service_name
+def get_existing_controller_names() -> Set[str]:
+    return {
+        record['controller_name']
+        for record in global_user_state.get_services()
+    }
 
 
-def generate_remote_task_yaml_file_name(service_name: str) -> str:
-    service_name = service_name.replace('-', '_')
-    # Don't expand here since it is used for remote machine.
-    prefix = constants.SERVE_PREFIX
-    return os.path.join(prefix, f'{service_name}.yaml')
+def generate_controller_cluster_name(existing_controllers: Set[str]) -> str:
+    index = 0
+    while True:
+        controller_name = (f'{constants.CONTROLLER_PREFIX}'
+                           f'{common_utils.get_user_hash()}-{index}')
+        if controller_name not in existing_controllers:
+            return controller_name
+        index += 1
 
 
 def generate_controller_yaml_file_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     prefix = os.path.expanduser(constants.SERVE_PREFIX)
     return os.path.join(prefix, f'{service_name}_controller.yaml')
+
+
+def generate_remote_service_dir_name(service_name: str) -> str:
+    service_name = service_name.replace('-', '_')
+    return os.path.join(constants.SERVE_PREFIX, service_name)
+
+
+def generate_remote_task_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'task.yaml')
+
+
+def generate_remote_controller_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'controller.log')
+
+
+def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'load_balancer.log')
+
+
+def generate_replica_launch_log_file_name(service_name: str,
+                                          replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_launch.log')
+
+
+def generate_replica_down_log_file_name(service_name: str,
+                                        replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_down.log')
+
+
+def generate_replica_local_log_file_name(service_name: str,
+                                         replica_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    return os.path.join(dir_name, f'replica_{replica_id}_local.log')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -96,66 +148,193 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
     return int(cluster_name.split('-')[-1])
 
 
-def generate_replica_launch_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_launch.log')
+def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
+    services = global_user_state.get_services_from_controller_name(
+        controller_name)
+    # Use `is None` to filter out self and all services with initialize status
+    existing_controller_ports, existing_load_balancer_ports = set(), set()
+    for service in services:
+        service_handle: ServiceHandle = service['handle']
+        if service_handle.controller_port is not None:
+            existing_controller_ports.add(service_handle.controller_port)
+        if service_handle.load_balancer_port is not None:
+            existing_load_balancer_ports.add(service_handle.load_balancer_port)
+    # Cannot expose controller to public internet.
+    # We opened 30001-31000 for controller VM, so load balancer port
+    # should be in this range and controller port should not be in
+    # this range.
+    controller_port = constants.CONTROLLER_PORT_START
+    while controller_port in existing_controller_ports:
+        controller_port += 1
+    load_balancer_port = constants.LOAD_BALANCER_PORT_START
+    while load_balancer_port in existing_load_balancer_ports:
+        load_balancer_port += 1
+    return controller_port, load_balancer_port
 
 
-def generate_replica_down_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_down.log')
+def _get_service_num_on_controller_if_available(
+        controller_name: str,
+        requested_controller_resources: 'sky.Resources') -> Optional[int]:
+    """Get number of services on the controller if it is available.
+
+    A controller is available if requested controller resources is less
+    demanding than the controller resources, and have available slots for
+    services. Max number of services on a controller is determined by the memory
+    of the controller, since ray job and our skypilot code is very memory
+    demanding (~1GB/service).
+
+    Args:
+        controller_name: The name of the controller.
+        requested_controller_resources: The resources requested for controller.
+
+    Returns:
+        Number of services on the controller if it is available, otherwise None.
+    """
+    controller_available = False
+    max_memory_requirements = 0.
+    controller_record = global_user_state.get_cluster_from_name(controller_name)
+    if controller_record is not None:
+        # If controller is already created, use its launched resources.
+        handle = controller_record['handle']
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        if requested_controller_resources.less_demanding_than(
+                handle.launched_resources):
+            controller_available = True
+        # Determine max number of services on this controller.
+        controller_cloud = handle.launched_resources.cloud
+        _, max_memory_requirements = (
+            controller_cloud.get_vcpus_mem_from_instance_type(
+                handle.launched_resources.instance_type))
+    else:
+        # Corner case: Multiple `sky serve up` are running simultaneously
+        # and the controller is not created yet. We created a resources
+        # for each initializing controller, and find the most demanding
+        # one to represent the controller resources.
+        service_records = (global_user_state.get_services_from_controller_name(
+            controller_name))
+        for service_record in service_records:
+            r = service_record['handle'].requested_controller_resources
+            # If any service is more demanding than the requested resources,
+            # then the controller is available since it must be launched
+            # with the most demanding resources, which is more demanding
+            # than the requested resources.
+            if requested_controller_resources.less_demanding_than(r):
+                controller_available = True
+                # Don't break here since we still want to find the max
+                # memory requirements.
+            # Remove the '+' in memory requirement.
+            max_memory_requirements = max(max_memory_requirements,
+                                          float(r.memory.strip('+')))
+    if controller_available:
+        # Determine max number of services on this controller.
+        max_services_num = int(max_memory_requirements /
+                               constants.SERVICES_MEMORY_USAGE_GB)
+        # Get current number of services on this controller.
+        services_num_on_controller = len(
+            global_user_state.get_services_from_controller_name(
+                controller_name))
+        # Only consider controllers that have available slots for services.
+        if services_num_on_controller < max_services_num:
+            return services_num_on_controller
+    return None
 
 
-def generate_replica_local_log_file_name(cluster_name: str) -> str:
-    cluster_name = cluster_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{cluster_name}_local.log')
+def get_available_controller_name(
+        controller_resources: 'sky.Resources') -> Tuple[str, bool]:
+    """Get available controller name to use.
+
+    Only consider controllers that satisfy the requested controller resources,
+    and have available slots for services.
+    If multiple controllers are available, choose the one with most number of
+    services to decrease the number of controllers.
+
+    Args:
+        controller_resources: The resources requested for controller.
+
+    Returns:
+        A tuple of controller name and a boolean value indicating whether the
+        controller name is newly generated.
+    """
+    # Get all existing controllers.
+    existing_controllers = get_existing_controller_names()
+    available_controller_to_service_num = dict()
+    # Get a mapping from controller name to number of services on it.
+    for controller_name in existing_controllers:
+        services_num_on_controller = (
+            _get_service_num_on_controller_if_available(controller_name,
+                                                        controller_resources))
+        if services_num_on_controller is not None:
+            available_controller_to_service_num[controller_name] = (
+                services_num_on_controller)
+    if not available_controller_to_service_num:
+        new_controller_name = generate_controller_cluster_name(
+            existing_controllers)
+        # This check should always be true since we already checked the
+        # service name is valid in `sky.serve_up`.
+        clouds.Cloud.check_cluster_name_is_valid(new_controller_name)
+        return new_controller_name, True
+    # If multiple controllers are available, choose the one with most number of
+    # services.
+    return max(available_controller_to_service_num,
+               key=lambda k: available_controller_to_service_num[k]), False
 
 
 class ServiceHandle(object):
     """A pickle-able tuple of:
 
-    - (required) Controller cluster name.
+    - (required) Service name.
     - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
-    - (required) All replica info.
+    - (required) Service requested controller resources.
     - (optional) Service uptime.
-    - (optional) Service endpoint URL.
+    - (optional) Service endpoint IP.
+    - (optional) Controller port.
+    - (optional) LoadBalancer port.
+    - (optional) Controller and LoadBalancer job id.
     - (optional) Ephemeral storage generated for the service.
 
     This class is only used as a cache for information fetched from controller.
     """
-    _VERSION = 1
+    _VERSION = 0
 
     def __init__(
-            self,
-            *,
-            controller_cluster_name: str,
-            policy: str,
-            requested_resources: 'sky.Resources',
-            replica_info: List[Dict[str, Any]],
-            uptime: Optional[int] = None,
-            endpoint: Optional[str] = None,
-            ephemeral_storage: Optional[List[Dict[str, Any]]] = None) -> None:
+        self,
+        *,
+        service_name: str,
+        policy: str,
+        requested_resources: 'sky.Resources',
+        requested_controller_resources: 'sky.Resources',
+        uptime: Optional[int] = None,
+        endpoint_ip: Optional[str] = None,
+        controller_port: Optional[int] = None,
+        load_balancer_port: Optional[int] = None,
+        job_id: Optional[int] = None,
+        ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self._version = self._VERSION
-        self.controller_cluster_name = controller_cluster_name
-        self.replica_info = replica_info
+        self.service_name = service_name
         self.uptime = uptime
-        self.endpoint = endpoint
+        self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
+        self.requested_controller_resources = requested_controller_resources
+        self.controller_port = controller_port
+        self.load_balancer_port = load_balancer_port
+        self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
     def __repr__(self):
         return ('ServiceHandle('
-                f'\n\tcontroller_cluster_name={self.controller_cluster_name},'
-                f'\n\treplica_info={self.replica_info},'
+                f'\n\tservice_name={self.service_name},'
                 f'\n\tuptime={self.uptime},'
-                f'\n\tendpoint={self.endpoint},'
+                f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
+                '\n\trequested_controller_resources='
+                f'{self.requested_controller_resources},'
+                f'\n\tcontroller_port={self.controller_port},'
+                f'\n\tload_balancer_port={self.load_balancer_port},'
+                f'\n\tjob_id={self.job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
     def cleanup_ephemeral_storage(self) -> None:
@@ -170,8 +349,10 @@ class ServiceHandle(object):
         self.__dict__.update(state)
 
 
-def get_latest_info() -> str:
-    resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
+def get_latest_info(controller_port: int) -> str:
+    resp = requests.get(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/get_latest_info')
     if resp.status_code != 200:
         raise ValueError(f'Failed to get replica info: {resp.text}')
     return common_utils.encode_payload(resp.json())
@@ -185,8 +366,10 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
     return latest_info
 
 
-def terminate_service() -> str:
-    resp = requests.post(_CONTROLLER_URL + '/controller/terminate')
+def terminate_service(controller_port: int) -> str:
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/terminate')
     resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
     return common_utils.encode_payload(resp)
 
@@ -197,12 +380,13 @@ def load_terminate_service_result(payload: str) -> Any:
     return terminate_resp
 
 
-def _follow_logs(file: TextIO,
-                 cluster_name: str,
-                 *,
-                 finish_stream: Callable[[], bool],
-                 exit_if_stream_end: bool = False,
-                 no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
+def _follow_replica_logs(
+        file: TextIO,
+        cluster_name: str,
+        *,
+        finish_stream: Callable[[], bool],
+        exit_if_stream_end: bool = False,
+        no_new_content_timeout: Optional[int] = None) -> Iterator[str]:
     line = ''
     log_file = None
     no_new_content_cnt = 0
@@ -240,7 +424,7 @@ def _follow_logs(file: TextIO,
                             # We still exit if more than 10 seconds without new
                             # content to avoid any internal bug that causes
                             # the launch failed and cluster status remains INIT.
-                            for l in _follow_logs(
+                            for l in _follow_replica_logs(
                                     f,
                                     cluster_name,
                                     finish_stream=cluster_is_up,
@@ -259,16 +443,15 @@ def _follow_logs(file: TextIO,
             time.sleep(1)
 
 
-def stream_logs(service_name: str,
-                replica_id: int,
-                follow: bool,
-                skip_local_log_file_check: bool = False) -> str:
+def stream_replica_logs(service_name: str,
+                        controller_port: int,
+                        replica_id: int,
+                        follow: bool,
+                        skip_local_log_file_check: bool = False) -> str:
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
     local_log_file_name = generate_replica_local_log_file_name(
-        replica_cluster_name)
+        service_name, replica_id)
 
     if not skip_local_log_file_check and os.path.exists(local_log_file_name):
         # When sync down, we set skip_local_log_file_check to False so it won't
@@ -279,6 +462,8 @@ def stream_logs(service_name: str,
             print(f.read(), flush=True)
         return ''
 
+    replica_cluster_name = generate_replica_cluster_name(
+        service_name, replica_id)
     handle = global_user_state.get_handle_from_cluster_name(
         replica_cluster_name)
     if handle is None:
@@ -286,13 +471,15 @@ def stream_logs(service_name: str,
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     launch_log_file_name = generate_replica_launch_log_file_name(
-        replica_cluster_name)
+        service_name, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> status_lib.ReplicaStatus:
-        resp = requests.get(_CONTROLLER_URL + '/controller/get_latest_info')
+        resp = requests.get(
+            _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+            '/controller/get_latest_info')
         if resp.status_code != 200:
             raise ValueError(
                 f'{colorama.Fore.RED}Failed to get replica info for service '
@@ -312,10 +499,10 @@ def stream_logs(service_name: str,
     finish_stream = (
         lambda: _get_replica_status() != status_lib.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
-        for line in _follow_logs(f,
-                                 replica_cluster_name,
-                                 finish_stream=finish_stream,
-                                 exit_if_stream_end=not follow):
+        for line in _follow_replica_logs(f,
+                                         replica_cluster_name,
+                                         finish_stream=finish_stream,
+                                         exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
     ) == status_lib.ReplicaStatus.PROVISIONING:
@@ -335,42 +522,94 @@ def stream_logs(service_name: str,
     return ''
 
 
+def _follow_logs(file: TextIO, exit_if_stream_end: bool) -> Iterator[str]:
+    line = ''
+    while True:
+        tmp = file.readline()
+        if tmp is not None and tmp != '':
+            line += tmp
+            if '\n' in line or '\r' in line:
+                yield line
+                line = ''
+        else:
+            if exit_if_stream_end:
+                break
+            time.sleep(1)
+
+
+def stream_serve_process_logs(service_name: str, stream_controller: bool,
+                              follow: bool) -> None:
+    if stream_controller:
+        log_file = generate_remote_controller_log_file_name(service_name)
+    else:
+        log_file = generate_remote_load_balancer_log_file_name(service_name)
+    with open(os.path.expanduser(log_file), 'r', newline='') as f:
+        for line in _follow_logs(f, exit_if_stream_end=not follow):
+            print(line, end='', flush=True)
+
+
+def cleanup_service_files(service_name: str) -> None:
+    """Cleanup utility files for a service."""
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
+    if os.path.exists(dir_name):
+        shutil.rmtree(dir_name)
+
+
 class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_latest_info()
+      >> code = ServeCodeGen.get_latest_info(controller_port)
     """
     _PREFIX = [
         'from sky.serve import serve_utils',
     ]
 
     @classmethod
-    def get_latest_info(cls) -> str:
+    def get_latest_info(cls, controller_port: int) -> str:
         code = [
-            'msg = serve_utils.get_latest_info()',
+            f'msg = serve_utils.get_latest_info({controller_port})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def terminate_service(cls) -> str:
+    def terminate_service(cls, controller_port: int) -> str:
         code = [
-            'msg = serve_utils.terminate_service()',
+            f'msg = serve_utils.terminate_service({controller_port})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def stream_logs(cls,
-                    service_name: str,
-                    replica_id: int,
-                    follow: bool,
-                    skip_local_log_file_check: bool = False) -> str:
+    def stream_replica_logs(cls,
+                            service_name: str,
+                            controller_port: int,
+                            replica_id: int,
+                            follow: bool,
+                            skip_local_log_file_check: bool = False) -> str:
         code = [
-            f'msg = serve_utils.stream_logs({service_name!r}, {replica_id!r}, '
-            f'follow={follow}, skip_local_log_file_check='
-            f'{skip_local_log_file_check})', 'print(msg, flush=True)'
+            f'msg = serve_utils.stream_replica_logs({service_name!r}, '
+            f'{controller_port}, {replica_id!r}, follow={follow}, '
+            f'skip_local_log_file_check={skip_local_log_file_check})',
+            'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def stream_serve_process_logs(cls, service_name: str,
+                                  stream_controller: bool, follow: bool) -> str:
+        code = [
+            f'serve_utils.stream_serve_process_logs({service_name!r}, '
+            f'{stream_controller}, follow={follow})',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def cleanup_service_files(cls, service_name: str) -> str:
+        code = [
+            f'serve_utils.cleanup_service_files({service_name!r})',
         ]
         return cls._build(code)
 
