@@ -872,7 +872,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        force_delete = config.pop('force_delete', None)
+        force_delete = config.pop('_force_delete', None)
         if force_delete is None:
             force_delete = False
 
