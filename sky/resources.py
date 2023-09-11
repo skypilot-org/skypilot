@@ -1093,8 +1093,10 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['ports'] = config.pop('ports', None)
-        resources_fields['_docker_login_config'] = config.pop('_docker_login_config', None)
-        resources_fields['_is_image_managed'] = config.pop('_is_image_managed', None)
+        resources_fields['_docker_login_config'] = config.pop(
+            '_docker_login_config', None)
+        resources_fields['_is_image_managed'] = config.pop(
+            '_is_image_managed', None)
 
         if resources_fields['cpus'] is not None:
             resources_fields['cpus'] = str(resources_fields['cpus'])
@@ -1105,9 +1107,6 @@ class Resources:
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
             resources_fields['disk_size'] = int(resources_fields['disk_size'])
-        if resources_fields['image_id'] is not None:
-            logger.warning('image_id in resources is experimental. It only '
-                           'supports AWS/GCP/IBM.')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
