@@ -4,7 +4,6 @@ from sky.serve.constants import CONTROLLER_PREFIX
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_SYNC_INTERVAL
 from sky.serve.constants import CONTROLLER_TEMPLATE
-from sky.serve.resources_spec import SkyResourcesSpec
 from sky.serve.serve_utils import generate_controller_cluster_name
 from sky.serve.serve_utils import generate_controller_yaml_file_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name

@@ -637,32 +637,33 @@ class SkyPilotInfraProvider(InfraProvider):
                 continue
             if info.first_not_ready_time is None:
                 info.first_not_ready_time = time.time()
-            if info.status_property.service_once_ready:
-                if self.use_spot:
-                    # Pull the actual cluster status from the cloud provider to
-                    # determine whether the cluster is preempted.
-                    (cluster_status, _
-                    ) = backends.backend_utils.refresh_cluster_status_handle(
+
+            if self.use_spot:
+                # Pull the actual cluster status from the cloud provider to
+                # determine whether the cluster is preempted.
+                (cluster_status,
+                    _) = backends.backend_utils.refresh_cluster_status_handle(
                         cluster_name,
                         force_refresh_statuses=set(status_lib.ClusterStatus))
 
-                    if cluster_status != status_lib.ClusterStatus.UP:
-                        # The cluster is (partially) preempted. It can be down, INIT
-                        # or STOPPED, based on the interruption behavior of the cloud.
-                        # Spot recovery is needed.
-                        cluster_status_str = (
-                            '' if cluster_status is None else
-                            f' (status: {cluster_status.value})')
-                        logger.info(
-                            f'Cluster {cluster_name} is preempted{cluster_status_str}.'
-                        )
-                        self._recover_from_preemption(cluster_name)
+                if cluster_status != status_lib.ClusterStatus.UP:
+                    # The cluster is (partially) preempted. It can be down, INIT
+                    # or STOPPED, based on the interruption behavior of the cloud.
+                    # Spot recovery is needed.
+                    cluster_status_str = (
+                        '' if cluster_status is None else
+                        f' (status: {cluster_status.value})')
+                    logger.info(
+                        f'Cluster {cluster_name} is preempted{cluster_status_str}.'
+                    )
+                    self._recover_from_preemption(cluster_name)
 
-                        # TODO(tgriggs): This currently attempts preemption recovery
-                        # infinitely. Add support for setting retry limits in the
-                        # recovery policy.
-                        continue
-
+                    # TODO(tgriggs): This currently attempts preemption recovery
+                    # infinitely. Add support for setting retry limits in the
+                    # recovery policy.
+                    continue
+            
+            if info.status_property.service_once_ready:
                 info.consecutive_failure_cnt += 1
                 if (info.consecutive_failure_cnt >=
                         _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):

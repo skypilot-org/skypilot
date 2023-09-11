@@ -27,6 +27,7 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         controller_resources: Optional[Dict[str, Any]] = None,
         auto_restart: bool = False,
+        use_spot: bool = False,
     ):
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -62,37 +63,39 @@ class SkyServiceSpec:
         self._post_data = post_data
         self._controller_resources = controller_resources
         self._auto_restart = auto_restart
+        self._use_spot = use_spot
 
     @staticmethod
     def from_yaml_config(config: Optional[Dict[str, Any]]):
-        if config is None:
+        if config['service'] is None:
             return None
+        service_config = config['service']
 
-        backend_utils.validate_schema(config, schemas.get_service_schema(),
+        backend_utils.validate_schema(service_config, schemas.get_service_schema(),
                                       'Invalid service YAML: ')
-        if 'replicas' in config and 'replica_policy' in config:
+        if 'replicas' in service_config and 'replica_policy' in service_config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify both `replicas` and `replica_policy` in '
                     'the service YAML. Please use one of them.')
 
-        service_config = {}
-        service_config['app_port'] = config['port']
+        service_spec = {}
+        service_spec['app_port'] = service_config['port']
 
-        readiness_section = config['readiness_probe']
+        readiness_section = service_config['readiness_probe']
         if isinstance(readiness_section, str):
-            service_config['readiness_path'] = readiness_section
+            service_spec['readiness_path'] = readiness_section
             initial_delay_seconds = None
             post_data = None
         else:
-            service_config['readiness_path'] = readiness_section['path']
+            service_spec['readiness_path'] = readiness_section['path']
             initial_delay_seconds = readiness_section.get(
                 'initial_delay_seconds', None)
             post_data = readiness_section.get('post_data', None)
         if initial_delay_seconds is None:
             ids = constants.DEFAULT_INITIAL_DELAY_SECONDS
             initial_delay_seconds = ids
-        service_config['initial_delay_seconds'] = initial_delay_seconds
+        service_spec['initial_delay_seconds'] = initial_delay_seconds
         if isinstance(post_data, str):
             try:
                 post_data = json.loads(post_data)
@@ -102,35 +105,40 @@ class SkyServiceSpec:
                         'Invalid JSON string for `post_data` in the '
                         '`readiness_probe` section of your service YAML.'
                     ) from e
-        service_config['post_data'] = post_data
+        service_spec['post_data'] = post_data
 
-        policy_section = config.get('replica_policy', None)
-        simplified_policy_section = config.get('replicas', None)
+        policy_section = service_config.get('replica_policy', None)
+        simplified_policy_section = service_config.get('replicas', None)
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
             else:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
-            service_config['min_replicas'] = min_replicas
-            service_config['max_replicas'] = None
-            service_config['qps_upper_threshold'] = None
-            service_config['qps_lower_threshold'] = None
-            service_config['auto_restart'] = False
+            service_spec['min_replicas'] = min_replicas
+            service_spec['max_replicas'] = None
+            service_spec['qps_upper_threshold'] = None
+            service_spec['qps_lower_threshold'] = None
+            service_spec['auto_restart'] = False
         else:
-            service_config['min_replicas'] = policy_section['min_replicas']
-            service_config['max_replicas'] = policy_section.get(
+            service_spec['min_replicas'] = policy_section['min_replicas']
+            service_spec['max_replicas'] = policy_section.get(
                 'max_replicas', None)
-            service_config['qps_upper_threshold'] = policy_section.get(
+            service_spec['qps_upper_threshold'] = policy_section.get(
                 'qps_upper_threshold', None)
-            service_config['qps_lower_threshold'] = policy_section.get(
+            service_spec['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
-            service_config['auto_restart'] = policy_section.get(
+            service_spec['auto_restart'] = policy_section.get(
                 'auto_restart', False)
 
-        service_config['controller_resources'] = config.pop(
+        service_spec['controller_resources'] = service_config.pop(
             'controller_resources', None)
 
-        return SkyServiceSpec(**service_config)
+        if 'resources' in config:
+            backend_utils.validate_schema(config['resources'], schemas.get_resources_schema(),
+                                      'Invalid resource YAML: ')
+            service_spec['use_spot'] = config['resources'].get('use_spot', False)
+
+        return SkyServiceSpec(**service_spec)
 
     @staticmethod
     def from_yaml(yaml_path: str):
@@ -150,7 +158,7 @@ class SkyServiceSpec:
                 raise ValueError('Service YAML must have a "service" section. '
                                  f'Is it correct? Path: {yaml_path}')
 
-        return SkyServiceSpec.from_yaml_config(config['service'])
+        return SkyServiceSpec.from_yaml_config(config)
 
     def to_yaml_config(self):
         config = dict()
@@ -203,6 +211,7 @@ class SkyServiceSpec:
             Replica autoscaling policy:    {self.policy_str()}
             Service initial delay seconds: {self.initial_delay_seconds}
             Replica auto restart:          {self.auto_restart}
+            Use spot:                      {self.use_spot}
 
             Please refer to SkyPilot Serve document for detailed explanations.
         """)
@@ -250,3 +259,7 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def use_spot(self) -> bool:
+        return self._use_spot
