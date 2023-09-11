@@ -43,10 +43,23 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
+@aws.import_package
+def botocore_config():
+    """Get botocore.config module.
+
+    This is for backward compatibility when `aws` module is imported before the
+    `botocore_config()` function is added in #1702.
+    TODO: remove this function after 0.6.0 release, when new provisioner is
+    used by default.
+    """
+    config = aws.botocore.config
+    return config
+
+
 def _default_ec2_resource(region: str) -> Any:
     return aws.resource('ec2',
                         region_name=region,
-                        config=aws.botocore_config().Config(
+                        config=botocore_config().Config(
                             retries={'max_attempts': BOTO_MAX_RETRIES}))
 
 
@@ -338,7 +351,7 @@ def run_instances(region: str, cluster_name: str,
         ec2_fail_fast = aws.resource(
             'ec2',
             region_name=region,
-            config=aws.botocore_config().Config(retries={'max_attempts': 0}))
+            config=botocore_config().Config(retries={'max_attempts': 0}))
 
         created_instances = _create_instances(ec2_fail_fast, cluster_name,
                                               config.node_config, tags,
@@ -509,7 +522,7 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = aws.resource('ec2',
                        region_name=region,
-                       config=aws.botocore_config().Config(
+                       config=botocore_config().Config(
                            retries={'max_attempts': BOTO_MAX_RETRIES}))
     sg_name = provider_config['security_group']['GroupName']
     # GroupNames will only filter SGs in the default VPC, so we need to use
