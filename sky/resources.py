@@ -533,6 +533,14 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
+    def switch_from_spot_to_on_demand(self):
+        self._use_managed_demand = True
+        self._use_spot = False
+
+    def switch_from_on_demand_to_spot(self):
+        self._use_managed_demand = False
+        self._use_spot = True
+
     def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
 
