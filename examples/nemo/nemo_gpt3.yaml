@@ -32,10 +32,25 @@ setup: |
       sudo apt-get update
       sudo apt-get install -y libsndfile1 ffmpeg
       pip install Cython
-      pip install nemo_toolkit['all']
+      pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[all]
     
       # Clone the NeMo repo to get the examples
       git clone https://github.com/NVIDIA/NeMo.git
+      
+      # Install Apex
+      git clone https://github.com/NVIDIA/apex.git
+      cd apex
+      git checkout 52e18c894223800cb611682dce27d88050edf1de
+      pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+      cd ..
+  
+      # Install megatron-core (TODO - write patch for setup.py)
+      pip install git+https://github.com/NVIDIA/Megatron-LM.git
+  
+      # Install transformer engine (Takes ~3hr to compile)
+      pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
+      
+      pip install pytorch-extension
   fi
   
   # ======== Download and preprocess the wikipedia dataset ========
@@ -70,10 +85,10 @@ setup: |
   
   # ======== Convert data to mmap format ========
   # Check if the mmap files exist
-  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_0.npy ]; then
+  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
       echo "Mmap files exist"
   else
-      # Convert the data to mmap format
+      # Convert the data to mmap format`
       cd ${DATASET_ROOT}
       python $HOME/sky_workdir/NeMo/scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
         --input=train_data.jsonl \
