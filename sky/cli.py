@@ -3619,6 +3619,11 @@ def spot_launch(
     else:
         dag = task_or_dag
 
+    if not use_spot and not use_managed_demand:
+        click.secho(
+            'Both use_spot and use_managed_demand are False or not specified')
+        sys.exit(1)
+
     if name is not None:
         dag.name = name
 
