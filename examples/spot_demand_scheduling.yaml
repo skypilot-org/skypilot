@@ -2,7 +2,7 @@ name: spot-demand-scheduling
 
 resources:
   cloud: gcp
-  use_spot: True
+  use_spot: False
   use_managed_demand: True
 
 run: |

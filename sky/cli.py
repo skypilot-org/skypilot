@@ -216,12 +216,6 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
-    use_managed_demand_option = click.option(
-        '--use-managed-demand',
-        default=None,
-        is_flag=True,
-        help='If true, Launched managed on-demand job.')
-
     tpuvm_option = click.option('--tpu-vm',
                                 default=False,
                                 is_flag=True,
@@ -311,7 +305,6 @@ def _interactive_node_cli_command(cli_func):
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
-        use_managed_demand_option,
         *([tpuvm_option] if cli_func.__name__ == 'tpunode' else []),
 
         # Attach options
@@ -398,10 +391,6 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, overrides the '
               '"resources.use_spot" config.')),
-    click.option('--use-managed-demand',
-                 default=None,
-                 is_flag=True,
-                 help='If true, Launched managed on-demand job.'),
     click.option('--image-id',
                  required=False,
                  default=None,
@@ -632,7 +621,6 @@ def _parse_override_params(cloud: Optional[str] = None,
                            memory: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
-                           use_managed_demand: Optional[bool] = None,
                            image_id: Optional[str] = None,
                            disk_size: Optional[int] = None,
                            disk_tier: Optional[str] = None) -> Dict[str, Any]:
@@ -675,8 +663,6 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['instance_type'] = instance_type
     if use_spot is not None:
         override_params['use_spot'] = use_spot
-    if use_managed_demand is not None:
-        override_params['use_managed_demand'] = use_managed_demand
     if image_id is not None:
         if image_id.lower() == 'none':
             override_params['image_id'] = None
@@ -1075,19 +1061,17 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
-    override_params = _parse_override_params(
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=gpus,
-        cpus=cpus,
-        memory=memory,
-        instance_type=instance_type,
-        use_spot=use_spot,
-        use_managed_demand=use_managed_demand,
-        image_id=image_id,
-        disk_size=disk_size,
-        disk_tier=disk_tier)
+    override_params = _parse_override_params(cloud=cloud,
+                                             region=region,
+                                             zone=zone,
+                                             gpus=gpus,
+                                             cpus=cpus,
+                                             memory=memory,
+                                             instance_type=instance_type,
+                                             use_spot=use_spot,
+                                             image_id=image_id,
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier)
 
     if is_yaml:
         assert entrypoint is not None
@@ -3500,6 +3484,10 @@ def spot():
               default=None,
               type=str,
               help='Spot recovery strategy to use for the managed spot task.')
+@click.option('--use-managed-demand',
+              default=None,
+              type=str,
+              help='Use managed demand instances.')
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -3592,6 +3580,7 @@ def spot_launch(
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
+        use_managed_demand=use_managed_demand,
         image_id=image_id,
         env=env,
         disk_size=disk_size,
@@ -3619,7 +3608,7 @@ def spot_launch(
     else:
         dag = task_or_dag
 
-    if not use_spot and not use_managed_demand:
+    if spot_recovery and not use_spot and not use_managed_demand:
         click.secho(
             'Both use_spot and use_managed_demand are False or not specified')
         sys.exit(1)
