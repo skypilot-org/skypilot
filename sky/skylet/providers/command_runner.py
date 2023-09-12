@@ -52,7 +52,7 @@ def docker_start_cmds(
 
     Changes we made:
         1. Remove --rm flag to keep the container after `ray stop` is executed;
-        2. Add --privileged and --device=/dev/fuse to enable fuse.
+        2. Add options to enable fuse.
     """
     del user  # unused
 
@@ -83,9 +83,10 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
-        # SkyPilot: Add --privileged and --device=/dev/fuse to enable fuse.
-        '--privileged',
+        # SkyPilot: Add following options to enable fuse.
+        '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
+        '--security-opt=apparmor:unconfined',
         image,
         'bash',
     ]
