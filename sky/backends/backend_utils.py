@@ -2682,27 +2682,29 @@ def _refresh_service_record_no_lock(
     if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_name!r} '
-                        'is not found.')
+        return record, None
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     if service_handle.controller_port is None:
-        return record, 'Controller task is not successfully launched.'
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
 
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)
-    returncode, latest_info_payload, stderr = backend.run_on_head(
+    returncode, latest_info_payload, _ = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        return record, ('Failed to refresh replica info from the controller. '
-                        f'Using the cached record. Reason: {stderr}')
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.uptime = latest_info['uptime']

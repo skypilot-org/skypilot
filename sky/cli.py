@@ -4204,6 +4204,17 @@ def serve_status(all: bool, service_names: List[str]):
             replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
 
+    failed_controllers = [
+        record['name']
+        for record in service_records
+        if record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED
+    ]
+    if failed_controllers:
+        num_failed = len(failed_controllers)
+        plural = '' if num_failed == 1 else 's'
+        click.echo(f'\n* {num_failed} service{plural} with failed controller '
+                   'found. The replica info and number might not be accurate.')
+
 
 @serve.command('down', cls=_DocumentedCodeCommand)
 @click.argument('service_names',
