@@ -580,12 +580,14 @@ class Task:
 
         return_resoruces = set()
         for r in self.resources:
-            if r.use_managed_demand is True:
+            if r.use_managed_demand:
                 return_resoruces.add(
                     r.copy(use_spot=False, use_managed_demand=True))
-            if r.use_spot is True:
+            if r.use_spot:
                 return_resoruces.add(
                     r.copy(use_spot=True, use_managed_demand=False))
+            if not r.use_managed_demand and not r.use_spot:
+                return_resoruces.add(r.copy())
         return return_resoruces
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
