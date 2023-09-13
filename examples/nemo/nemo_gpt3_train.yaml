@@ -13,7 +13,7 @@
 #   sky down nemo_gpt3_train
 
 resources:
-  accelerators: V100:1
+  accelerators: A100:1
 
 num_nodes: 2
 
