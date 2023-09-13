@@ -504,14 +504,6 @@ class Task:
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
 
-    def switch_from_spot_to_on_demand(self):
-        for r in self.resources:
-            r.switch_from_spot_to_on_demand()
-
-    def switch_from_on_demand_to_spot(self):
-        for r in self.resources:
-            r.switch_from_on_demand_to_spot()
-
     def set_inputs(self, inputs: str,
                    estimated_size_gigabytes: float) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.

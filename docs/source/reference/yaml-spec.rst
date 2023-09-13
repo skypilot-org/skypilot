@@ -65,7 +65,7 @@ Available fields:
       use_spot: False
 
       # Launch a managed on-demand job.
-      use_managed_demand: False
+      managed: 'ON_DEMAND'
 
       # The recovery strategy for spot jobs (optional).
       # `use_spot` must be True for this to have any effect. For now, only

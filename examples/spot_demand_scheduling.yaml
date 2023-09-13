@@ -2,8 +2,7 @@ name: spot-demand-scheduling
 
 resources:
   cloud: gcp
-  use_spot: False
-  use_managed_demand: True
+  managed: ON_DEMAND
 
 run: |
   echo "Hello World!"

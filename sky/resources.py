@@ -533,14 +533,6 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def switch_from_spot_to_on_demand(self):
-        self._use_managed_demand = True
-        self._use_spot = False
-
-    def switch_from_on_demand_to_spot(self):
-        self._use_managed_demand = False
-        self._use_spot = True
-
     def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
 
@@ -1109,9 +1101,22 @@ class Resources:
                 config.pop('accelerator_args'))
         if config.get('use_spot') is not None:
             resources_fields['use_spot'] = config.pop('use_spot')
-        if config.get('use_managed_demand') is not None:
-            resources_fields['use_managed_demand'] = config.pop(
-                'use_managed_demand')
+        if config.get('managed') is not None:
+            managed_str = config.pop('managed')
+            if managed_str == 'SPOT':
+                resources_fields['use_spot'] = True
+                resources_fields['use_managed_demand'] = False
+            elif managed_str == 'ON_DEMAND':
+                resources_fields['use_spot'] = False
+                resources_fields['use_managed_demand'] = True
+            elif managed_str == 'CONSIDER_BOTH':
+                resources_fields['use_spot'] = True
+                resources_fields['use_managed_demand'] = True
+            else:
+                raise ValueError(
+                    f'Invalid value {managed_str} for managed. '
+                    'Please use one of "SPOT", "ON_DEMAND", or "CONSIDER_BOTH".'
+                )
         if config.get('spot_recovery') is not None:
             resources_fields['spot_recovery'] = config.pop('spot_recovery')
         if config.get('disk_size') is not None:
