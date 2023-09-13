@@ -109,6 +109,10 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
   
   # Fetch all regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+  # Fetch the specified regions for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
+  # Exclude the specified regions for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --exclude centralus eastus
 
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>`` 
 (the full name can be found in ``sky status``), and run the commands above.
