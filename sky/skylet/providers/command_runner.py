@@ -1,6 +1,5 @@
 """Sky's DockerCommandRunner."""
 import dataclasses
-import enum
 import json
 import os
 from typing import Dict
@@ -27,13 +26,6 @@ class DockerLoginConfig:
             password=d[constants.DOCKER_PASSWORD_ENV_VAR],
             server=d[constants.DOCKER_SERVER_ENV_VAR],
         )
-
-
-class DockerContainerStatus(enum.Enum):
-    """Enum for docker container status."""
-    RUNNING = 'RUNNING'
-    STOPPED = 'STOPPED'
-    NOT_EXIST = 'NOT_EXIST'
 
 
 def docker_start_cmds(
@@ -105,25 +97,18 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
     """
 
-    # SkyPilot: New function to check docker container status. It could have
-    # three status:
-    #   1. RUNNING: The container is running. This is due to `sky launch` an
-    #        existing cluster;
-    #   2. STOPPED: The container is stopped. This is due to `sky stop` an
-    #        existing cluster (which unlike ray, will not remove it) and
-    #        re-launch it;
-    #   3. NOT_EXIST: The container does not exist. This is due to `sky launch`
-    #        a new cluster.
-    def _sky_check_container_status(self) -> DockerContainerStatus:
+    # SkyPilot: New function to check whether a container is exited
+    # (but not removed). This is due to previous `sky stop` command,
+    # which will stop the container but not remove it.
+    def _check_container_exited(self) -> bool:
+        if self.initialized:
+            return True
         output = (self.ssh_command_runner.run(
             check_docker_running_cmd(self.container_name, self.docker_cmd),
             with_output=True,
-        ).decode('utf-8').strip()).lower()
-        if 'no such object' in output:
-            return DockerContainerStatus.NOT_EXIST
-        if 'false' in output:
-            return DockerContainerStatus.STOPPED
-        return DockerContainerStatus.RUNNING
+        ).decode('utf-8').strip())
+        return 'false' in output.lower(
+        ) and 'no such object' not in output.lower()
 
     def run_init(self, *, as_head: bool, file_mounts: Dict[str, str],
                  sync_run_yet: bool):
@@ -137,21 +122,15 @@ class SkyDockerCommandRunner(DockerCommandRunner):
 
         self._check_docker_installed()
 
-        # SkyPilot: Check the container status.
-        docker_status = self._sky_check_container_status()
-        if docker_status == DockerContainerStatus.RUNNING:
-            # If docker status is RUNNING, skip initialization.
+        # SkyPilot: Check if the container is exited but not removed.
+        # If true, then we can start the container directly.
+        # Notice that we will skip all setup commands, so we need to
+        # manually start the ssh service.
+        if self._check_container_exited():
             self.initialized = True
-            return True
-        if docker_status == DockerContainerStatus.STOPPED:
-            # If docker status is STOPPED, then we can start the container
-            # directly. Notice that we will skip all setup commands, so we
-            # need to manually start the ssh service.
             self.run(f'docker start {self.container_name}', run_env='host')
             self.run('sudo service ssh start')
-            self.initialized = True
             return True
-        assert docker_status == DockerContainerStatus.NOT_EXIST
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if "docker_login_config" in self.docker_config:
