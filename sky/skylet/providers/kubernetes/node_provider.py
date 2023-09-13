@@ -229,14 +229,17 @@ class KubernetesNodeProvider(NodeProvider):
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
-                if pod.status.phase == 'Pending':
+                if pod.status.phase == 'Running':
+                    continue
+                elif pod.status.phase == 'Pending':
                     # Iterate over each pod to check their status
                     if pod.status.container_statuses is not None:
                         for container_status in pod.status.container_statuses:
                             # Continue if container status is ContainerCreating
                             # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
-                                continue
+                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ErrImagePull':
+                                if 'rpc error: code = Unknown' in container_status.state.waiting.message:
+                                    raise config.KubernetesError(f'Failed to pull docker image while launching the node. Please check your network connection. Error:{container_status.state.waiting.message}')
                             else:
                                 # If the container wasn't in creating state,
                                 # then we know pod wasn't scheduled or had some
