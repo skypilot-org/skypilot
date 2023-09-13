@@ -1077,42 +1077,36 @@ class Resources:
                                       'Invalid resources YAML: ')
 
         resources_fields = {}
-        if config.get('cloud') is not None:
-            resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
-                config.pop('cloud'))
-        if config.get('instance_type') is not None:
-            resources_fields['instance_type'] = config.pop('instance_type')
-        if config.get('cpus') is not None:
-            resources_fields['cpus'] = str(config.pop('cpus'))
-        if config.get('memory') is not None:
-            resources_fields['memory'] = str(config.pop('memory'))
-        if config.get('accelerators') is not None:
-            resources_fields['accelerators'] = config.pop('accelerators')
-        if config.get('accelerator_args') is not None:
+        resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+            config.pop('cloud', None))
+        resources_fields['instance_type'] = config.pop('instance_type', None)
+        resources_fields['cpus'] = config.pop('cpus', None)
+        resources_fields['memory'] = config.pop('memory', None)
+        resources_fields['accelerators'] = config.pop('accelerators', None)
+        resources_fields['accelerator_args'] = config.pop(
+            'accelerator_args', None)
+        resources_fields['use_spot'] = config.pop('use_spot', None)
+        resources_fields['spot_recovery'] = config.pop('spot_recovery', None)
+        resources_fields['disk_size'] = config.pop('disk_size', None)
+        resources_fields['region'] = config.pop('region', None)
+        resources_fields['zone'] = config.pop('zone', None)
+        resources_fields['image_id'] = config.pop('image_id', None)
+        resources_fields['disk_tier'] = config.pop('disk_tier', None)
+        resources_fields['ports'] = config.pop('ports', None)
+        resources_fields['_docker_login_config'] = config.pop(
+            '_docker_login_config', None)
+        resources_fields['_is_image_managed'] = config.pop(
+            '_is_image_managed', None)
+
+        if resources_fields['cpus'] is not None:
+            resources_fields['cpus'] = str(resources_fields['cpus'])
+        if resources_fields['memory'] is not None:
+            resources_fields['memory'] = str(resources_fields['memory'])
+        if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
-                config.pop('accelerator_args'))
-        if config.get('use_spot') is not None:
-            resources_fields['use_spot'] = config.pop('use_spot')
-        if config.get('spot_recovery') is not None:
-            resources_fields['spot_recovery'] = config.pop('spot_recovery')
-        if config.get('disk_size') is not None:
-            resources_fields['disk_size'] = int(config.pop('disk_size'))
-        if config.get('region') is not None:
-            resources_fields['region'] = config.pop('region')
-        if config.get('zone') is not None:
-            resources_fields['zone'] = config.pop('zone')
-        if config.get('image_id') is not None:
-            resources_fields['image_id'] = config.pop('image_id')
-        if config.get('disk_tier') is not None:
-            resources_fields['disk_tier'] = config.pop('disk_tier')
-        if config.get('ports') is not None:
-            resources_fields['ports'] = config.pop('ports')
-        if config.get('_docker_login_config') is not None:
-            resources_fields['_docker_login_config'] = config.pop(
-                '_docker_login_config')
-        if config.get('_is_image_managed') is not None:
-            resources_fields['_is_image_managed'] = config.pop(
-                '_is_image_managed')
+                resources_fields['accelerator_args'])
+        if resources_fields['disk_size'] is not None:
+            resources_fields['disk_size'] = int(resources_fields['disk_size'])
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
