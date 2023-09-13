@@ -230,8 +230,16 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget '
-                 'patch openssh-server python3-pip;')
+        self.run(
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # So if we `sky launch` on an existing cluster, we need to
+            # install fuse package first to get rid of apt-get error.
+            # Here we use --fix-broken to fix the dependency. The dpkg
+            # option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" --fix-broken '
+            'install -y; sudo apt-get install -y rsync curl wget patch '
+            'openssh-server python3-pip;')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on
