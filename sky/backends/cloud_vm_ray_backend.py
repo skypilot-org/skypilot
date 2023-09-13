@@ -2593,6 +2593,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._dag = None
         self._optimize_target = None
         self._requested_features = set()
+        self._minimize_logging = False
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -2608,6 +2609,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
+        self._minimize_logging = kwargs.pop('minimize_logging',
+                                            self._minimize_logging)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: CloudVmRayResourceHandle,
@@ -3226,7 +3229,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                            f'Failed to submit job {job_id}.',
                                            stderr=stdout + stderr)
 
-        if not handle.cluster_name.startswith(serve_lib.CONTROLLER_PREFIX):
+        if not self._minimize_logging:
             logger.info('Job submitted with Job ID: '
                         f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
 
@@ -3259,9 +3262,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            elif not name.startswith(serve_lib.CONTROLLER_PREFIX):
-                # Skip logging for submit controller & load balancer jobs
-                # to skyserve controller cluster
+            elif not self._minimize_logging:
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -3384,8 +3385,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        if (name == spot_lib.SPOT_CONTROLLER_NAME or down or
-                name.startswith(serve_lib.CONTROLLER_PREFIX)):
+        if down or self._minimize_logging:
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
@@ -3503,8 +3503,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def cancel_jobs(self,
                     handle: CloudVmRayResourceHandle,
                     jobs: Optional[List[int]],
-                    cancel_all: bool = False,
-                    silent: bool = False) -> None:
+                    cancel_all: bool = False) -> None:
         """Cancels jobs.
 
         CloudVMRayBackend specific method.
@@ -3537,7 +3536,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         cancelled_ids = common_utils.decode_payload(stdout)
 
-        if silent:
+        if self._minimize_logging:
             return
 
         if cancelled_ids:
@@ -4284,7 +4283,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'{cluster_name!r} [Username: {ssh_user}].'
                         f'{colorama.Style.RESET_ALL}\n'
                         'Run `sky status` to see existing clusters.')
-        elif not cluster_name.startswith(serve_lib.CONTROLLER_PREFIX):
+        elif not self._minimize_logging:
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
                 f'[{task.num_nodes}x {to_provision}].'

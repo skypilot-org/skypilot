@@ -180,6 +180,7 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    minimize_logging: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
@@ -323,7 +324,8 @@ def _execute(
 
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
-                          requested_features=requested_features)
+                          requested_features=requested_features,
+                          minimize_logging=minimize_logging)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -380,26 +382,21 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        if (cluster_name != spot.SPOT_CONTROLLER_NAME and
-                cluster_name is not None and
-                not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
+        if not minimize_logging:
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
             # because spot jobs are serverless, there can be many of them, and
             # users tend to continuously monitor spot jobs using `sky spot
-            # status`.
+            # status`. Also don't print if this job is a skyserve controller
+            # job.
             #
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
-        # UX: Don't show cursor if we are initializing a skyserve controller,
-        # since it will mess up the progress bar.
-        if (cluster_name is None or
-                not cluster_name.startswith(serve.CONTROLLER_PREFIX)):
-            print()
-            print('\x1b[?25h', end='')  # Show cursor.
+        print()
+        print('\x1b[?25h', end='')  # Show cursor.
     return job_id
 
 
@@ -798,6 +795,7 @@ def spot_launch(
             idle_minutes_to_autostop=spot.
             SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            minimize_logging=True,
         )
 
 
@@ -1126,6 +1124,7 @@ def serve_up(
             # value and a previous controller could be reused.
             idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
+            minimize_logging=True,
         )
 
         controller_record = global_user_state.get_cluster_from_name(
@@ -1140,6 +1139,7 @@ def serve_up(
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend), backend
+        backend.register_info(minimize_logging=True)
         service_handle.endpoint_ip = handle.head_ip
         global_user_state.set_service_handle(service_name, service_handle)
 

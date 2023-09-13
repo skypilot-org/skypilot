@@ -1179,13 +1179,14 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         if handle is not None:
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             backend = backends.CloudVmRayBackend()
+            backend.register_info(minimize_logging=True)
 
             # Cancel the controller and load balancer jobs.
             # For the case when controller / load_balancer job failed to submit.
             jobs = []
             if service_handle.job_id is not None:
                 jobs.append(service_handle.job_id)
-            backend.cancel_jobs(handle, jobs=jobs, silent=True)
+            backend.cancel_jobs(handle, jobs=jobs)
 
             # Cleanup all files on controller related to this service.
             # We have a 10-min grace period for the controller to autostop,
