@@ -249,21 +249,15 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.'
-    )
-    group.add_argument(
-        '--regions',
-        nargs='+',
-        help='Fetch the list of specified regions.'
-    )
-    parser.add_argument(
-        '--exclude',
-        nargs='+',
-        help='Exclude the list of specified regions.'
-    )
+    group.add_argument('--all-regions',
+                       action='store_true',
+                       help='Fetch all global regions, not just the U.S. ones.')
+    group.add_argument('--regions',
+                       nargs='+',
+                       help='Fetch the list of specified regions.')
+    parser.add_argument('--exclude',
+                        nargs='+',
+                        help='Exclude the list of specified regions.')
     args = parser.parse_args()
 
     if args.regions:
@@ -273,7 +267,8 @@ if __name__ == '__main__':
         region_filter = set(region_filter) - EXCLUDED_REGIONS
     else:
         region_filter = US_REGIONS
-    region_filter = set(region_filter) - set(args.exclude) if args.exclude else region_filter
+    region_filter = set(region_filter) - set(
+        args.exclude) if args.exclude else region_filter
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
