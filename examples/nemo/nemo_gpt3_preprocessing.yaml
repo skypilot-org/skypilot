@@ -8,13 +8,10 @@
 # that can be downloaded to your bucket (see nemo_gpt3_train.yaml).
 #
 # Usage:
-#   sky launch -c nemo_gpt3_preprocessing nemo_gpt3_preprocessing.yaml
+#   sky launch -s -c nemo_gpt3_preprocessing nemo_gpt3_preprocessing.yaml
 #
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt3_preprocessing
-
-resources:
-  accelerators: V100:1 # TODO - See if this can be run on CPU-only nodes
 
 num_nodes: 1
 

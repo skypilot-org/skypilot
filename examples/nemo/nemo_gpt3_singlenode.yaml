@@ -1,9 +1,15 @@
-# End to end Distributed training a GPT style model with Nvidia NeMo
-# This script includes data download, pre-processing and training, all on a
-# single node.
+# Single node training a GPT style model with Nvidia NeMo
+#
+# This script downloads data from read-only bucket at gs://sky-wiki-data.
+# If you want to preprocess the data yourself, see nemo_gpt3_preprocessing.yaml.
+#
+# The specific model used here should fit on GPU with 16GB memory.
+#
+# After the script completes, the model checkpoints will be saved in
+# ~/sky_workdir/nemo_experiments/megatron_gpt/checkpoints on the head node.
 #
 # Usage:
-#   sky launch -c nemo_gpt3 nemo_gpt3_singlenode.yaml
+#   sky launch -s -c nemo_gpt3 nemo_gpt3_singlenode.yaml
 #
 #   # Or try on spot A100 GPUs:
 #   sky launch -c nemo_gpt3 nemo_gpt3_singlenode.yaml --use-spot --gpus A100:1

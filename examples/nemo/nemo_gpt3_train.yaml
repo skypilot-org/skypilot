@@ -6,8 +6,11 @@
 # download preprocessed data to your bucket. If you want to preprocess the data
 # yourself, see nemo_gpt3_preprocessing.yaml.
 #
+# After the script completes, the model checkpoints will be saved in
+# ~/sky_workdir/nemo_experiments/megatron_gpt/checkpoints on the head node.
+#
 # Usage:
-#   sky launch -c nemo_gpt3_train nemo_gpt3_train.yaml
+#   sky launch -s -c nemo_gpt3_train nemo_gpt3_train.yaml
 #
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt3_train
@@ -19,7 +22,7 @@ num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
-  BUCKET_NAME: romil-nemo-test-bucket2 # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
+  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
 
 file_mounts:
   ${DATASET_ROOT}:
@@ -158,3 +161,9 @@ run: |
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \
     exp_manager.checkpoint_callback_params.always_save_nemo=True
+  
+  # Optional - copy checkpoints to the mounted dataset bucket (~6 GB)
+  # if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
+  #     mkdir -p ${DATASET_ROOT}/results
+  #     cp -R ~/sky_workdir/nemo_experiments 
+  # fi
