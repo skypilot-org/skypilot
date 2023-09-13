@@ -1,18 +1,20 @@
-# Distributed training a GPT style model with Nvidia NeMo
+# End to end Distributed training a GPT style model with Nvidia NeMo
+# This script includes data download, pre-processing and training, all on a
+# single node.
 #
 # Usage:
-#   sky launch -c nemo_gpt3 nemo_gpt3.yaml
+#   sky launch -c nemo_gpt3 nemo_gpt3_singlenode.yaml
 #
 #   # Or try on spot A100 GPUs:
-#   sky launch -c nemo_gpt3 nemo_gpt3.yaml --use-spot --gpus A100:1
+#   sky launch -c nemo_gpt3 nemo_gpt3_singlenode.yaml --use-spot --gpus A100:1
 #
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt3
 
 resources:
-  accelerators: V100:1
+  accelerators: A100:1
 
-num_nodes: 2
+num_nodes: 1
 
 envs:
   DATASET_ROOT: $HOME/wiki/
@@ -110,7 +112,6 @@ run: |
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
   
-  # TODO - make this distributed
   python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
     --config-path=NeMo/examples/nlp/language_modeling/conf \
     --config-name=megatron_gpt_config \

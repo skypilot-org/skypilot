@@ -1,13 +1,16 @@
-# Distributed training a GPT style model with Nvidia NeMo
+# Distributed training a GPT style model with Nvidia NeMo on multiple nodes.
+#
+# Inspired from https://github.com/NVIDIA/NeMo/blob/main/docs/source/nlp/nemo_megatron/gpt/gpt_training.rst
+#
+# Note that we provide a read-only bucket at gs://sky-wiki-data that is used to
+# download preprocessed data to your bucket. If you want to preprocess the data
+# yourself, see nemo_gpt3_preprocessing.yaml.
 #
 # Usage:
-#   sky launch -c nemo_gpt3 nemo_gpt3.yaml
-#
-#   # Or try on spot A100 GPUs:
-#   sky launch -c nemo_gpt3 nemo_gpt3.yaml --use-spot --gpus A100:1
+#   sky launch -c nemo_gpt3_train nemo_gpt3_train.yaml
 #
 #   # Terminate cluster after you're done
-#   sky down nemo_gpt3
+#   sky down nemo_gpt3_train
 
 resources:
   accelerators: V100:1
@@ -16,7 +19,7 @@ num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
-  BUCKET_NAME: romil-nemo-test-bucket2
+  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
 
 file_mounts:
   ${DATASET_ROOT}:
@@ -30,8 +33,6 @@ setup: |
   if [ $? -eq 0 ]; then
       echo "Nemo conda env exists"
   else
-      # Print out time when setup is start
-      date
       echo "Setup start"
   
       conda create -y --name nemo python==3.10.12
@@ -87,7 +88,6 @@ run: |
   # worker nodes. In our training script, the head node writes a index 
   # file to this shared filesystem that is read by workers.
   
-  echo "I am node ${SKYPILOT_NODE_RANK}"
   if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
       if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
           echo "Data already downloaded"
@@ -121,9 +121,9 @@ run: |
     trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
     trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
-    trainer.max_steps=300000 \
-    trainer.val_check_interval=300 \
-    trainer.log_every_n_steps=50 \
+    trainer.max_steps=100 \
+    trainer.val_check_interval=20 \
+    trainer.log_every_n_steps=10 \
     trainer.limit_val_batches=50 \
     trainer.limit_test_batches=50 \
     trainer.accumulate_grad_batches=1 \
@@ -155,58 +155,11 @@ run: |
     model.optim.sched.warmup_steps=750 \
     model.optim.sched.constant_steps=80000 \
     model.optim.sched.min_lr=6e-5 \
+    model.nemo_path=${DATASET_ROOT}/ \
     exp_manager.resume_if_exists=True \
     exp_manager.resume_ignore_no_checkpoint=True \
     exp_manager.create_checkpoint_callback=True \
     exp_manager.checkpoint_callback_params.monitor=val_loss \
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \
-    exp_manager.checkpoint_callback_params.always_save_nemo=False
-#  # TODO - make this distributed
-#  python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
-#    --config-path=conf \
-#    --config-name=megatron_gpt_config \
-#    trainer.devices=1 \
-#    trainer.num_nodes=1 \
-#    trainer.max_epochs=null \
-#    trainer.max_steps=300000 \
-#    trainer.val_check_interval=300 \
-#    trainer.log_every_n_steps=50 \
-#    trainer.limit_val_batches=50 \
-#    trainer.limit_test_batches=50 \
-#    trainer.accumulate_grad_batches=1 \
-#    trainer.precision=16 \
-#    model.micro_batch_size=6 \
-#    model.global_batch_size=192 \
-#    model.tensor_model_parallel_size=1 \
-#    model.pipeline_model_parallel_size=1 \
-#    model.max_position_embeddings=1024 \
-#    model.encoder_seq_length=1024 \
-#    model.hidden_size=768 \
-#    model.ffn_hidden_size=3072 \
-#    model.num_layers=12 \
-#    model.num_attention_heads=12 \
-#    model.init_method_std=0.021 \
-#    model.hidden_dropout=0.1 \
-#    model.layernorm_epsilon=1e-5 \
-#    model.tokenizer.vocab_file=${DATASET_ROOT}/gpt2-vocab.json \
-#    model.tokenizer.merge_file=${DATASET_ROOT}/gpt2-merges.txt \
-#    model.data.data_prefix=[1.0,${DATASET_ROOT}/hfbpe_gpt_training_data_text_document] \
-#    model.data.num_workers=2 \
-#    model.data.seq_length=1024 \
-#    model.data.splits_string=\'980,10,10\' \
-#    model.optim.name=fused_adam \
-#    model.optim.lr=6e-4 \
-#    model.optim.betas=[0.9,0.95] \
-#    model.optim.weight_decay=0.1 \
-#    model.optim.sched.name=CosineAnnealing \
-#    model.optim.sched.warmup_steps=750 \
-#    model.optim.sched.constant_steps=80000 \
-#    model.optim.sched.min_lr=6e-5 \
-#    exp_manager.resume_if_exists=True \
-#    exp_manager.resume_ignore_no_checkpoint=True \
-#    exp_manager.create_checkpoint_callback=True \
-#    exp_manager.checkpoint_callback_params.monitor=val_loss \
-#    exp_manager.checkpoint_callback_params.save_top_k=3 \
-#    exp_manager.checkpoint_callback_params.mode=min \
-#    exp_manager.checkpoint_callback_params.always_save_nemo=False
+    exp_manager.checkpoint_callback_params.always_save_nemo=True
