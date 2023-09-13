@@ -72,10 +72,6 @@ setup: |
       git checkout 52e18c894223800cb611682dce27d88050edf1de
       pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
       cd ..
-      
-      # Print out time when setup is done
-      date
-      echo "Setup done"
   fi
 
 run: |

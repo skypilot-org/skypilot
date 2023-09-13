@@ -20,10 +20,13 @@ envs:
   DATASET_ROOT: $HOME/wiki/
 
 setup: |
+  # ============== Dependency Setup ==============
   conda activate nemo
   if [ $? -eq 0 ]; then
       echo "Nemo conda env exists"
   else
+      echo "Setup start"
+  
       conda create -y --name nemo python==3.10.12
       conda activate nemo
   
@@ -31,91 +34,58 @@ setup: |
       pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
       
       # Install nemo
-      sudo apt-get update
-      sudo apt-get install -y libsndfile1 ffmpeg
-      pip install Cython
-      pip install git+https://github.com/NVIDIA/NeMo.git@main#egg=nemo_toolkit[all]
-    
-      # Clone the NeMo repo to get the examples
       git clone https://github.com/NVIDIA/NeMo.git
+      cd NeMo
+      git checkout b4ad7eaa7873d632391d6985aa6b359f39c20bab
+      pip install Cython
+      pip install .[all]
+      cd ..
+  
+      # Install megatron-core
+      # We install in editable mode because setup.py does not install all 
+      # required modules if we install in non-editable mode.
+      git clone https://github.com/NVIDIA/Megatron-LM
+      cd Megatron-LM
+      git checkout dc21350806361564b8ce61d4a8d247cb195cc5f0
+      pip install -e .  
+      cd ..
       
+      # Install ninja for faster compilation
+      pip install ninja packaging
+  
+      # Install transformer engine (Takes ~3hr to compile)
+      MAX_JOBS=4 pip install flash-attn==2.0.4 --no-build-isolation # Version upper capped by TransformerEngine
+      MAX_JOBS=4 pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
+      
+      pip install pytorch-extension
+  
       # Install Apex
       git clone https://github.com/NVIDIA/apex.git
       cd apex
       git checkout 52e18c894223800cb611682dce27d88050edf1de
       pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
       cd ..
-  
-      # Install megatron-core (TODO - write patch for setup.py)
-      pip install git+https://github.com/NVIDIA/Megatron-LM.git
-  
-      # Install transformer engine (Takes ~3hr to compile)
-      pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
-      
-      pip install pytorch-extension
-  fi
-  
-  # ======== Download and preprocess the wikipedia dataset ========
-  if [ -f ${DATASET_ROOT}/train_data.jsonl ]; then
-      echo "Dataset exists"
-  else
-      # Install axel for faster downloads
-      sudo apt-get install -y axel
-  
-      mkdir -p ${DATASET_ROOT}
-      cd ${DATASET_ROOT}
-  
-      # Download the wikipedia dataset (takes ~15 min)
-      axel -n 20 https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
-      
-      # Preprocess the wikipedia dataset (takes ~2 hours)
-      pip install wikiextractor
-      python -m wikiextractor.WikiExtractor enwiki-latest-pages-articles.xml.bz2 --json
-      find text -name 'wiki_*' -exec cat {} \; > train_data.jsonl
-  fi
-  
-  # ======== Download tokenizer files ========
-  # Check if the tokenizer files exist
-  if [ -f ${DATASET_ROOT}/gpt2-vocab.json ]; then
-      echo "Tokenizer files exist"
-  else
-      # Download the tokenizer files
-      cd {DATASET_ROOT}
-      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json
-      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt
-  fi
-  
-  # ======== Convert data to mmap format ========
-  # Check if the mmap files exist
-  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
-      echo "Mmap files exist"
-  else
-      # Convert the data to mmap format`
-      cd ${DATASET_ROOT}
-      python $HOME/sky_workdir/NeMo/scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
-        --input=train_data.jsonl \
-        --json-keys=text \
-        --tokenizer-library=megatron \
-        --vocab gpt2-vocab.json \
-        --dataset-impl mmap \
-        --tokenizer-type GPT2BPETokenizer \
-        --merge-file gpt2-merges.txt \
-        --output-prefix=hfbpe_gpt_training_data \
-        --append-eod \
-        --workers=32
   fi
 
 run: |
+  # ============= Data Download =============
+  # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
+  # For more on how to pre-process data, see nemo_gpt3_preprocessing.yaml
+  
+  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
+      echo "Data already downloaded"
+  else
+      echo "Head node downloading data to shared bucket."
+      gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
+  fi 
+  
+  # ============= Training =============
   conda activate nemo
-  
-  # Get the number of nodes and master address from SkyPilot envvars
-  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
-  master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-  
+    
   python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
     --config-path=NeMo/examples/nlp/language_modeling/conf \
     --config-name=megatron_gpt_config \
-    trainer.devices=1 \
+    trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
     trainer.num_nodes=1 \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \

@@ -13,13 +13,13 @@
 #   sky down nemo_gpt3_train
 
 resources:
-  accelerators: A100:1
+  accelerators: V100:1
 
 num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
-  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
+  BUCKET_NAME: romil-nemo-test-bucket2 # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
 
 file_mounts:
   ${DATASET_ROOT}:
@@ -73,10 +73,6 @@ setup: |
       git checkout 52e18c894223800cb611682dce27d88050edf1de
       pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
       cd ..
-      
-      # Print out time when setup is done
-      date
-      echo "Setup done"
   fi
 
 run: |
@@ -155,7 +151,6 @@ run: |
     model.optim.sched.warmup_steps=750 \
     model.optim.sched.constant_steps=80000 \
     model.optim.sched.min_lr=6e-5 \
-    model.nemo_path=${DATASET_ROOT}/ \
     exp_manager.resume_if_exists=True \
     exp_manager.resume_ignore_no_checkpoint=True \
     exp_manager.create_checkpoint_callback=True \
