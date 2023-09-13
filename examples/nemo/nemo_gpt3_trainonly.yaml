@@ -12,18 +12,20 @@
 resources:
   accelerators: V100:1
 
-num_nodes: 1
+num_nodes: 2
 
 envs:
   DATASET_ROOT: /wiki
+  BUCKET_NAME: romil-nemo-test-bucket2
 
 file_mounts:
   ${DATASET_ROOT}:
-    source: gs://sky-wiki-data
-    mode: COPY
+    name: ${BUCKET_NAME}
+    mode: MOUNT
     
 
-setup: |
+setup: |  
+  # ============== Dependency Setup ==============
   conda activate nemo
   if [ $? -eq 0 ]; then
       echo "Nemo conda env exists"
@@ -44,6 +46,7 @@ setup: |
       git checkout b4ad7eaa7873d632391d6985aa6b359f39c20bab
       pip install Cython
       pip install .[all]
+      cd ..
   
       # Install megatron-core
       # We install in editable mode because setup.py does not install all 
@@ -52,6 +55,7 @@ setup: |
       cd Megatron-LM
       git checkout dc21350806361564b8ce61d4a8d247cb195cc5f0
       pip install -e .  
+      cd ..
       
       # Install ninja for faster compilation
       pip install ninja packaging
@@ -75,18 +79,47 @@ setup: |
   fi
 
 run: |
+  # ============= Data Download =============
+  # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
+  # to our shared bucket at gs://${BUCKET_NAME}. 
+  # 
+  # This bucket acts as a network filesystem (NFS) between the head node and 
+  # worker nodes. In our training script, the head node writes a index 
+  # file to this shared filesystem that is read by workers.
+  
+  echo "I am node ${SKYPILOT_NODE_RANK}"
+  if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
+      if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
+          echo "Data already downloaded"
+      else
+          echo "Head node downloading data to shared bucket."
+          gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
+      fi
+  else
+      while [ ! -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; do
+          echo "Worker ${SKYPILOT_NODE_RANK} - waiting for data to be downloaded to shared bucket."
+          sleep 1
+      done
+  fi 
+  
+  # ============= Training =============
   conda activate nemo
   
   # Get the number of nodes and master address from SkyPilot envvars
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
   
-  # TODO - make this distributed
-  python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
+  python -m torch.distributed.run \
+    --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
+    --nnodes=${num_nodes} \
+    --node_rank=${SKYPILOT_NODE_RANK} \
+    --master_addr=${master_addr} \
+    --master_port=12375 \
+    NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
     --config-path=conf \
     --config-name=megatron_gpt_config \
-    trainer.devices=1 \
-    trainer.num_nodes=1 \
+    trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
+    trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \
     trainer.val_check_interval=300 \
@@ -129,3 +162,51 @@ run: |
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \
     exp_manager.checkpoint_callback_params.always_save_nemo=False
+#  # TODO - make this distributed
+#  python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
+#    --config-path=conf \
+#    --config-name=megatron_gpt_config \
+#    trainer.devices=1 \
+#    trainer.num_nodes=1 \
+#    trainer.max_epochs=null \
+#    trainer.max_steps=300000 \
+#    trainer.val_check_interval=300 \
+#    trainer.log_every_n_steps=50 \
+#    trainer.limit_val_batches=50 \
+#    trainer.limit_test_batches=50 \
+#    trainer.accumulate_grad_batches=1 \
+#    trainer.precision=16 \
+#    model.micro_batch_size=6 \
+#    model.global_batch_size=192 \
+#    model.tensor_model_parallel_size=1 \
+#    model.pipeline_model_parallel_size=1 \
+#    model.max_position_embeddings=1024 \
+#    model.encoder_seq_length=1024 \
+#    model.hidden_size=768 \
+#    model.ffn_hidden_size=3072 \
+#    model.num_layers=12 \
+#    model.num_attention_heads=12 \
+#    model.init_method_std=0.021 \
+#    model.hidden_dropout=0.1 \
+#    model.layernorm_epsilon=1e-5 \
+#    model.tokenizer.vocab_file=${DATASET_ROOT}/gpt2-vocab.json \
+#    model.tokenizer.merge_file=${DATASET_ROOT}/gpt2-merges.txt \
+#    model.data.data_prefix=[1.0,${DATASET_ROOT}/hfbpe_gpt_training_data_text_document] \
+#    model.data.num_workers=2 \
+#    model.data.seq_length=1024 \
+#    model.data.splits_string=\'980,10,10\' \
+#    model.optim.name=fused_adam \
+#    model.optim.lr=6e-4 \
+#    model.optim.betas=[0.9,0.95] \
+#    model.optim.weight_decay=0.1 \
+#    model.optim.sched.name=CosineAnnealing \
+#    model.optim.sched.warmup_steps=750 \
+#    model.optim.sched.constant_steps=80000 \
+#    model.optim.sched.min_lr=6e-5 \
+#    exp_manager.resume_if_exists=True \
+#    exp_manager.resume_ignore_no_checkpoint=True \
+#    exp_manager.create_checkpoint_callback=True \
+#    exp_manager.checkpoint_callback_params.monitor=val_loss \
+#    exp_manager.checkpoint_callback_params.save_top_k=3 \
+#    exp_manager.checkpoint_callback_params.mode=min \
+#    exp_manager.checkpoint_callback_params.always_save_nemo=False
