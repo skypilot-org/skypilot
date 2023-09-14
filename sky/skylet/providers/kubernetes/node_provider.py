@@ -229,7 +229,8 @@ class KubernetesNodeProvider(NodeProvider):
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
-                # phase is set to Running when all the containers are created
+                # Continue if pod phase is Running
+                # This indicates all the containers are created within the pod
                 if pod.status.phase == 'Running':
                     continue
                 elif pod.status.phase == 'Pending':
@@ -238,9 +239,15 @@ class KubernetesNodeProvider(NodeProvider):
                         for container_status in pod.status.container_statuses:
                             # Continue if container status is ContainerCreating
                             # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ErrImagePull':
-                                if 'rpc error: code = Unknown' in container_status.state.waiting.message:
-                                    raise config.KubernetesError(f'Failed to pull docker image while launching the node. Please check your network connection. Error:{container_status.state.waiting.message}')
+                            if container_status.state.waiting is not None:
+                                if container_status.state.waiting.reason == 'ErrImagePull':
+                                    if 'rpc error: code = Unknown' in container_status.state.waiting.message:
+                                        raise config.KubernetesError(
+                                            'Failed to pull docker image while '
+                                            'launching the node. Please check '
+                                            'your network connection. Error: '
+                                            f'{container_status.state.waiting.message}.'
+                                        )
                             else:
                                 # If the container wasn't in creating state,
                                 # then we know pod wasn't scheduled or had some
@@ -248,10 +255,10 @@ class KubernetesNodeProvider(NodeProvider):
                                 # See list of possible reasons for waiting here:
                                 # https://stackoverflow.com/a/57886025
                                 all_ready = False
-                    else:
-                        # If container_statuses is None, then the pod hasn't
-                        # been scheduled yet.
-                        all_ready = False
+                else:
+                    # If container_statuses is None, then the pod hasn't
+                    # been scheduled yet.
+                    all_ready = False
             if all_ready:
                 break
             time.sleep(1)
