@@ -51,7 +51,6 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
@@ -2102,8 +2101,6 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
 
     Job IDs can be looked up by ``sky queue cluster_name``.
     """
-    bold = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     job_identity_str = None
     job_ids_to_cancel = None
     if not jobs and not all:
@@ -2131,18 +2128,9 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
-        if cluster == spot_lib.SPOT_CONTROLLER_NAME:
-            # Friendly message for usage like 'sky cancel <spot controller>
-            # -a/<jobid>'.
-            error_str = (
-                'Cancelling the spot controller\'s jobs is not allowed.'
-                f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
-                f'job IDs> [--all]{reset}')
-        else:
-            assert cluster.startswith(serve_lib.CONTROLLER_PREFIX)
-            error_str = (
-                'Cancelling the sky serve controller\'s jobs is not allowed.')
-        click.echo(error_str)
+        group = backend_utils.ReservedClusterGroup.get_group(cluster)
+        assert group is not None
+        click.echo(group.value.decline_cancel_hint)
         sys.exit(1)
     except ValueError as e:
         raise click.UsageError(str(e))

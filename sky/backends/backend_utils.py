@@ -127,6 +127,10 @@ class ReservedClusterGroup(enum.Enum):
             f'sky spot queue{colorama.Style.RESET_ALL}'),
         decline_stop_hint=('Spot controller will be auto-stopped after all '
                            'spot jobs finish.'),
+        decline_cancel_hint=(
+            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
+            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
+            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
         check_cluster_name_hint=(
             f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller. '))
@@ -138,6 +142,8 @@ class ReservedClusterGroup(enum.Enum):
             f'sky serve status{colorama.Style.RESET_ALL}'),
         decline_stop_hint=(f'To teardown a service, use {colorama.Style.BRIGHT}'
                            f'sky serve down{colorama.Style.RESET_ALL}.'),
+        decline_cancel_hint=(
+            'Cancelling the sky serve controller\'s jobs is not allowed.'),
         check_cluster_name_hint=(
             f'Cluster prefix {serve_lib.CONTROLLER_PREFIX} is reserved for '
             'sky serve controller. '))

@@ -184,17 +184,20 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if cluster_name == spot.SPOT_CONTROLLER_NAME:
+    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for the spot controller. Pass '
+                             'supported for skypilot controllers. Pass '
                              '`down=False` or omit it instead.')
         if idle_minutes_to_autostop is not None:
             raise ValueError(
                 'Passing a custom autostop setting is currently not '
-                'supported when starting the spot controller. To '
+                'supported when starting skypilot controllers. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
+        # TODO(tian): Maybe we should merge the two MINUTES_TO_AUTOSTOP
+        # together. Currently, the two value is the same so we just use spot
+        # constant here.
         idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
