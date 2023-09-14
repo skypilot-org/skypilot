@@ -90,6 +90,11 @@ Available fields:
         - 8080
         - 10022-10040
 
+      # If you only have one port or range to expose, you can use the following shorthand:
+      ports: 8081
+      # or
+      ports: 10052-10100
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
