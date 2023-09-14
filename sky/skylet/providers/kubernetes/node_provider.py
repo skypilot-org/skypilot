@@ -253,6 +253,7 @@ class KubernetesNodeProvider(NodeProvider):
                                             f'{lack_resource_msg.format(resource="GPUs")} '
                                             f'Please confirm if {new_node.spec.node_selector[label_key]} is '
                                             'available in the cluster.')
+                        # reveal the pod_status as well through timeout_err_msg argument. 
                         raise config.KubernetesError(f'{timeout_err_msg} '
                                                      f'Error: {event_message}')
                 raise config.KubernetesError(f'{timeout_err_msg}')
