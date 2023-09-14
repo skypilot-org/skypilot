@@ -67,8 +67,8 @@ class Kubernetes(clouds.Cloud):
             ('Docker image is not supported in Kubernetes. ')
     }
 
-    IMAGE_CPU = service_catalog.get_image_id_from_tag('skypilot:cpu-debian-11', clouds='kubernetes')
-    IMAGE_GPU = service_catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004', clouds='kubernetes')
+    IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
+    IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -201,7 +201,14 @@ class Kubernetes(clouds.Cloud):
         acc_type = k.accelerator_type if k.accelerator_type else None
 
         # Select image based on whether we are using GPUs or not.
-        image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        # Get the container image ID from the service catalog.
+        # Note that currently we do not support custom images, so this condition
+        # will always be triggered. In the future we may want to get image_id
+        # from the resources object if it is set.
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
@@ -223,7 +230,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
             # TODO(romilb): Allow user to specify custom images
-            'image_id': image,
+            'image_id': image_id,
         }
         return deploy_vars
 
