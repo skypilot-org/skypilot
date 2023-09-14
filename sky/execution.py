@@ -1035,8 +1035,9 @@ def serve_up(
         # TODO(tian): remove pylint disabling when filelock
         # version updated
         # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(serve.CONTROLLER_FILE_LOCK_PATH,
-                               serve.CONTROLLER_FILE_LOCK_TIMEOUT):
+        with filelock.FileLock(
+                os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH),
+                serve.CONTROLLER_FILE_LOCK_TIMEOUT):
             controller_name, _ = serve.get_available_controller_name(
                 controller_resources)
             global_user_state.add_or_update_service(

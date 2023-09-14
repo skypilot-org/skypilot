@@ -28,4 +28,4 @@ from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceHandle
 from sky.serve.service_spec import SkyServiceSpec
 
-os.makedirs(SERVE_PREFIX, exist_ok=True)
+os.makedirs(os.path.expanduser(SERVE_PREFIX), exist_ok=True)
