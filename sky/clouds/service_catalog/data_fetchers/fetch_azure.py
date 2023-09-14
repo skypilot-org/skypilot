@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-US_REGIONS = [
+US_REGIONS = {
     'centralus',
     'eastus',
     'eastus2',
@@ -24,7 +24,7 @@ US_REGIONS = [
     'westus',
     'westus2',
     'westus3',
-]
+}
 
 # Exclude the following regions as they do not have ProductName in the
 # pricing table. Reference: #1768
@@ -263,8 +263,7 @@ if __name__ == '__main__':
     if args.regions:
         region_filter = set(args.regions) - EXCLUDED_REGIONS
     elif args.all_regions:
-        region_filter = get_regions()
-        region_filter = set(region_filter) - EXCLUDED_REGIONS
+        region_filter = set(get_regions()) - EXCLUDED_REGIONS
     else:
         region_filter = US_REGIONS
     region_filter = set(region_filter) - set(
