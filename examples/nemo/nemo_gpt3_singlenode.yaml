@@ -59,7 +59,7 @@ setup: |
       # Install ninja for faster compilation
       pip install ninja packaging
   
-      # Install transformer engine (Takes ~3hr to compile)
+      # Install transformer engine and flash-attn (Takes ~1hr to compile)
       MAX_JOBS=4 pip install flash-attn==2.0.4 --no-build-isolation # Version upper capped by TransformerEngine
       MAX_JOBS=4 pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
       
