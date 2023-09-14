@@ -28,7 +28,7 @@ _DEFAULT_DISK_SIZE_GB = 256
 class Resources:
     """Resources: compute requirements of Tasks.
 
-    This class is immutable once created (to ensure some validations are done
+    This class is immutable once created (to ensure some validations are done
     whenever properties change). To update the property of an instance of
     Resources, use `resources.copy(**new_properties)`.
 
@@ -59,7 +59,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-        ports: Optional[List[str]] = None,
+        ports: Optional[Union[int, str, List[str]]] = None,
         # Internal use only.
         _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
@@ -170,6 +170,8 @@ class Resources:
 
         self._disk_tier = disk_tier
         if ports is not None:
+            if not isinstance(ports, list):
+                ports = [ports]
             ports = [str(port) for port in ports]
         self._ports = ports
         self._docker_login_config = _docker_login_config
