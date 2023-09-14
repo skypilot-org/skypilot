@@ -625,7 +625,7 @@ class RetryingVmProvisioner(object):
             cluster_name: str,
             resources: resources_lib.Resources,
             num_nodes: int,
-            ports_to_open: Optional[List[Union[int, str]]] = None,
+            ports_to_open: Optional[List[str]] = None,
             prev_cluster_status: Optional[status_lib.ClusterStatus] = None,
             prev_handle: Optional['CloudVmRayResourceHandle'] = None,
         ) -> None:
@@ -2875,7 +2875,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return handle
 
     def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
-                               ports_to_open: List[Union[int, str]]) -> None:
+                               ports_to_open: List[str]) -> None:
         cloud = handle.launched_resources.cloud
         if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
             logger.warning(f'Cannot open ports for {cloud} that not support '
@@ -2891,8 +2891,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], ssh_port_list: List[int],
-            ports_to_open: Optional[List[Union[int,
-                                               str]]], lock_path: str) -> None:
+            ports_to_open: Optional[List[str]], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(

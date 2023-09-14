@@ -1,7 +1,7 @@
 """AWS instance provisioning."""
 import re
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from botocore import config
 
@@ -227,7 +227,7 @@ def _maybe_move_to_new_sg(
 
 def open_ports(
     cluster_name_on_cloud: str,
-    ports: List[Union[int, str]],
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
@@ -242,15 +242,13 @@ def open_ports(
 
     ip_permissions = []
     for port in ports:
-        if isinstance(port, int):
+        if port.isdigit():
             from_port = to_port = port
         else:
-            from_to_port = port.split('-')
-            from_port = int(from_to_port[0])
-            to_port = int(from_to_port[1])
+            from_port, to_port = port.split('-')
         ip_permissions.append({
-            'FromPort': from_port,
-            'ToPort': to_port,
+            'FromPort': int(from_port),
+            'ToPort': int(to_port),
             'IpProtocol': 'tcp',
             'IpRanges': [{
                 'CidrIp': '0.0.0.0/0'

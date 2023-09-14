@@ -1,5 +1,5 @@
 """Utilities for GCP instances."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -76,7 +76,7 @@ class GCPInstance:
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: Union[int, str],
+        port: str,
     ) -> None:
         raise NotImplementedError
 
@@ -94,7 +94,7 @@ class GCPInstance:
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: Union[int, str],
+        port: str,
         vpc_name: str,
     ) -> dict:
         raise NotImplementedError
@@ -102,7 +102,7 @@ class GCPInstance:
 
 def _get_firewall_rule_name(
     cluster_name_on_cloud: str,
-    port: Union[int, str],
+    port: str,
 ) -> str:
     return f'user-ports-{cluster_name_on_cloud}-{port}'
 
@@ -230,7 +230,7 @@ class GCPComputeInstance(GCPInstance):
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: Union[int, str],
+        port: str,
     ) -> None:
         firewall_rule_name = _get_firewall_rule_name(cluster_name_on_cloud,
                                                      port)
@@ -269,7 +269,7 @@ class GCPComputeInstance(GCPInstance):
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: Union[int, str],
+        port: str,
         vpc_name: str,
     ) -> dict:
         name = _get_firewall_rule_name(cluster_name_on_cloud, port)
@@ -282,7 +282,7 @@ class GCPComputeInstance(GCPInstance):
             'priority': 65534,
             'allowed': [{
                 'IPProtocol': 'tcp',
-                'ports': [str(port)],
+                'ports': [port],
             },],
             'sourceRanges': ['0.0.0.0/0'],
             'targetTags': [cluster_name_on_cloud],

@@ -2,7 +2,7 @@
 import collections
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -175,7 +175,7 @@ def terminate_instances(
 
 def open_ports(
     cluster_name_on_cloud: str,
-    ports: List[Union[int, str]],
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""

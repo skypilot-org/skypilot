@@ -1,5 +1,5 @@
 """Azure instance provisioning."""
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
@@ -29,7 +29,7 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
 
 def open_ports(
     cluster_name_on_cloud: str,
-    ports: List[Union[int, str]],
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
@@ -39,7 +39,6 @@ def open_ports(
     network_client = azure.get_client('network', subscription_id)
     create_or_update = get_azure_sdk_function(
         client=network_client.security_rules, function_name='create_or_update')
-    ports = [str(port) for port in ports if port != 22]
     rule_name = f'user-ports-{"-".join(ports)}'
 
     def security_rule_parameters(priority: int) -> Dict[str, Any]:

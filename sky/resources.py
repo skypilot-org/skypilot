@@ -42,7 +42,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 12
+    _VERSION = 13
 
     def __init__(
         self,
@@ -59,7 +59,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-        ports: Optional[List[Union[int, str]]] = None,
+        ports: Optional[List[str]] = None,
         # Internal use only.
         _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
@@ -169,6 +169,8 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+        if ports is not None:
+            ports = [str(port) for port in ports]
         self._ports = ports
         self._docker_login_config = _docker_login_config
 
@@ -367,7 +369,7 @@ class Resources:
         return self._disk_tier
 
     @property
-    def ports(self) -> Optional[List[Union[int, str]]]:
+    def ports(self) -> Optional[List[str]]:
         return self._ports
 
     @property
@@ -800,33 +802,35 @@ class Resources:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
         for port in self.ports:
-            if isinstance(port, int):
-                if port < 1 or port > 65535:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid port {port}. Please use a port number '
-                            'between 1 and 65535.')
-            elif isinstance(port, str):
-                port_range = port.split('-')
-                if len(port_range) != 2:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid port {port}. Please use a port range '
-                            'such as 10022-10040.')
-                try:
-                    from_port = int(port_range[0])
-                    to_port = int(port_range[1])
-                except ValueError as e:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid port {port}. Please use a integer inside'
-                            ' the range.') from e
-                if (from_port < 1 or from_port > 65535 or to_port < 1 or
-                        to_port > 65535):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid port {port}. Please use port '
-                            'numbers between 1 and 65535.')
+            if isinstance(port, str):
+                if port.isdigit():
+                    int_port = int(port)
+                    if int_port < 1 or int_port > 65535:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid port {port}. Please use a port '
+                                'number between 1 and 65535.')
+                else:
+                    port_range = port.split('-')
+                    if len(port_range) != 2:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid port {port}. Please use a port '
+                                'range such as 10022-10040.')
+                    try:
+                        from_port = int(port_range[0])
+                        to_port = int(port_range[1])
+                    except ValueError as e:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid port {port}. Please use a integer '
+                                'inside the range.') from e
+                    if (from_port < 1 or from_port > 65535 or to_port < 1 or
+                            to_port > 65535):
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Invalid port {port}. Please use port '
+                                'numbers between 1 and 65535.')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -1212,5 +1216,8 @@ class Resources:
 
         if version < 12:
             self._docker_login_config = None
+
+        if version < 13:
+            state['_ports'] = [str(port) for port in state['_ports']]
 
         self.__dict__.update(state)
