@@ -1,9 +1,43 @@
 .. _docker-containers:
 
-Running Docker Containers
+Docker Containers
 =========================
 
-SkyPilot can run docker containers as tasks. Docker runtime is configured and ready for use on the default VM image used by SkyPilot.
+Use Docker Containers as Runtime Environment
+----------------------------
+
+SkyPilot now offers native Docker support. This means that a Docker container can serve as the runtime environment for your tasks. Every incoming task will execute within the Docker container specified by its image, and sll of the GPUs will be automatically mapped to your Docker container.
+
+To designate a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:ubuntu:20.04
+
+For Docker images hosted on private registries, you can provide the registry authentication details using the :code:`env` section:
+
+.. code-block:: yaml
+
+  # private_docker.yaml
+  resources:
+    image_id: docker:<your-private-registry>:<tag>
+
+  env:
+    SKYPILOT_DOCKER_USERNAME: <username>
+    SKYPILOT_DOCKER_PASSWORD: <password>
+    SKYPILOT_DOCKER_SERVER: <server>
+
+Alternatively, you can set some of these environment variables directly through the CLI:
+
+.. code-block:: bash
+
+  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1) private_docker.yaml
+
+Directly Running Docker Containers
+----------------------------
+
+As an alternative, SkyPilot can run docker containers as tasks. Docker runtime is configured and ready for use on the default VM image used by SkyPilot.
 
 To run a container, you can directly invoke the :code:`docker run` command in the :code:`run` section of your task.
 
