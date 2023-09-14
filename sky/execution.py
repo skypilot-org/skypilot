@@ -1024,7 +1024,8 @@ def serve_up(
         service_name=service_name,
         policy=task.service.policy_str(),
         requested_resources=requested_resources,
-        requested_controller_resources=controller_resources)
+        requested_controller_resources=controller_resources,
+        auto_restart=task.service.auto_restart)
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller

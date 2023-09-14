@@ -77,6 +77,7 @@ from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
+    from sky import serve as serve_lib
     from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -4154,9 +4155,16 @@ def serve_status(all: bool, service_names: List[str]):
                f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
+        handle: 'serve_lib.ServiceHandle' = service_record['handle']
         for replica_record in service_record['replica_info']:
-            replica_record['service_name'] = service_record['name']
-            replica_infos.append(replica_record)
+            # Only print FAILED replicas if:
+            # 1. --all is specified;
+            # 2. auto_restart is not enabled (in which FAILED replica count
+            #    as one replica).
+            if (all or not handle.auto_restart or replica_record['status'] !=
+                    status_lib.ReplicaStatus.FAILED):
+                replica_record['service_name'] = service_record['name']
+                replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
 
     failed_controllers = [

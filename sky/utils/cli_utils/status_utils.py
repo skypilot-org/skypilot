@@ -421,11 +421,15 @@ def _get_uptime(service_record: _ServiceRecord) -> str:
 
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
-    ready_replica_num = 0
+    ready_replica_num, total_replica_num = 0, 0
+    auto_restart = _get_service_handle(service_record).auto_restart
     for info in service_record['replica_info']:
         if _get_status(info) == status_lib.ReplicaStatus.READY:
             ready_replica_num += 1
-    total_replica_num = len(service_record['replica_info'])
+        # If auto restart enabled, not count FAILED replicas here.
+        if (not auto_restart or
+                _get_status(info) != status_lib.ReplicaStatus.FAILED):
+            total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 
 
