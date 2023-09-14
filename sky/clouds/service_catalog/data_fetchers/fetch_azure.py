@@ -266,8 +266,11 @@ if __name__ == '__main__':
         region_filter = set(get_regions()) - EXCLUDED_REGIONS
     else:
         region_filter = US_REGIONS
-    region_filter = set(region_filter) - set(
+    region_filter = region_filter - set(
         args.exclude) if args.exclude else region_filter
+
+    if not region_filter:
+        raise ValueError('No regions to fetch. Please check your arguments.')
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
