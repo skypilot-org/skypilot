@@ -103,10 +103,14 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
   version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
+  # Fetch the US region for GCP
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
   # Fetch all regions for GCP
   pip install lxml
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
-  
+
+  # Fetch the US region for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
   # Fetch the specified regions for Azure

@@ -261,7 +261,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.regions:
-        region_filter = US_REGIONS + args.regions
+        region_filter = set(args.regions) - EXCLUDED_REGIONS
     elif args.all_regions:
         region_filter = get_regions()
         region_filter = set(region_filter) - EXCLUDED_REGIONS
