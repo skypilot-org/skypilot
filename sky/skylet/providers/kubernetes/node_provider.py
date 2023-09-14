@@ -229,6 +229,7 @@ class KubernetesNodeProvider(NodeProvider):
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
+                # phase is set to Running when all the containers are created
                 if pod.status.phase == 'Running':
                     continue
                 elif pod.status.phase == 'Pending':
