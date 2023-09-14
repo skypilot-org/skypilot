@@ -9,6 +9,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
+from sky.clouds import service_catalog
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
@@ -66,10 +67,8 @@ class Kubernetes(clouds.Cloud):
             ('Docker image is not supported in Kubernetes. ')
     }
 
-    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
-                 'skypilot-375900/skypilotk8s/skypilot:latest')
-    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
-                 'skypilotk8s/skypilot-gpu:latest')
+    IMAGE_CPU = service_catalog.get_image_id_from_tag('skypilot:cpu-debian-11', clouds='kubernetes')
+    IMAGE_GPU = service_catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004', clouds='kubernetes')
 
     @classmethod
     def _cloud_unsupported_features(
