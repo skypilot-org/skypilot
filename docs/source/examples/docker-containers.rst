@@ -1,10 +1,10 @@
 .. _docker-containers:
 
 Docker Containers
-=========================
+=================
 
 Use Docker Containers as Runtime Environment
-----------------------------
+--------------------------------------------
 
 SkyPilot now offers native Docker support. This means that a Docker container can serve as the runtime environment for your tasks. Every incoming task will execute within the Docker container specified by its image, and sll of the GPUs will be automatically mapped to your Docker container.
 
@@ -35,7 +35,7 @@ Alternatively, you can set some of these environment variables directly through 
   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1) private_docker.yaml
 
 Directly Running Docker Containers
-----------------------------
+----------------------------------
 
 As an alternative, SkyPilot can run docker containers as tasks. Docker runtime is configured and ready for use on the default VM image used by SkyPilot.
 
