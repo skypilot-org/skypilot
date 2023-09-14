@@ -86,6 +86,12 @@ Available fields:
       # these ports. Applies to all VMs of a cluster created with this field set. 
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
+      # Ports Lifecycle:
+      # Ports are opened every time a cluster is launched. You can launch on an existing
+      # clusters to add more ports. During the launch process, SkyPilot checks whether the
+      # ports are already open. It will bypass the already opened ports and only open those
+      # that are not. Once the cluster is terminated, SkyPilot will remove all firewall rules
+      # or security groups related to that cluster.
       ports:
         - 8080
         - 10022-10040
