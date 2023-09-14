@@ -9,7 +9,6 @@ from typing import Optional
 from sky import sky_logging
 from sky.clouds.service_catalog import common
 
-
 logger = sky_logging.init_logger(__name__)
 
 _PULL_FREQUENCY_HOURS = 7
@@ -18,9 +17,9 @@ _PULL_FREQUENCY_HOURS = 7
 _image_df = common.read_catalog('kubernetes/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-
 # TODO(romilb): Refactor implementation of common service catalog functions from
 #   clouds/kubernetes.py to kubernetes_catalog.py
+
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
