@@ -499,13 +499,15 @@ def _get_replica_resources(replica_record: _ReplicaRecord) -> str:
         return '-'
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     cloud = handle.launched_resources.cloud
-    launched_resource_str = f'{cloud}'
+    launched_resource_str = f'{cloud} ('
+    if handle.launched_resources.use_spot:
+        launched_resource_str += 'Spot '
     if handle.launched_resources.accelerators is None:
         vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
             handle.launched_resources.instance_type)
-        launched_resource_str += f'(vCPU={int(vcpu)})'
+        launched_resource_str += f'vCPU={int(vcpu)})'
     else:
-        launched_resource_str += f'({handle.launched_resources.accelerators})'
+        launched_resource_str += f'{handle.launched_resources.accelerators})'
     resources_str = (f'{handle.launched_nodes}x {launched_resource_str}')
     return resources_str
 
