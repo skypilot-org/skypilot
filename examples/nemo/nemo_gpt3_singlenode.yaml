@@ -82,6 +82,7 @@ run: |
       echo "Data already downloaded"
   else
       echo "Head node downloading data to shared bucket."
+      mkdir -p $DATASET_ROOT
       gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
   fi 
   
@@ -89,7 +90,7 @@ run: |
   conda activate nemo
     
   python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
-    --config-path=NeMo/examples/nlp/language_modeling/conf \
+    --config-path=conf \
     --config-name=megatron_gpt_config \
     trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
     trainer.num_nodes=1 \
@@ -114,9 +115,9 @@ run: |
     model.init_method_std=0.021 \
     model.hidden_dropout=0.1 \
     model.layernorm_epsilon=1e-5 \
-    model.tokenizer.vocab_file=gpt2-vocab.json \
-    model.tokenizer.merge_file=gpt2-merges.txt \
-    model.data.data_prefix=[1.0,hfbpe_gpt_training_data_text_document] \
+    model.tokenizer.vocab_file=${DATASET_ROOT}/gpt2-vocab.json \
+    model.tokenizer.merge_file=${DATASET_ROOT}/gpt2-merges.txt \
+    model.data.data_prefix=[1.0,${DATASET_ROOT}/hfbpe_gpt_training_data_text_document] \
     model.data.num_workers=2 \
     model.data.seq_length=1024 \
     model.data.splits_string=\'980,10,10\' \

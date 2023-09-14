@@ -120,9 +120,9 @@ run: |
     trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
     trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
-    trainer.max_steps=100 \
-    trainer.val_check_interval=20 \
-    trainer.log_every_n_steps=10 \
+    trainer.max_steps=300000 \
+    trainer.val_check_interval=300 \
+    trainer.log_every_n_steps=50 \
     trainer.limit_val_batches=50 \
     trainer.limit_test_batches=50 \
     trainer.accumulate_grad_batches=1 \
