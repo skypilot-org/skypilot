@@ -63,23 +63,23 @@ class RunPodNodeProvider(NodeProvider):
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
-        return self._get_cached_node(node_id=node_id) is not None
+        return self._get_node(node_id=node_id) is not None
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
-        return self._get_cached_node(node_id=node_id) is None
+        return self._get_node(node_id=node_id) is None
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
-        return self._get_cached_node(node_id=node_id)['tags']
+        return self._get_node(node_id=node_id)['tags']
 
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        return self._get_cached_node(node_id=node_id)['ip']
+        return self._get_node(node_id=node_id)['ip']
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        return self._get_cached_node(node_id=node_id)['ip']
+        return self._get_node(node_id=node_id)['ip']
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace."""
@@ -126,22 +126,25 @@ class RunPodNodeProvider(NodeProvider):
         '''
         instances = runpod_api.list_instances()
 
-        new_cache = {}
+        filtered_nodes = {}
         for instance_id, instance in instances.items():
             if instance['status'] not in ['CREATED', 'RUNNING', 'RESTARTING', 'PAUSED']:
                 continue
             if any(tag in instance['tags'] for tag in tag_filters):
-                new_cache[instance_id] = instance
+                filtered_nodes[instance_id] = instance
 
-        self.cached_nodes = new_cache
-        return self.cached_nodes
+        return filtered_nodes
 
     def _get_node(self, node_id: str):
         ''' SkyPilot Method
         Returns the node with the given node_id, if it exists.
         '''
-        self._get_filtered_nodes({})  # Side effect: updates cache
-        return self.cached_nodes.get(node_id, None)
+        instances = runpod_api.list_instances()
+        for instance_id, instance in instances.items():
+            if instance_id == node_id:
+                return instance
+
+        return None
 
     def _get_cached_node(self, node_id):
         ''' SkyPilot Method
