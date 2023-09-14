@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import copy
+import dataclasses
 from datetime import datetime
 import difflib
 import enum
@@ -14,7 +15,8 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    Union)
 import uuid
 
 import colorama
@@ -101,18 +103,52 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Mapping from reserved cluster names to the corresponding group name (logging
-# purpose).
-# NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
-}
 
-# Mapping from reserved cluster prefixes to the corresponding group name
-# (logging purpose).
-SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
-    serve_lib.CONTROLLER_PREFIX: 'SkyServe controller',
-}
+@dataclasses.dataclass
+class ReservedClusterRecord:
+    """Record for reserved cluster group."""
+    group_name: str
+    check: Callable[[str], bool]
+    sky_status_hint: str
+    decline_stop_hint: str
+    decline_cancel_hint: str
+    check_cluster_name_hint: str
+
+
+class ReservedClusterGroup(enum.Enum):
+    """Reserved cluster groups for skypilot."""
+    # NOTE(dev): Keep this align with
+    # sky/cli.py::_RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE
+    SPOT_CONTROLLER = ReservedClusterRecord(
+        group_name='Managed spot controller',
+        check=lambda name: name == spot_lib.SPOT_CONTROLLER_NAME,
+        sky_status_hint=(
+            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
+            f'sky spot queue{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=('Spot controller will be auto-stopped after all '
+                           'spot jobs finish.'),
+        check_cluster_name_hint=(
+            f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
+            'managed spot controller. '))
+    SKY_SERVE_CONTROLLER = ReservedClusterRecord(
+        group_name='Sky Serve controller',
+        check=lambda name: name.startswith(serve_lib.CONTROLLER_PREFIX),
+        sky_status_hint=(
+            f'* To see detailed service status: {colorama.Style.BRIGHT}'
+            f'sky serve status{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=(f'To teardown a service, use {colorama.Style.BRIGHT}'
+                           f'sky serve down{colorama.Style.RESET_ALL}.'),
+        check_cluster_name_hint=(
+            f'Cluster prefix {serve_lib.CONTROLLER_PREFIX} is reserved for '
+            'sky serve controller. '))
+
+    @classmethod
+    def get_group(cls, name: str) -> Optional['ReservedClusterGroup']:
+        for group in cls:
+            if group.value.check(name):
+                return group
+        return None
+
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -2534,7 +2570,7 @@ def get_clusters(
     if not include_reserved:
         records = [
             record for record in records
-            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+            if ReservedClusterGroup.get_group(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2875,16 +2911,11 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
-    msg = None
-    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-    for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
-        if cluster_name is not None and cluster_name.startswith(prefix):
-            msg = (f'Cluster prefix {prefix!r} is reserved for the '
-                   f'{SKY_RESERVED_CLUSTER_PREFIXES[prefix].lower()}.')
-            break
-    if msg is not None:
+    if cluster_name is None:
+        return
+    group = ReservedClusterGroup.get_group(cluster_name)
+    if group is not None:
+        msg = group.value.check_cluster_name_hint
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
