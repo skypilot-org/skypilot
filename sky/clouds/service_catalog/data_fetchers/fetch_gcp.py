@@ -10,7 +10,7 @@ import io
 import multiprocessing
 import os
 import textwrap
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import google.auth
 from googleapiclient import discovery
@@ -83,6 +83,8 @@ gcp_client = discovery.build('compute', 'v1')
 tpu_client = discovery.build('tpu', 'v1')
 
 SINGLE_THREADED = False
+ZONES: List[str] = []
+EXCLUDED_REGIONS: List[str] = []
 
 
 def get_skus(service_id: str) -> List[Dict[str, Any]]:
@@ -140,6 +142,31 @@ def _get_unit_price(sku: Dict[str, Any]) -> float:
     return units + nanos
 
 
+def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
+    """Decorator to filter the zones returned by the decorated function.
+    It first intersects the result with the global ZONES (if defined) and then
+    removes any zones present in the global EXCLUDED_REGIONS (if defined).
+    """
+
+    def wrapper(*arguments,
+                **keyword_args) -> List[str]:  # Renamed args to arguments
+        # Get the original zones from the decorated function
+        original_zones = set(func(*arguments, **keyword_args))
+
+        # Intersect with ZONES if defined
+        if ZONES:
+            original_zones &= set(ZONES)
+
+        # Remove zones from EXCLUDED_REGIONS if defined
+        if EXCLUDED_REGIONS:
+            original_zones -= set(EXCLUDED_REGIONS)
+
+        return list(original_zones)
+
+    return wrapper
+
+
+@filter_zones
 @functools.lru_cache(maxsize=None)
 def _get_all_zones() -> List[str]:
     zones_request = gcp_client.zones().list(project=project_id)
@@ -388,6 +415,8 @@ def _get_tpus() -> pd.DataFrame:
 # TODO: the TPUs fetched fails to contain us-east1
 def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     df = _get_tpus()
+    if df.empty:
+        return df
 
     def get_tpu_price(row: pd.Series, spot: bool) -> float:
         tpu_price = None
@@ -485,10 +514,16 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--all-regions',
+                       action='store_true',
+                       help='Fetch all global regions, not just the U.S. ones.')
+    group.add_argument('--zones',
+                       nargs='+',
+                       help='Fetch the list of specified zones.')
+    parser.add_argument('--exclude',
+                        nargs='+',
+                        help='Exclude the list of specified regions.')
     parser.add_argument('--single-threaded',
                         action='store_true',
                         help='Run in single-threaded mode. This is useful when '
@@ -498,6 +533,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     SINGLE_THREADED = args.single_threaded
+    ZONES = args.zones
+    EXCLUDED_REGIONS = args.exclude
 
     region_prefix_filter = '' if args.all_regions else 'us-'
     catalog_df = get_catalog_df(region_prefix_filter)
