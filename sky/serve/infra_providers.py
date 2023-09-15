@@ -626,10 +626,9 @@ class SkyPilotInfraProvider(InfraProvider):
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
                 continue
-            if info.first_not_ready_time is None:
-                info.first_not_ready_time = time.time()
             current_time = time.time()
-            current_delay_seconds = current_time - info.first_not_ready_time
+            if info.first_not_ready_time is None:
+                info.first_not_ready_time = current_time
             if info.status_property.service_once_ready:
                 info.consecutive_failure_times.append(current_time)
                 consecutive_failure_time = (info.consecutive_failure_times[-1] -
@@ -647,6 +646,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                 f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
             else:
+                current_delay_seconds = current_time - info.first_not_ready_time
                 if current_delay_seconds > self.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeding initial delay seconds. '
