@@ -2739,12 +2739,23 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def validate_schema(obj, schema, err_msg_prefix=''):
-    """Validates an object against a JSON schema.
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
+    """Validates an object against a given JSON schema.
+
+    Args:
+        obj: The object to validate.
+        schema: The JSON schema against which to validate the object.
+        err_msg_prefix: The string to prepend to the error message if
+          validation fails.
+        skip_none: If True, removes fields with value None from the object
+          before validation. This is useful for objects that will never contain
+          None because yaml.safe_load() loads empty fields as None.
 
     Raises:
         ValueError: if the object does not match the schema.
     """
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)

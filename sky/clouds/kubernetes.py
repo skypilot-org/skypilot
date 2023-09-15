@@ -367,3 +367,19 @@ class Kubernetes(clouds.Cloud):
                 cluster_status.append(status_lib.ClusterStatus.INIT)
         # If pods are not found, we don't add them to the return list
         return cluster_status
+
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[List[str]]:
+        k8s = kubernetes.get_kubernetes()
+        try:
+            _, current_context = k8s.config.list_kube_config_contexts()
+            if 'namespace' in current_context['context']:
+                namespace = current_context['context']['namespace']
+            else:
+                namespace = kubernetes_utils.DEFAULT_NAMESPACE
+
+            user = current_context['context']['user']
+            cluster = current_context['context']['cluster']
+            return [f'{cluster}_{user}_{namespace}']
+        except k8s.config.config_exception.ConfigException:
+            return None

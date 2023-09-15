@@ -7,7 +7,7 @@
 #   * Open http://localhost:5111 in your browser
 
 resources:
-  accelerators: T4:1
+  accelerators: A100:1
 
 setup: |
   conda activate py39
@@ -16,17 +16,13 @@ setup: |
   else
     conda create -y -n py39 python=3.9
     conda activate py39
-    git clone https://github.com/romilbhardwaj/localGPT.git
+    git clone https://github.com/PromtEngineer/localGPT.git
     cd localGPT/
-    git checkout localui_update
+    git checkout 5ab5e1921adb45a2df8d61f189a3fb4e9b401e58
     pip install -r requirements.txt
-    cd ..
-
-    # Install AutoGPTQ
-    git clone https://github.com/PanQiWei/AutoGPTQ.git
-    cd AutoGPTQ
-    git checkout v0.2.2
-    pip install .
+    # bitsandbytes>0.39.1 fails on GCP, see issue:
+    # https://github.com/TimDettmers/bitsandbytes/issues/620
+    pip install -U bitsandbytes==0.39.1
   fi
 
 run: |
