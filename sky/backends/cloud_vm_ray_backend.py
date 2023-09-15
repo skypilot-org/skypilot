@@ -2874,7 +2874,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision_config.ports_to_open, lock_path)
             return handle
 
-    def _open_inexistent_ports(self, handle: CloudVmRayResourceHandle,
+    def _open_nonexistent_ports(self, handle: CloudVmRayResourceHandle,
                                ports_to_open: List[str]) -> None:
         cloud = handle.launched_resources.cloud
         if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
