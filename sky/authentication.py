@@ -435,7 +435,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    kubernetes_utils.setup_sshjump_svc(ssh_jump_name, namespace, service_type)
+    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
         PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,

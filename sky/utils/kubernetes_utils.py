@@ -726,22 +726,22 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     return ssh_jump_proxy_command
 
 
-def setup_sshjump_svc(ssh_jump_name: str, namespace: str,
-                      service_type: KubernetesServiceType):
+def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
+                       service_type: KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
-    setup_sshjump_pod(...) method. This service ensures the pod is accessible.
+    setup_ssh_jump_pod(...) method. This service ensures the pod is accessible.
 
     Args:
-        sshjump_name: Name to use for the SSH jump service
+        ssh_jump_name: Name to use for the SSH jump service
         namespace: Namespace to create the SSH jump service in
         service_type: Networking configuration on either to use NodePort
             or ClusterIP service to ssh in
     """
-    # Fill in template - ssh_key_secret and sshjump_image are not required for
+    # Fill in template - ssh_key_secret and ssh_jump_image are not required for
     # the service spec, so we pass in empty strs.
-    content = fill_sshjump_template('', '', ssh_jump_name, service_type.value)
+    content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
     # Create service
     try:
         kubernetes.core_api().create_namespaced_service(namespace,
@@ -788,8 +788,8 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str,
         logger.info(f'Created SSH Jump Service {ssh_jump_name}.')
 
 
-def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
-                      ssh_key_secret: str, namespace: str):
+def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
+                       ssh_key_secret: str, namespace: str):
     """Sets up Kubernetes RBAC and pod for SSH jump host.
 
     Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
@@ -798,18 +798,18 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
     permission to watch for other SkyPilot pods and terminate itself if there
     are no SkyPilot pods running.
 
-    setup_sshjump_service must also be run to ensure that the SSH jump pod is
+    setup_ssh_jump_service must also be run to ensure that the SSH jump pod is
     reachable.
 
     Args:
-        sshjump_image: Container image to use for the SSH jump pod
-        sshjump_name: Name to use for the SSH jump pod
+        ssh_jump_image: Container image to use for the SSH jump pod
+        ssh_jump_name: Name to use for the SSH jump pod
         ssh_key_secret: Secret name for the SSH key stored in the cluster
         namespace: Namespace to create the SSH jump pod in
     """
     # Fill in template - service is created separately so service_type is not
     # required, so we pass in empty str.
-    content = fill_sshjump_template(ssh_key_secret, sshjump_image, sshjump_name,
+    content = fill_ssh_jump_template(ssh_key_secret, ssh_jump_image, ssh_jump_name,
                                     '')
     # ServiceAccount
     try:
@@ -855,20 +855,20 @@ def setup_sshjump_pod(sshjump_name: str, sshjump_image: str,
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.info(
-                f'SSH Jump Host {sshjump_name} already exists in the cluster, '
+                f'SSH Jump Host {ssh_jump_name} already exists in the cluster, '
                 'using it.')
         else:
             raise
     else:
-        logger.info(f'Created SSH Jump Host {sshjump_name}.')
+        logger.info(f'Created SSH Jump Host {ssh_jump_name}.')
 
 
-def clean_zombie_sshjump_pod(namespace: str, node_id: str):
+def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
     """Analyzes SSH jump pod and removes if it is in a bad state
 
     Prevents the existence of a dangling SSH jump pod. This could happen
     in case the pod main container did not start properly (or failed). In that
-    case, jump pod lifecycle management (LCM) will not functioning properly to
+    case, jump pod lifecycle manager will not function properly to
     remove the pod and service automatically, and must be done manually.
 
     Args:
@@ -890,48 +890,48 @@ def clean_zombie_sshjump_pod(namespace: str, node_id: str):
                            ' but the pod was not found (404).')
         raise
     else:
-        sshjump_name = pod.metadata.labels.get('skypilot-sshjump')
+        ssh_jump_name = pod.metadata.labels.get('skypilot-ssh-jump')
     try:
-        sshjump_pod = kubernetes.core_api().read_namespaced_pod(
-            sshjump_name, namespace)
-        cont_ready_cond = find(sshjump_pod.status.conditions,
+        ssh_jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_name, namespace)
+        cont_ready_cond = find(ssh_jump_pod.status.conditions,
                                lambda c: c.type == 'ContainersReady')
         if cont_ready_cond and \
             cont_ready_cond.status == 'False':
             # The main container is not ready. To be on the safe side
-            # and prevent a dangling sshjump pod, lets remove it and
+            # and prevent a dangling ssh jump pod, lets remove it and
             # the service. Otherwise main container is ready and its lifecycle
             # management script takes care of the cleaning.
-            kubernetes.core_api().delete_namespaced_pod(sshjump_name, namespace)
+            kubernetes.core_api().delete_namespaced_pod(ssh_jump_name, namespace)
             kubernetes.core_api().delete_namespaced_service(
-                sshjump_name, namespace)
+                ssh_jump_name, namespace)
     # only warn and proceed as usual
     except kubernetes.api_exception() as e:
-        logger.warning(f'Tried to check sshjump pod {sshjump_name},'
+        logger.warning(f'Tried to check ssh jump pod {ssh_jump_name},'
                        f' but got error {e}\n. Consider running `kubectl '
-                       f'delete pod {sshjump_name} -n {namespace}` to manually '
+                       f'delete pod {ssh_jump_name} -n {namespace}` to manually '
                        'remove the pod if it has crashed.')
-        # We encountered an issue while checking sshjump pod. To be on
+        # We encountered an issue while checking ssh jump pod. To be on
         # the safe side, lets remove its service so the port is freed
         try:
             kubernetes.core_api().delete_namespaced_service(
-                sshjump_name, namespace)
+                ssh_jump_name, namespace)
         except kubernetes.api_exception():
             pass
 
 
-def fill_sshjump_template(ssh_key_secret: str, sshjump_image: str,
-                          sshjump_name: str, service_type: str) -> Dict:
+def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
+                           ssh_jump_name: str, service_type: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
-                                 'kubernetes-sshjump.yml.j2')
+                                 'kubernetes-ssh-jump.yml.j2')
     if not os.path.exists(template_path):
         raise FileNotFoundError(
-            'Template "kubernetes-sshjump.j2" does not exist.')
+            'Template "kubernetes-ssh-jump.j2" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
-    cont = j2_template.render(name=sshjump_name,
-                              image=sshjump_image,
+    cont = j2_template.render(name=ssh_jump_name,
+                              image=ssh_jump_image,
                               secret=ssh_key_secret,
                               service_type=service_type)
     content = yaml.safe_load(cont)

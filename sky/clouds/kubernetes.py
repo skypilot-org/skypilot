@@ -28,7 +28,7 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-    SKY_SSH_JUMP_NAME = f'sky-sshjump-{common_utils.get_user_hash()}'
+    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
         'kubernetes-port-forward-proxy-command.sh.j2'
     PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
@@ -213,7 +213,7 @@ class Kubernetes(clouds.Cloud):
         image_id = service_catalog.get_image_id_from_tag(image_id,
                                                          clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
-        sshjump_image = service_catalog.get_image_id_from_tag(self.IMAGE_CPU,
+        ssh_jump_image = service_catalog.get_image_id_from_tag(self.IMAGE_CPU,
                                                          clouds='kubernetes')
 
         k8s_acc_label_key = None
@@ -235,8 +235,8 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
-            'k8s_sshjump_name': self.SKY_SSH_JUMP_NAME,
-            'k8s_sshjump_image': sshjump_image,
+            'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
+            'k8s_ssh_jump_image': ssh_jump_image,
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }

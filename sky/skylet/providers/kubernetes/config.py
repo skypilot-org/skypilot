@@ -267,8 +267,8 @@ def _configure_ssh_jump(namespace, config):
     """
     pod_cfg = config['available_node_types']['ray_head_default']['node_config']
 
-    sshjump_name = pod_cfg['metadata']['labels']['skypilot-sshjump']
-    sshjump_image = config['provider']['sshjump_image']
+    ssh_jump_name = pod_cfg['metadata']['labels']['skypilot-ssh-jump']
+    ssh_jump_image = config['provider']['ssh_jump_image']
 
     volumes = pod_cfg['spec']['volumes']
     # find 'secret-volume' and get the secret name
@@ -288,8 +288,8 @@ def _configure_ssh_jump(namespace, config):
     #  and available before we create the SSH jump pod. If for any reason the
     #  service is missing, we should raise an error.
 
-    kubernetes_utils.setup_sshjump_pod(sshjump_name, sshjump_image,
-                                       ssh_key_secret_name, namespace)
+    kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
+                                        ssh_key_secret_name, namespace)
     return config
 
 

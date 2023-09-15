@@ -23,7 +23,7 @@ provider:
 
     timeout: {{timeout}}
 
-    sshjump_image: {{k8s_sshjump_image}}
+    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -130,7 +130,7 @@ available_node_types:
             component: {{cluster_name_on_cloud}}-ray-head
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
-            skypilot-sshjump: {{k8s_sshjump_name}}
+            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
