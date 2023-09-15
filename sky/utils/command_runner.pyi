@@ -24,8 +24,11 @@ def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
     *,
+    ssh_proxy_command: Optional[str] = ...,
+    docker_ssh_proxy_command: Optional[str] = ...,
     timeout: int = ...,
-    disable_control_master: Optional[bool] = False,
+    port: int = ...,
+    disable_control_master: Optional[bool] = ...,
 ) -> List[str]:
     ...
 

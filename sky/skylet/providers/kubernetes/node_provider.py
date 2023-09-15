@@ -319,12 +319,12 @@ class KubernetesNodeProvider(NodeProvider):
         # Kubernetes automatically populates containers with critical
         # environment variables, such as those for discovering services running
         # in the cluster and CUDA/nvidia environment variables. We need to
-        # update task environment variables with these env vars. This is needed
-        # for GPU support and service discovery.
+        # make sure these env vars are available in every task and ssh session.
+        # This is needed for GPU support and service discovery.
         # See https://github.com/skypilot-org/skypilot/issues/2287 for
         # more details.
-        # Capturing env vars from the pod's runtime and writes them to
-        # /etc/profile.d/ making them available for all users in future
+        # To do so, we capture env vars from the pod's runtime and write them to
+        # /etc/profile.d/, making them available for all users in future
         # shell sessions.
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',

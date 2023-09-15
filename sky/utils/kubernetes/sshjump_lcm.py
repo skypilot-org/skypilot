@@ -60,8 +60,8 @@ def poll():
             raise
 
         if len(ret.items) == 0:
-            sys.stdout.write(f'Did not pods with label "{label_selector}" in '
-                             f'namespace {current_namespace}\n')
+            sys.stdout.write(f'Did not find pods with label "{label_selector}" '
+                             f'in namespace {current_namespace}\n')
             nocluster_delta = nocluster_delta + retry_interval_delta
             sys.stdout.write(
                 f'Time since no pods found: {nocluster_delta}, alert '

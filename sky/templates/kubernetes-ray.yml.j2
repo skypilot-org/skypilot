@@ -16,7 +16,9 @@ provider:
     type: external
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
-    # Use False if running from outside of k8s cluster
+    # We use internal IPs since we set up a port-forward between the kubernetes
+    # cluster and the local machine, or directly use NodePort to reach the
+    # head node.
     use_internal_ips: true
 
     timeout: {{timeout}}

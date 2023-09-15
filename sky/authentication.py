@@ -380,11 +380,18 @@ def setup_scp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Default ssh session is established with kubectl port-forwarding with
-    # ClusterIP service
+    # ClusterIP service.
     nodeport_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD
-    ssh_setup_mode = skypilot_config.get_nested(('kubernetes', 'networking'),
+    network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
                                                 port_forward_mode.value)
+    try:
+        network_mode = kubernetes_utils.KubernetesNetworkingMode.from_str(network_mode_str)
+    except ValueError as e:
+        # Add message saying "Please check: ~/.sky/config.yaml" to the error
+        # message.
+        e.message += f'\nPlease check {skypilot_config.CONFIG_PATH}.'
+        raise
     get_or_generate_keys()
 
     # Run kubectl command to add the public key to the cluster.
@@ -412,24 +419,18 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             raise
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
-    if ssh_setup_mode.lower() == nodeport_mode.value:
-        network_mode = nodeport_mode
+    if network_mode == nodeport_mode:
         service_type = kubernetes_utils.KubernetesServiceType.NODEPORT
-
-    elif ssh_setup_mode.lower() == port_forward_mode.value:
+    elif network_mode == port_forward_mode:
         kubernetes_utils.check_port_forward_mode_dependencies()
-        network_mode = port_forward_mode
         # Using `kubectl port-forward` creates a direct tunnel to jump pod and
         # does not require opening any ports on Kubernetes nodes. As a result,
         # the service can be a simple ClusterIP service which we access with
         # `kubectl port-forward`.
         service_type = kubernetes_utils.KubernetesServiceType.CLUSTERIP
     else:
-        raise ValueError(f'Unsupported kubernetes networking mode: '
-                         f'{ssh_setup_mode}. The mode has to be either '
-                         f'\'{port_forward_mode.value}\' or '
-                         f'\'{nodeport_mode.value}\'. '
-                         'Please check: ~/.sky/config.yaml')
+        # This should never happen because we check for this in from_str above.
+        raise ValueError(f'Unsupported networking mode: {network_mode_str}')
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.

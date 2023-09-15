@@ -41,6 +41,20 @@ class KubernetesNetworkingMode(enum.Enum):
     NODEPORT = 'nodeport'
     PORTFORWARD = 'portforward'
 
+    @classmethod
+    def from_str(cls, mode: str) -> 'KubernetesNetworkingMode':
+        """Returns the enum value for the given string."""
+        if mode.lower() == cls.NODEPORT.value:
+            return cls.NODEPORT
+        elif mode.lower() == cls.PORTFORWARD.value:
+            return cls.PORTFORWARD
+        else:
+            raise ValueError(f'Unsupported kubernetes networking mode: '
+                             f'{mode}. The mode has to be either '
+                             f'\'{cls.PORTFORWARD.value}\' or '
+                             f'\'{cls.NODEPORT.value}\'. ')
+
+
 
 class KubernetesServiceType(enum.Enum):
     """Enum for the different types of services."""
@@ -741,7 +755,7 @@ def setup_sshjump_svc(ssh_jump_name: str, namespace: str,
             if service_type.value == curr_svc_type:
                 # If the currently existing SSH Jump service's type is identical
                 # to user's configuration for networking mode
-                logger.warning(
+                logger.debug(
                     f'SSH Jump Service {ssh_jump_name} already exists in the '
                     'cluster, using it.')
             else:
@@ -938,5 +952,7 @@ def check_port_forward_mode_dependencies() -> None:
                     f'`{name}` is required to setup Kubernetes cloud with '
                     f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
                     'networking mode and it is not installed. '
-                    'For Debian/Ubuntu system, install it with:\n'
-                    f'  $ sudo apt install {name}') from None
+                    'On Debian/Ubuntu, install it with:\n'
+                    f'  $ sudo apt install {name}\n'
+                    f'On MacOS, install it with: \n'
+                    f'  $ brew install {name}') from None
