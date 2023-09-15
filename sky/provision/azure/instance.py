@@ -38,36 +38,42 @@ def open_ports(
     subscription_id = provider_config['subscription_id']
     resource_group = provider_config['resource_group']
     network_client = azure.get_client('network', subscription_id)
-    create_or_update = get_azure_sdk_function(
-        client=network_client.security_rules, function_name='create_or_update')
-    rule_name = f'user-ports-{"-".join(ports)}'
-
-    def security_rule_parameters(priority: int) -> Dict[str, Any]:
-        return {
-            'priority': priority,
-            'protocol': 'TCP',
-            'access': 'Allow',
-            'direction': 'Inbound',
-            'sourceAddressPrefix': '*',
-            'sourcePortRange': '*',
-            'destinationAddressPrefix': '*',
-            'destinationPortRanges': ports,
-        }
-
+    # The NSG should have been created by the cluster provisioning.
+    update_network_security_groups = get_azure_sdk_function(
+        client=network_client.network_security_groups,
+        function_name='create_or_update')
     list_network_security_groups = get_azure_sdk_function(
         client=network_client.network_security_groups, function_name='list')
+    rule_name = f'sky-ports-{cluster_name_on_cloud}'
     for nsg in list_network_security_groups(resource_group):
         try:
             # Azure NSG rules have a priority field that determines the order
             # in which they are applied. The priority must be unique across
             # all inbound rules in one NSG.
-            max_inbound_priority = max([
-                rule.priority
-                for rule in nsg.security_rules
-                if rule.direction == 'Inbound'
-            ])
-            create_or_update(resource_group, nsg.name, rule_name,
-                             security_rule_parameters(max_inbound_priority + 1))
+            max_inbound_priority = 0
+            rule_exist = False
+            for rule in nsg.security_rules:
+                if rule.direction == 'Inbound':
+                    max_inbound_priority = max(max_inbound_priority,
+                                               rule.priority)
+                if rule.name == rule_name:
+                    rule_exist = True
+                    rule.destination_port_ranges.extend(ports)
+                    break
+            if not rule_exist:
+                nsg.security_rules.append(
+                    azure.create_security_rule(
+                        name=rule_name,
+                        priority=max_inbound_priority + 1,
+                        protocol='Tcp',
+                        access='Allow',
+                        direction='Inbound',
+                        source_address_prefix='*',
+                        source_port_range='*',
+                        destination_address_prefix='*',
+                        destination_port_ranges=ports,
+                    ))
+            update_network_security_groups(resource_group, nsg.name, nsg)
         except azure.http_error_exception() as e:
             logger.warning(
                 f'Failed to open ports {ports} in NSG {nsg.name}: {e}')

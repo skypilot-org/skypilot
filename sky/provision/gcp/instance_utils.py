@@ -1,4 +1,5 @@
 """Utilities for GCP instances."""
+import re
 from typing import Dict, List, Optional
 
 from sky import sky_logging
@@ -9,6 +10,9 @@ logger = sky_logging.init_logger(__name__)
 # Using v2 according to
 # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
 TPU_VERSION = 'v2'
+
+_FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/global/firewalls/.*\' was not found')
 
 
 def instance_to_handler(instance: str):
@@ -97,18 +101,15 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def create_firewall_rule(
+    def create_or_update_firewall_rule(
         cls,
+        firewall_rule_name: str,
         project_id: str,
         cluster_name_on_cloud: str,
         ports: List[str],
         vpc_name: str,
-    ) -> dict:
+    ) -> Optional[dict]:
         raise NotImplementedError
-
-
-def _get_firewall_rule_prefix(cluster_name_on_cloud: str) -> str:
-    return f'user-ports-{cluster_name_on_cloud}-'
 
 
 class GCPComputeInstance(GCPInstance):
@@ -233,16 +234,12 @@ class GCPComputeInstance(GCPInstance):
     def delete_firewall_rule(
         cls,
         project_id: str,
-        cluster_name_on_cloud: str,
+        firewall_rule_name: str,
     ) -> None:
-        prefix = _get_firewall_rule_prefix(cluster_name_on_cloud)
-        previous_names = cls.get_firewall_rule_names_start_with(
-            project_id, prefix)
-        for rule_name in previous_names:
-            cls.load_resource().firewalls().delete(
-                project=project_id,
-                firewall=rule_name,
-            ).execute()
+        cls.load_resource().firewalls().delete(
+            project=project_id,
+            firewall=firewall_rule_name,
+        ).execute()
 
     @classmethod
     def get_vpc_name(
@@ -272,45 +269,48 @@ class GCPComputeInstance(GCPInstance):
         return [rule['name'] for rule in response.get('items', [])]
 
     @classmethod
-    def create_firewall_rule(
+    def create_or_update_firewall_rule(
         cls,
+        firewall_rule_name: str,
         project_id: str,
         cluster_name_on_cloud: str,
         ports: List[str],
         vpc_name: str,
-    ) -> dict:
-        prefix = _get_firewall_rule_prefix(cluster_name_on_cloud)
-        previous_names = cls.get_firewall_rule_names_start_with(
-            project_id, prefix)
-        serial = 0
-        while True:
-            if f'{prefix}{serial}' not in previous_names:
-                # GCP's firewall rule name can only contain 63 characters.
-                # The prefix is 12 + len(cluster_name_on_cloud) characters,
-                # which is up to 47 characters since cluster_name_on_cloud
-                # is 35 characters at most (see gcp.py). That left 16 characters
-                # for the serial number, which is enough to use.
-                name = f'{prefix}{serial}'
-                break
-            serial += 1
-        body = {
-            'name': name,
-            'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
-            'network': f'projects/{project_id}/global/networks/{vpc_name}',
-            'selfLink': f'projects/{project_id}/global/firewalls/' + name,
-            'direction': 'INGRESS',
-            'priority': 65534,
-            'allowed': [{
-                'IPProtocol': 'tcp',
-                'ports': ports,
-            }],
-            'sourceRanges': ['0.0.0.0/0'],
-            'targetTags': [cluster_name_on_cloud],
-        }
-        operation = cls.load_resource().firewalls().insert(
-            project=project_id,
-            body=body,
-        ).execute()
+    ) -> Optional[dict]:
+        try:
+            body = cls.load_resource().firewalls().get(
+                project=project_id, firewall=firewall_rule_name).execute()
+            body['allowed'][0]['ports'].extend(ports)
+            operation = cls.load_resource().firewalls().update(
+                project=project_id,
+                firewall=firewall_rule_name,
+                body=body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            if _FIREWALL_RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+                logger.warning(
+                    f'Failed to update firewall rule {firewall_rule_name}: '
+                    f'{e.reason}')
+                return None
+            body = {
+                'name': firewall_rule_name,
+                'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
+                'network': f'projects/{project_id}/global/networks/{vpc_name}',
+                'selfLink': f'projects/{project_id}/global/firewalls/' +
+                            firewall_rule_name,
+                'direction': 'INGRESS',
+                'priority': 65534,
+                'allowed': [{
+                    'IPProtocol': 'tcp',
+                    'ports': ports,
+                }],
+                'sourceRanges': ['0.0.0.0/0'],
+                'targetTags': [cluster_name_on_cloud],
+            }
+            operation = cls.load_resource().firewalls().insert(
+                project=project_id,
+                body=body,
+            ).execute()
         return operation
 
 

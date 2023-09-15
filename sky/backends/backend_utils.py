@@ -136,7 +136,7 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #   well as the disabling of the auto-update with apt-get.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
-    ('provider', 'ports'),
+    ('provider', 'firewall_rule'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
@@ -992,9 +992,11 @@ def write_cluster_config(
         cluster_name, max_length=cloud.max_cluster_name_length())
 
     # Only using new security group names for clusters with ports specified.
-    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+    aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+    gcp_firewall_rule = None
     if ports is not None:
-        default_aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
+        aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
+        gcp_firewall_rule = f'sky-ports-{cluster_name_on_cloud}'
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
@@ -1006,7 +1008,6 @@ def write_cluster_config(
             **{
                 'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
-                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -1021,7 +1022,7 @@ def write_cluster_config(
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), default_aws_sg_name),
+                    ('aws', 'security_group_name'), aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -1040,6 +1041,7 @@ def write_cluster_config(
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
+                'firewall_rule': gcp_firewall_rule,
 
                 # Conda setup
                 'conda_installation_commands':

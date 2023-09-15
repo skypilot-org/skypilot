@@ -182,6 +182,7 @@ def open_ports(
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
+    firewall_rule_name = provider_config['firewall_rule']
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     handlers: List[Type[instance_utils.GCPInstance]] = [
@@ -212,13 +213,16 @@ def open_ports(
                 RuntimeError(f'Failed to get VPC name for instance '
                              f'{instances[0]}'))
         else:
-            operations[handler].append(
-                handler.create_firewall_rule(
-                    project_id,
-                    cluster_name_on_cloud,
-                    ports,
-                    vpc_name,
-                ))
+            op = handler.create_or_update_firewall_rule(
+                firewall_rule_name,
+                project_id,
+                cluster_name_on_cloud,
+                ports,
+                vpc_name,
+            )
+            # op is None if any error occurs.
+            if op is not None:
+                operations[handler].append(op)
     # Use zone = None to indicate wait for global operations
     _wait_for_operations(operations, project_id, None)
     if errs:
@@ -231,9 +235,10 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
-    if 'ports' not in provider_config:
+    if 'firewall_rule' not in provider_config:
         # No new ports were opened, so there is nothing to clean up.
         return
     project_id = provider_config['project_id']
+    firewall_rule_name = provider_config['firewall_rule']
     instance_utils.GCPComputeInstance.delete_firewall_rule(
-        project_id, cluster_name_on_cloud)
+        project_id, firewall_rule_name)

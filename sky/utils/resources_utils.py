@@ -1,14 +1,16 @@
 """Utility functions for resources."""
 import itertools
-from typing import List, Set
+from typing import List, Optional, Set
 
 
 # TODO(tian): Maybe we need more intuitive names for these functions.
-def parse_ports(ports: List[str]) -> Set[int]:
+def parse_ports(ports: Optional[List[str]]) -> Set[int]:
     """Parse a list of ports into a set that containing no duplicates.
 
     For example, ['1-3', '5-7'] will be parsed to {1, 2, 3, 5, 6, 7}.
     """
+    if ports is None:
+        return set()
     port_set = set()
     for port in ports:
         if port.isdigit():
@@ -19,13 +21,15 @@ def parse_ports(ports: List[str]) -> Set[int]:
     return port_set
 
 
-def parse_port_set(port_set: Set[int]) -> List[str]:
+def parse_port_set(port_set: Optional[Set[int]]) -> List[str]:
     """Parse a set of ports into the skypilot ports format.
 
     This function will group consecutive ports together into a range,
     and keep the rest as is. For example, {1, 2, 3, 5, 6, 7} will be
     parsed to ['1-3', '5-7'].
     """
+    if port_set is None:
+        return []
     ports: List[str] = []
     # Group consecutive ports together.
     # This algorithm is based on one observation: consecutive numbers

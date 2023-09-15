@@ -260,12 +260,16 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
-    if 'ports' not in provider_config:
-        return
+    assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
+    # NOTE(dev): Keep this the same with backend_utils::write_cluster_config
+    if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
+        # This is the default shared AWS SG. We only want to delete the SG
+        # that is dedicated to this cluster (i.e., this cluster have opened
+        # some ports).
+        return
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
         logger.warning(

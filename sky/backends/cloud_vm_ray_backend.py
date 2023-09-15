@@ -625,7 +625,6 @@ class RetryingVmProvisioner(object):
             cluster_name: str,
             resources: resources_lib.Resources,
             num_nodes: int,
-            ports_to_open: Optional[List[str]] = None,
             prev_cluster_status: Optional[status_lib.ClusterStatus] = None,
             prev_handle: Optional['CloudVmRayResourceHandle'] = None,
         ) -> None:
@@ -633,7 +632,6 @@ class RetryingVmProvisioner(object):
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
-            self.ports_to_open = ports_to_open
             self.prev_cluster_status = prev_cluster_status
             self.prev_handle = prev_handle
 
@@ -2869,13 +2867,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            self._update_after_cluster_provisioned(
-                handle, task, prev_cluster_status, ip_list, ssh_port_list,
-                to_provision_config.ports_to_open, lock_path)
+            existing_ports = []
+            if to_provision_config.prev_handle is not None:
+                existing_ports = (
+                    to_provision_config.prev_handle.launched_resources.ports)
+            ports_to_open = resources_utils.parse_port_set(
+                resources_utils.parse_ports(handle.launched_resources.ports) -
+                resources_utils.parse_ports(existing_ports))
+            self._update_after_cluster_provisioned(handle, task,
+                                                   prev_cluster_status, ip_list,
+                                                   ssh_port_list, ports_to_open,
+                                                   lock_path)
             return handle
 
     def _open_nonexistent_ports(self, handle: CloudVmRayResourceHandle,
-                               ports_to_open: List[str]) -> None:
+                                ports_to_open: List[str]) -> None:
         cloud = handle.launched_resources.cloud
         if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
             logger.warning(f'Cannot open ports for {cloud} that not support '
@@ -2891,7 +2897,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], ssh_port_list: List[int],
-            ports_to_open: Optional[List[str]], lock_path: str) -> None:
+            ports_to_open: List[str], lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -2936,8 +2942,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
 
-        # This include ports_to_open is not None and not empty.
         if ports_to_open:
+            logger.info(
+                f'Cluster {handle.cluster_name!r} exist before but does not '
+                f'satisfy the ports requirements in task.yaml. Opening new '
+                f'ports: {ports_to_open}')
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
                 self._open_nonexistent_ports(handle, ports_to_open)
@@ -4201,41 +4210,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     force_refresh_statuses={status_lib.ClusterStatus.INIT},
                     acquire_per_cluster_status_lock=False,
                 ))
-        assert len(task.resources) == 1
-        required_ports = list(task.resources)[0].ports
-        if required_ports is None:
-            required_ports = []
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            existing_ports = handle.launched_resources.ports
-            if existing_ports is None:
-                existing_ports = []
-            ports_to_open = resources_utils.parse_port_set(
-                resources_utils.parse_ports(required_ports) -
-                resources_utils.parse_ports(existing_ports))
-            if ports_to_open:
-                logger.info(
-                    f'Cluster {cluster_name!r} exist before but does not '
-                    f'satisfy the ports requirements in task.yaml. Opening '
-                    f'new ports: {ports_to_open}')
-            if dryrun:
-                to_provision = handle.launched_resources
-            else:
-                # We pass new ports here to write to cluster config file.
-                # This will automatically change AWS SG name in provider config
-                # too, so we check if we are using default SG by name, and
-                # change to new SG in new provisioner API if needed.
-                to_provision = handle.launched_resources.copy(
-                    ports=existing_ports + ports_to_open)
+            assert len(task.resources) == 1
+            all_ports = resources_utils.parse_port_set(
+                resources_utils.parse_ports(handle.launched_resources.ports) |
+                resources_utils.parse_ports(list(task.resources)[0].ports))
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
-                to_provision,
+                handle.launched_resources.copy(ports=all_ports),
                 handle.launched_nodes,
-                ports_to_open=ports_to_open,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle)
         usage_lib.messages.usage.set_new_cluster()
@@ -4286,11 +4274,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Tip: to reuse an existing cluster, '
                 'specify --cluster (-c). '
                 'Run `sky status` to see existing clusters.')
-        return RetryingVmProvisioner.ToProvisionConfig(
-            cluster_name,
-            to_provision,
-            task.num_nodes,
-            ports_to_open=required_ports)
+        return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
+                                                       to_provision,
+                                                       task.num_nodes)
 
     def _set_tpu_name(self, handle: CloudVmRayResourceHandle,
                       tpu_name: str) -> None:

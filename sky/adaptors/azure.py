@@ -67,3 +67,9 @@ def get_client(name: str, subscription_id: str):
             return ResourceManagementClient(credential, subscription_id)
         else:
             raise ValueError(f'Client not supported: "{name}"')
+
+
+@import_package
+def create_security_rule(**kwargs):
+    from azure.mgmt.network.models import SecurityRule
+    return SecurityRule(**kwargs)
