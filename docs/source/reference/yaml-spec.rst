@@ -92,14 +92,11 @@ Available fields:
       # ports are already open. It will bypass the already opened ports and only open those
       # that are not. Once the cluster is terminated, SkyPilot will remove all firewall rules
       # or security groups related to that cluster.
+      # If you only have one port or range to expose, you can use the following shorthand: 
+      # `ports: 8081` or `ports: 10052-10100`
       ports:
         - 8080
         - 10022-10040
-
-      # If you only have one port or range to expose, you can use the following shorthand:
-      ports: 8081
-      # or
-      ports: 10052-10100
 
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
