@@ -2940,7 +2940,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if ports_to_open:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
-                self._open_inexistent_ports(handle, ports_to_open)
+                self._open_nonexistent_ports(handle, ports_to_open)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
