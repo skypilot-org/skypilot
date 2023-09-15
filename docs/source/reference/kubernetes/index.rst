@@ -17,8 +17,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 
 * Get SkyPilot features (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
 * Replace complex Kubernetes manifests with simple SkyPilot tasks
-* Maximize resource utilization by running cloud jobs on your Kubernetes cluster
-* Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested
+* Seamlessly "burst" jobs to the cloud if your Kubernetes cluster is congested
 * Retain observability and control over your cluster with your existing Kubernetes tools
 
 **Supported deployment models:**
@@ -34,7 +33,7 @@ Kubernetes Cluster Requirements
 To connect and use a Kubernetes cluster, SkyPilot needs:
 
 * An existing Kubernetes cluster running Kubernetes v1.20 or later.
-* A `Kubeconfig <kubeconfig>`_ file containing access credentials and namespace to be used.
+* A `Kubeconfig <https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/>`_ file containing access credentials and namespace to be used.
 
 In a typical workflow:
 
@@ -133,7 +132,7 @@ FAQs
 
 * **I have multiple users in my organization who share the same Kubernetes cluster. How do I provide isolation for their SkyPilot workloads?**
 
-  You can create an individual Kubernetes namespace for each user and set it in the kubeconfig distributed to the user. SkyPilot will use this namespace for running all tasks.
+  For isolation, you can create separate Kubernetes namespaces and set them in the kubeconfig distributed to users. SkyPilot will use the namespace set in the kubeconfig for running all tasks.
 
 Features and Roadmap
 --------------------
