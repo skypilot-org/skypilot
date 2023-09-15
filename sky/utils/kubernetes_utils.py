@@ -50,10 +50,9 @@ class KubernetesNetworkingMode(enum.Enum):
             return cls.PORTFORWARD
         else:
             raise ValueError(f'Unsupported kubernetes networking mode: '
-                             f'{mode}. The mode has to be either '
+                             f'{mode}. The mode must be either '
                              f'\'{cls.PORTFORWARD.value}\' or '
                              f'\'{cls.NODEPORT.value}\'. ')
-
 
 
 class KubernetesServiceType(enum.Enum):
@@ -809,8 +808,8 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
     """
     # Fill in template - service is created separately so service_type is not
     # required, so we pass in empty str.
-    content = fill_ssh_jump_template(ssh_key_secret, ssh_jump_image, ssh_jump_name,
-                                    '')
+    content = fill_ssh_jump_template(ssh_key_secret, ssh_jump_image,
+                                     ssh_jump_name, '')
     # ServiceAccount
     try:
         kubernetes.core_api().create_namespaced_service_account(
@@ -902,15 +901,17 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
             # and prevent a dangling ssh jump pod, lets remove it and
             # the service. Otherwise main container is ready and its lifecycle
             # management script takes care of the cleaning.
-            kubernetes.core_api().delete_namespaced_pod(ssh_jump_name, namespace)
+            kubernetes.core_api().delete_namespaced_pod(ssh_jump_name,
+                                                        namespace)
             kubernetes.core_api().delete_namespaced_service(
                 ssh_jump_name, namespace)
     # only warn and proceed as usual
     except kubernetes.api_exception() as e:
-        logger.warning(f'Tried to check ssh jump pod {ssh_jump_name},'
-                       f' but got error {e}\n. Consider running `kubectl '
-                       f'delete pod {ssh_jump_name} -n {namespace}` to manually '
-                       'remove the pod if it has crashed.')
+        logger.warning(
+            f'Tried to check ssh jump pod {ssh_jump_name},'
+            f' but got error {e}\n. Consider running `kubectl '
+            f'delete pod {ssh_jump_name} -n {namespace}` to manually '
+            'remove the pod if it has crashed.')
         # We encountered an issue while checking ssh jump pod. To be on
         # the safe side, lets remove its service so the port is freed
         try:

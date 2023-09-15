@@ -384,14 +384,16 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     nodeport_mode = kubernetes_utils.KubernetesNetworkingMode.NODEPORT
     port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD
     network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
-                                                port_forward_mode.value)
+                                                  port_forward_mode.value)
     try:
-        network_mode = kubernetes_utils.KubernetesNetworkingMode.from_str(network_mode_str)
+        network_mode = kubernetes_utils.KubernetesNetworkingMode.from_str(
+            network_mode_str)
     except ValueError as e:
         # Add message saying "Please check: ~/.sky/config.yaml" to the error
         # message.
-        e.message += f'\nPlease check {skypilot_config.CONFIG_PATH}.'
-        raise
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
+                from None
     get_or_generate_keys()
 
     # Run kubectl command to add the public key to the cluster.
