@@ -1,6 +1,6 @@
 .. _kubernetes-overview:
 
-Running SkyPilot on Kubernetes (Alpha)
+Deploying on Kubernetes (Alpha)
 ======================================
 
 .. note::

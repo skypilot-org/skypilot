@@ -1,3 +1,5 @@
+:orphan:
+
 .. _local-overview:
 
 SkyPilot On-prem
