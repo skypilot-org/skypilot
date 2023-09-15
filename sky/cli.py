@@ -1630,6 +1630,11 @@ def _get_spot_jobs(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.option('--ip',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Only query the IP address of the cluster. ')
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
@@ -1642,7 +1647,8 @@ def _get_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
+def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
+           clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1653,6 +1659,10 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
     command.
 
     Display all fields using ``sky status -a``.
+
+    Only display the IP address of the cluster using
+    ``sky status --ip <cluster-name>``. This option will override all other
+    options.
 
     Each cluster can have one of the following statuses:
 
@@ -1695,8 +1705,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
     # Using a pool with 1 worker to run the spot job query in parallel to speed
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
-        # Do not show spot queue if user specifies clusters.
-        show_spot_jobs = show_spot_jobs and not clusters
+        # Do not show spot queue if user specifies clusters, and if user
+        # specifies --ip.
+        show_spot_jobs = show_spot_jobs and not clusters and not ip
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1706,13 +1717,40 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+        if not ip:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
+        if ip:
+            if len(cluster_records) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'{len(cluster_records)} cluster found. Please specify '
+                        'exactly one cluster (or glob that only matches one '
+                        'cluster) to show its IP address.')
+            cluster_record = cluster_records[0]
+            if cluster_record['status'] != status_lib.ClusterStatus.UP:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Cluster is not in UP status. ')
+            handle = cluster_record['handle']
+            if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Querying IP address is not supported '
+                                     'for local clusters.')
+            head_ip = handle.head_ip
+            if head_ip is None:
+                # Try fetching the IP address again.
+                head_ip = handle.external_ips()[0]
+                if head_ip is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError('Failed to fetch IP address. '
+                                           'Please try again later.')
+            click.echo(head_ip)
+            return
         nonreserved_cluster_records = []
         reserved_clusters = []
         for cluster_record in cluster_records:
