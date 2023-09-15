@@ -148,6 +148,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
+DEFAULT_AWS_SG_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -992,9 +994,10 @@ def write_cluster_config(
         cluster_name, max_length=cloud.max_cluster_name_length())
 
     # Only using new security group names for clusters with ports specified.
-    aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+    aws_sg_name = DEFAULT_AWS_SG_NAME
     gcp_firewall_rule = None
-    if ports is not None:
+    # This include the case where ports is None or empty.
+    if ports:
         aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
         gcp_firewall_rule = f'sky-ports-{cluster_name_on_cloud}'
 

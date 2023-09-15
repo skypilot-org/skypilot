@@ -2867,37 +2867,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            existing_ports = []
-            if to_provision_config.prev_handle is not None:
-                existing_ports = (
-                    to_provision_config.prev_handle.launched_resources.ports)
-            ports_to_open = resources_utils.parse_port_set(
-                resources_utils.parse_ports(handle.launched_resources.ports) -
-                resources_utils.parse_ports(existing_ports))
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
-                                                   ssh_port_list, ports_to_open,
-                                                   lock_path)
+                                                   ssh_port_list, lock_path)
             return handle
 
-    def _open_nonexistent_ports(self, handle: CloudVmRayResourceHandle,
-                                ports_to_open: List[str]) -> None:
+    def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
         if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
             logger.warning(f'Cannot open ports for {cloud} that not support '
                            'new provisioner API.')
             return
-        logger.debug(f'Opening new ports {ports_to_open} for {cloud}')
+        logger.debug(
+            f'Opening new ports {handle.launched_resources.ports} for {cloud}')
         config = common_utils.read_yaml(handle.cluster_yaml)
         provider_config = config['provider']
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
-                                 ports_to_open, provider_config)
+                                 handle.launched_resources.ports,
+                                 provider_config)
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], ssh_port_list: List[int],
-            ports_to_open: List[str], lock_path: str) -> None:
+            lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
         usage_lib.messages.usage.update_final_cluster_status(
@@ -2942,14 +2935,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
 
-        if ports_to_open:
-            logger.info(
-                f'Cluster {handle.cluster_name!r} exist before but does not '
-                f'satisfy the ports requirements in task.yaml. Opening new '
-                f'ports: {ports_to_open}')
+        if handle.launched_resources.ports:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
-                self._open_nonexistent_ports(handle, ports_to_open)
+                self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(

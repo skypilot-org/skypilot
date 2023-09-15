@@ -169,13 +169,16 @@ class Resources:
         self._is_image_managed = _is_image_managed
 
         self._disk_tier = disk_tier
+
         if ports is not None:
             if isinstance(ports, tuple):
                 ports = list(ports)
             if not isinstance(ports, list):
                 ports = [ports]
-            ports = [str(port) for port in ports]
+            ports = resources_utils.simplify_ports(
+                [str(port) for port in ports])
         self._ports = ports
+
         self._docker_login_config = _docker_login_config
 
         self._set_cpus(cpus)
@@ -258,9 +261,8 @@ class Resources:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
-        if self.ports is not None:
-            simplified_ports = resources_utils.simplify_ports(self.ports)
-            ports = f', ports={simplified_ports}'
+        if self.ports:
+            ports = f', ports={self.ports}'
 
         if self._instance_type is not None:
             instance_type = f'{self._instance_type}'
@@ -805,45 +807,8 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
-
-        def is_port_valid(port: int):
-            return 1 <= port <= 65535
-
-        for port in self.ports:
-            if isinstance(port, str):
-                if port.isdigit():
-                    int_port = int(port)
-                    if not is_port_valid(int_port):
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Invalid port {port}. Please use a port '
-                                'number between 1 and 65535.')
-                else:
-                    port_range = port.split('-')
-                    if len(port_range) != 2:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Invalid port {port}. Please use a port '
-                                'range such as 10022-10040.')
-                    try:
-                        from_port = int(port_range[0])
-                        to_port = int(port_range[1])
-                    except ValueError as e:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Invalid port {port}. Please use a integer '
-                                'inside the range.') from e
-                    if (not is_port_valid(from_port) or
-                            not is_port_valid(to_port)):
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Invalid port {port}. Please use port '
-                                'numbers between 1 and 65535.')
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid port {port}. Please use an integer or '
-                        'a range such as 10022-10040.')
+        # We don't need to check the ports format since we already done it
+        # in resources_utils.simplify_ports
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

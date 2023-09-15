@@ -1541,7 +1541,7 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
-    if not ports:
+    if ports:
         raise ValueError('`ports` is not supported by `sky exec`.')
 
     env = _merge_env_vars(env_file, env)

@@ -280,7 +280,7 @@ class GCPComputeInstance(GCPInstance):
         try:
             body = cls.load_resource().firewalls().get(
                 project=project_id, firewall=firewall_rule_name).execute()
-            body['allowed'][0]['ports'].extend(ports)
+            body['allowed'][0]['ports'] = ports
             operation = cls.load_resource().firewalls().update(
                 project=project_id,
                 firewall=firewall_rule_name,

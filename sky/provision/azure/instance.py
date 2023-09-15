@@ -44,35 +44,26 @@ def open_ports(
         function_name='create_or_update')
     list_network_security_groups = get_azure_sdk_function(
         client=network_client.network_security_groups, function_name='list')
-    rule_name = f'sky-ports-{cluster_name_on_cloud}'
     for nsg in list_network_security_groups(resource_group):
         try:
             # Azure NSG rules have a priority field that determines the order
             # in which they are applied. The priority must be unique across
             # all inbound rules in one NSG.
-            max_inbound_priority = 0
-            rule_exist = False
-            for rule in nsg.security_rules:
-                if rule.direction == 'Inbound':
-                    max_inbound_priority = max(max_inbound_priority,
-                                               rule.priority)
-                if rule.name == rule_name:
-                    rule_exist = True
-                    rule.destination_port_ranges.extend(ports)
-                    break
-            if not rule_exist:
-                nsg.security_rules.append(
-                    azure.create_security_rule(
-                        name=rule_name,
-                        priority=max_inbound_priority + 1,
-                        protocol='Tcp',
-                        access='Allow',
-                        direction='Inbound',
-                        source_address_prefix='*',
-                        source_port_range='*',
-                        destination_address_prefix='*',
-                        destination_port_ranges=ports,
-                    ))
+            priority = max(rule.priority
+                           for rule in nsg.security_rules
+                           if rule.direction == 'Inbound') + 1
+            nsg.security_rules.append(
+                azure.create_security_rule(
+                    name=f'sky-ports-{cluster_name_on_cloud}-{priority}',
+                    priority=priority,
+                    protocol='Tcp',
+                    access='Allow',
+                    direction='Inbound',
+                    source_address_prefix='*',
+                    source_port_range='*',
+                    destination_address_prefix='*',
+                    destination_port_ranges=ports,
+                ))
             update_network_security_groups(resource_group, nsg.name, nsg)
         except azure.http_error_exception() as e:
             logger.warning(

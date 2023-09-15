@@ -1,14 +1,16 @@
 """AWS instance provisioning."""
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from botocore import config
 
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
+from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -129,6 +131,7 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
+    sg_name = provider_config['security_group']['GroupName']
     ec2 = _default_ec2_resource(region)
     filters = [
         {
@@ -146,7 +149,8 @@ def terminate_instances(
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
     instances = _filter_instances(ec2, filters, None, None)
     instances.terminate()
-    if 'ports' not in provider_config:
+    if sg_name == backend_utils.DEFAULT_AWS_SG_NAME:
+        # Using default shared AWS SG. We don't need to delete it.
         return
     # If ports are specified, we need to delete the newly created Security
     # Group. Here we wait for all instances to be terminated, since the
@@ -237,8 +241,21 @@ def open_ports(
         logger.warning('Find new security group failed. Skip open ports.')
         return
 
+    existing_ports: Set[int] = set()
+    for existing_rule in sg.ip_permissions:
+        # Skip any non-tcp rules.
+        if existing_rule['IpProtocol'] != 'tcp':
+            continue
+        # Skip any rules that don't have a FromPort or ToPort.
+        if 'FromPort' not in existing_rule or 'ToPort' not in existing_rule:
+            continue
+        existing_ports.update(
+            range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
+    ports_to_open = resources_utils.parse_port_set(
+        resources_utils.parse_ports(ports) - existing_ports)
+
     ip_permissions = []
-    for port in ports:
+    for port in ports_to_open:
         if port.isdigit():
             from_port = to_port = port
         else:
@@ -252,7 +269,9 @@ def open_ports(
             }],
         })
 
-    sg.authorize_ingress(IpPermissions=ip_permissions)
+    # For the case when every new ports is already opened.
+    if ip_permissions:
+        sg.authorize_ingress(IpPermissions=ip_permissions)
 
 
 def cleanup_ports(
@@ -264,8 +283,7 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    # NOTE(dev): Keep this the same with backend_utils::write_cluster_config
-    if sg_name == f'sky-sg-{common_utils.user_and_hostname_hash()}':
+    if sg_name == backend_utils.DEFAULT_AWS_SG_NAME:
         # This is the default shared AWS SG. We only want to delete the SG
         # that is dedicated to this cluster (i.e., this cluster have opened
         # some ports).
