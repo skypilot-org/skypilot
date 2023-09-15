@@ -2879,7 +2879,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            'new provisioner API.')
             return
         logger.debug(
-            f'Opening new ports {handle.launched_resources.ports} for {cloud}')
+            f'Opening ports {handle.launched_resources.ports} for {cloud}')
         config = common_utils.read_yaml(handle.cluster_yaml)
         provider_config = config['provider']
         provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
