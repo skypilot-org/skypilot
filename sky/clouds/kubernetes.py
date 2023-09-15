@@ -212,6 +212,9 @@ class Kubernetes(clouds.Cloud):
         assert image_id.startswith('skypilot:')
         image_id = service_catalog.get_image_id_from_tag(image_id,
                                                          clouds='kubernetes')
+        # TODO(romilb): Create a lightweight image for SSH jump host
+        sshjump_image = service_catalog.get_image_id_from_tag(self.IMAGE_CPU,
+                                                         clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
@@ -233,8 +236,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_sshjump_name': self.SKY_SSH_JUMP_NAME,
-            # TODO(romilb): Create a lightweight image for SSH jump host
-            'k8s_sshjump_image': self.IMAGE_CPU,
+            'k8s_sshjump_image': sshjump_image,
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
