@@ -89,15 +89,7 @@ class GCPInstance:
         project_id: str,
         zone: str,
         instance: str,
-    ) -> Optional[str]:
-        raise NotImplementedError
-
-    @classmethod
-    def get_firewall_rule_names_start_with(
-        cls,
-        project_id: str,
-        prefix: str,
-    ) -> List[str]:
+    ) -> str:
         raise NotImplementedError
 
     @classmethod
@@ -236,6 +228,14 @@ class GCPComputeInstance(GCPInstance):
         project_id: str,
         firewall_rule_name: str,
     ) -> None:
+        rule = cls.load_resource().firewalls().list(
+            project=project_id, filter=f'name={firewall_rule_name}').execute()
+        # For the return value format, please refer to
+        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # pylint: disable=line-too-long
+        if 'items' not in rule:
+            logger.warning(f'Firewall rule {firewall_rule_name} not found. '
+                           'Skip cleanup.')
+            return
         cls.load_resource().firewalls().delete(
             project=project_id,
             firewall=firewall_rule_name,
@@ -247,7 +247,7 @@ class GCPComputeInstance(GCPInstance):
         project_id: str,
         zone: str,
         instance: str,
-    ) -> Optional[str]:
+    ) -> str:
         # Any errors will be handled in the caller function.
         instance = cls.load_resource().instances().get(
             project=project_id,
@@ -257,16 +257,6 @@ class GCPComputeInstance(GCPInstance):
         # Format: projects/PROJECT_ID/global/networks/VPC_NAME
         vpc_link = instance['networkInterfaces'][0]['network']
         return vpc_link.split('/')[-1]
-
-    @classmethod
-    def get_firewall_rule_names_start_with(
-        cls,
-        project_id: str,
-        prefix: str,
-    ) -> List[str]:
-        response = cls.load_resource().firewalls().list(
-            project=project_id, filter=f'name eq {prefix}.*').execute()
-        return [rule['name'] for rule in response.get('items', [])]
 
     @classmethod
     def create_or_update_firewall_rule(
