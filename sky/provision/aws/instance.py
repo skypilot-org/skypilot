@@ -70,7 +70,7 @@ def query_instances(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     filters = _cluster_name_filter(cluster_name_on_cloud)
-    instances = ec2.instances.filter(Filters=filters)
+    instances = _filter_instances(ec2, filters, None, None)
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
@@ -187,24 +187,9 @@ def _get_sg_from_name(
 
 def _maybe_move_to_new_sg(
     ec2: Any,
-    cluster_name_on_cloud: str,
+    instance: Any,
     expected_sg_name: str,
 ) -> Any:
-    filters = [
-        {
-            'Name': 'instance-state-name',
-            # exclude 'shutting-down' or 'terminated' states
-            'Values': ['pending', 'running', 'stopping', 'stopped'],
-        },
-        *_cluster_name_filter(cluster_name_on_cloud),
-    ]
-    instances = ec2.instances.filter(Filters=filters)
-    if len(list(instances)) != 1:
-        logger.warning(
-            f'Expected 1 instance with cluster name {cluster_name_on_cloud}, '
-            f'but found {len(list(instances))}. Skip creating security group.')
-        return None
-    instance = list(instances)[0]
     sg_names = [sg['GroupName'] for sg in instance.security_groups]
     if len(sg_names) != 1:
         logger.warning(
@@ -214,9 +199,6 @@ def _maybe_move_to_new_sg(
     sg_name = sg_names[0]
     if sg_name == expected_sg_name:
         return _get_sg_from_name(ec2, sg_name)
-    logger.info(f'Cluster {cluster_name_on_cloud} is using shared security '
-                f'group {sg_name}. Change to dedicated security group '
-                f'{expected_sg_name} to allow more inbound rules.')
     # The security groups will be automatically created by config.py for AWS
     # since we write it to provider config. But it won't change an existing
     # instance's security group, so here we move to it.
@@ -235,7 +217,22 @@ def open_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    sg = _maybe_move_to_new_sg(ec2, cluster_name_on_cloud, sg_name)
+    filters = [
+        {
+            'Name': 'instance-state-name',
+            # exclude 'shutting-down' or 'terminated' states
+            'Values': ['pending', 'running', 'stopping', 'stopped'],
+        },
+        *_cluster_name_filter(cluster_name_on_cloud),
+    ]
+    instances = _filter_instances(ec2, filters, None, None)
+    if len(list(instances)) != 1:
+        logger.warning(
+            f'Expected 1 instance with cluster name {cluster_name_on_cloud}, '
+            f'but found {len(list(instances))}. Skip creating security group.')
+        return None
+    instance = list(instances)[0]
+    sg = _maybe_move_to_new_sg(ec2, instance, sg_name)
     if sg is None:
         logger.warning('Find new security group failed. Skip open ports.')
         return

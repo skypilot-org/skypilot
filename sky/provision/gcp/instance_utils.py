@@ -76,7 +76,6 @@ class GCPInstance:
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: str,
     ) -> None:
         raise NotImplementedError
 
@@ -85,8 +84,16 @@ class GCPInstance:
         cls,
         project_id: str,
         zone: str,
-        instance_name: str,
+        instance: str,
     ) -> Optional[str]:
+        raise NotImplementedError
+
+    @classmethod
+    def get_firewall_rule_names_start_with(
+        cls,
+        project_id: str,
+        prefix: str,
+    ) -> List[str]:
         raise NotImplementedError
 
     @classmethod
@@ -94,17 +101,14 @@ class GCPInstance:
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: str,
+        ports: List[str],
         vpc_name: str,
     ) -> dict:
         raise NotImplementedError
 
 
-def _get_firewall_rule_name(
-    cluster_name_on_cloud: str,
-    port: str,
-) -> str:
-    return f'user-ports-{cluster_name_on_cloud}-{port}'
+def _get_firewall_rule_prefix(cluster_name_on_cloud: str) -> str:
+    return f'user-ports-{cluster_name_on_cloud}-'
 
 
 class GCPComputeInstance(GCPInstance):
@@ -230,60 +234,76 @@ class GCPComputeInstance(GCPInstance):
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: str,
     ) -> None:
-        firewall_rule_name = _get_firewall_rule_name(cluster_name_on_cloud,
-                                                     port)
-        rule = cls.load_resource().firewalls().list(
-            project=project_id, filter=f'name={firewall_rule_name}').execute()
-        # For the return value format, please refer to
-        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # pylint: disable=line-too-long
-        if 'items' not in rule:
-            logger.warning(f'Firewall rule {firewall_rule_name} not found. '
-                           'Skip cleanup.')
-            return
-        cls.load_resource().firewalls().delete(
-            project=project_id,
-            firewall=firewall_rule_name,
-        ).execute()
+        prefix = _get_firewall_rule_prefix(cluster_name_on_cloud)
+        previous_names = cls.get_firewall_rule_names_start_with(
+            project_id, prefix)
+        for rule_name in previous_names:
+            cls.load_resource().firewalls().delete(
+                project=project_id,
+                firewall=rule_name,
+            ).execute()
 
     @classmethod
     def get_vpc_name(
         cls,
         project_id: str,
         zone: str,
-        instance_name: str,
+        instance: str,
     ) -> Optional[str]:
         # Any errors will be handled in the caller function.
         instance = cls.load_resource().instances().get(
             project=project_id,
             zone=zone,
-            instance=instance_name,
+            instance=instance,
         ).execute()
         # Format: projects/PROJECT_ID/global/networks/VPC_NAME
         vpc_link = instance['networkInterfaces'][0]['network']
         return vpc_link.split('/')[-1]
 
     @classmethod
+    def get_firewall_rule_names_start_with(
+        cls,
+        project_id: str,
+        prefix: str,
+    ) -> List[str]:
+        response = cls.load_resource().firewalls().list(
+            project=project_id, filter=f'name eq {prefix}.*').execute()
+        return [rule['name'] for rule in response.get('items', [])]
+
+    @classmethod
     def create_firewall_rule(
         cls,
         project_id: str,
         cluster_name_on_cloud: str,
-        port: str,
+        ports: List[str],
         vpc_name: str,
     ) -> dict:
-        name = _get_firewall_rule_name(cluster_name_on_cloud, port)
+        prefix = _get_firewall_rule_prefix(cluster_name_on_cloud)
+        previous_names = cls.get_firewall_rule_names_start_with(
+            project_id, prefix)
+        serial = 0
+        while True:
+            if f'{prefix}{serial}' not in previous_names:
+                # GCP's firewall rule name can only contain 63 characters.
+                # The prefix is 12 + len(cluster_name_on_cloud) characters,
+                # which is up to 47 characters since cluster_name_on_cloud
+                # is 35 characters at most (see gcp.py). That left 16 characters
+                # for the serial number, which is enough to use.
+                name = f'{prefix}{serial}'
+                break
+            serial += 1
         body = {
             'name': name,
-            'description': f'Allow user-specified port {port} for cluster {cluster_name_on_cloud}',
+            'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
             'network': f'projects/{project_id}/global/networks/{vpc_name}',
             'selfLink': f'projects/{project_id}/global/firewalls/' + name,
             'direction': 'INGRESS',
             'priority': 65534,
             'allowed': [{
                 'IPProtocol': 'tcp',
-                'ports': [port],
-            },],
+                'ports': ports,
+            }],
             'sourceRanges': ['0.0.0.0/0'],
             'targetTags': [cluster_name_on_cloud],
         }

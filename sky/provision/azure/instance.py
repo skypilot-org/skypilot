@@ -53,9 +53,9 @@ def open_ports(
             'destinationPortRanges': ports,
         }
 
-    list_nsg = get_azure_sdk_function(
+    list_network_security_groups = get_azure_sdk_function(
         client=network_client.network_security_groups, function_name='list')
-    for nsg in list_nsg(resource_group):
+    for nsg in list_network_security_groups(resource_group):
         try:
             # Azure NSG rules have a priority field that determines the order
             # in which they are applied. The priority must be unique across

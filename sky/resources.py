@@ -1,6 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import functools
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 from typing_extensions import Literal
@@ -59,7 +59,7 @@ class Resources:
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-        ports: Optional[Union[int, str, List[str]]] = None,
+        ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
         _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
@@ -170,6 +170,8 @@ class Resources:
 
         self._disk_tier = disk_tier
         if ports is not None:
+            if isinstance(ports, tuple):
+                ports = list(ports)
             if not isinstance(ports, list):
                 ports = [ports]
             ports = [str(port) for port in ports]
@@ -803,11 +805,15 @@ class Resources:
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
                 {clouds.CloudImplementationFeatures.OPEN_PORTS})
+
+        def is_port_valid(port: int):
+            return 1 <= port <= 65535
+
         for port in self.ports:
             if isinstance(port, str):
                 if port.isdigit():
                     int_port = int(port)
-                    if int_port < 1 or int_port > 65535:
+                    if not is_port_valid(int_port):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'Invalid port {port}. Please use a port '
@@ -827,8 +833,8 @@ class Resources:
                             raise ValueError(
                                 f'Invalid port {port}. Please use a integer '
                                 'inside the range.') from e
-                    if (from_port < 1 or from_port > 65535 or to_port < 1 or
-                            to_port > 65535):
+                    if (not is_port_valid(from_port) or
+                            not is_port_valid(to_port)):
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'Invalid port {port}. Please use port '

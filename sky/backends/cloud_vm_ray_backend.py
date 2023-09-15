@@ -4223,17 +4223,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'satisfy the ports requirements in task.yaml. Opening '
                     f'new ports: {ports_to_open}')
             if dryrun:
-                launched_resources = handle.launched_resources
+                to_provision = handle.launched_resources
             else:
                 # We pass new ports here to write to cluster config file.
                 # This will automatically change AWS SG name in provider config
                 # too, so we check if we are using default SG by name, and
                 # change to new SG in new provisioner API if needed.
-                launched_resources = handle.launched_resources.copy(
+                to_provision = handle.launched_resources.copy(
                     ports=existing_ports + ports_to_open)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
-                launched_resources,
+                to_provision,
                 handle.launched_nodes,
                 ports_to_open=ports_to_open,
                 prev_cluster_status=prev_cluster_status,

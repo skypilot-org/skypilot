@@ -212,14 +212,13 @@ def open_ports(
                 RuntimeError(f'Failed to get VPC name for instance '
                              f'{instances[0]}'))
         else:
-            for port in ports:
-                operations[handler].append(
-                    handler.create_firewall_rule(
-                        project_id,
-                        cluster_name_on_cloud,
-                        port,
-                        vpc_name,
-                    ))
+            operations[handler].append(
+                handler.create_firewall_rule(
+                    project_id,
+                    cluster_name_on_cloud,
+                    ports,
+                    vpc_name,
+                ))
     # Use zone = None to indicate wait for global operations
     _wait_for_operations(operations, project_id, None)
     if errs:
@@ -236,6 +235,5 @@ def cleanup_ports(
         # No new ports were opened, so there is nothing to clean up.
         return
     project_id = provider_config['project_id']
-    for port in provider_config['ports']:
-        instance_utils.GCPComputeInstance.delete_firewall_rule(
-            project_id, cluster_name_on_cloud, port)
+    instance_utils.GCPComputeInstance.delete_firewall_rule(
+        project_id, cluster_name_on_cloud)

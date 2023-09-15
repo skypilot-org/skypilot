@@ -630,18 +630,19 @@ def _add_click_options(options: List[click.Option]):
     return _add_options
 
 
-def _parse_override_params(cloud: Optional[str] = None,
-                           region: Optional[str] = None,
-                           zone: Optional[str] = None,
-                           gpus: Optional[str] = None,
-                           cpus: Optional[str] = None,
-                           memory: Optional[str] = None,
-                           instance_type: Optional[str] = None,
-                           use_spot: Optional[bool] = None,
-                           image_id: Optional[str] = None,
-                           disk_size: Optional[int] = None,
-                           disk_tier: Optional[str] = None,
-                           ports: Optional[List[str]] = None) -> Dict[str, Any]:
+def _parse_override_params(
+        cloud: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        gpus: Optional[str] = None,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        instance_type: Optional[str] = None,
+        use_spot: Optional[bool] = None,
+        image_id: Optional[str] = None,
+        disk_size: Optional[int] = None,
+        disk_tier: Optional[str] = None,
+        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -1052,7 +1053,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[List[str]] = None,
+    ports: Optional[Tuple[str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1362,7 +1363,7 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: List[str],
+    ports: Tuple[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1412,8 +1413,7 @@ def launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports),
+        ports=ports,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1475,7 +1475,7 @@ def exec(
     zone: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
-    ports: List[str],
+    ports: Tuple[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -2860,7 +2860,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            disk_tier: Optional[str], ports: List[str],
+            disk_tier: Optional[str], ports: Tuple[str],
             idle_minutes_to_autostop: Optional[int], down: bool,
             retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
@@ -2911,19 +2911,17 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         instance_type = default_resources.instance_type
     if use_spot is None:
         use_spot = default_resources.use_spot
-    resources = sky.Resources(
-        cloud=cloud_provider,
-        region=region,
-        zone=zone,
-        instance_type=instance_type,
-        cpus=cpus,
-        memory=memory,
-        accelerators=gpus,
-        use_spot=use_spot,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports))
+    resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              accelerators=gpus,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2948,7 +2946,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], disk_tier: Optional[str],
-            ports: List[str], idle_minutes_to_autostop: Optional[int],
+            ports: Tuple[str], idle_minutes_to_autostop: Optional[int],
             down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
@@ -2995,18 +2993,16 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         instance_type = default_resources.instance_type
     if use_spot is None:
         use_spot = default_resources.use_spot
-    resources = sky.Resources(
-        cloud=cloud_provider,
-        region=region,
-        zone=zone,
-        instance_type=instance_type,
-        cpus=cpus,
-        memory=memory,
-        use_spot=use_spot,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports))
+    resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -3032,7 +3028,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], disk_tier: Optional[str],
-            ports: List[str], idle_minutes_to_autostop: Optional[int],
+            ports: Tuple[str], idle_minutes_to_autostop: Optional[int],
             down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
@@ -3084,20 +3080,18 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         tpus = default_resources.accelerators
     if use_spot is None:
         use_spot = default_resources.use_spot
-    resources = sky.Resources(
-        cloud=sky.GCP(),
-        region=region,
-        zone=zone,
-        instance_type=instance_type,
-        cpus=cpus,
-        memory=memory,
-        accelerators=tpus,
-        accelerator_args=accelerator_args,
-        use_spot=use_spot,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports))
+    resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
+                              zone=zone,
+                              instance_type=instance_type,
+                              cpus=cpus,
+                              memory=memory,
+                              accelerators=tpus,
+                              accelerator_args=accelerator_args,
+                              use_spot=use_spot,
+                              disk_size=disk_size,
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'tpunode',
@@ -3578,7 +3572,7 @@ def spot_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: List[str],
+    ports: Tuple[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3615,8 +3609,7 @@ def spot_launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports),
+        ports=ports,
         spot_recovery=spot_recovery,
     )
     # Deprecation.
@@ -4042,7 +4035,7 @@ def benchmark_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: List[str],
+    ports: Tuple[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -4142,17 +4135,15 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    override_params = _parse_override_params(
-        cloud=cloud,
-        region=region,
-        zone=zone,
-        gpus=override_gpu,
-        use_spot=use_spot,
-        image_id=image_id,
-        disk_size=disk_size,
-        disk_tier=disk_tier,
-        # Convert ports from tuple to list.
-        ports=list(ports))
+    override_params = _parse_override_params(cloud=cloud,
+                                             region=region,
+                                             zone=zone,
+                                             gpus=override_gpu,
+                                             use_spot=use_spot,
+                                             image_id=image_id,
+                                             disk_size=disk_size,
+                                             disk_tier=disk_tier,
+                                             ports=ports)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')
