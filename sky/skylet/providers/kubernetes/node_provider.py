@@ -14,7 +14,6 @@ from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
-from sky.utils import ux_utils
 
 logger = logging.getLogger(__name__)
 
@@ -186,34 +185,36 @@ class KubernetesNodeProvider(NodeProvider):
                                'Cluster may be out of resources or '
                                'may be too slow to autoscale.')
             lack_resource_msg = (
-                'Insufficient {resource}. Other SkyPilot tasks or pods on '
-                'the cluster may be using resources. Check resource usage '
-                'by running `kubectl describe nodes`.')
+                'Insufficient {resource} capacity on the cluster. '
+                'Other SkyPilot tasks or pods may be using resources. '
+                'Check resource usage by running `kubectl describe nodes`.')
             if event_message is not None:
                 if pod_status == 'Pending':
                     if 'Insufficient cpu' in event_message:
                         raise config.KubernetesError(
-                            lack_resource_msg.format(resource='CPUs'))
+                            lack_resource_msg.format(resource='CPU'))
                     if 'Insufficient memory' in event_message:
                         raise config.KubernetesError(
                             lack_resource_msg.format(resource='memory'))
-                    gpu_lf_keys = [lf.get_label_key() \
+                    gpu_lf_keys = [lf.get_label_key()
                         for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY]
-                    # Confirms if the nodeSelector in the pod spec is
-                    # set for GPU scheduling.
                     if new_node.spec.node_selector:
                         for label_key in new_node.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
+                                # TODO(romilb): We may have additional node
+                                #  affinity selectors in the future - in that
+                                #  case we will need to update this logic.
                                 if 'Insufficient nvidia.com/gpu' in event_message or \
                                     'didn\'t match Pod\'s node affinity/selector' in event_message:
                                     raise config.KubernetesError(
-                                        f'{lack_resource_msg.format(resource="GPUs")} '
-                                        f'Please confirm if {new_node.spec.node_selector[label_key]}'
+                                        f'{lack_resource_msg.format(resource="GPU")} '
+                                        f'Verify if {new_node.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
                 raise config.KubernetesError(
                     f'{timeout_err_msg} '
-                    f'Error details: \'{event_message}\' '
-                    f'Error pod status: {pod_status}')
+                    f'Pod status: {pod_status}'
+                    f'Details: \'{event_message}\' '
+                )
         raise config.KubernetesError(f'{timeout_err_msg}')
 
     def create_node(self, node_config, tags, count):
@@ -267,11 +268,11 @@ class KubernetesNodeProvider(NodeProvider):
                 except config.KubernetesError:
                     raise
                 except Exception as e:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError(
-                            f'An error occurred during pod creation. '
-                            f'Status: {common_utils.format_exception(e, use_bracket=True)}'
-                        ) from None
+                    raise config.KubernetesError(
+                        'An error occurred while trying to fetch the reason '
+                        'for pod scheduling failure. '
+                        f'Error: {common_utils.format_exception(e)}'
+                    ) from None
 
             all_ready = True
             for node in new_nodes:
