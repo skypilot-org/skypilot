@@ -32,7 +32,7 @@ while getopts ":pg" opt; do
 done
 
 # Add -gpu to the tag if the GPU image is being built
-if [[ $gpu ]]; then
+if [[ $gpu == "true" ]]; then
   TAG=$TAG-gpu:latest
 else
   TAG=$TAG:latest
