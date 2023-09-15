@@ -169,7 +169,7 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 Oracle Cloud Infrastructure (OCI)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To access Oracle Cloud Infrastructure (OCI), set up the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
 .. code-block:: text
 
@@ -304,10 +304,10 @@ its AWS and GCP dependencies installed for users to quickly try out SkyPilot. Yo
   $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" berkeleyskypilot/skypilot:latest
   $ docker exec -it sky /bin/bash
 
-If your cloud CLIs are already set up, your credentials will be mounted to the
+If your cloud CLIs are already setup, your credentials will be mounted to the
 container and you can proceed to :ref:`Quickstart <quickstart>`. Else you can
 follow the instructions in :ref:`Cloud account setup <cloud-account-setup>`
-inside the container to set up your cloud accounts.
+inside the container to setup your cloud accounts.
 
 If you exit from the shell in the container, the container will keep running
 in the background. You can start a new shell with :code:`docker exec -it sky /bin/bash`.
