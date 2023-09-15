@@ -27,8 +27,6 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
-_CONSECUTIVE_FAILURE_THRESHOLD_COUNT = (
-    _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT // _ENDPOINT_PROBE_INTERVAL)
 
 
 def _interrupt_process_and_children(pid: int) -> None:
@@ -152,7 +150,7 @@ class ReplicaInfo:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
-        self.consecutive_failure_cnt: int = 0
+        self.consecutive_failure_times: List[int] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
 
     @property
@@ -624,30 +622,31 @@ class SkyPilotInfraProvider(InfraProvider):
             info = self.replica_info[cluster_name]
             info.status_property.service_ready_now = res
             if res:
-                info.consecutive_failure_cnt = 0
+                info.consecutive_failure_times.clear()
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
                 continue
             if info.first_not_ready_time is None:
                 info.first_not_ready_time = time.time()
+            current_time = time.time()
+            current_delay_seconds = current_time - info.first_not_ready_time
             if info.status_property.service_once_ready:
-                info.consecutive_failure_cnt += 1
-                if (info.consecutive_failure_cnt >=
-                        _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
+                info.consecutive_failure_times.append(current_time)
+                consecutive_failure_time = (info.consecutive_failure_times[-1] -
+                                            info.consecutive_failure_times[0])
+                if (consecutive_failure_time >=
+                        _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
                     logger.info(f'Replica {cluster_name} is  not ready for too '
                                 'long and exceeding consecutive failure '
                                 'threshold. Terminating the replica...')
                     self._teardown_cluster(cluster_name)
                 else:
-                    current_unready_time = (info.consecutive_failure_cnt *
-                                            _ENDPOINT_PROBE_INTERVAL)
                     logger.info(f'Replica {cluster_name} is not ready but '
                                 'within consecutive failure threshold '
-                                f'({current_unready_time}s / '
+                                f'({consecutive_failure_time}s / '
                                 f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
             else:
-                current_delay_seconds = time.time() - info.first_not_ready_time
                 if current_delay_seconds > self.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeding initial delay seconds. '
