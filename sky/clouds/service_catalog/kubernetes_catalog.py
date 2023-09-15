@@ -6,10 +6,7 @@ mapping SkyPilot image tags to corresponding container image tags.
 
 from typing import Optional
 
-from sky import sky_logging
 from sky.clouds.service_catalog import common
-
-logger = sky_logging.init_logger(__name__)
 
 _PULL_FREQUENCY_HOURS = 7
 

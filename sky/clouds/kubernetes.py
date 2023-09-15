@@ -203,12 +203,12 @@ class Kubernetes(clouds.Cloud):
         # Select image based on whether we are using GPUs or not.
         image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
         # Get the container image ID from the service catalog.
-        # Note that currently we do not support custom images, so this condition
-        # will always be triggered. In the future we may want to get image_id
-        # from the resources object if it is set.
-        if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(
-                image_id, clouds='kubernetes')
+        # TODO(romilb): Note that currently we do not support custom images,
+        #  so the image_id should start with 'skypilot:'.
+        #  In the future we may want to get image_id from the resources object.
+        assert image_id.startswith('skypilot:')
+        image_id = service_catalog.get_image_id_from_tag(
+            image_id, clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
