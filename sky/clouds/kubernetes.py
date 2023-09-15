@@ -207,8 +207,8 @@ class Kubernetes(clouds.Cloud):
         #  so the image_id should start with 'skypilot:'.
         #  In the future we may want to get image_id from the resources object.
         assert image_id.startswith('skypilot:')
-        image_id = service_catalog.get_image_id_from_tag(
-            image_id, clouds='kubernetes')
+        image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
