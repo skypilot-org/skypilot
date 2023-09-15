@@ -5,15 +5,15 @@ Kubernetes Cluster Setup
 
 
 .. note::
-    This is a guide for cluster administrators on how to setup Kubernetes clusters
+    This is a guide for cluster administrators on how to set up Kubernetes clusters
     for use with SkyPilot.
 
-    If you are a SkyPilot user and your cluster administrator has already setup a cluster
+    If you are a SkyPilot user and your cluster administrator has already set up a cluster
     and shared a kubeconfig file with you, :ref:`Submitting tasks to Kubernetes <kubernetes-instructions>`
     explains how to submit tasks to your cluster.
 
 
-SkyPilot on Kubernetes is designed to work with most Kubernetes distributions and deployment environments.
+SkyPilot's Kubernetes support is designed to work with most Kubernetes distributions and deployment environments.
 
 To connect to a Kubernetes cluster, SkyPilot needs:
 
@@ -23,37 +23,43 @@ To connect to a Kubernetes cluster, SkyPilot needs:
 
 Deployment Guides
 -----------------
-Below we show minimal examples to setup a new Kubernetes cluster in different environments, including hosted services on the cloud, and generating kubeconfig files which can be :ref:`used by SkyPilot <kubernetes-instructions>`.
+Below we show minimal examples to set up a new Kubernetes cluster in different environments, including hosted services on the cloud, and generating kubeconfig files which can be :ref:`used by SkyPilot <kubernetes-instructions>`.
 
 ..
   TODO(romilb) - Add a table of contents/grid cards for each deployment environment.
 
+* :ref:`Deploying locally on your laptop <kubernetes-setup-kind>`
+* :ref:`Deploying on Google Cloud GKE <kubernetes-setup-gke>`
+* :ref:`Deploying on Amazon EKS <kubernetes-setup-eks>`
+* :ref:`Deploying on on-prem clusters <kubernetes-setup-onprem>`
+
 .. _kubernetes-setup-kind:
 
-Deploying locally on your Laptop
+
+Deploying locally on your laptop
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you want to try out SkyPilot on Kubernetes on your laptop or run SkyPilot
+To try out SkyPilot on Kubernetes on your laptop or run SkyPilot
 tasks locally without requiring any cloud access, we provide the
 :code:`sky local up` CLI to create a 1-node Kubernetes cluster locally.
 
 Under the hood, :code:`sky local up` uses `kind <https://kind.sigs.k8s.io/>`_,
 a tool for creating a Kubernetes cluster on your local machine.
-It runs a Kubernetes cluster inside a container, so no setup is required.
+It runs a Kubernetes cluster inside a container, so no set up is required.
 
 1. Install `Docker <https://docs.docker.com/engine/install/>`_ and `kind <https://kind.sigs.k8s.io/>`_.
 2. Run :code:`sky local up` to launch a Kubernetes cluster and automatically configure your kubeconfig file:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        $ sky local up
+     $ sky local up
 
 3. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot. You can now run SkyPilot tasks on this locally hosted Kubernetes cluster using :code:`sky launch`.
 4. After you are done using the cluster, you can remove it with :code:`sky local down`. This will terminate the KinD container and switch your kubeconfig back to it's original context:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        $ sky local down
+     $ sky local down
 
 .. note::
     We recommend allocating at least 4 or more CPUs to your docker runtime to
@@ -61,46 +67,46 @@ It runs a Kubernetes cluster inside a container, so no setup is required.
     `here <https://docs.docker.com/desktop/settings/linux/>`_.
 
 .. note::
-    KinD does not support multiple nodes and GPUs.
+    kind does not support multiple nodes and GPUs.
     It is not recommended for use in a production environment.
-    If you want to run a private On-Prem cluster, see the section on `On-Prem deployment <Deploying on On-Prem Clusters>`_ for more.
+    If you want to run a private on-prem cluster, see the section on :ref:`on-prem deployment <kubernetes-setup-onprem>` for more.
 
 
 .. _kubernetes-setup-gke:
 
-Deploying on GKE
-^^^^^^^^^^^^^^^^
+Deploying on Google Cloud GKE
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Create a GKE standard cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
-2. Get the kubeconfig for your cluster. This will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster:
+2. Get the kubeconfig for your cluster. The following command will automatically update ``~/.kube/config`` with new kubecontext for the GKE cluster:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        $ gcloud container clusters get-credentials <cluster-name> --region <region>
+     $ gcloud container clusters get-credentials <cluster-name> --region <region>
 
-        # Example:
-        # gcloud container clusters get-credentials testcluster --region us-central1-c
+     # Example:
+     # gcloud container clusters get-credentials testcluster --region us-central1-c
 
 3. [If using GPUs] If your GKE nodes have GPUs, you may need to to
    `manually install <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_
    nvidia drivers. You can do so by deploying the daemonset
    depending on the OS of your nodes:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        # For Container Optimized OS (COS) based nodes:
-        $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+     # For Container Optimized OS (COS) based nodes:
+     $ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
 
-        # For Ubuntu (COS) based nodes:
-        kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
+     # For Ubuntu based nodes:
+     kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/ubuntu/daemonset-preloaded.yaml
 
-   To verify if GPU drivers are setup, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
+   To verify if GPU drivers are set up, run ``kubectl describe nodes`` and verify that ``nvidia.com/gpu`` is listed under the ``Capacity`` section.
 
-4. Verify your kubeconfig (and GPU support, if available) is correctly setup by running :code:`sky check`:
+4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        $ sky check
+     $ sky check
 
 .. note::
     GKE autopilot clusters are currently not supported. Only GKE standard clusters are supported.
@@ -108,39 +114,46 @@ Deploying on GKE
 
 .. _kubernetes-setup-eks:
 
-Deploying on AWS EKS
-^^^^^^^^^^^^^^^^^^^^
+Deploying on Amazon EKS
+^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Create a EKS cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
 
-2. TODO - Add instructions on getting kubeconfig.
+2. Get the kubeconfig for your cluster. The following command will automatically update ``~/.kube/config`` with new kubecontext for the EKS cluster:
 
-3. [If using GPUs] EKS clusters already come with Nvidia drivers setup. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+   .. code-block:: console
 
-    .. code-block:: console
+     $ aws eks update-kubeconfig --name <cluster-name> --region <region>
 
-        python -m sky.utils.kubernetes.gpu_labeler
+     # Example:
+     # aws eks update-kubeconfig --name testcluster --region us-west-2
+
+3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+
+   .. code-block:: console
+
+     python -m sky.utils.kubernetes.gpu_labeler
 
 
    This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. You can check the status of these jobs by running:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        kubectl get jobs -n kube-system
+     kubectl get jobs -n kube-system
 
-4. Verify your kubeconfig (and GPU support, if available) is correctly setup by running :code:`sky check`:
+4. Verify your kubeconfig (and GPU support, if available) is correctly set up by running :code:`sky check`:
 
-    .. code-block:: console
+   .. code-block:: console
 
-        $ sky check
+     $ sky check
 
 
 .. _kubernetes-setup-onprem:
 
-Deploying on On-Prem Clusters
+Deploying on on-prem clusters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can also deploy Kubernetes on your On-Prem clusters using off-the-shelf tools,
+You can also deploy Kubernetes on your on-prem clusters using off-the-shelf tools,
 such as `kubeadm <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/>`_,
 `k3s <https://docs.k3s.io/quick-start>`_ or
 `Rancher <https://ranchermanager.docs.rancher.com/v2.5/pages-for-subheaders/kubernetes-clusters-in-rancher-setup>`_.
@@ -153,7 +166,7 @@ device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each 
 Additionally, you will need to label each node in your cluster with the GPU type.
 For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
 
-We provide a convenience script that automatically detects GPU type and labels each node. You can run it with:
+We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
 .. code-block:: console
 
@@ -171,13 +184,13 @@ We provide a convenience script that automatically detects GPU type and labels e
 
 
 .. note::
- To cleanup any leftover jobs from the GPU labelling process, run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup``.
+ If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
 
-    .. code-block:: console
+.. code-block:: console
 
-        $ sky check
+    $ sky check
 
 
 .. _kubernetes-observability:
@@ -219,5 +232,5 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
 .. note::
     The demo dashboard is not secure and should not be used in production. Please refer to the
     `Kubernetes documentation <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_
-    for more information on how to setup access control for the dashboard.
+    for more information on how to set up access control for the dashboard.
 

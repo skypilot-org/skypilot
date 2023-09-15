@@ -1,30 +1,30 @@
 .. _kubernetes-overview:
 
-SkyPilot on Kubernetes (Alpha)
-==============================
+Running SkyPilot on Kubernetes (Alpha)
+======================================
 
 .. note::
-    Kubernetes support for SkyPilot is an alpha preview under active development.
+    Kubernetes support is in alpha preview and under active development.
     There may be rough edges and features may change without notice.
     Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
     `reach out to us <http://slack.skypilot.co>`_ for feature requests.
 
-SkyPilot tasks can be deployed on your private on-prem or cloud clusters running Kubernetes.
+SkyPilot tasks can be deployed on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
 tasks can be submitted to your Kubernetes cluster just like any other cloud provider.
 
-**Benefits of bringing your Kubernetes cluster to SkyPilot:**
+**Benefits of using SkyPilot to run jobs on your Kubernetes cluster:**
 
 * Get SkyPilot features (setup management, job execution, queuing, logging, SSH access) on your Kubernetes resources
 * Replace complex Kubernetes manifests with simple SkyPilot tasks
-* Maximize resource utilization by running cloud jobs on your Kubernetes cluster.
-* Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested.
-* Retain observability and control over your cluster with your existing Kubernetes tools.
+* Maximize resource utilization by running cloud jobs on your Kubernetes cluster
+* Seamlessly "burst" jobs to the cloud if the Kubernetes cluster is congested
+* Retain observability and control over your cluster with your existing Kubernetes tools
 
 **Supported deployment models:**
 
+* Hosted Kubernetes services (EKS, GKE)
 * On-prem clusters (Kubeadm, K3s, Rancher)
-* Hosted Kubernetes services (AWS EKS, GKE)
 * Local development clusters (KinD, minikube)
 
 
@@ -51,7 +51,7 @@ Submitting SkyPilot tasks to Kubernetes Clusters
 
 Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes-setup>` and provided you with a kubeconfig file:
 
-0. Make sure `kubectl <https://kubernetes.io/docs/tasks/tools/>`_, ``socat`` and ``lsof`` are installed.
+0. Make sure `kubectl <https://kubernetes.io/docs/tasks/tools/>`_, ``socat`` and ``lsof`` are installed on your local machine.
 
 1. Place your kubeconfig file at ``~/.kube/config``.
 
@@ -60,7 +60,7 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
      $ mkdir -p ~/.kube
      $ cp /path/to/kubeconfig ~/.kube/config
 
-   You can verify your credentials are setup correctly by running :code:`kubectl get pods`
+   You can verify your credentials are setup correctly by running :code:`kubectl get pods`.
 
 2. Run :code:`sky check` and verify that Kubernetes is enabled in SkyPilot.
 
@@ -121,7 +121,7 @@ FAQs
 
 * **Are autoscaling Kubernetes clusters supported?**
 
-  Yes - however they currently require adjusting the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  To deploy on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
 
 * **What container image is used for tasks? Can I specify my own image?**
 
@@ -129,7 +129,7 @@ FAQs
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
-  The goal of SkyPilot on Kubernetes is to run SkyPilot tasks on resources in an existing Kubernetes cluster. It does not provision any new Kubernetes clusters or add new nodes to an existing Kubernetes cluster. The Kubernetes control plane remains untouched.
+  The goal of Kubernetes support is to run SkyPilot tasks on an existing Kubernetes cluster. It does not provision any new Kubernetes clusters or add new nodes to an existing Kubernetes cluster.
 
 * **I have multiple users in my organization who share the same Kubernetes cluster. How do I provide isolation for their SkyPilot workloads?**
 
@@ -138,12 +138,11 @@ FAQs
 Features and Roadmap
 --------------------
 
-SkyPilot on Kubernetes is under active development. Some features are in progress and will be released soon:
+Kubernetes support is under active development. Some features are in progress and will be released soon:
 
-* CPU Tasks - ✅ Available
+* CPU and GPU Tasks - ✅ Available
 * Auto-down - ✅ Available
 * Storage mounting - ✅ Available on x86_64 clusters
-* GPU Tasks - ✅ Available
 * Multi-node tasks - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 
