@@ -9,6 +9,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
+from sky.clouds import service_catalog
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
@@ -69,10 +70,8 @@ class Kubernetes(clouds.Cloud):
             ('Docker image is not supported in Kubernetes. ')
     }
 
-    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
-                 'skypilot-375900/skypilotk8s/skypilot:latest')
-    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
-                 'skypilotk8s/skypilot-gpu:latest')
+    IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
+    IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -205,7 +204,14 @@ class Kubernetes(clouds.Cloud):
         acc_type = k.accelerator_type if k.accelerator_type else None
 
         # Select image based on whether we are using GPUs or not.
-        image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        # Get the container image ID from the service catalog.
+        # TODO(romilb): Note that currently we do not support custom images,
+        #  so the image_id should start with 'skypilot:'.
+        #  In the future we may want to get image_id from the resources object.
+        assert image_id.startswith('skypilot:')
+        image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
@@ -230,7 +236,7 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Create a lightweight image for SSH jump host
             'k8s_sshjump_image': self.IMAGE_CPU,
             # TODO(romilb): Allow user to specify custom images
-            'image_id': image,
+            'image_id': image_id,
         }
         return deploy_vars
 
