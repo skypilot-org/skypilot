@@ -196,8 +196,10 @@ class KubernetesNodeProvider(NodeProvider):
                     if 'Insufficient memory' in event_message:
                         raise config.KubernetesError(
                             lack_resource_msg.format(resource='memory'))
-                    gpu_lf_keys = [lf.get_label_key()
-                        for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY]
+                    gpu_lf_keys = [
+                        lf.get_label_key()
+                        for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
+                    ]
                     if new_node.spec.node_selector:
                         for label_key in new_node.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
@@ -210,11 +212,9 @@ class KubernetesNodeProvider(NodeProvider):
                                         f'{lack_resource_msg.format(resource="GPU")} '
                                         f'Verify if {new_node.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
-                raise config.KubernetesError(
-                    f'{timeout_err_msg} '
-                    f'Pod status: {pod_status}'
-                    f'Details: \'{event_message}\' '
-                )
+                raise config.KubernetesError(f'{timeout_err_msg} '
+                                             f'Pod status: {pod_status}'
+                                             f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
 
     def create_node(self, node_config, tags, count):
@@ -271,8 +271,7 @@ class KubernetesNodeProvider(NodeProvider):
                     raise config.KubernetesError(
                         'An error occurred while trying to fetch the reason '
                         'for pod scheduling failure. '
-                        f'Error: {common_utils.format_exception(e)}'
-                    ) from None
+                        f'Error: {common_utils.format_exception(e)}') from None
 
             all_ready = True
             for node in new_nodes:
