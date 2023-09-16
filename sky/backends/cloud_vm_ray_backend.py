@@ -1503,7 +1503,6 @@ class RetryingVmProvisioner(object):
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
-                    to_provision.ports,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,

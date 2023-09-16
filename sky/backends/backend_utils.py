@@ -871,7 +871,6 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
-        ports: Optional[List[str]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -993,14 +992,6 @@ def write_cluster_config(
     cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
         cluster_name, max_length=cloud.max_cluster_name_length())
 
-    # Only using new security group names for clusters with ports specified.
-    aws_sg_name = DEFAULT_AWS_SG_NAME
-    gcp_firewall_rule = None
-    # This include the case where ports is None or empty.
-    if ports:
-        aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
-        gcp_firewall_rule = f'sky-ports-{cluster_name_on_cloud}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1025,7 +1016,7 @@ def write_cluster_config(
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), aws_sg_name),
+                    ('aws', 'security_group_name'), DEFAULT_AWS_SG_NAME),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -1044,7 +1035,6 @@ def write_cluster_config(
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
-                'firewall_rule': gcp_firewall_rule,
 
                 # Conda setup
                 'conda_installation_commands':
