@@ -228,10 +228,14 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
-    if 'firewall_rule' not in provider_config:
-        # No new ports were opened, so there is nothing to clean up.
-        return
     project_id = provider_config['project_id']
-    firewall_rule_name = provider_config['firewall_rule']
-    instance_utils.GCPComputeInstance.delete_firewall_rule(
-        project_id, firewall_rule_name)
+    if 'ports' in provider_config:
+        # Backward compatibility for old provider config.
+        for port in provider_config['ports']:
+            rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
+            instance_utils.GCPComputeInstance.delete_firewall_rule(
+                project_id, rule_name)
+    if 'firewall_rule' in provider_config:
+        firewall_rule_name = provider_config['firewall_rule']
+        instance_utils.GCPComputeInstance.delete_firewall_rule(
+            project_id, firewall_rule_name)

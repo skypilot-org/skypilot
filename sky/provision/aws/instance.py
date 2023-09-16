@@ -199,7 +199,6 @@ def _get_sg_from_name(
 
 
 def _maybe_move_to_new_sg(
-    ec2: Any,
     instance: Any,
     expected_sg: Any,
 ) -> None:
@@ -258,7 +257,7 @@ def open_ports(
         return
     # For multinode cases, we need to open ports for all instances.
     for instance in instance_list:
-        _maybe_move_to_new_sg(ec2, instance, sg)
+        _maybe_move_to_new_sg(instance, sg)
 
     existing_ports: Set[int] = set()
     for existing_rule in sg.ip_permissions:
