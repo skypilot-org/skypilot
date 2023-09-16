@@ -1189,6 +1189,9 @@ class Resources:
             self._docker_login_config = None
 
         if version < 13:
-            state['_ports'] = [str(port) for port in state['_ports']]
+            original_ports = state.get('_ports', None)
+            if original_ports is not None:
+                self._ports = resources_utils.simplify_ports(
+                    [str(port) for port in original_ports])
 
         self.__dict__.update(state)
