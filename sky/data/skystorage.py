@@ -149,10 +149,7 @@ def update_interval(interval_seconds: int, elapsed_time: int):
     wait before the next sync operation.
     """
     diff = interval_seconds - elapsed_time
-    if diff <= 0:
-        return 0
-    else:
-        return diff
+    return max(0, diff)
 
 
 def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
