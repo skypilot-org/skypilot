@@ -339,7 +339,7 @@ class ServiceHandle(object):
         self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
                 f'\n\tuptime={self.uptime},'

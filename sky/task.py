@@ -412,7 +412,8 @@ class Task:
         task.set_resources({resources})
 
         service = config.pop('service', None)
-        service = serve_lib.SkyServiceSpec.from_yaml_config(service)
+        if service is not None:
+            service = serve_lib.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'

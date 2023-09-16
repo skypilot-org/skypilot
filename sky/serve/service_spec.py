@@ -27,7 +27,7 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         controller_resources: Optional[Dict[str, Any]] = None,
         auto_restart: bool = False,
-    ):
+    ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -58,10 +58,7 @@ class SkyServiceSpec:
         self._auto_restart = auto_restart
 
     @staticmethod
-    def from_yaml_config(config: Optional[Dict[str, Any]]):
-        if config is None:
-            return None
-
+    def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
         backend_utils.validate_schema(config, schemas.get_service_schema(),
                                       'Invalid service YAML: ')
         if 'replicas' in config and 'replica_policy' in config:
@@ -127,7 +124,7 @@ class SkyServiceSpec:
         return SkyServiceSpec(**service_config)
 
     @staticmethod
-    def from_yaml(yaml_path: str):
+    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
@@ -146,7 +143,7 @@ class SkyServiceSpec:
 
         return SkyServiceSpec.from_yaml_config(config['service'])
 
-    def to_yaml_config(self):
+    def to_yaml_config(self) -> Dict[str, Any]:
         config = dict()
 
         def add_if_not_none(section, key, value, no_empty: bool = False):
