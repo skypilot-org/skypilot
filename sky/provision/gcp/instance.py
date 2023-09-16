@@ -196,24 +196,14 @@ def open_ports(
             logger.warning(f'No instance found for cluster '
                            f'{cluster_name_on_cloud}.')
             continue
-        # If multiple instances are found, they are in the same cluster,
-        # i.e. the same VPC. So we can just pick one.
-        try:
-            vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
-        except gcp.http_error_exception() as e:
-            if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
-                logger.warning(f'Failed to get VPC name for instance '
-                               f'{instances[0]}. Skip opening ports for it.')
-            else:
-                logger.warning(f'Instance {instances[0]} does not exist. '
-                               f'Skip opening ports for it.')
         else:
             op = handler.create_or_update_firewall_rule(
                 firewall_rule_name,
                 project_id,
+                zone,
+                instances,
                 cluster_name_on_cloud,
                 ports,
-                vpc_name,
             )
             # op is None if any error occurs.
             if op is not None:

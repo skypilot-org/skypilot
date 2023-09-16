@@ -79,17 +79,8 @@ class GCPInstance:
     def delete_firewall_rule(
         cls,
         project_id: str,
-        cluster_name_on_cloud: str,
+        firewall_rule_name: str,
     ) -> None:
-        raise NotImplementedError
-
-    @classmethod
-    def get_vpc_name(
-        cls,
-        project_id: str,
-        zone: str,
-        instance: str,
-    ) -> str:
         raise NotImplementedError
 
     @classmethod
@@ -97,9 +88,10 @@ class GCPInstance:
         cls,
         firewall_rule_name: str,
         project_id: str,
+        zone: str,
+        instances: List[str],
         cluster_name_on_cloud: str,
         ports: List[str],
-        vpc_name: str,
     ) -> Optional[dict]:
         raise NotImplementedError
 
@@ -242,31 +234,31 @@ class GCPComputeInstance(GCPInstance):
         ).execute()
 
     @classmethod
-    def get_vpc_name(
-        cls,
-        project_id: str,
-        zone: str,
-        instance: str,
-    ) -> str:
-        # Any errors will be handled in the caller function.
-        instance = cls.load_resource().instances().get(
-            project=project_id,
-            zone=zone,
-            instance=instance,
-        ).execute()
-        # Format: projects/PROJECT_ID/global/networks/VPC_NAME
-        vpc_link = instance['networkInterfaces'][0]['network']
-        return vpc_link.split('/')[-1]
-
-    @classmethod
     def create_or_update_firewall_rule(
         cls,
         firewall_rule_name: str,
         project_id: str,
+        zone: str,
+        instances: List[str],
         cluster_name_on_cloud: str,
         ports: List[str],
-        vpc_name: str,
     ) -> Optional[dict]:
+        try:
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick one.
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instances[0],
+            ).execute()
+            # Format: projects/PROJECT_ID/global/networks/VPC_NAME
+            vpc_link = response['networkInterfaces'][0]['network']
+            vpc_name = vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            logger.warning(
+                f'Failed to get VPC name for instance {instances[0]}: '
+                f'{e.reason}. Skip opening ports for it.')
+            return None
         try:
             body = cls.load_resource().firewalls().get(
                 project=project_id, firewall=firewall_rule_name).execute()
