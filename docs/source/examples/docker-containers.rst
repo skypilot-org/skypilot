@@ -40,7 +40,7 @@ For Docker images hosted on private registries, you can provide the registry aut
     SKYPILOT_DOCKER_PASSWORD: <password>
     SKYPILOT_DOCKER_SERVER: <server>
 
-Alternatively, you can these environment variables directly through the CLI:
+Alternatively, you can set these environment variables directly through the CLI:
 
 .. code-block:: bash
 
