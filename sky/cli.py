@@ -1731,7 +1731,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                     raise RuntimeError(
                         f'{len(cluster_records)} cluster found. Please specify '
                         'exactly one cluster (or glob that only matches one '
-                        'cluster) to show its IP address.')
+                        'cluster) to show its IP address. \nUsage: `sky status --ip <cluster>`')
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
