@@ -1,7 +1,7 @@
 .. _kubernetes-overview:
 
-Deploying on Kubernetes (Alpha)
-======================================
+Running on Kubernetes (Alpha)
+=============================
 
 .. note::
     Kubernetes support is in alpha preview and under active development.
@@ -9,7 +9,7 @@ Deploying on Kubernetes (Alpha)
     Please report any `bugs <https://github.com/skypilot-org/skypilot/issues>`_ and
     `reach out to us <http://slack.skypilot.co>`_ for feature requests.
 
-SkyPilot tasks can be deployed on your private on-prem or cloud Kubernetes clusters.
+SkyPilot tasks can be run on your private on-prem or cloud Kubernetes clusters.
 The Kubernetes cluster gets added to the list of "clouds" in SkyPilot and SkyPilot
 tasks can be submitted to your Kubernetes cluster just like any other cloud provider.
 
@@ -20,7 +20,7 @@ tasks can be submitted to your Kubernetes cluster just like any other cloud prov
 * Seamlessly "burst" jobs to the cloud if your Kubernetes cluster is congested
 * Retain observability and control over your cluster with your existing Kubernetes tools
 
-**Supported deployment models:**
+**Supported Kubernetes deployments:**
 
 * Hosted Kubernetes services (EKS, GKE)
 * On-prem clusters (Kubeadm, K3s, Rancher)
@@ -52,6 +52,15 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
 0. Make sure `kubectl <https://kubernetes.io/docs/tasks/tools/>`_, ``socat`` and ``lsof`` are installed on your local machine.
 
+   .. code-block:: console
+
+     $ # MacOS (lsof is already installed)
+     $ brew install kubectl socat
+
+     $ # Linux (may have socat and lsof already installed)
+     $ sudo apt-get install kubectl socat lsof
+
+
 1. Place your kubeconfig file at ``~/.kube/config``.
 
    .. code-block:: console
@@ -82,7 +91,7 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
    .. code-block:: console
 
-        $ sky launch --cpus 2+
+        $ sky launch --cpus 2+ task.yaml
         == Optimizer ==
         Target: minimizing cost
         Estimated cost: $0.0 / hour
@@ -120,7 +129,7 @@ FAQs
 
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To deploy on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
+  To run on an autoscaling cluster, you may need to adjust the resource provisioning timeout (:code:`Kubernetes.TIMEOUT` in `clouds/kubernetes.py`) to a large value to give enough time for the cluster to autoscale. We are working on a better interface to adjust this timeout - stay tuned!
 
 * **What container image is used for tasks? Can I specify my own image?**
 

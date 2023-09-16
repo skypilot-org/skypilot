@@ -45,7 +45,7 @@ tasks locally without requiring any cloud access, we provide the
 
 Under the hood, :code:`sky local up` uses `kind <https://kind.sigs.k8s.io/>`_,
 a tool for creating a Kubernetes cluster on your local machine.
-It runs a Kubernetes cluster inside a container, so no set up is required.
+It runs a Kubernetes cluster inside a container, so no setup is required.
 
 1. Install `Docker <https://docs.docker.com/engine/install/>`_ and `kind <https://kind.sigs.k8s.io/>`_.
 2. Run :code:`sky local up` to launch a Kubernetes cluster and automatically configure your kubeconfig file:
