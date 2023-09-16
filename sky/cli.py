@@ -1662,7 +1662,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
     Only display the IP address of the cluster using
     ``sky status --ip <cluster-name>``. This option will override all other
-    options.
+    options. For Kubernetes clusters, the returned IP address is the internal IP of the head pod, and may not be accessible from outside the cluster. 
 
     Each cluster can have one of the following statuses:
 
