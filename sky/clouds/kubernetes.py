@@ -36,7 +36,7 @@ class Kubernetes(clouds.Cloud):
     # itself, which can be upto 2-3 seconds.
     # For non-autoscaling clusters, we conservatively set this to 10s.
     # TODO(romilb): Make the timeout configurable.
-    TIMEOUT = 30
+    TIMEOUT = 10
 
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1

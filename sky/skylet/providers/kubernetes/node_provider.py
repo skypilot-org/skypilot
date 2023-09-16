@@ -229,25 +229,14 @@ class KubernetesNodeProvider(NodeProvider):
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
-                # Continue if pod phase is Running
-                # This indicates all the containers are created within the pod
-                if pod.status.phase == 'Running':
-                    continue
-                elif pod.status.phase == 'Pending':
+                if pod.status.phase == 'Pending':
                     # Iterate over each pod to check their status
                     if pod.status.container_statuses is not None:
                         for container_status in pod.status.container_statuses:
                             # Continue if container status is ContainerCreating
                             # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None:
-                                if container_status.state.waiting.reason == 'ErrImagePull':
-                                    if 'rpc error: code = Unknown' in container_status.state.waiting.message:
-                                        raise config.KubernetesError(
-                                            'Failed to pull docker image while '
-                                            'launching the node. Please check '
-                                            'your network connection. Error: '
-                                            f'{container_status.state.waiting.message}.'
-                                        )
+                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
+                                continue
                             else:
                                 # If the container wasn't in creating state,
                                 # then we know pod wasn't scheduled or had some
@@ -255,11 +244,42 @@ class KubernetesNodeProvider(NodeProvider):
                                 # See list of possible reasons for waiting here:
                                 # https://stackoverflow.com/a/57886025
                                 all_ready = False
-                else:
-                    # If container_statuses is None, then the pod hasn't
-                    # been scheduled yet.
-                    all_ready = False
+                    else:
+                        # If container_statuses is None, then the pod hasn't
+                        # been scheduled yet.
+                        all_ready = False
             if all_ready:
+                break
+            time.sleep(1)
+
+        # After pods are successfully scheduled, we wait for all the containers
+        # within pods to be up and running.
+        while True:
+            all_pods_running = True
+            # Iterate over each pod to check their status
+            for node in new_nodes:
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+                # Continue if pod phase is Running. This indicates all the
+                # containers are successfully created within the pod.
+                if pod.status.phase == 'Running':
+                    continue
+                else:
+                    all_pods_running = False
+                    if pod.status.phase == 'Pending':
+                        # Iterate over each container in pod to check their status
+                        for container_status in pod.status.container_statuses:
+                            if container_status.state.waiting is not None:
+                                if container_status.state.waiting.reason == 'ErrImagePull':
+                                    if 'rpc error: code = Unknown' in container_status.state.waiting.message:
+                                        raise config.KubernetesError(
+                                            'Failed to pull docker image while '
+                                            'launching the node. Please check '
+                                            'your network connection. Error details: '
+                                            f'{container_status.state.waiting.message}.'
+                                        )
+
+            if all_pods_running:
                 break
             time.sleep(1)
 
