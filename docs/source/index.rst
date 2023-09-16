@@ -129,7 +129,7 @@ Documentation
    reference/interactive-nodes
    reference/faq
    reference/logging
-   reference/local/index
+   reference/kubernetes/index
 
 .. toctree::
    :maxdepth: 1
