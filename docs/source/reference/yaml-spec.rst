@@ -91,10 +91,15 @@ Available fields:
       # existing cluster, any new ports specified will be opened for the cluster, and the firewall 
       # rules for old ports will never be removed until the cluster is terminated.
       # The following three ways are valid for specifying ports for a cluster:
-      # `ports: 8081` or `ports: 10052-10100`
-      ports:
-        - 8080
-        - 10022-10040
+      #   To specify a single port:
+      #     ports: 8081
+      #   To specify a port range:
+      #     ports: 10052-10100
+      #   To specify multiple ports / port ranges:
+      #     ports:
+      #       - 8080
+      #       - 10022-10040
+      ports: 8081
 
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
