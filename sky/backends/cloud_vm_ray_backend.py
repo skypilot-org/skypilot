@@ -2863,8 +2863,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     to_provision_config.prev_handle.launched_resources.ports)
                 current_ports = handle.launched_resources.ports
                 open_new_ports = bool(
-                    resources_utils.parse_ports(current_ports) -
-                    resources_utils.parse_ports(prev_ports))
+                    resources_utils.port_ranges_to_set(current_ports) -
+                    resources_utils.port_ranges_to_set(prev_ports))
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
                                                    ssh_port_list,
@@ -3977,6 +3977,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
+            # TODO(tian): Add some API like
+            # provision_lib.supports(cloud, 'cleanup_ports')
+            # so that our backend do not need to know the specific details
+            # for different clouds.
             if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
@@ -4175,12 +4179,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             assert len(task.resources) == 1
-            all_ports = resources_utils.parse_port_set(
-                resources_utils.parse_ports(handle.launched_resources.ports) |
-                resources_utils.parse_ports(list(task.resources)[0].ports))
+            all_ports = resources_utils.port_set_to_ranges(
+                resources_utils.port_ranges_to_set(
+                    handle.launched_resources.ports) |
+                resources_utils.port_ranges_to_set(
+                    list(task.resources)[0].ports))
+            to_provision = handle.launched_resources
+            if all_ports:
+                to_provision = to_provision.copy(ports=all_ports)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
-                handle.launched_resources.copy(ports=all_ports),
+                to_provision,
                 handle.launched_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle)

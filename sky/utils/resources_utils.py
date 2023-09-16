@@ -32,9 +32,8 @@ def check_port_range_str(port_range: str) -> None:
             raise ValueError(_PORT_RANGE_HINT_MSG.format(port_range))
 
 
-# TODO(tian): Maybe we need more intuitive names for these functions.
-def parse_ports(ports: Optional[List[str]]) -> Set[int]:
-    """Parse a list of ports into a set that containing no duplicates.
+def port_ranges_to_set(ports: Optional[List[str]]) -> Set[int]:
+    """Parse a list of port ranges into a set that containing no duplicates.
 
     For example, ['1-3', '5-7'] will be parsed to {1, 2, 3, 5, 6, 7}.
     """
@@ -52,7 +51,7 @@ def parse_ports(ports: Optional[List[str]]) -> Set[int]:
     return port_set
 
 
-def parse_port_set(port_set: Optional[Set[int]]) -> List[str]:
+def port_set_to_ranges(port_set: Optional[Set[int]]) -> List[str]:
     """Parse a set of ports into the skypilot ports format.
 
     This function will group consecutive ports together into a range,
@@ -83,4 +82,4 @@ def simplify_ports(ports: List[str]) -> List[str]:
 
     For example, ['1-2', '3', '5-6', '7'] will be simplified to ['1-3', '5-7'].
     """
-    return parse_port_set(parse_ports(ports))
+    return port_set_to_ranges(port_ranges_to_set(ports))

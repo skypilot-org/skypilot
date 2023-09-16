@@ -948,8 +948,8 @@ class Resources:
             if self.ports is not None:
                 if other.ports is None:
                     return False
-                self_ports = resources_utils.parse_ports(self.ports)
-                other_ports = resources_utils.parse_ports(other.ports)
+                self_ports = resources_utils.port_ranges_to_set(self.ports)
+                other_ports = resources_utils.port_ranges_to_set(other.ports)
                 if not self_ports <= other_ports:
                     return False
 

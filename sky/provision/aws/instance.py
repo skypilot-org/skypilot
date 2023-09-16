@@ -72,7 +72,10 @@ def query_instances(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     filters = _cluster_name_filter(cluster_name_on_cloud)
-    instances = _filter_instances(ec2, filters, None, None)
+    instances = _filter_instances(ec2,
+                                  filters,
+                                  included_instances=None,
+                                  excluded_instances=None)
     status_map = {
         'pending': status_lib.ClusterStatus.INIT,
         'running': status_lib.ClusterStatus.UP,
@@ -113,7 +116,10 @@ def stop_instances(
             'Name': f'tag:{TAG_RAY_NODE_KIND}',
             'Values': ['worker'],
         })
-    instances = _filter_instances(ec2, filters, None, None)
+    instances = _filter_instances(ec2,
+                                  filters,
+                                  included_instances=None,
+                                  excluded_instances=None)
     instances.stop()
     # TODO(suquark): Currently, the implementation of GCP and Azure will
     #  wait util the cluster is fully terminated, while other clouds just
@@ -147,7 +153,10 @@ def terminate_instances(
             'Values': ['worker'],
         })
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
-    instances = _filter_instances(ec2, filters, None, None)
+    instances = _filter_instances(ec2,
+                                  filters,
+                                  included_instances=None,
+                                  excluded_instances=None)
     instances.terminate()
     if sg_name == backend_utils.DEFAULT_AWS_SG_NAME:
         # Using default shared AWS SG. We don't need to delete it.
@@ -192,23 +201,27 @@ def _get_sg_from_name(
 def _maybe_move_to_new_sg(
     ec2: Any,
     instance: Any,
-    expected_sg_name: str,
-) -> Any:
+    expected_sg: Any,
+) -> None:
+    """Move the instance to the new security group if needed.
+
+    If the instance is already in the expected security group, do nothing.
+    Otherwise, move it to the expected security group.
+    Our config.py will automatically create a new security group for every
+    GroupName specified in the provider config. But it won't change the
+    security group of an existing cluster, so we need to move it to the
+    expected security group.
+    """
     sg_names = [sg['GroupName'] for sg in instance.security_groups]
     if len(sg_names) != 1:
         logger.warning(
             f'Expected 1 security group for instance {instance.id}, '
             f'but found {len(sg_names)}. Skip creating security group.')
-        return None
+        return
     sg_name = sg_names[0]
-    if sg_name == expected_sg_name:
-        return _get_sg_from_name(ec2, sg_name)
-    # The security groups will be automatically created by config.py for AWS
-    # since we write it to provider config. But it won't change an existing
-    # instance's security group, so here we move to it.
-    sg = _get_sg_from_name(ec2, expected_sg_name)
-    instance.modify_attribute(Groups=[sg.id])
-    return sg
+    if sg_name == expected_sg.group_name:
+        return
+    instance.modify_attribute(Groups=[expected_sg.id])
 
 
 def open_ports(
@@ -229,17 +242,23 @@ def open_ports(
         },
         *_cluster_name_filter(cluster_name_on_cloud),
     ]
-    instances = _filter_instances(ec2, filters, None, None)
-    if len(list(instances)) != 1:
+    instances = _filter_instances(ec2,
+                                  filters,
+                                  included_instances=None,
+                                  excluded_instances=None)
+    instance_list = list(instances)
+    if not instance_list:
         logger.warning(
-            f'Expected 1 instance with cluster name {cluster_name_on_cloud}, '
-            f'but found {len(list(instances))}. Skip creating security group.')
+            f'Instance with cluster name {cluster_name_on_cloud} not found. '
+            f'Skip creating security group.')
         return None
-    instance = list(instances)[0]
-    sg = _maybe_move_to_new_sg(ec2, instance, sg_name)
+    sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
         logger.warning('Find new security group failed. Skip open ports.')
         return
+    # For multinode cases, we need to open ports for all instances.
+    for instance in instance_list:
+        _maybe_move_to_new_sg(ec2, instance, sg)
 
     existing_ports: Set[int] = set()
     for existing_rule in sg.ip_permissions:
@@ -251,8 +270,8 @@ def open_ports(
             continue
         existing_ports.update(
             range(existing_rule['FromPort'], existing_rule['ToPort'] + 1))
-    ports_to_open = resources_utils.parse_port_set(
-        resources_utils.parse_ports(ports) - existing_ports)
+    ports_to_open = resources_utils.port_set_to_ranges(
+        resources_utils.port_ranges_to_set(ports) - existing_ports)
 
     ip_permissions = []
     for port in ports_to_open:
