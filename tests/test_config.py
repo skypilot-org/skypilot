@@ -6,9 +6,12 @@ import pytest
 
 from sky import skypilot_config
 from sky.utils import common_utils
+from sky.utils import kubernetes_utils
 
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
+NODEPORT_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.NODEPORT.value
+PORT_FORWARD_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD.value
 
 
 def _reload_config() -> None:
@@ -34,6 +37,8 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                 vpc_name: {VPC_NAME}
                 use_internal_ips: true
                 ssh_proxy_command: {PROXY_COMMAND}
+            kubernetes:
+                networking: {NODEPORT_MODE_NAME}
             """))
 
 
@@ -67,14 +72,18 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
-
+    assert skypilot_config.get_nested(('kubernetes', 'networking'),
+                                      None) == NODEPORT_MODE_NAME
     # Check set_nested() will copy the config dict and return a new dict
     new_config = skypilot_config.set_nested(('aws', 'ssh_proxy_command'),
                                             'new_value')
     assert new_config['aws']['ssh_proxy_command'] == 'new_value'
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
-
+    new_config = skypilot_config.set_nested(('kubernetes', 'networking'),
+                                            PORT_FORWARD_MODE_NAME)
+    assert skypilot_config.get_nested(('kubernetes', 'networking'),
+                                      None) == NODEPORT_MODE_NAME
     # Check that dumping the config to a file with the new None can be reloaded
     new_config2 = skypilot_config.set_nested(('aws', 'ssh_proxy_command'), None)
     new_config_path = tmp_path / 'new_config.yaml'

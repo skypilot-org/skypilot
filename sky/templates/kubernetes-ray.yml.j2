@@ -16,10 +16,14 @@ provider:
     type: external
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
-    # Use False if running from outside of k8s cluster
-    use_internal_ips: false
+    # We use internal IPs since we set up a port-forward between the kubernetes
+    # cluster and the local machine, or directly use NodePort to reach the
+    # head node.
+    use_internal_ips: true
 
     timeout: {{timeout}}
+
+    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -78,7 +82,6 @@ provider:
             skypilot-cluster: {{cluster_name_on_cloud}}
           name: {{cluster_name_on_cloud}}-ray-head-ssh
         spec:
-          type: NodePort
           selector:
             component: {{cluster_name_on_cloud}}-ray-head
           ports:
@@ -126,6 +129,8 @@ available_node_types:
             parent: skypilot
             component: {{cluster_name_on_cloud}}-ray-head
             skypilot-cluster: {{cluster_name_on_cloud}}
+            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.

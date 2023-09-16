@@ -1708,6 +1708,8 @@ class RetryingVmProvisioner(object):
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml, cluster_handle.docker_user)
+        # Always fetch the latest IPs, since GCP may change them without notice
+        cluster_handle.update_cluster_ips()
         all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
@@ -2318,23 +2320,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
-        """Updates the cluster SSH ports cached in the handle."""
-        # TODO(romilb): Replace this with a call to the cloud class to get ports
-        # Use port 22 for everything except Kubernetes
-        if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_ssh_port = 22
-        else:
-            svc_name = f'{self.cluster_name_on_cloud}-ray-head-ssh'
-            retry_cnt = 0
-            while True:
-                try:
-                    head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-                    break
-                except Exception:  # pylint: disable=broad-except
-                    retry_cnt += 1
-                    if retry_cnt >= max_attempts:
-                        raise
-            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
+        """Fetches and sets the SSH ports for the cluster nodes.
+
+        Use this method to use any cloud-specific port fetching logic.
+        """
+        del max_attempts  # Unused.
+        head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))
 
@@ -3031,36 +3022,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
-    def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
-                             task: task_lib.Task) -> None:
-        """Update envs with env vars from Kubernetes if cloud is Kubernetes.
-
-        Kubernetes automatically populates containers with critical environment
-        variables, such as those for discovering services running in the
-        cluster and CUDA/nvidia environment variables. We need to update task
-        environment variables with these env vars. This is needed for GPU
-        support and service discovery.
-
-        See https://github.com/skypilot-org/skypilot/issues/2287 for
-        more details.
-        """
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            temp_envs = copy.deepcopy(task.envs)
-            cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
-                handle.cluster_name_on_cloud)
-            task.update_envs(cloud_env_vars)
-
-            # Re update the envs with the original envs to give priority to
-            # the original envs.
-            task.update_envs(temp_envs)
-
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
-
-        self._update_envs_for_k8s(handle, task)
 
         if task.setup is None:
             return
@@ -3371,7 +3337,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
         self.check_resources_fit_cluster(handle, task, check_ports=True)
-        self._update_envs_for_k8s(handle, task)
 
         resources_str = backend_utils.get_task_resources_str(task)
 

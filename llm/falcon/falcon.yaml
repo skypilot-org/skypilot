@@ -1,0 +1,42 @@
+resources:
+  accelerators: A100-80GB:1
+  disk_size: 1000
+  disk_tier: high
+
+workdir: .
+
+envs:
+  MODEL_NAME: tiiuae/falcon-7b # [ybelkada/falcon-7b-sharded-bf16, tiiuae/falcon-7b, tiiuae/falcon-40b]
+  WANDB_API_KEY: $WANDB_KEY # Change to your own wandb key
+  OUTPUT_BUCKET_NAME: # Set a unique name for the bucket which will store model weights
+
+file_mounts:
+  /results: # Change if the output_dir parameter is changed below
+    name: $OUTPUT_BUCKET_NAME
+    mode: MOUNT
+
+setup: |
+  # Setup the environment
+  conda activate falcon
+  if [ $? -ne 0 ]; then
+    conda create -n falcon python=3.10 -y
+    conda activate falcon
+  fi
+
+  # Install dependencies
+  pip install -q -U transformers accelerate peft
+  pip install -q trl==0.4.6 datasets bitsandbytes einops wandb scipy torch
+
+run: |
+  conda activate falcon
+  wandb login $WANDB_API_KEY
+  echo "Starting training..."
+  python train.py \
+  --model_name $MODEL_NAME \
+  --max_seq_len 2048 \
+  --bf16 \
+  --group_by_length \
+  --bnb_4bit_compute_dtype bfloat16 \
+  --max_steps 500 \
+  --dataset_name timdettmers/openassistant-guanaco \
+  --output_dir /results
