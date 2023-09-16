@@ -82,13 +82,13 @@ sky local up
    ```bash
    kubectl get jobs -n kube-system
    ```
-   Note that some jobs may be in pending state if your cluster contains CPU nodes. To clean up these jobs after you're done, run:
-   ```bash
-   python -m sky.utils.kubernetes.gpu_labeler --cleanup
-   ```
    After the jobs are done, you can verify the GPU labels are setup correctly by looking for `skypilot.co/accelerator` label in the output of:
    ```bash
    kubectl describe nodes
+   ```
+   In case something goes wrong, you can clean up these jobs by running:
+   ```bash
+   python -m sky.utils.kubernetes.gpu_labeler --cleanup
    ```
 5. Run `sky check`.
    ```bash
