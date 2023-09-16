@@ -4508,13 +4508,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         the _execute_file_mounts.
 
         """
-        storage_mounts = {
-            path: storage_mount
-            for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_utils.StorageMode.CSYNC
+        csync_storage_mounts = {
+            path: storage_obj
+            for path, storage_obj in storage_mounts.items()
+            if storage_obj.mode == storage_utils.StorageMode.CSYNC
         }
 
-        if not storage_mounts:
+        if not csync_storage_mounts:
             return
 
         cloud = handle.launched_resources.cloud
@@ -4527,8 +4527,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         fore = colorama.Fore
         style = colorama.Style
-        plural = 's' if len(storage_mounts) > 1 else ''
-        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
+        plural = 's' if len(csync_storage_mounts) > 1 else ''
+        logger.info(f'{fore.CYAN}Processing {len(csync_storage_mounts)} '
                     f'storage CSYNC{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
@@ -4540,7 +4540,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ip_list, port_list=port_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
 
-        for dst, storage_obj in storage_mounts.items():
+        for dst, storage_obj in csync_storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to sync

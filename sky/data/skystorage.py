@@ -193,7 +193,7 @@ def run_sync(src: str,
              max_retries: int = 10,
              backoff: Optional[common_utils.Backoff] = None):
     """Runs the sync command to from src to storetype bucket"""
-    #TODO: add enum type class to handle storetypes
+    #TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
         sync_cmd = get_s3_upload_cmd(src, dst, num_threads, delete,
