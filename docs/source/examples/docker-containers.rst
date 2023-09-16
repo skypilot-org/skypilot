@@ -44,7 +44,10 @@ Alternatively, you can set these environment variables directly through the CLI:
 
 .. code-block:: bash
 
-  sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1) private_docker.yaml
+  sky launch \
+    --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1) \
+    --env SKYPILOT_DOCKER_USERNAME=AWS \
+    private_docker.yaml
 
 Running Docker Containers as Tasks
 ----------------------------------
