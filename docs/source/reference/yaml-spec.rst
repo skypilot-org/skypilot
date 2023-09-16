@@ -87,12 +87,10 @@ Available fields:
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
       # Ports Lifecycle:
-      # Ports are opened every time a cluster is launched. You can launch on an existing
-      # clusters to add more ports. During the launch process, SkyPilot checks whether the
-      # ports are already open. It will bypass the already opened ports and only open those
-      # that are not. Once the cluster is terminated, SkyPilot will remove all firewall rules
-      # or security groups related to that cluster.
-      # If you only have one port or range to expose, you can use the following shorthand: 
+      # A cluster's ports will be updated whenever `sky launch` is executed. When launch an
+      # existing cluster, any new ports specified will be opened for the cluster, and the firewall 
+      # rules for old ports will never be removed until the cluster is terminated.
+      # The following three ways are valid for specifying ports for a cluster:
       # `ports: 8081` or `ports: 10052-10100`
       ports:
         - 8080
