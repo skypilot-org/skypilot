@@ -108,13 +108,17 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 # command.
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
+_STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
+    '{cluster_num} cluster{plural} {verb}. Please specify exactly one existing '
+    'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
-def _get_glob_clusters(clusters: List[str]) -> List[str]:
+
+def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if len(glob_cluster) == 0:
+        if len(glob_cluster) == 0 and not silent:
             if onprem_utils.check_if_local_cloud(cluster):
                 click.echo(
                     constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
@@ -1662,7 +1666,8 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
     Only display the IP address of the cluster using
     ``sky status --ip <cluster-name>``. This option will override all other
-    options. For Kubernetes clusters, the returned IP address is the internal IP of the head pod, and may not be accessible from outside the cluster. 
+    options. For Kubernetes clusters, the returned IP address is the internal IP
+    of the head pod, and may not be accessible from outside the cluster.
 
     Each cluster can have one of the following statuses:
 
@@ -1717,21 +1722,32 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
-        if not ip:
+        if ip:
+            if len(clusters) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    plural = 's' if len(clusters) > 1 else ''
+                    raise RuntimeError(
+                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=len(clusters),
+                            plural=plural,
+                            verb='specified'))
+        else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
-            query_clusters = _get_glob_clusters(clusters)
+            query_clusters = _get_glob_clusters(clusters, silent=ip)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
         if ip:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
+                    plural = 's' if len(cluster_records) > 1 else ''
                     raise RuntimeError(
-                        f'{len(cluster_records)} cluster found. Please specify '
-                        'exactly one cluster (or glob that only matches one '
-                        'cluster) to show its IP address. \nUsage: `sky status --ip <cluster>`')
+                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=len(cluster_records),
+                            plural=plural,
+                            verb='found'))
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
