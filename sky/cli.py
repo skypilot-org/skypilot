@@ -1634,7 +1634,7 @@ def _get_spot_jobs(
               default=False,
               is_flag=True,
               required=False,
-              help='Only query the IP address of the cluster. ')
+              help='Get the IP address of the head node of a cluster. ')
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
