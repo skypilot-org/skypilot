@@ -625,8 +625,8 @@ class RetryingVmProvisioner(object):
             cluster_name: str,
             resources: resources_lib.Resources,
             num_nodes: int,
-            prev_cluster_status: Optional[status_lib.ClusterStatus] = None,
-            prev_handle: Optional['CloudVmRayResourceHandle'] = None,
+            prev_cluster_status: Optional[status_lib.ClusterStatus],
+            prev_handle: Optional['CloudVmRayResourceHandle'],
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -4229,7 +4229,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Run `sky status` to see existing clusters.')
         return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
                                                        to_provision,
-                                                       task.num_nodes)
+                                                       task.num_nodes,
+                                                       prev_cluster_status=None,
+                                                       prev_handle=None)
 
     def _set_tpu_name(self, handle: CloudVmRayResourceHandle,
                       tpu_name: str) -> None:
