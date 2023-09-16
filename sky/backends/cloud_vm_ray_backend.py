@@ -2864,10 +2864,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
-        if not isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
-            logger.warning(f'Cannot open ports for {cloud} that not support '
-                           'new provisioner API.')
-            return
         logger.debug(
             f'Opening ports {handle.launched_resources.ports} for {cloud}')
         config = common_utils.read_yaml(handle.cluster_yaml)
