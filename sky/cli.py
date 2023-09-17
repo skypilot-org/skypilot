@@ -109,7 +109,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
-    '{cluster_num} cluster{plural} {verb}. Please specify exactly one existing '
+    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
     'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
 
