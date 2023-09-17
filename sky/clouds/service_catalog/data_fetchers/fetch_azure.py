@@ -58,7 +58,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation', 'DeviceMemory'
 ]
 
 
@@ -267,7 +267,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
                     'Standard_ND24s': 96,
                     'Standard_ND24rs*': 96,
                     'Standard_ND40rs_v2': 32,
-                    'Standard_ND40rs_v2': 80 ,
                     'Standard_NG8ads_V620_v1': 8,
                     'Standard_NG16ads_V620_v1': 16,
                     'Standard_NG32ads_V620_v1': 32,
@@ -291,7 +290,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
                     'Standard_NV6_Promo': 16,
                     'Standard_NV12_Promo': 32,
                     'Standard_NV24_Promo': 48
-                }
+        }
             
         all_instance = df.InstanceType.unique()
         
@@ -300,7 +299,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
                 gpu_map[instance] = ''
         return gpu_map
 
-    def mapDeviceMemory(row, dic):
+    def map_device_memory(row, dic):
         return dic[row]
 
 
@@ -309,10 +308,12 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
     after_drop_len = len(df_ret)
     print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
 
+    df_ret['DeviceMemory'] = df_ret.InstanceType.apply(
+        map_device_memory, args=(create_gpu_map(df_ret),))
+
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
     df_ret = df_ret[USEFUL_COLUMNS]
-    df_ret['DeviceMemory'] = df_ret.InstanceType.apply(mapDeviceMemory, args=(create_gpu_map(df_ret),))
     return df_ret
 
 
