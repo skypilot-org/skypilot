@@ -497,7 +497,7 @@ def check_local_cloud_args(cloud: Optional[str] = None,
         yaml_config: User's task yaml loaded into a JSON dictionary.
     """
     yaml_cloud = None
-    if yaml_config is not None and 'resources' in yaml_config:
+    if yaml_config is not None and yaml_config.get('resources') is not None:
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if (cluster_name is not None and check_if_local_cloud(cluster_name)):

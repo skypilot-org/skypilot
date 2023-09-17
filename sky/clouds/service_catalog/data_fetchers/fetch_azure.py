@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-US_REGIONS = [
+US_REGIONS = {
     'centralus',
     'eastus',
     'eastus2',
@@ -24,13 +24,14 @@ US_REGIONS = [
     'westus',
     'westus2',
     'westus3',
-]
+}
 
 # Exclude the following regions as they do not have ProductName in the
-# pricing table. Reference: #1768
+# pricing table. Reference: #1768 #2548
 EXCLUDED_REGIONS = {
     'eastus2euap',
     'centraluseuap',
+    'brazilus',
 }
 
 
@@ -248,14 +249,29 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--all-regions',
+                       action='store_true',
+                       help='Fetch all global regions, not just the U.S. ones.')
+    group.add_argument('--regions',
+                       nargs='+',
+                       help='Fetch the list of specified regions.')
+    parser.add_argument('--exclude',
+                        nargs='+',
+                        help='Exclude the list of specified regions.')
     args = parser.parse_args()
 
-    region_filter = get_regions() if args.all_regions else US_REGIONS
-    region_filter = set(region_filter) - EXCLUDED_REGIONS
+    if args.regions:
+        region_filter = set(args.regions) - EXCLUDED_REGIONS
+    elif args.all_regions:
+        region_filter = set(get_regions()) - EXCLUDED_REGIONS
+    else:
+        region_filter = US_REGIONS
+    region_filter = region_filter - set(
+        args.exclude) if args.exclude else region_filter
+
+    if not region_filter:
+        raise ValueError('No regions to fetch. Please check your arguments.')
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
