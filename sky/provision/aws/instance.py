@@ -159,7 +159,7 @@ def terminate_instances(
                                   excluded_instances=None)
     instances.terminate()
     if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # not using a dedicated AWS SG. We don't need to wait for the
+        # Using default AWS SG. We don't need to wait for the
         # termination of the instances.
         return
     # If ports are specified, we need to delete the newly created Security
@@ -230,7 +230,7 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
@@ -256,7 +256,7 @@ def open_ports(
     if sg is None:
         logger.warning('Find new security group failed. Skip open ports.')
         return
-    # For multinode cases, we need to open ports for all instances.
+    # For multinode cases, we need to change the SG for all instances.
     for instance in instance_list:
         _maybe_move_to_new_sg(instance, sg)
 
@@ -303,9 +303,8 @@ def cleanup_ports(
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
     if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
-        # not using a dedicated AWS SG. We only want to delete the SG
-        # that is dedicated to this cluster (i.e., this cluster have opened
-        # some ports).
+        # Using default AWS SG. We only want to delete the SG that is dedicated
+        # to this cluster (i.e., this cluster have opened some ports).
         return
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
