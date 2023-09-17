@@ -1,4 +1,4 @@
-InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,Generation,Device_Memory
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Price,SpotPrice,Region,Generation,DeviceMemory
 Basic_A0,,,1.0,0.75,,0.024,0.00912,australiacentral,V1,
 Basic_A0,,,1.0,0.75,,0.024,0.0024,australiacentral2,V1,
 Basic_A0,,,1.0,0.75,,0.024,0.00912,australiaeast,V1,
