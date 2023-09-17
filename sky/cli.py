@@ -1761,14 +1761,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Querying IP address is not supported '
                                      'for local clusters.')
-            head_ip = handle.head_ip
-            if head_ip is None:
-                # Try fetching the IP address again.
-                head_ip = handle.external_ips()[0]
-                if head_ip is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError('Failed to fetch IP address. '
-                                           'Please try again later.')
+            head_ip = handle.external_ips()[0]
             click.echo(head_ip)
             return
         nonreserved_cluster_records = []
