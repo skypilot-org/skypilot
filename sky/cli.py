@@ -1638,7 +1638,11 @@ def _get_spot_jobs(
               default=False,
               is_flag=True,
               required=False,
-              help='Get the IP address of the head node of a cluster. ')
+              help=('Get the IP address of the head node of a cluster. This '
+                    'option will override all other options. For Kubernetes '
+                    'clusters, the returned IP address is the internal IP '
+                    'of the head pod, and may not be accessible from outside '
+                    'the cluster.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
@@ -1663,11 +1667,6 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     command.
 
     Display all fields using ``sky status -a``.
-
-    Only display the IP address of the cluster using
-    ``sky status --ip <cluster-name>``. This option will override all other
-    options. For Kubernetes clusters, the returned IP address is the internal IP
-    of the head pod, and may not be accessible from outside the cluster.
 
     Each cluster can have one of the following statuses:
 
@@ -1755,7 +1754,8 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Cluster {cluster_record["name"]!r} is not in UP status.')
+                    raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+                                       'is not in UP status.')
             handle = cluster_record['handle']
             if not isinstance(handle, backends.CloudVmRayResourceHandle):
                 with ux_utils.print_exception_no_traceback():
