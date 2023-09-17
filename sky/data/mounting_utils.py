@@ -31,8 +31,8 @@ def get_mounting_command(
           MOUNT and CSYNC
         mount_path: Path to mount the bucket at.
         mount_cmd: Command to mount the bucket. Should be single line.
-        install_cmd: Command to install the mounting utility. Should be
-          single line.
+        install_cmd: Command to install the mounting utility for MOUNT mode.
+          Should be single line.
 
     Returns:
         str: Mounting command with the mounting script as a heredoc.
@@ -58,17 +58,17 @@ def get_mounting_command(
             MOUNT_BINARY={mount_binary}
             # Check if path is already mounted
             if grep -q $MOUNT_PATH /proc/mounts ; then
-                echo "Path already mounted - unmounting..."
-                fusermount -uz "$MOUNT_PATH"
-                echo "Successfully unmounted $MOUNT_PATH."
+              echo "Path already mounted - unmounting..."
+              fusermount -uz "$MOUNT_PATH"
+              echo "Successfully unmounted $MOUNT_PATH."
             fi
 
             # Install MOUNT_BINARY if not already installed
             if {installed_check}; then
-            echo "$MOUNT_BINARY already installed. Proceeding..."
+              echo "$MOUNT_BINARY already installed. Proceeding..."
             else
-            echo "Installing $MOUNT_BINARY..."
-            {install_cmd}
+              echo "Installing $MOUNT_BINARY..."
+              {install_cmd}
             fi
         fi
 
@@ -81,21 +81,21 @@ def get_mounting_command(
           # Check if mount path contains files for MOUNT mode only
           if [ "$MOUNT_MODE" = "MOUNT" ]; then
             if [ "$(ls -A $MOUNT_PATH)" ]; then
-                echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
-                exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
+              echo "Mount path $MOUNT_PATH is not empty. Please mount to another path or remove it first."
+              exit {exceptions.MOUNT_PATH_NON_EMPTY_CODE}
             fi
           fi
         fi
 
         if [ "$MOUNT_MODE" = "MOUNT" ]; then
-            echo "Mounting source bucket to $MOUNT_PATH with $MOUNT_BINARY..."
-            {mount_cmd}
-            echo "Mounting done."
+          echo "Mounting source bucket to $MOUNT_PATH with $MOUNT_BINARY..."
+          {mount_cmd}
+          echo "Mounting done."
         else
-            # running CSYNC cmd
-            echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
-            setsid {mount_cmd} >/dev/null 2>&1 &
-            echo "CSYNC is set."
+          # running CSYNC cmd
+          echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
+          setsid {mount_cmd} >/dev/null 2>&1 &
+          echo "CSYNC is set."
         fi
     """)
 

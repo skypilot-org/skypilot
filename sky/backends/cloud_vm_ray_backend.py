@@ -3009,8 +3009,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
-        self._execute_storage_mounts(handle, storage_mounts, storage_utils.StorageMode.MOUNT)
-        self._execute_storage_mounts(handle, storage_mounts, storage_utils.StorageMode.CSYNC)
+        self._execute_storage_mounts(handle, storage_mounts,
+                                     storage_utils.StorageMode.MOUNT)
+        self._execute_storage_mounts(handle, storage_mounts,
+                                     storage_utils.StorageMode.CSYNC)
         self._set_cluster_storage_mounts_metadata(handle.cluster_name,
                                                   storage_mounts)
 
@@ -4414,8 +4416,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'File mount sync took {end - start} seconds.')
 
     def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Dict[Path,
-                                                     storage_lib.Storage],
+                                storage_mounts: Dict[Path, storage_lib.Storage],
                                 mount_mode: storage_utils.StorageMode):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Process only MOUNT mode objects here. COPY mode objects have been
@@ -4441,7 +4442,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if mount_mode == storage_utils.StorageMode.MOUNT:
             mode_str = 'mount'
             action_message = 'Mounting'
-        else: # CSYNC mdoe
+        else:  # CSYNC mdoe
             mode_str = 'csync'
             action_message = 'Setting up CSYNC'
 
@@ -4468,8 +4469,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             store = list(storage_obj.stores.values())[0]
             if mount_mode == storage_utils.StorageMode.MOUNT:
                 mount_cmd = store.mount_command(dst)
-            else: # CSYNC mode
-                mount_cmd=  store.csync_command(dst)
+            else:  # CSYNC mode
+                mount_cmd = store.csync_command(dst,
+                                                storage_obj.interval_seconds)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4509,7 +4511,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
-
 
     def _set_cluster_storage_mounts_metadata(
             self, cluster_name: str,

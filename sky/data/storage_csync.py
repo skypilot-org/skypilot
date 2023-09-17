@@ -1,4 +1,4 @@
-"""Skystorage module"""
+"""CSYNC module"""
 import functools
 import os
 import pathlib
@@ -17,6 +17,7 @@ from sky.utils import db_utils
 logger = sky_logging.init_logger(__name__)
 
 _CSYNC_BASE_PATH = '~/.skystorage'
+_CSYNC_DB_PATH = '~/.sky/storage_csync.db'
 
 _DB = None
 _CURSOR = None
@@ -24,7 +25,7 @@ _CONN = None
 _BOOT_TIME = None
 
 
-def db(func):
+def connect_db(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -41,8 +42,7 @@ def db(func):
             conn.commit()
 
         if _DB is None:
-            db_path = os.path.expanduser('~/.sky/skystorage.db')
-            pathlib.Path(db_path).parents[0].mkdir(parents=True, exist_ok=True)
+            db_path = os.path.expanduser(_CSYNC_DB_PATH)
             _DB = db_utils.SQLiteConn(db_path, create_table)
 
         _CURSOR = _DB.cursor
@@ -54,7 +54,7 @@ def db(func):
     return wrapper
 
 
-@db
+@connect_db
 def _add_running_csync(csync_pid: int, source_path: str):
     """Given the process id of CSYNC, it should create a row with it"""
     assert _CURSOR is not None
@@ -66,7 +66,7 @@ def _add_running_csync(csync_pid: int, source_path: str):
     _CONN.commit()
 
 
-@db
+@connect_db
 def _get_all_running_csync_pid() -> List[Any]:
     """Returns all the registerd pid of CSYNC processes"""
     assert _CURSOR is not None
@@ -77,7 +77,7 @@ def _get_all_running_csync_pid() -> List[Any]:
     return csync_pids
 
 
-@db
+@connect_db
 def _get_running_csync_source_path() -> List[Any]:
     """Returns all the registerd source path of CSYNC processes"""
     assert _CURSOR is not None
@@ -89,7 +89,7 @@ def _get_running_csync_source_path() -> List[Any]:
     return source_paths
 
 
-@db
+@connect_db
 def _set_running_csync_sync_pid(csync_pid: int, sync_pid: Optional[int]):
     """Given the process id of CSYNC, sets the sync_pid column value"""
     assert _CURSOR is not None
@@ -100,7 +100,7 @@ def _set_running_csync_sync_pid(csync_pid: int, sync_pid: Optional[int]):
     _CONN.commit()
 
 
-@db
+@connect_db
 def _get_running_csync_sync_pid(csync_pid: int) -> Optional[int]:
     """Given the process id of CSYNC, returns the sync_pid column value"""
     assert _CURSOR is not None
@@ -113,7 +113,7 @@ def _get_running_csync_sync_pid(csync_pid: int) -> Optional[int]:
     raise ValueError(f'CSYNC PID {csync_pid} not found.')
 
 
-@db
+@connect_db
 def _delete_running_csync(csync_pid: int):
     """Deletes the row with process id of CSYNC from running_csync table"""
     assert _CURSOR is not None
@@ -123,7 +123,7 @@ def _delete_running_csync(csync_pid: int):
     _CONN.commit()
 
 
-@db
+@connect_db
 def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
     """Given the path, returns process ID of csync running on it"""
     assert _CURSOR is not None
@@ -146,7 +146,7 @@ def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
     """Builds sync command for aws s3"""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
-    subprocess.check_output(config_cmd, shell=True)
+    subprocess.run(config_cmd, shell=True)
     sync_cmd = f'aws s3 sync {src_path} s3://{dst}'
     if delete:
         sync_cmd += ' --delete'
@@ -168,16 +168,9 @@ def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
     return sync_cmd
 
 
-def run_sync(src: str,
-             storetype: str,
-             dst: str,
-             num_threads: int,
-             interval_seconds: int,
-             delete: bool,
-             no_follow_symlinks: bool,
-             csync_pid: int,
-             max_retries: int = 10,
-             backoff: Optional[common_utils.Backoff] = None):
+def run_sync(src: str, storetype: str, dst: str, num_threads: int,
+             interval_seconds: int, delete: bool, no_follow_symlinks: bool,
+             csync_pid: int):
     """Runs the sync command to from src to storetype bucket"""
     #TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
@@ -199,40 +192,40 @@ def run_sync(src: str,
     log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
 
     with open(log_path, 'a') as fout:
-        try:
-            with subprocess.Popen(sync_cmd,
-                                  stdout=fout,
-                                  stderr=fout,
-                                  start_new_session=True,
-                                  shell=True) as proc:
-                _set_running_csync_sync_pid(csync_pid, proc.pid)
-                proc.wait()
-        except subprocess.CalledProcessError:
-            src_to_bucket = (f'\'{src}\' to \'{dst}\' '
-                             f'at \'{storetype}\'')
-            if max_retries > 0:
-                if backoff is None:
-                    # interval_seconds/2 is heuristically determined
-                    # as initial backoff
-                    backoff = common_utils.Backoff(int(interval_seconds / 2))
-                wait_time = backoff.current_backoff()
-                fout.write('Encountered an error while syncing '
-                           f'{src_to_bucket}. Retrying'
-                           f' in {wait_time}s. {max_retries} more reattempts '
-                           f'remaining. Check {log_path} for details.')
-                time.sleep(wait_time)
+        max_retries = 10
+        # interval_seconds/2 is heuristically determined
+        # as initial backoff
+        initial_backoff = int(interval_seconds / 2)
+        backoff = common_utils.Backoff(initial_backoff)
+        for _ in range(max_retries):
+            try:
+                with subprocess.Popen(sync_cmd,
+                                      stdout=fout,
+                                      stderr=fout,
+                                      start_new_session=True,
+                                      shell=True) as proc:
+                    _set_running_csync_sync_pid(csync_pid, proc.pid)
+                    proc.wait()
+                    _set_running_csync_sync_pid(csync_pid, -1)
+            except subprocess.CalledProcessError:
                 # reset sync pid as the sync process is terminated
                 _set_running_csync_sync_pid(csync_pid, -1)
-                run_sync(src, storetype, dst, num_threads, interval_seconds,
-                         delete, no_follow_symlinks, csync_pid, max_retries - 1,
-                         backoff)
+                src_to_bucket = (f'\'{src}\' to \'{dst}\' '
+                                 f'at \'{storetype}\'')
+                wait_time = backoff.current_backoff()
+                fout.write('Encountered an error while syncing '
+                           f'{src_to_bucket}. Retrying sync '
+                           f'in {wait_time}s. {max_retries} more reattempts '
+                           f'remaining. Check {log_path} for details.')
+                time.sleep(wait_time)
             else:
-                raise RuntimeError(f'Failed to sync {src_to_bucket} after '
-                                   f'number of retries. Check {log_path} for'
-                                   'details') from None
+                break
+        else:
+            raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+                               f'{max_retries} number of retries. Check '
+                               f'{log_path} for more details') from None
 
         # run necessary post-processes
-        _set_running_csync_sync_pid(csync_pid, -1)
         if storetype == 's3':
             # set number of threads back to its default value
             config_cmd = \
@@ -304,7 +297,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         # operation, we compute remaining time to wait before the next
         # sync operation.
         elapsed_time = int(end_time - start_time)
-        remaining_interval = max(0, interval_seconds-elapsed_time)
+        remaining_interval = max(0, interval_seconds - elapsed_time)
         # sync_pid column is set to 0 when sync is not running
         time.sleep(remaining_interval)
 

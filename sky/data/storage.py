@@ -457,7 +457,8 @@ class Storage(object):
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
-        self.interval_seconds = interval_seconds
+        if self.mode != StorageMode.CSYNC:
+            assert interval_seconds is None
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -746,7 +747,8 @@ class Storage(object):
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
-    def from_metadata(cls, metadata: StorageMetadata, **override_args):
+    def from_metadata(cls, metadata: StorageMetadata,
+                      **override_args) -> 'Storage':
         """Create Storage from a StorageMetadata object.
 
         Used when reconstructing Storage and Store objects from
@@ -988,6 +990,7 @@ class S3Store(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
     def __init__(self,
                  name: str,
@@ -1308,7 +1311,7 @@ class S3Store(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval_seconds: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = None) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
@@ -1316,7 +1319,7 @@ class S3Store(AbstractStore):
           interval_seconds: int; runs the sync command every INTERVAL seconds
         """
         if interval_seconds is None:
-            interval_seconds = 600
+            interval_seconds = self._CSYNC_DEFAULT_INTERVAL_SECONDS
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -1327,7 +1330,7 @@ class S3Store(AbstractStore):
                     )
         else:
             dst = self.bucket.name
-        csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
+        csync_cmd = (f'python -m sky.data.storage_csync csync {csync_path} '
                      f's3 {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
@@ -1407,6 +1410,7 @@ class GcsStore(AbstractStore):
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
     GCSFUSE_VERSION = '1.0.1'
+    _CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
     def __init__(self,
                  name: str,
@@ -1776,7 +1780,7 @@ class GcsStore(AbstractStore):
           interval_seconds: int; runs the sync command every INTERVAL seconds
         """
         if interval_seconds is None:
-            interval_seconds = 600
+            interval_seconds = self._CSYNC_DEFAULT_INTERVAL_SECONDS
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -1787,7 +1791,7 @@ class GcsStore(AbstractStore):
                     )
         else:
             dst = self.bucket.name
-        csync_cmd = (f'python -m sky.data.skystorage csync {csync_path} '
+        csync_cmd = (f'python -m sky.data.storage_csync csync {csync_path} '
                      f'gcs {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,

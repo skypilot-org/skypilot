@@ -2897,7 +2897,7 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                                                handle.docker_user)
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, port_list=port_list, **ssh_credentials)
-    csync_terminate_cmd = ('python -m sky.data.skystorage terminate -a '
+    csync_terminate_cmd = ('python -m sky.data.storage_csync terminate -a '
                            '>/dev/null')
 
     def _run_csync_terminate(runner):
