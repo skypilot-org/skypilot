@@ -1,0 +1,18 @@
+resources:
+  cpus: 2+
+  cloud: gcp
+
+workdir: .
+
+setup: |
+  pip install fastapi
+  pip install uvicorn
+
+run: python3 sky/map/main.py
+
+service:
+  port: 8081
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1

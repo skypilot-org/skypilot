@@ -205,6 +205,12 @@ class SpotController:
                                task_id=task_id,
                                start_time=remote_job_submitted_at,
                                callback_func=callback_func)
+
+        (_, handle) = backend_utils.refresh_cluster_status_handle(
+            cluster_name, force_refresh_statuses=set(status_lib.ClusterStatus))
+        spot_utils.report_wait(handle.launched_resources.zone,
+                               time.time() - submitted_at)
+
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -269,6 +275,11 @@ class SpotController:
                                       f' (status: {cluster_status.value})')
                 logger.info(
                     f'Cluster is preempted{cluster_status_str}. Recovering...')
+                if handle.launched_resources is not None:
+                    launched_resources = handle.launched_resources
+                    life_time = time.time() - submitted_at
+                    spot_utils.report_preemption(launched_resources.zone,
+                                                 life_time)
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
