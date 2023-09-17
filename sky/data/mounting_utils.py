@@ -13,6 +13,7 @@ def get_mounting_command(
     mount_cmd: str,
     install_cmd: Optional[str] = None,
     version_check_cmd: Optional[str] = None,
+    csync_log_path: Optional[str] = None,
 ) -> str:
     """Generates the mounting command for a given bucket.
 
@@ -94,7 +95,7 @@ def get_mounting_command(
         else
           # running CSYNC cmd
           echo "Setting up CSYNC on $MOUNT_PATH to source bucket..."
-          setsid {mount_cmd} >/dev/null 2>&1 &
+          setsid {mount_cmd} >> {csync_log_path} 2>&1 &
           echo "CSYNC is set."
         fi
     """)

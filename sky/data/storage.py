@@ -1334,11 +1334,20 @@ class S3Store(AbstractStore):
                     )
         else:
             dst = self.bucket.name
-        csync_cmd = (f'python -m sky.data.storage_csync csync {csync_path} '
+
+        result = urllib.parse.urlsplit(dst)
+        # the exact mounting point being either the name of bucket
+        # or subdirectory in it
+        sync_point = result.path.split('/')[-1]
+        log_file_name = log_file_name = f'csync_s3_{sync_point}.log'
+        log_path = f'~/.sky/{log_file_name}'
+        csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f's3 {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
-                                                   csync_path, csync_cmd)
+                                                   csync_path,
+                                                   csync_cmd,
+                                                   csync_log_path=log_path)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1795,11 +1804,20 @@ class GcsStore(AbstractStore):
                     )
         else:
             dst = self.bucket.name
-        csync_cmd = (f'python -m sky.data.storage_csync csync {csync_path} '
+
+        result = urllib.parse.urlsplit(dst)
+        # the exact mounting point being either the name of bucket
+        # or subdirectory in it
+        sync_point = result.path.split('/')[-1]
+        log_file_name = log_file_name = f'csync_gcs_{sync_point}.log'
+        log_path = f'~/.sky/{log_file_name}'
+        csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f'gcs {dst} --interval-seconds {interval_seconds} '
                      '--delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
-                                                   csync_path, csync_cmd)
+                                                   csync_path,
+                                                   csync_cmd,
+                                                   csync_log_path=log_path)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket

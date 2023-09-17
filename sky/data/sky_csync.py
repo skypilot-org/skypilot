@@ -16,8 +16,7 @@ from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_CSYNC_BASE_PATH = '~/.skystorage'
-_CSYNC_DB_PATH = '~/.sky/storage_csync.db'
+_CSYNC_DB_PATH = '~/.sky/sky_csync.db'
 
 _DB = None
 _CURSOR = None
@@ -183,58 +182,45 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
     else:
         raise ValueError(f'Unsupported store type: {storetype}')
 
-    result = urllib.parse.urlsplit(dst)
-    # the exact mounting point being either the bucket or subdirectory in it
-    sync_point = result.path.split('/')[-1]
-    log_file_name = f'csync_{storetype}_{sync_point}.log'
-    base_dir = os.path.expanduser(_CSYNC_BASE_PATH)
-    os.makedirs(base_dir, exist_ok=True)
-    log_path = os.path.expanduser(os.path.join(base_dir, log_file_name))
-
-    with open(log_path, 'a') as fout:
-        max_retries = 10
-        # interval_seconds/2 is heuristically determined
-        # as initial backoff
-        initial_backoff = int(interval_seconds / 2)
-        backoff = common_utils.Backoff(initial_backoff)
-        for _ in range(max_retries):
-            try:
-                with subprocess.Popen(sync_cmd,
-                                      stdout=fout,
-                                      stderr=fout,
-                                      start_new_session=True,
-                                      shell=True) as proc:
-                    _set_running_csync_sync_pid(csync_pid, proc.pid)
-                    proc.wait()
-                    _set_running_csync_sync_pid(csync_pid, -1)
-            except subprocess.CalledProcessError:
-                # reset sync pid as the sync process is terminated
+    max_retries = 10
+    # interval_seconds/2 is heuristically determined
+    # as initial backoff
+    initial_backoff = int(interval_seconds / 2)
+    backoff = common_utils.Backoff(initial_backoff)
+    for _ in range(max_retries):
+        try:
+            with subprocess.Popen(sync_cmd, start_new_session=True,
+                                  shell=True) as proc:
+                _set_running_csync_sync_pid(csync_pid, proc.pid)
+                proc.wait()
                 _set_running_csync_sync_pid(csync_pid, -1)
-                src_to_bucket = (f'\'{src}\' to \'{dst}\' '
-                                 f'at \'{storetype}\'')
-                wait_time = backoff.current_backoff()
-                fout.write('Encountered an error while syncing '
+        except subprocess.CalledProcessError:
+            # reset sync pid as the sync process is terminated
+            _set_running_csync_sync_pid(csync_pid, -1)
+            src_to_bucket = (f'\'{src}\' to \'{dst}\' '
+                             f'at \'{storetype}\'')
+            wait_time = backoff.current_backoff()
+            logger.warning('Encountered an error while syncing '
                            f'{src_to_bucket}. Retrying sync '
-                           f'in {wait_time}s. {max_retries} more reattempts '
-                           f'remaining. Check {log_path} for details.')
-                time.sleep(wait_time)
-            else:
-                break
+                           f'in {wait_time}s. {max_retries} more reattempts'
+                           ' remaining. Check the log file in ~/.sky/ '
+                           'for more details.')
+            time.sleep(wait_time)
         else:
-            raise RuntimeError(f'Failed to sync {src_to_bucket} after '
-                               f'{max_retries} number of retries. Check '
-                               f'{log_path} for more details') from None
+            # successfully completed sync process
+            break
+    else:
+        raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+                           f'{max_retries} number of retries. Check '
+                           'the log file in ~/.sky/ for more'
+                           'details') from None
 
-        # run necessary post-processes
-        if storetype == 's3':
-            # set number of threads back to its default value
-            config_cmd = \
-                'aws configure set default.s3.max_concurrent_requests 10'
-            subprocess.run(config_cmd,
-                           shell=True,
-                           check=True,
-                           stdout=fout,
-                           stderr=fout)
+    # run necessary post-processes
+    if storetype == 's3':
+        # set number of threads back to its default value
+        config_cmd = \
+            'aws configure set default.s3.max_concurrent_requests 10'
+        subprocess.run(config_cmd, shell=True, check=True)
 
 
 @main.command()
