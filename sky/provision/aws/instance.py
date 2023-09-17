@@ -8,6 +8,7 @@ from botocore import config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
+from sky.clouds import aws as aws_cloud
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
@@ -157,7 +158,7 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    if cluster_name_on_cloud not in sg_name:
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
         # not using a dedicated AWS SG. We don't need to wait for the
         # termination of the instances.
         return
@@ -301,7 +302,7 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    if cluster_name_on_cloud not in sg_name:
+    if sg_name == aws_cloud.DEFAULT_SECURITY_GROUP_NAME:
         # not using a dedicated AWS SG. We only want to delete the SG
         # that is dedicated to this cluster (i.e., this cluster have opened
         # some ports).
