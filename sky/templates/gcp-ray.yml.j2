@@ -30,8 +30,8 @@ provider:
   project_id: {{gcp_project_id}}
   # The firewall rule name for customized firewall rules. Only enabled
   # if we have ports requirement.
-{% if have_ports %}
-  firewall_rule: sky-ports-{{cluster_name_on_cloud}}
+{% if firewall_rule is not None %}
+  firewall_rule: {{firewall_rule}}
 {% endif %}
 {%- if docker_login_config is not none %}
   # We put docker login config in provider section because ray's schema disabled

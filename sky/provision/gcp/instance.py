@@ -221,6 +221,7 @@ def cleanup_ports(
     project_id = provider_config['project_id']
     if 'ports' in provider_config:
         # Backward compatibility for old provider config.
+        # TODO(tian): remove this after 2 minor releases, 0.6.0.
         for port in provider_config['ports']:
             firewall_rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
             instance_utils.GCPComputeInstance.delete_firewall_rule(

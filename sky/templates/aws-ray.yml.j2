@@ -25,13 +25,8 @@ provider:
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
   security_group:
-    # AWS config file must include security group name, but we change
-    # to dedicted security group if we have ports requirement.
-  {% if have_ports %}
-    GroupName: sky-sg-{{cluster_name_on_cloud}}
-  {% else %}
+    # AWS config file must include security group name
     GroupName: {{security_group}}
-  {% endif %}
 {% if vpc_name is not none %}
   # NOTE: This is a new field added by SkyPilot and parsed by our own
   # AWSNodeProvider.
