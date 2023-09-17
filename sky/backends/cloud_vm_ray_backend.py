@@ -2857,18 +2857,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            prev_ports = None
-            if to_provision_config.prev_handle is not None:
-                prev_ports = (
-                    to_provision_config.prev_handle.launched_resources.ports)
-            current_ports = handle.launched_resources.ports
-            open_new_ports = bool(
-                resources_utils.port_ranges_to_set(current_ports) -
-                resources_utils.port_ranges_to_set(prev_ports))
-            self._update_after_cluster_provisioned(handle, task,
-                                                   prev_cluster_status, ip_list,
-                                                   ssh_port_list,
-                                                   open_new_ports, lock_path)
+            self._update_after_cluster_provisioned(
+                handle, to_provision_config.prev_handle, task,
+                prev_cluster_status, ip_list, ssh_port_list, lock_path)
             return handle
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
@@ -2882,9 +2873,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  provider_config)
 
     def _update_after_cluster_provisioned(
-            self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
+            self, handle: CloudVmRayResourceHandle,
+            prev_handle: CloudVmRayResourceHandle, task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
-            ip_list: List[str], ssh_port_list: List[int], open_new_ports: bool,
+            ip_list: List[str], ssh_port_list: List[int],
             lock_path: str) -> None:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, handle.launched_resources)
@@ -2930,6 +2922,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
 
+        prev_ports = None
+        if prev_handle is not None:
+            prev_ports = prev_handle.launched_resources.ports
+        current_ports = handle.launched_resources.ports
+        open_new_ports = bool(
+            resources_utils.port_ranges_to_set(current_ports) -
+            resources_utils.port_ranges_to_set(prev_ports))
         if open_new_ports:
             with rich_utils.safe_status(
                     '[bold cyan]Launching - Opening new ports'):
