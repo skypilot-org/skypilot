@@ -178,6 +178,8 @@ class Resources:
             ports = resources_utils.simplify_ports(
                 [str(port) for port in ports])
             if not ports:
+                # Set to None if empty. This is mainly for resources from
+                # cli, which will comes in as an empty tuple.
                 ports = None
         self._ports = ports
 
@@ -263,7 +265,7 @@ class Resources:
             disk_size = f', disk_size={self.disk_size}'
 
         ports = ''
-        if self.ports:
+        if self.ports is not None:
             ports = f', ports={self.ports}'
 
         if self._instance_type is not None:
