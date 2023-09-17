@@ -65,3 +65,13 @@ class ZoneStore:
             return 0.0
 
         return total_preempt_time / count
+    
+    def get_preempt_data_with_idx(self, idx: int) -> Tuple[float, datetime]:
+        if idx >= len(self._preempt_data):
+            return (-1.0, None)
+        return (self._preempt_data[idx][0], self._preempt_data[idx][1])
+
+    def get_wait_data_with_idx(self, idx: int) -> Tuple[float, datetime]:
+        if idx >= len(self._wait_data):
+            return (-1.0, None)
+        return (self._wait_data[idx][0], self._wait_data[idx][1])

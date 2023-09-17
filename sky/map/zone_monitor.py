@@ -55,3 +55,15 @@ class ZoneMonitor:
 
     def get_zone_info(self) -> List[str]:
         return list(self._zone_stores.keys())
+    
+    def get_preempt_data_with_idx(self, zone: str, idx: int) -> tuple[str, datetime.datetime]:
+        if zone not in self._zone_stores:
+            return None, -1.0
+        time, timestamp = self._zone_stores[zone].get_preempt_data_with_idx(idx)
+        return timestamp, time
+
+    def get_wait_data_with_idx(self, zone: str, idx: int) -> tuple[str, datetime.datetime]:
+        if zone not in self._zone_stores:
+            return None, -1.0
+        time, timestamp = self._zone_stores[zone].get_wait_data_with_idx(idx)
+        return timestamp, time
