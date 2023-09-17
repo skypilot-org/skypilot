@@ -2857,14 +2857,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            open_new_ports = True
+            prev_ports = None
             if to_provision_config.prev_handle is not None:
                 prev_ports = (
                     to_provision_config.prev_handle.launched_resources.ports)
-                current_ports = handle.launched_resources.ports
-                open_new_ports = bool(
-                    resources_utils.port_ranges_to_set(current_ports) -
-                    resources_utils.port_ranges_to_set(prev_ports))
+            current_ports = handle.launched_resources.ports
+            open_new_ports = bool(
+                resources_utils.port_ranges_to_set(current_ports) -
+                resources_utils.port_ranges_to_set(prev_ports))
             self._update_after_cluster_provisioned(handle, task,
                                                    prev_cluster_status, ip_list,
                                                    ssh_port_list,

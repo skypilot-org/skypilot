@@ -151,8 +151,6 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
     'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
-DEFAULT_AWS_SG_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
-
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -1019,7 +1017,8 @@ def write_cluster_config(
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
                 'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), DEFAULT_AWS_SG_NAME),
+                    ('aws', 'security_group_name'),
+                    f'sky-sg-{common_utils.user_and_hostname_hash()}'),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(

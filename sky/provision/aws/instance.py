@@ -8,7 +8,6 @@ from botocore import config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
-from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
 
@@ -158,8 +157,9 @@ def terminate_instances(
                                   included_instances=None,
                                   excluded_instances=None)
     instances.terminate()
-    if sg_name == backend_utils.DEFAULT_AWS_SG_NAME:
-        # Using default shared AWS SG. We don't need to delete it.
+    if cluster_name_on_cloud not in sg_name:
+        # not using a dedicated AWS SG. We don't need to wait for the
+        # termination of the instances.
         return
     # If ports are specified, we need to delete the newly created Security
     # Group. Here we wait for all instances to be terminated, since the
@@ -301,8 +301,8 @@ def cleanup_ports(
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
     sg_name = provider_config['security_group']['GroupName']
-    if sg_name == backend_utils.DEFAULT_AWS_SG_NAME:
-        # This is the default shared AWS SG. We only want to delete the SG
+    if cluster_name_on_cloud not in sg_name:
+        # not using a dedicated AWS SG. We only want to delete the SG
         # that is dedicated to this cluster (i.e., this cluster have opened
         # some ports).
         return
