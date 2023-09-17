@@ -37,13 +37,7 @@ and look for the logs fo some output like:
     Jupyter Server 2.7.0 is running at:
         http://127.0.0.1:8888/lab?token=<token>
 
-Run
-
-.. code-block:: bash
-
-    $ sky status -a jupyter
-
-to get the :code:`HEAD_IP` of the cluster, replace the :code:`127.0.0.1` with the :code:`HEAD_IP` and open your browser for the URL.
+Replace the :code:`127.0.0.1` with the output of :code:`sky status --ip jupyter` and open your browser for the URL.
 
 If you want to expose multiple ports, you can specify a list of ports or port ranges in the :code:`resources` section:
 
