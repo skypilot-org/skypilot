@@ -1726,9 +1726,11 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
-                    raise RuntimeError(
+                    cluster_num = (str(len(clusters))
+                                   if len(clusters) > 0 else 'No')
+                    raise ValueError(
                         _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=len(clusters),
+                            cluster_num=cluster_num,
                             plural=plural,
                             verb='specified'))
         else:
@@ -1743,15 +1745,17 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
-                    raise RuntimeError(
+                    cluster_num = (str(len(cluster_records))
+                                   if len(clusters) > 0 else 'No')
+                    raise ValueError(
                         _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=len(cluster_records),
+                            cluster_num=cluster_num,
                             plural=plural,
                             verb='found'))
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Cluster is not in UP status. ')
+                    raise RuntimeError('Cluster is not in UP status.')
             handle = cluster_record['handle']
             if not isinstance(handle, backends.CloudVmRayResourceHandle):
                 with ux_utils.print_exception_no_traceback():
