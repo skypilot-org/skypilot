@@ -30,7 +30,7 @@ provider:
   project_id: {{gcp_project_id}}
   # The firewall rule name for customized firewall rules. Only enabled
   # if we have ports requirement.
-{% if firewall_rule is not None %}
+{% if firewall_rule is not none %}
   firewall_rule: {{firewall_rule}}
 {% endif %}
 {%- if docker_login_config is not none %}
