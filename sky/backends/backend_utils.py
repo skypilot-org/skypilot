@@ -2871,8 +2871,10 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 
 def wait_and_terminate_csync(cluster_name: str) -> None:
-    """Terminatese all the CSYNC process running in each node after
-    waiting for the sync process launched by CSYNC complete.
+    """Terminates all the CSYNC process running in each node.
+    
+    Before terminating the CSYNC daemon, it waits until the sync process
+    launched by CSYNC is completed if there are any.
 
     Args:
         cluster_name: Cluster name (see `sky status`)
@@ -2885,13 +2887,14 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
         return
     try:
         ip_list = handle.external_ips()
-    # When cluster is in INIT mode, attempt to fetch IP fails raising an error
+    # When cluster is in INIT status, attempt to fetch IP fails raising an error
     except exceptions.FetchIPError:
         return
     if not ip_list:
         return
     port_list = handle.external_ssh_ports()
-    ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+    ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
+                                               handle.docker_user)
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, port_list=port_list, **ssh_credentials)
     csync_terminate_cmd = ('python -m sky.data.skystorage terminate -a '

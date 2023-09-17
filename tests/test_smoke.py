@@ -797,9 +797,9 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 @pytest.mark.aws
 def test_aws_storage_mounts():
     name = _get_cluster_name()
-    random_name = int(time.time())
-    storage_name = f'sky-test-{random_name}'
-    csync_storage_name = f'sky-test-{random_name + 1}'
+    timestamp = int(time.time())
+    storage_name = f'sky-test-{timestamp}'
+    csync_storage_name = f'sky-test-{timestamp + 1}'
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)

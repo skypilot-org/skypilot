@@ -3009,8 +3009,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ) -> None:
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
-        self._execute_storage_mounts(handle, storage_mounts)
-        self._execute_storage_csync(handle, storage_mounts)
+        self._execute_storage_mounts(handle, storage_mounts, storage_utils.StorageMode.MOUNT)
+        self._execute_storage_mounts(handle, storage_mounts, storage_utils.StorageMode.CSYNC)
         self._set_cluster_storage_mounts_metadata(handle.cluster_name,
                                                   storage_mounts)
 
@@ -4415,7 +4415,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
                                 storage_mounts: Dict[Path,
-                                                     storage_lib.Storage]):
+                                                     storage_lib.Storage],
+                                mount_mode: storage_utils.StorageMode):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Process only MOUNT mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
@@ -4423,7 +4424,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_utils.StorageMode.MOUNT
+            if storage_mount.mode == mount_mode
         }
 
         if not storage_mounts:
@@ -4437,11 +4438,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
             return
 
+        if mount_mode == storage_utils.StorageMode.MOUNT:
+            mode_str = 'mount'
+            action_message = 'Mounting'
+        else: # CSYNC mdoe
+            mode_str = 'csync'
+            action_message = 'Setting up CSYNC'
+
         fore = colorama.Fore
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage mount{plural}.{style.RESET_ALL}')
+                    f'storage {mode_str}{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
         port_list = handle.external_ssh_ports()
@@ -4450,14 +4458,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
-        log_path = os.path.join(self.log_dir, 'storage_mounts.log')
+        log_file_name = f'storage_{mode_str}.log'
+        log_path = os.path.join(self.log_dir, log_file_name)
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
+            if mount_mode == storage_utils.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+            else: # CSYNC mode
+                mount_cmd=  store.csync_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4469,7 +4481,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                 )
             except exceptions.CommandError as e:
@@ -4486,93 +4498,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     if env_options.Options.SHOW_DEBUG_INFO.get():
                         raise exceptions.CommandError(e.returncode,
-                                                      command='to mount',
+                                                      command=f'to {mode_str}',
                                                       error_msg=e.error_msg)
                     else:
                         # Strip the command (a big heredoc) from the exception
                         raise exceptions.CommandError(
                             e.returncode,
-                            command='to mount',
+                            command=f'to {mode_str}',
                             error_msg=e.error_msg) from None
 
         end = time.time()
-        logger.debug(f'Storage mount sync took {end - start} seconds.')
+        logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
 
-    def _execute_storage_csync(
-            self, handle: CloudVmRayResourceHandle,
-            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
-        """Executes CSYNC on storages.
-
-        This function only runs the CSYNC daemon on the given storage
-        and the files/dirs to be copied to remote node are handled in
-        the _execute_file_mounts.
-
-        """
-        csync_storage_mounts = {
-            path: storage_obj
-            for path, storage_obj in storage_mounts.items()
-            if storage_obj.mode == storage_utils.StorageMode.CSYNC
-        }
-
-        if not csync_storage_mounts:
-            return
-
-        cloud = handle.launched_resources.cloud
-        if isinstance(cloud, clouds.Local):
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Sky On-prem does not support '
-                'storage syncing. No action will be taken.'
-                f'{colorama.Style.RESET_ALL}')
-            return
-
-        fore = colorama.Fore
-        style = colorama.Style
-        plural = 's' if len(csync_storage_mounts) > 1 else ''
-        logger.info(f'{fore.CYAN}Processing {len(csync_storage_mounts)} '
-                    f'storage CSYNC{plural}.{style.RESET_ALL}')
-        start = time.time()
-        ip_list = handle.external_ips()
-        port_list = handle.external_ssh_ports()
-        assert ip_list is not None, 'external_ips is not cached in handle'
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=port_list, **ssh_credentials)
-        log_path = os.path.join(self.log_dir, 'storage_csyncs.log')
-
-        for dst, storage_obj in csync_storage_mounts.items():
-            if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
-            # Get the first store and use it to sync
-            store = list(storage_obj.stores.values())[0]
-            csync_cmd = store.csync_command(dst, storage_obj.interval_seconds)
-            src_print = (storage_obj.source
-                         if storage_obj.source else storage_obj.name)
-            if isinstance(src_print, list):
-                src_print = ', '.join(src_print)
-            try:
-                backend_utils.parallel_data_transfer_to_nodes(
-                    runners,
-                    source=src_print,
-                    target=dst,
-                    cmd=csync_cmd,
-                    run_rsync=False,
-                    action_message='Setting CSYNC',
-                    log_path=log_path,
-                )
-            except exceptions.CommandError as e:
-                if env_options.Options.SHOW_DEBUG_INFO.get():
-                    raise exceptions.CommandError(e.returncode,
-                                                  command='to CSYNC',
-                                                  error_msg=e.error_msg)
-                else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode, command='to CSYNC',
-                        error_msg=e.error_msg) from None
-
-        end = time.time()
-        logger.debug(f'Storage Sync setup took {end - start} seconds.')
 
     def _set_cluster_storage_mounts_metadata(
             self, cluster_name: str,
@@ -4617,9 +4554,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         return storage_mounts
 
     def _has_csync(self, cluster_name: str) -> bool:
-        """Chekcs if there is a storage running with CSYNC mode within the
-        cluster.
-        """
+        """Chekcs if there are CSYNC mode storages within the cluster."""
         storage_mounts = self._get_cluster_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:
             for _, storage_obj in storage_mounts.items():

@@ -141,17 +141,6 @@ def main():
     pass
 
 
-def update_interval(interval_seconds: int, elapsed_time: int):
-    """Updates the time interval for the next sync operation.
-
-    Given the originally set interval_seconds and the time elapsed during the
-    sync operation, this function computes and returns the remaining time to
-    wait before the next sync operation.
-    """
-    diff = interval_seconds - elapsed_time
-    return max(0, diff)
-
-
 def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                       no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
@@ -242,7 +231,7 @@ def run_sync(src: str,
                                    f'number of retries. Check {log_path} for'
                                    'details') from None
 
-        #run necessary post-processes
+        # run necessary post-processes
         _set_running_csync_sync_pid(csync_pid, -1)
         if storetype == 's3':
             # set number of threads back to its default value
@@ -279,9 +268,11 @@ def run_sync(src: str,
               help='')
 def csync(source: str, storetype: str, destination: str, num_threads: int,
           interval_seconds: int, delete: bool, no_follow_symlinks: bool):
-    """Syncs the source to the bucket every INTERVAL seconds. Creates an entry
-    of pid of the sync process in local database while sync command is runninng
-    and removes it when completed.
+    """Runs daemon to sync the source to the bucket every INTERVAL seconds.
+
+    Creates an entry of pid of the sync process in local database while sync
+    command is runninng and removes it when completed.
+    
     Args:
         source (str): The local path to the directory that you want to sync.
         storetype (str): The type of cloud storage to sync to.
@@ -309,9 +300,11 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         run_sync(full_src, storetype, destination, num_threads,
                  interval_seconds, delete, no_follow_symlinks, csync_pid)
         end_time = time.time()
-        # the time took to sync gets reflected to the interval_seconds
+        # Given the interval_seconds and the time elapsed during the sync
+        # operation, we compute remaining time to wait before the next
+        # sync operation.
         elapsed_time = int(end_time - start_time)
-        remaining_interval = update_interval(interval_seconds, elapsed_time)
+        remaining_interval = max(0, interval_seconds-elapsed_time)
         # sync_pid column is set to 0 when sync is not running
         time.sleep(remaining_interval)
 
@@ -346,8 +339,8 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
     """Terminates all the CSYNC daemon running after checking if all the
     sync process has completed.
     """
-    # TODO: Currently, this terminates all the CSYNC daemon by default.
-    # Make an option of --all to terminate all and make the default
+    # TODO(Doyoung): Currently, this terminates all the CSYNC daemon by
+    # default. Make an option of --all to terminate all and make the default
     # behavior to take a source name to terminate only one daemon.
     # Call the function to terminate the csync processes here
     if all:

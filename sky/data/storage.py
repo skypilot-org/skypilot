@@ -365,7 +365,7 @@ class Storage(object):
         - (required) Source.
         - (optional) Sync every interval_seconds for CSYNC mode.
         - (optional) Storage mode.
-        - (optional) Set of stores managed by sky added to the Storage object
+        - (optional) Set of stores managed by sky added to the Storage object.
         """
 
         def __init__(
