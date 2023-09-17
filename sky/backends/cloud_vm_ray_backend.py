@@ -2874,7 +2874,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _update_after_cluster_provisioned(
             self, handle: CloudVmRayResourceHandle,
-            prev_handle: CloudVmRayResourceHandle, task: task_lib.Task,
+            prev_handle: Optional[CloudVmRayResourceHandle],
+            task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], ssh_port_list: List[int],
             lock_path: str) -> None:
