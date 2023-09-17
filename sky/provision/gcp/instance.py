@@ -222,9 +222,9 @@ def cleanup_ports(
     if 'ports' in provider_config:
         # Backward compatibility for old provider config.
         for port in provider_config['ports']:
-            rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
+            firewall_rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
             instance_utils.GCPComputeInstance.delete_firewall_rule(
-                project_id, rule_name)
+                project_id, firewall_rule_name)
     if 'firewall_rule' in provider_config:
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(
