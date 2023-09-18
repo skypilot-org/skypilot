@@ -17,6 +17,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.map import map_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
@@ -392,6 +393,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
+            map_utils.report_wait(handle.launched_resources.zone,
+                                  time.time() - job_submitted_at)
         else:
             self._launched_cloud_region = None
         return job_submitted_at

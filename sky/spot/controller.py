@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.map import map_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.spot import recovery_strategy
@@ -208,8 +209,8 @@ class SpotController:
 
         (_, handle) = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh_statuses=set(status_lib.ClusterStatus))
-        spot_utils.report_wait(handle.launched_resources.zone,
-                               time.time() - submitted_at)
+        map_utils.report_wait(handle.launched_resources.zone,
+                              time.time() - submitted_at)
 
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -278,8 +279,8 @@ class SpotController:
                 if handle.launched_resources is not None:
                     launched_resources = handle.launched_resources
                     life_time = time.time() - submitted_at
-                    spot_utils.report_preemption(launched_resources.zone,
-                                                 life_time)
+                    map_utils.report_preemption(launched_resources.zone,
+                                                life_time)
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.

@@ -20,7 +20,8 @@ class BackingStore:
     def store(self, monitor: zone_monitor.ZoneMonitor):
 
         if not os.path.isfile(self._store_path):
-            logger.info('Backing store address not found.')
+            logger.info(
+                f'New Backing store address created: {self._store_path}')
 
         with open(self._store_path, 'wb+') as f:
             pickle.dump(monitor, f)

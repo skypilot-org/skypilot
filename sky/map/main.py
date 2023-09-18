@@ -15,6 +15,7 @@ from starlette.responses import Response
 import uvicorn
 
 from sky import sky_logging
+from sky.map import map_utils
 from sky.map.zone_monitor import ZoneMonitor
 
 logger = sky_logging.init_logger('sky.serve.zone_monitor')
@@ -107,7 +108,7 @@ def get_zone_info():
     data = {
         'zone_info': zone_info,
     }
-    return fastapi.responses.JSONResponse(content=data, status_code=200)
+    return map_utils.PrettyJSONResponse(content=data, status_code=200)
 
 
 async def retrieve_zone_preempt_data(zone: str):
@@ -187,7 +188,7 @@ if __name__ == '__main__':
     parser.add_argument('--backing-store',
                         type=str,
                         required=False,
-                        default='/sky-map-backing-store/store.db')
+                        default='~/store.db')
     args = parser.parse_args()
     backing_store = BackingStore(args.backing_store)
     zone_monitor = backing_store.load()

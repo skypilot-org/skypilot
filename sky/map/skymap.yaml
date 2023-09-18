@@ -15,7 +15,7 @@ setup: |
 
 run: |
   ls /sky-map-backing-store
-  python3 sky/map/main.py
+  python3 sky/map/main.py --backing-store /sky-map-backing-store/store.db
 
 service:
   port: 8081

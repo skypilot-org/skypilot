@@ -41,6 +41,7 @@ from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.map import map_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -333,12 +334,16 @@ def _execute(
     try:
         if Stage.PROVISION in stages:
             if handle is None:
+                submitted_at = time.time()
                 handle = backend.provision(task,
                                            task.best_resources,
                                            dryrun=dryrun,
                                            stream_logs=stream_logs,
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
+                if handle.launched_resources is not None:
+                    map_utils.report_wait(handle.launched_resources.zone,
+                                          time.time() - submitted_at)
 
         if dryrun and handle is None:
             logger.info('Dryrun finished.')
