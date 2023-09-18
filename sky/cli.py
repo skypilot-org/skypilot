@@ -691,7 +691,7 @@ def _parse_override_params(
         override_params['disk_size'] = disk_size
     if disk_tier is not None:
         override_params['disk_tier'] = disk_tier
-    if ports is not None:
+    if ports:
         override_params['ports'] = ports
     return override_params
 
