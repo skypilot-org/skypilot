@@ -27,27 +27,25 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
   run: |
     # Will run inside container
 
-For Docker images hosted on private registries, you can provide the registry authentication details using the :code:`envs` section:
+For Docker images hosted on private registries, you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
 .. code-block:: yaml
 
-  # private_docker.yaml
+  # ecr_private_docker.yaml
   resources:
     image_id: docker:<your-private-image>:<tag>
 
   envs:
-    SKYPILOT_DOCKER_USERNAME: <username>
-    SKYPILOT_DOCKER_PASSWORD: <password>
-    SKYPILOT_DOCKER_SERVER: <server>
+    SKYPILOT_DOCKER_USERNAME: AWS
+    # SKYPILOT_DOCKER_PASSWORD: <password>
+    SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-east-1.amazonaws.com
 
-Alternatively, you can set these environment variables directly through the CLI:
+We suggest to setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
 
 .. code-block:: bash
 
-  $ sky launch \
-      --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1) \
-      --env SKYPILOT_DOCKER_USERNAME=AWS \
-      private_docker.yaml
+  $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
+  $ sky launch ecr_private_docker.yaml --env SKYPILOT_DOCKER_PASSWORD
 
 Running Docker Containers as Tasks
 ----------------------------------
