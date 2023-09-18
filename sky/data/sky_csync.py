@@ -129,9 +129,10 @@ def main():
 def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                       no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
-    sync_cmd = ('aws configure set default.s3.max_concurrent_requests '
-                f'{num_threads};')
-    sync_cmd += f' aws s3 sync {src_path} s3://{dst}'
+    config_cmd = ('aws configure set default.s3.max_concurrent_requests '
+                  f'{num_threads}')
+    subprocess.check_output(config_cmd, shell=True)
+    sync_cmd = f'aws s3 sync {src_path} s3://{dst}'
     if delete:
         sync_cmd += ' --delete'
     if no_follow_symlinks:
