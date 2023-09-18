@@ -1007,8 +1007,6 @@ def serve_up(
     if 'ports' in controller_resources_config:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify ports for controller resources.')
-    # TODO(tian): Open required ports only after #2485 is merged.
-    controller_resources_config['ports'] = [serve.LOAD_BALANCER_PORT_RANGE]
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
@@ -1053,6 +1051,8 @@ def serve_up(
             service_handle.controller_port = controller_port
             service_handle.load_balancer_port = load_balancer_port
             global_user_state.set_service_handle(service_name, service_handle)
+            controller_resources = controller_resources.copy(
+                ports=[load_balancer_port])
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(

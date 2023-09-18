@@ -67,7 +67,3 @@ DEFAULT_MIN_REPLICAS = 1
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
-
-# Ports to open for controller VM. We open ~1000 ports for controller to ensure
-# services can be started on the same controller without port conflicts.
-LOAD_BALANCER_PORT_RANGE = '30001-31000'

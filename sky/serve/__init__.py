@@ -8,7 +8,6 @@ from sky.serve.constants import CONTROLLER_PREFIX
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_SYNC_INTERVAL
 from sky.serve.constants import CONTROLLER_TEMPLATE
-from sky.serve.constants import LOAD_BALANCER_PORT_RANGE
 from sky.serve.constants import SERVE_PREFIX
 from sky.serve.constants import SERVE_STARTUP_TIMEOUT
 from sky.serve.constants import SERVICE_NAME_VALID_REGEX

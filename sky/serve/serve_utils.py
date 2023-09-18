@@ -160,10 +160,6 @@ def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
             existing_controller_ports.add(service_handle.controller_port)
         if service_handle.load_balancer_port is not None:
             existing_load_balancer_ports.add(service_handle.load_balancer_port)
-    # Cannot expose controller to public internet.
-    # We opened 30001-31000 for controller VM, so load balancer port
-    # should be in this range and controller port should not be in
-    # this range.
     controller_port = constants.CONTROLLER_PORT_START
     while controller_port in existing_controller_ports:
         controller_port += 1
