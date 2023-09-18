@@ -143,9 +143,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 docker_login_config.password,
                 docker_login_config.server,
             ))
-            server_prefix = f'{docker_login_config.server}/'
-            if not specific_image.startswith(server_prefix):
-                specific_image = f'{server_prefix}{specific_image}'
+            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
