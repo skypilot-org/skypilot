@@ -636,8 +636,9 @@ class Optimizer:
         for parent, child in graph.edges():
             src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
                 parent, plan[parent], child, plan[child])
-            if nbytes == 0:
-                continue
+            if not nbytes:
+                # nbytes can be None, if the task has no inputs/outputs.
+                return 0
 
             if minimize_cost:
                 fn = Optimizer._egress_cost
