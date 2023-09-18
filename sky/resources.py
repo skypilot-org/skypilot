@@ -277,6 +277,56 @@ class Resources:
 
         return f'{cloud_str}({hardware_str})'
 
+    def get_short_repr(self):
+        """Returns a short string representation for SkyMap.
+
+        Examples:
+
+            >>> sky.Resources(accelerators='V100')
+            {'V100': 1}
+
+            >>> sky.Resources(accelerators='V100', use_spot=True)
+            [Spot], {'V100': 1}
+
+            >>> sky.Resources(accelerators='V100',
+            ...     use_spot=True, instance_type='p3.2xlarge')
+            p3.2xlarge[Spot], {'V100': 1}
+
+            >>> sky.Resources(accelerators='V100', instance_type='p3.2xlarge')
+            p3.2xlarge, {'V100': 1}
+
+            >>> sky.Resources(instance_type='p3.2xlarge')
+            p3.2xlarge, {'V100': 1}
+
+        """
+        accelerators = ''
+        if self.accelerators is not None:
+            accelerators = f', {self.accelerators}'
+
+        if isinstance(self.cloud, clouds.Local):
+            return f'{self.cloud}({self.accelerators})'
+
+        use_spot = ''
+        if self.use_spot:
+            use_spot = '[Spot]'
+
+        if self._instance_type is not None:
+            instance_type = f'{self._instance_type}'
+        else:
+            instance_type = ''
+
+        # Do not show region/zone here as `sky status -a` would show them as
+        # separate columns. Also, Resources repr will be printed during
+        # failover, and the region may be dynamically determined.
+        hardware_str = (f'{instance_type}{use_spot}'
+                        f'{accelerators}')
+        # It may have leading ',' (for example, instance_type not set) or empty
+        # spaces.  Remove them.
+        while hardware_str and hardware_str[0] in (',', ' '):
+            hardware_str = hardware_str[1:]
+
+        return f'{hardware_str}'
+
     @property
     def cloud(self):
         return self._cloud

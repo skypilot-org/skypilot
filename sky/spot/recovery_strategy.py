@@ -393,9 +393,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
-            map_utils.report_wait(zone=handle.launched_resources.zone,
-                                  wait_time=time.time() - job_submitted_at,
-                                  resource=repr(handle.launched_resources))
+            map_utils.report_wait(
+                zone=handle.launched_resources.zone,
+                wait_time=time.time() - job_submitted_at,
+                resource=handle.launched_resources.get_short_repr())
         else:
             self._launched_cloud_region = None
         return job_submitted_at

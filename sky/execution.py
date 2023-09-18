@@ -342,10 +342,10 @@ def _execute(
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
                 if handle.launched_resources is not None:
-                    map_utils.report_wait(zone=handle.launched_resources.zone,
-                                          wait_time=time.time() - submitted_at,
-                                          resource=repr(
-                                              handle.launched_resources))
+                    map_utils.report_wait(
+                        zone=handle.launched_resources.zone,
+                        wait_time=time.time() - submitted_at,
+                        resource=handle.launched_resources.get_short_repr())
 
         if dryrun and handle is None:
             logger.info('Dryrun finished.')

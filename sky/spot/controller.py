@@ -209,9 +209,10 @@ class SpotController:
 
         (_, handle) = backend_utils.refresh_cluster_status_handle(
             cluster_name, force_refresh_statuses=set(status_lib.ClusterStatus))
-        map_utils.report_wait(zone=handle.launched_resources.zone,
-                              wait_time=time.time() - submitted_at,
-                              resource=repr(handle.launched_resources))
+        map_utils.report_wait(
+            zone=handle.launched_resources.zone,
+            wait_time=time.time() - submitted_at,
+            resource=handle.launched_resources.get_short_repr())
 
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -283,7 +284,7 @@ class SpotController:
                     map_utils.report_preemption(
                         zone=launched_resources.zone,
                         life_time=life_time,
-                        resource=repr(launched_resources))
+                        resource=launched_resources.get_short_repr())
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.

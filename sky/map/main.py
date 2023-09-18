@@ -39,11 +39,6 @@ def home():
 
 @app.get('/health')
 def healthy():
-    global counter
-    counter += 1
-    if counter % 10 == 0:
-        backing_store.store(zone_monitor)
-        logger.info('Flushing data to disk...')
     return 'Healthy'
 
 
@@ -54,6 +49,7 @@ def add_preempt(request: fastapi.Request):
     time = data['time']
     resource = data['resource']
     zone_monitor.add_zone_preempt_data(zone, float(time), resource)
+    backing_store.store(zone_monitor)
     user_data = {
         'zone': zone,
         'time': time,
@@ -70,6 +66,7 @@ def add_wait(request: fastapi.Request):
     time = data['time']
     resource = data['resource']
     zone_monitor.add_zone_wait_data(zone, float(time), resource)
+    backing_store.store(zone_monitor)
     user_data = {
         'zone': zone,
         'time': time,
