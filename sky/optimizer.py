@@ -209,7 +209,9 @@ class Optimizer:
         if not nbytes:
             # nbytes can be None, if the task has no inputs/outputs.
             return 0
-        assert src_cloud is not None and dst_cloud is not None
+        assert src_cloud is not None and dst_cloud is not None, (src_cloud,
+                                                                 dst_cloud,
+                                                                 nbytes)
 
         if minimize_cost:
             fn = Optimizer._egress_cost
@@ -639,6 +641,9 @@ class Optimizer:
             if not nbytes:
                 # nbytes can be None, if the task has no inputs/outputs.
                 return 0
+            assert src_cloud is not None and dst_cloud is not None, (src_cloud,
+                                                                     dst_cloud,
+                                                                     nbytes)
 
             if minimize_cost:
                 fn = Optimizer._egress_cost
