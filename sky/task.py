@@ -505,6 +505,9 @@ class Task:
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs.update(envs)
+        # If the update_envs() is called after set_resources(), we need to
+        # manually update docker login config in task resources, in case the
+        # newly added envs are docker login envs.
         if _check_docker_login_config(self._envs):
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
