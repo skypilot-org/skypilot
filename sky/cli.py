@@ -1425,6 +1425,7 @@ def launch(
             '`sky spot launch`. `sky launch` supports a '
             'single task only.')
     task = task_or_dag
+    print(task)
 
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:

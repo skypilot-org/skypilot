@@ -576,8 +576,7 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        if _check_docker_login_config(self.envs):
-            self.resources = _with_docker_login_config(resources, self.envs)
+        self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
     def get_resources(self):
