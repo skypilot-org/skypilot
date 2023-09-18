@@ -1754,7 +1754,6 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
             query_clusters = _get_glob_clusters(clusters)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
-        hints = []
         nonreserved_cluster_records = []
         reserved_clusters = []
         for cluster_record in cluster_records:
