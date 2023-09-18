@@ -117,7 +117,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                 "Resource": "*"
             }
 
-5. **Optional**: To enable open ports on AWS cluster, you need to add the following permissions to the policy above as well.
+5. **Optional**: To enable opening ports on AWS cluster, you need to add the following permissions to the policy above as well.
 
 .. code-block:: json
 
