@@ -112,9 +112,25 @@ async def retrieve_zone_preempt_data(zone: str):
         yield f'data:{json_data}\n\n'
         idx += 1
 
+async def retrieve_zone_wait_data(zone: str):
+
+    idx = 0
+    while True:
+        duration, timestamp = zone_monitor.get_wait_data_with_idx(zone, idx)
+        if timestamp is None:
+            await asyncio.sleep(1)
+            continue
+
+        json_data = json.dumps({
+            'time': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'duration': duration,
+        })
+        yield f'data:{json_data}\n\n'
+        idx += 1
+
 
 # https://github.com/roniemartinez/real-time-charts-with-fastapi/tree/master
-@app.get('/chart-data/{zone}')
+@app.get('/chart-preempt-data/{zone}')
 async def chart_data(zone: str) -> StreamingResponse:
     response = StreamingResponse(retrieve_zone_preempt_data(zone),
                                  media_type='text/event-stream')
@@ -122,15 +138,28 @@ async def chart_data(zone: str) -> StreamingResponse:
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
+@app.get('/chart-wait-data/{zone}')
+async def chart_data(zone: str) -> StreamingResponse:
+    response = StreamingResponse(retrieve_zone_wait_data(zone),
+                                 media_type='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
-@app.get('/visualize/{zone}', response_class=HTMLResponse)
+@app.get('/visualize-preempt/{zone}', response_class=HTMLResponse)
 async def index(request: Request, zone: str) -> Response:
-    return templates.TemplateResponse('index.html', {
+    return templates.TemplateResponse('visualize-preempt.html', {
         'request': request,
         'zone': zone
     })
 
-
+@app.get('/visualize-wait/{zone}', response_class=HTMLResponse)
+async def index(request: Request, zone: str) -> Response:
+    return templates.TemplateResponse('visualize-wait.html', {
+        'request': request,
+        'zone': zone
+    })
+    
 atexit.register(exit_handler)
 
 if __name__ == '__main__':

@@ -86,7 +86,7 @@
         const context = document.getElementById('canvas').getContext('2d');
 
         const lineChart = new Chart(context, config);
-        const source = new EventSource('/chart-data/{{zone}}');
+        const source = new EventSource('/chart-preempt-data/{{zone}}');
 
         source.onmessage = function (event) {
             const data = JSON.parse(event.data);
