@@ -115,6 +115,20 @@ def get_average_preempt_time_all_time(zone: str, resource: str):
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
+@app.get('/get-num-preempt/{zone}/{time}/{resource}')
+def get_num_preempt(zone: str, time: str, resource: str):
+    num_preempt = zone_monitor.get_num_preempt(zone, float(time), resource)
+    data = {'num_preempt': num_preempt}
+    return fastapi.responses.JSONResponse(content=data, status_code=200)
+
+
+@app.get('/get-num-wait/{zone}/{time}/{resource}')
+def get_num_wait(zone: str, time: str, resource: str):
+    num_wait = zone_monitor.get_num_wait(zone, float(time), resource)
+    data = {'num_wait': num_wait}
+    return fastapi.responses.JSONResponse(content=data, status_code=200)
+
+
 @app.get('/get-zone-info')
 def get_zone_info():
     zone_info = zone_monitor.get_zone_info()

@@ -79,3 +79,13 @@ class ZoneMonitor:
         if zone not in self._zone_stores:
             return constants.UNAVAILABLE_FLOAT, None
         return self._zone_stores[zone].get_wait_data_with_idx(idx, resource)
+
+    def get_num_preempt(self, zone: str, time: float, resource: str):
+        if zone not in self._zone_stores:
+            return 0
+        return self._zone_stores[zone].get_num_preempt(time, resource)
+
+    def get_num_wait(self, zone: str, time: float, resource: str):
+        if zone not in self._zone_stores:
+            return 0
+        return self._zone_stores[zone].get_num_wait(time, resource)

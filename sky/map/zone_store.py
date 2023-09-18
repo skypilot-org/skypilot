@@ -91,3 +91,27 @@ class ZoneStore:
 
     def get_resources(self) -> Tuple[List[str], List[str]]:
         return list(self._preempt_data.keys()), list(self._wait_data.keys())
+
+    def get_num_preempt(self, time: float, resource: str):
+        if resource not in self._preempt_data:
+            return 0
+
+        count = 0
+        for _, timestamp in self._preempt_data[resource]:
+            time_diff = (datetime.now() - timestamp).total_seconds()
+            if time == -1 or time_diff < time:
+                count += 1
+
+        return count
+
+    def get_num_wait(self, time: float, resource: str):
+        if resource not in self._wait_data:
+            return 0
+
+        count = 0
+        for _, timestamp in self._wait_data[resource]:
+            time_diff = (datetime.now() - timestamp).total_seconds()
+            if time == -1 or time_diff < time:
+                count += 1
+
+        return count
