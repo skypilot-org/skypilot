@@ -40,8 +40,11 @@ def docker_start_cmds(
 ):
     """Generating docker start command without --rm.
     
-    The code is borrowed from `ray.autoscaler._private.docker`. The only
-    difference is that we don't use `--rm` flag here.
+    The code is borrowed from `ray.autoscaler._private.docker`.
+
+    Changes we made:
+        1. Remove --rm flag to keep the container after `ray stop` is executed;
+        2. Add options to enable fuse.
     """
     del user  # unused
 
@@ -72,6 +75,10 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
+        # SkyPilot: Add following options to enable fuse.
+        '--cap-add=SYS_ADMIN',
+        '--device=/dev/fuse',
+        '--security-opt=apparmor:unconfined',
         image,
         'bash',
     ]
@@ -136,7 +143,6 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 docker_login_config.password,
                 docker_login_config.server,
             ))
-            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
@@ -165,7 +171,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             if requires_re_init:
                 self.run(f'{self.docker_cmd} stop {self.container_name}',
                          run_env='host')
-                # Manualy rm here since --rm is not specified
+                # Manually rm here since --rm is not specified
                 self.run(f'{self.docker_cmd} rm {self.container_name}',
                          run_env='host')
 
@@ -223,8 +229,13 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget '
-                 'patch openssh-server python3-pip;')
+        self.run(
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # We need to install fuse package first to enable storage mount.
+            # The dpkg option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install '
+            '-y rsync curl wget patch openssh-server python3-pip fuse;')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on

@@ -188,8 +188,13 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
+# - firewall_rule: This is a newly added section for gcp in provider section.
+# - security_group: In #2485 we introduces the changed of security group, so we
+#   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    ('provider', 'firewall_rule'),
+    ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
@@ -921,7 +926,6 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
-        ports: Optional[List[Union[int, str]]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -947,6 +951,10 @@ def write_cluster_config(
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
     assert cloud is not None, to_provision
+
+    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=cloud.max_cluster_name_length())
+
     # This can raise a ResourcesUnavailableError when:
     #  * The region/zones requested does not appear in the catalog. It can be
     #    triggered if the user changed the catalog file while there is a cluster
@@ -959,7 +967,8 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(region, zones)
+    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
+                                                        region, zones)
     config_dict = {}
 
     azure_subscription_id = None
@@ -1040,14 +1049,6 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        cluster_name, max_length=cloud.max_cluster_name_length())
-
-    # Only using new security group names for clusters with ports specified.
-    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
-    if ports is not None:
-        default_aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1058,7 +1059,6 @@ def write_cluster_config(
             **{
                 'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
-                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -1068,13 +1068,6 @@ def write_cluster_config(
                     'SKYPILOT_USER', '')),
 
                 # AWS only:
-                # Temporary measure, as deleting per-cluster SGs is too slow.
-                # See https://github.com/skypilot-org/skypilot/pull/742.
-                # Generate the name of the security group we're looking for.
-                # (username, last 4 chars of hash of hostname): for uniquefying
-                # users on shared-account scenarios.
-                'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), default_aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -1408,7 +1401,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str,
                              docker_user: Optional[str] = None
-                            ) -> Dict[str, str]:
+                            ) -> Dict[str, Any]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -1424,6 +1417,10 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     }
     if docker_user is not None:
         credentials['docker_user'] = docker_user
+    ssh_provider_module = config['provider']['module']
+    # If we are running ssh command on kubernetes node.
+    if 'kubernetes' in ssh_provider_module:
+        credentials['disable_control_master'] = True
     return credentials
 
 
@@ -2952,12 +2949,23 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def validate_schema(obj, schema, err_msg_prefix=''):
-    """Validates an object against a JSON schema.
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
+    """Validates an object against a given JSON schema.
+
+    Args:
+        obj: The object to validate.
+        schema: The JSON schema against which to validate the object.
+        err_msg_prefix: The string to prepend to the error message if
+          validation fails.
+        skip_none: If True, removes fields with value None from the object
+          before validation. This is useful for objects that will never contain
+          None because yaml.safe_load() loads empty fields as None.
 
     Raises:
         ValueError: if the object does not match the schema.
     """
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)
