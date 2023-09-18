@@ -77,18 +77,6 @@ def _get_all_running_csync_pid() -> List[Any]:
 
 
 @connect_db
-def _get_running_csync_source_path() -> List[Any]:
-    """Returns all the registerd source path of CSYNC processes"""
-    assert _CURSOR is not None
-    _CURSOR.execute(
-        'SELECT source_path FROM running_csync '
-        'WHERE boot_time=(?)', (_BOOT_TIME,))
-    rows = _CURSOR.fetchall()
-    source_paths = [row[0] for row in rows]
-    return source_paths
-
-
-@connect_db
 def _set_running_csync_sync_pid(csync_pid: int, sync_pid: Optional[int]):
     """Given the process id of CSYNC, sets the sync_pid column value"""
     assert _CURSOR is not None
@@ -132,7 +120,7 @@ def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
     row = _CURSOR.fetchone()
     if row:
         return row[0]
-    raise ValueError(f'{path} is not mounted with CSYNC.')
+    return None
 
 
 @click.group()
@@ -266,12 +254,9 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
             the source directory.
     """
     full_src = os.path.abspath(os.path.expanduser(source))
-    csync_mounted_source_paths = _get_running_csync_source_path()
     # If the given source is already mounted with CSYNC, terminate it.
-    for source_path in csync_mounted_source_paths:
-        if os.path.samefile(full_src, source_path):
-            _terminate([full_src])
-            break
+    if _get_csync_pid_from_source_path(full_src):
+        _terminate([full_src])
     csync_pid = os.getpid()
     _add_running_csync(csync_pid, full_src)
     while True:
