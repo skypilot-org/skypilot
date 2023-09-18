@@ -472,6 +472,8 @@ class Task:
         Raises:
           ValueError: if various invalid inputs errors are detected.
         """
+        # NOTE(dev): This should be called before task.set_resources() because
+        # of the docker login config.
         if envs is None:
             envs = {}
         if isinstance(envs, (list, tuple)):
@@ -559,6 +561,8 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
+        # NOTE(dev): This should be called after task.update_envs() because of
+        # the docker login config.
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
