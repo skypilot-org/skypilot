@@ -33,7 +33,9 @@ For Docker images hosted on private registries, you can provide the registry aut
 
   # ecr_private_docker.yaml
   resources:
-    image_id: docker:<your-private-image>:<tag>
+    image_id: docker:<your-user-id>.dkr.ecr.us-east-1.amazonaws.com/<your-private-image>:<tag>
+    # the following shorthand is also supported:
+    # image_id: docker:<your-private-image>:<tag>
 
   envs:
     SKYPILOT_DOCKER_USERNAME: AWS
