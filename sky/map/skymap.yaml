@@ -7,17 +7,14 @@ workdir: .
 file_mounts:
   /sky-map-backing-store:
     name: sky-map-backing-store
-    source: ~/store
-    store: gcs
     persistent: True
-    mode: MOUNT
 
 setup: |
   pip install fastapi
   pip install uvicorn
 
 run: |
-  ls ~/store
+  ls /sky-map-backing-store
   python3 sky/map/main.py
 
 service:

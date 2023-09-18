@@ -5,21 +5,18 @@ import uvicorn
 
 app = fastapi.FastAPI()
 
+
 @app.get('/')
 def hello_world():
-    user_data = {
-        'data': 'Hello, World!'
-    }
-    return fastapi.responses.JSONResponse(content=user_data,
-                                          status_code=200)
+    user_data = {'data': 'Hello, World!'}
+    return fastapi.responses.JSONResponse(content=user_data, status_code=200)
+
 
 @app.get('/health')
 def health():
-    user_data = {
-        'data': 'Healthy!'
-    }
-    return fastapi.responses.JSONResponse(content=user_data,
-                                          status_code=200)
+    user_data = {'data': 'Healthy!'}
+    return fastapi.responses.JSONResponse(content=user_data, status_code=200)
+
 
 if __name__ == '__main__':
 
