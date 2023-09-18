@@ -125,6 +125,7 @@ Documentation
    :caption: User Guides
 
    examples/docker-containers
+   examples/ports
    examples/iterative-dev-project
    reference/interactive-nodes
    reference/faq

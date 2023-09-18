@@ -204,6 +204,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
