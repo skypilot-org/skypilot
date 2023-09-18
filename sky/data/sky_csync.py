@@ -1,11 +1,9 @@
 """CSYNC module"""
 import functools
 import os
-import pathlib
 import subprocess
 import time
 from typing import Any, List, Optional
-import urllib.parse
 
 import click
 import psutil
@@ -132,7 +130,7 @@ def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                       no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
     sync_cmd = ('aws configure set default.s3.max_concurrent_requests '
-                  f'{num_threads};')
+                f'{num_threads};')
     sync_cmd += f' aws s3 sync {src_path} s3://{dst}'
     if delete:
         sync_cmd += ' --delete'
@@ -140,20 +138,6 @@ def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
         sync_cmd += ' --no-follow-symlinks'
     return sync_cmd
 
-"""
-def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
-                      no_follow_symlinks: bool):
-    """"""Builds sync command for aws s3""""""
-    config_cmd = ('aws configure set default.s3.max_concurrent_requests '
-                  f'{num_threads}')
-    subprocess.run(config_cmd, shell=True)
-    sync_cmd = f'aws s3 sync {src_path} s3://{dst}'
-    if delete:
-        sync_cmd += ' --delete'
-    if no_follow_symlinks:
-        sync_cmd += ' --no-follow-symlinks'
-    return sync_cmd
-"""
 
 def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                        no_follow_symlinks: bool):
@@ -196,7 +180,8 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
                 if storetype == 's3':
                     # set number of threads back to its default value
                     config_cmd = \
-                        'aws configure set default.s3.max_concurrent_requests 10'
+                        ('aws configure '
+                         'set default.s3.max_concurrent_requests 10')
                     subprocess.run(config_cmd, shell=True, check=True)
                 proc.wait()
                 _set_running_csync_sync_pid(csync_pid, -1)
@@ -250,7 +235,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
 
     Creates an entry of pid of the sync process in local database while sync
     command is runninng and removes it when completed.
-    
+
     Args:
         source (str): The local path to the directory that you want to sync.
         storetype (str): The type of cloud storage to sync to.

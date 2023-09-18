@@ -755,27 +755,14 @@ class Storage(object):
         Used when reconstructing Storage and Store objects from
         global_user_state.
         """
-        
-        #storage_obj = cls(name=override_args.get('name', metadata.storage_name),
-        #                  source=override_args.get('source', metadata.source),
-        #                  sync_on_reconstruction=override_args.get(
-        #                      'sync_on_reconstruction', True))
-
-        storage_obj = cls(name=override_args.get('name', metadata.storage_name),
-                          source=override_args.get('source', metadata.source),
-                          sync_on_reconstruction=override_args.get(
-                              'sync_on_reconstruction', True),
-                          interval_seconds=override_args.get('interval_seconds', metadata.interval_seconds),
-                          mode=override_args.get('mode', metadata.mode))
-
-        # For backward compatibility
-        """
-        if hasattr(metadata, 'interval_seconds'):
-            storage_obj.interval_seconds = metadata.interval_seconds
-        if hasattr(metadata, 'mode'):
-            if metadata.mode:
-                storage_obj.mode = metadata.mode
-        """
+        storage_obj = cls(
+            name=override_args.get('name', metadata.storage_name),
+            source=override_args.get('source', metadata.source),
+            sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                     True),
+            interval_seconds=override_args.get('interval_seconds',
+                                               metadata.interval_seconds),
+            mode=override_args.get('mode', metadata.mode))
         storage_obj._add_store_from_metadata(metadata.sky_stores)
         return storage_obj
 

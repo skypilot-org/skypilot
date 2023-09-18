@@ -3004,8 +3004,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                      storage_utils.StorageMode.MOUNT)
         self._execute_storage_mounts(handle, storage_mounts,
                                      storage_utils.StorageMode.CSYNC)
-        self._set_cluster_storage_mounts_metadata(handle.cluster_name,
-                                                  storage_mounts)
+        self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -4477,7 +4476,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
 
-    def _set_cluster_storage_mounts_metadata(
+    def _set_storage_mounts_metadata(
             self, cluster_name: str,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
         """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
@@ -4496,7 +4495,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             global_user_state.set_cluster_storage_mounts_metadata(
                 cluster_name, storage_mounts_metadata)
 
-    def _get_cluster_storage_mounts_metadata(
+    def _get_storage_mounts_metadata(
             self,
             cluster_name: str) -> Optional[Dict[Path, storage_lib.Storage]]:
         """Gets 'storage_mounts' object from cluster's storage_mounts_metadata
@@ -4521,7 +4520,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _has_csync(self, cluster_name: str) -> bool:
         """Chekcs if there are CSYNC mode storages within the cluster."""
-        storage_mounts = self._get_cluster_storage_mounts_metadata(cluster_name)
+        storage_mounts = self._get_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:
             for _, storage_obj in storage_mounts.items():
                 if storage_obj.mode == storage_utils.StorageMode.CSYNC:
