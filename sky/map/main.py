@@ -18,7 +18,7 @@ from sky import sky_logging
 from sky.map import map_utils
 from sky.map.zone_monitor import ZoneMonitor
 
-logger = sky_logging.init_logger('sky.serve.zone_monitor')
+logger = sky_logging.init_logger('sky.map.zone_monitor')
 
 app = fastapi.FastAPI()
 backing_store = BackingStore('')
@@ -52,8 +52,14 @@ def add_preempt(request: fastapi.Request):
     data = asyncio.run(request.json())
     zone = data['zone']
     time = data['time']
-    zone_monitor.add_zone_preempt_data(zone, float(time))
-    user_data = {'zone': zone, 'time': time, 'status': 'success'}
+    resource = data['resource']
+    zone_monitor.add_zone_preempt_data(zone, float(time), resource)
+    user_data = {
+        'zone': zone,
+        'time': time,
+        'resources': resource,
+        'status': 'success'
+    }
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
 
@@ -62,8 +68,14 @@ def add_wait(request: fastapi.Request):
     data = asyncio.run(request.json())
     zone = data['zone']
     time = data['time']
-    zone_monitor.add_zone_wait_data(zone, float(time))
-    user_data = {'zone': zone, 'time': time, 'status': 'success'}
+    resource = data['resource']
+    zone_monitor.add_zone_wait_data(zone, float(time), resource)
+    user_data = {
+        'zone': zone,
+        'time': time,
+        'resources': resource,
+        'status': 'success'
+    }
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
 
@@ -74,30 +86,34 @@ def flush_to_disk():
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
 
-@app.get('/get-average-wait-time/{zone}/{time}')
-def get_average_wait_time(zone: str, time: str):
-    wait_time = zone_monitor.get_zone_average_wait_time(zone, float(time))
+@app.get('/get-average-wait-time/{zone}/{time}/{resource}')
+def get_average_wait_time(zone: str, time: str, resource: str):
+    wait_time = zone_monitor.get_zone_average_wait_time(zone, float(time),
+                                                        resource)
     data = {'wait_time': wait_time}
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
-@app.get('/get-average-preempt-time/{zone}/{time}')
-def get_average_preempt_time(zone: str, time: str):
-    preempt_time = zone_monitor.get_zone_average_preempt_time(zone, float(time))
+@app.get('/get-average-preempt-time/{zone}/{time}/{resource}')
+def get_average_preempt_time(zone: str, time: str, resource: str):
+    print(zone, time, resource)
+    preempt_time = zone_monitor.get_zone_average_preempt_time(
+        zone, float(time), resource)
     data = {'preempt_time': preempt_time}
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
-@app.get('/get-average-wait-time/{zone}')
-def get_average_wait_time_all_time(zone: str):
-    wait_time = zone_monitor.get_zone_average_wait_time(zone, -1)
+@app.get('/get-average-wait-time/{zone}/{resource}')
+def get_average_wait_time_all_time(zone: str, resource: str):
+    wait_time = zone_monitor.get_zone_average_wait_time(zone, -1, resource)
     data = {'wait_time': wait_time}
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
-@app.get('/get-average-preempt-time/{zone}')
-def get_average_preempt_time_all_time(zone: str):
-    preempt_time = zone_monitor.get_zone_average_preempt_time(zone, -1)
+@app.get('/get-average-preempt-time/{zone}/{resource}')
+def get_average_preempt_time_all_time(zone: str, resource: str):
+    preempt_time = zone_monitor.get_zone_average_preempt_time(
+        zone, -1, resource)
     data = {'preempt_time': preempt_time}
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
@@ -111,11 +127,12 @@ def get_zone_info():
     return map_utils.PrettyJSONResponse(content=data, status_code=200)
 
 
-async def retrieve_zone_preempt_data(zone: str):
+async def retrieve_zone_preempt_data(zone: str, resource: str):
 
     idx = 0
     while True:
-        duration, timestamp = zone_monitor.get_preempt_data_with_idx(zone, idx)
+        duration, timestamp = zone_monitor.get_preempt_data_with_idx(
+            zone, idx, resource)
         if timestamp is None:
             await asyncio.sleep(1)
             continue
@@ -128,11 +145,12 @@ async def retrieve_zone_preempt_data(zone: str):
         idx += 1
 
 
-async def retrieve_zone_wait_data(zone: str):
+async def retrieve_zone_wait_data(zone: str, resource: str):
 
     idx = 0
     while True:
-        duration, timestamp = zone_monitor.get_wait_data_with_idx(zone, idx)
+        duration, timestamp = zone_monitor.get_wait_data_with_idx(
+            zone, idx, resource)
         if timestamp is None:
             await asyncio.sleep(1)
             continue
@@ -146,37 +164,39 @@ async def retrieve_zone_wait_data(zone: str):
 
 
 # https://github.com/roniemartinez/real-time-charts-with-fastapi/tree/master
-@app.get('/chart-preempt-data/{zone}')
-async def chart_preempt_data(zone: str) -> StreamingResponse:
-    response = StreamingResponse(retrieve_zone_preempt_data(zone),
+@app.get('/chart-preempt-data/{zone}/{resource}')
+async def chart_preempt_data(zone: str, resource: str) -> StreamingResponse:
+    response = StreamingResponse(retrieve_zone_preempt_data(zone, resource),
                                  media_type='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
 
-@app.get('/chart-wait-data/{zone}')
-async def chart_wait_data(zone: str) -> StreamingResponse:
-    response = StreamingResponse(retrieve_zone_wait_data(zone),
+@app.get('/chart-wait-data/{zone}/{resource}')
+async def chart_wait_data(zone: str, resource: str) -> StreamingResponse:
+    response = StreamingResponse(retrieve_zone_wait_data(zone, resource),
                                  media_type='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
 
-@app.get('/visualize-preempt/{zone}', response_class=HTMLResponse)
-async def preempt_index(request: Request, zone: str) -> Response:
+@app.get('/visualize-preempt/{zone}/{resource}', response_class=HTMLResponse)
+async def preempt_index(request: Request, zone: str, resource: str) -> Response:
     return templates.TemplateResponse('visualize-preempt.html', {
         'request': request,
-        'zone': zone
+        'zone': zone,
+        'resource': resource
     })
 
 
-@app.get('/visualize-wait/{zone}', response_class=HTMLResponse)
-async def wait_index(request: Request, zone: str) -> Response:
+@app.get('/visualize-wait/{zone}/{resource}', response_class=HTMLResponse)
+async def wait_index(request: Request, zone: str, resource: str) -> Response:
     return templates.TemplateResponse('visualize-wait.html', {
         'request': request,
-        'zone': zone
+        'zone': zone,
+        'resource': resource
     })
 
 

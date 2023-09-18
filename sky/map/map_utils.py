@@ -11,16 +11,18 @@ from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-def report_preemption(zone: str, life_time: float):
+
+def report_preemption(zone: str, life_time: float, resource: str):
     """Report preemption to SkyMap."""
 
     logger.info(
-        f'Reporting preemption to SkyMap. zone: {zone}, life_time: {life_time}')
+        f'Report Preempt. zone:{zone}, life_time:{life_time}, resource:{resource}'  # pylint: disable=line-too-long
+    )
     if zone is None:
         logger.info('No zone specified. Skipping preemption report.')
         return
 
-    json_data = {'zone': zone, 'time': life_time}
+    json_data = {'zone': zone, 'time': life_time, 'resource': resource}
     sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
     sky_map_port = constants.SKY_MAP_PORT
 
@@ -30,16 +32,16 @@ def report_preemption(zone: str, life_time: float):
     logger.info(response)
 
 
-def report_wait(zone: str, wait_time: float):
+def report_wait(zone: str, wait_time: float, resource: str):
     """Report preemption to SkyMap."""
 
     logger.info(
-        f'Reporting wait to SkyMap. zone: {zone}, wait_time: {wait_time}')
+        f'Report wait. zone:{zone}, wait_time:{wait_time}, resource:{resource}')  # pylint: disable=line-too-long
     if zone is None:
         logger.info('No zone specified. Skipping wait report.')
         return
 
-    json_data = {'zone': zone, 'time': wait_time}
+    json_data = {'zone': zone, 'time': wait_time, 'resource': resource}
     sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
     sky_map_port = constants.SKY_MAP_PORT
 
@@ -47,6 +49,7 @@ def report_wait(zone: str, wait_time: float):
         f'http://{sky_map_ip_addr}:{sky_map_port}/add-wait', json=json_data)
 
     logger.info(response)
+
 
 class PrettyJSONResponse(Response):
     media_type = 'application/json'

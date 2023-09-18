@@ -22,45 +22,60 @@ class ZoneMonitor:
     def __init__(self) -> None:
         self._zone_stores: Dict[str, zone_store.ZoneStore] = {}
 
-    def add_zone_preempt_data(self, zone: str, time_in_s: float) -> None:
+    def add_zone_preempt_data(self, zone: str, time_in_s: float,
+                              resource: str) -> None:
 
         if zone not in self._zone_stores:
             self._zone_stores[zone] = zone_store.ZoneStore(zone)
         self._zone_stores[zone].add_preempt_data(time_in_s,
-                                                 datetime.datetime.now())
+                                                 datetime.datetime.now(),
+                                                 resource)
 
-    def add_zone_wait_data(self, zone: str, time_in_s: float) -> None:
+    def add_zone_wait_data(self, zone: str, time_in_s: float,
+                           resource: str) -> None:
 
         if zone not in self._zone_stores:
             self._zone_stores[zone] = zone_store.ZoneStore(zone)
         self._zone_stores[zone].add_wait_data(time_in_s,
-                                              datetime.datetime.now())
+                                              datetime.datetime.now(), resource)
 
-    def get_zone_average_wait_time(self, zone: str, time_in_s: float) -> float:
+    def get_zone_average_wait_time(self, zone: str, time_in_s: float,
+                                   resource: str) -> float:
         if zone not in self._zone_stores:
             return constants.UNAVAILABLE_FLOAT
-        return self._zone_stores[zone].get_average_wait_time(time_in_s)
+        return self._zone_stores[zone].get_average_wait_time(
+            time_in_s, resource)
 
-    def get_zone_average_preempt_time(self, zone: str,
-                                      time_in_s: float) -> float:
+    def get_zone_average_preempt_time(self, zone: str, time_in_s: float,
+                                      resource: str) -> float:
 
         if zone not in self._zone_stores:
             return constants.UNAVAILABLE_FLOAT
-        return self._zone_stores[zone].get_average_preempt_time(time_in_s)
+        return self._zone_stores[zone].get_average_preempt_time(
+            time_in_s, resource)
 
-    def get_zone_info(self) -> List[str]:
-        return list(self._zone_stores.keys())
+    def get_zone_info(self) -> List[Dict[str, str]]:
+        zone_info_list = []
+        for zone_name, store in self._zone_stores.items():
+            preempt_resources, wait_reources = store.get_resources()
+            zone_dict = {
+                'zone_name': zone_name,
+                'preempt_resources': ','.join(preempt_resources),
+                'wait_resources': ','.join(wait_reources)
+            }
+            zone_info_list.append(zone_dict)
+        return zone_info_list
 
     def get_preempt_data_with_idx(
-            self, zone: str,
-            idx: int) -> Tuple[float, Optional[datetime.datetime]]:
+            self, zone: str, idx: int,
+            resource: str) -> Tuple[float, Optional[datetime.datetime]]:
         if zone not in self._zone_stores:
             return constants.UNAVAILABLE_FLOAT, None
-        return self._zone_stores[zone].get_preempt_data_with_idx(idx)
+        return self._zone_stores[zone].get_preempt_data_with_idx(idx, resource)
 
     def get_wait_data_with_idx(
-            self, zone: str,
-            idx: int) -> Tuple[float, Optional[datetime.datetime]]:
+            self, zone: str, idx: int,
+            resource: str) -> Tuple[float, Optional[datetime.datetime]]:
         if zone not in self._zone_stores:
             return constants.UNAVAILABLE_FLOAT, None
-        return self._zone_stores[zone].get_wait_data_with_idx(idx)
+        return self._zone_stores[zone].get_wait_data_with_idx(idx, resource)
