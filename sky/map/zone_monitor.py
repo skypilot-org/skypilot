@@ -6,6 +6,7 @@ import datetime
 from typing import Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.map import constants
 from sky.map import zone_store
 
 logger = sky_logging.init_logger('sky.serve.zone_monitor')
@@ -37,14 +38,14 @@ class ZoneMonitor:
 
     def get_zone_average_wait_time(self, zone: str, time_in_s: float) -> float:
         if zone not in self._zone_stores:
-            return -1.0
+            return constants.UNAVAILABLE_FLOAT
         return self._zone_stores[zone].get_average_wait_time(time_in_s)
 
     def get_zone_average_preempt_time(self, zone: str,
                                       time_in_s: float) -> float:
 
         if zone not in self._zone_stores:
-            return -1.0
+            return constants.UNAVAILABLE_FLOAT
         return self._zone_stores[zone].get_average_preempt_time(time_in_s)
 
     def get_zone_info(self) -> List[str]:
@@ -54,12 +55,12 @@ class ZoneMonitor:
             self, zone: str,
             idx: int) -> Tuple[float, Optional[datetime.datetime]]:
         if zone not in self._zone_stores:
-            return -1.0, None
+            return constants.UNAVAILABLE_FLOAT, None
         return self._zone_stores[zone].get_preempt_data_with_idx(idx)
 
     def get_wait_data_with_idx(
             self, zone: str,
             idx: int) -> Tuple[float, Optional[datetime.datetime]]:
         if zone not in self._zone_stores:
-            return -1.0, None
+            return constants.UNAVAILABLE_FLOAT, None
         return self._zone_stores[zone].get_wait_data_with_idx(idx)

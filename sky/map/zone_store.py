@@ -5,6 +5,8 @@ Responsible for storing different zones's preempt and wait time data.
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+from sky.map import constants
+
 
 class ZoneStore:
     """ZoneStore: control everything about zone data.
@@ -34,7 +36,8 @@ class ZoneStore:
         total_wait_time = 0.0
         count = 0
         for wait_time, timestamp in self._wait_data:
-            if (datetime.now() - timestamp).total_seconds() < time_in_s:
+            time_diff = (datetime.now() - timestamp).total_seconds()
+            if time_in_s == -1 or time_diff < time_in_s:
                 total_wait_time += wait_time
                 count += 1
 
@@ -52,7 +55,7 @@ class ZoneStore:
         count = 0
         for preempt_time, timestamp in self._preempt_data:
             time_diff = (datetime.now() - timestamp).total_seconds()
-            if time_diff < time_in_s:
+            if time_in_s == -1 or time_diff < time_in_s:
                 total_preempt_time += preempt_time
                 count += 1
 
@@ -64,11 +67,11 @@ class ZoneStore:
     def get_preempt_data_with_idx(self,
                                   idx: int) -> Tuple[float, Optional[datetime]]:
         if idx >= len(self._preempt_data):
-            return (-1.0, None)
+            return (constants.UNAVAILABLE_FLOAT, None)
         return (self._preempt_data[idx][0], self._preempt_data[idx][1])
 
     def get_wait_data_with_idx(self,
                                idx: int) -> Tuple[float, Optional[datetime]]:
         if idx >= len(self._wait_data):
-            return (-1.0, None)
+            return (constants.UNAVAILABLE_FLOAT, None)
         return (self._wait_data[idx][0], self._wait_data[idx][1])

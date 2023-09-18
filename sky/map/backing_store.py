@@ -9,9 +9,11 @@ from sky.map import zone_monitor
 
 logger = sky_logging.init_logger('sky.serve.backing_store')
 
+
 class BackingStore:
     """BackingStore: back up different zones' data.
     """
+
     def __init__(self, store_path: str) -> None:
         self._store_path = store_path
 

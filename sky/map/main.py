@@ -87,6 +87,20 @@ def get_average_preempt_time(zone: str, time: str):
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
+@app.get('/get-average-wait-time/{zone}')
+def get_average_wait_time_all_time(zone: str):
+    wait_time = zone_monitor.get_zone_average_wait_time(zone, -1)
+    data = {'wait_time': wait_time}
+    return fastapi.responses.JSONResponse(content=data, status_code=200)
+
+
+@app.get('/get-average-preempt-time/{zone}')
+def get_average_preempt_time_all_time(zone: str):
+    preempt_time = zone_monitor.get_zone_average_preempt_time(zone, -1)
+    data = {'preempt_time': preempt_time}
+    return fastapi.responses.JSONResponse(content=data, status_code=200)
+
+
 @app.get('/get-zone-info')
 def get_zone_info():
     zone_info = zone_monitor.get_zone_info()
@@ -112,6 +126,7 @@ async def retrieve_zone_preempt_data(zone: str):
         yield f'data:{json_data}\n\n'
         idx += 1
 
+
 async def retrieve_zone_wait_data(zone: str):
 
     idx = 0
@@ -131,35 +146,39 @@ async def retrieve_zone_wait_data(zone: str):
 
 # https://github.com/roniemartinez/real-time-charts-with-fastapi/tree/master
 @app.get('/chart-preempt-data/{zone}')
-async def chart_data(zone: str) -> StreamingResponse:
+async def chart_preempt_data(zone: str) -> StreamingResponse:
     response = StreamingResponse(retrieve_zone_preempt_data(zone),
                                  media_type='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
+
 @app.get('/chart-wait-data/{zone}')
-async def chart_data(zone: str) -> StreamingResponse:
+async def chart_wait_data(zone: str) -> StreamingResponse:
     response = StreamingResponse(retrieve_zone_wait_data(zone),
                                  media_type='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
+
 @app.get('/visualize-preempt/{zone}', response_class=HTMLResponse)
-async def index(request: Request, zone: str) -> Response:
+async def preempt_index(request: Request, zone: str) -> Response:
     return templates.TemplateResponse('visualize-preempt.html', {
         'request': request,
         'zone': zone
     })
 
+
 @app.get('/visualize-wait/{zone}', response_class=HTMLResponse)
-async def index(request: Request, zone: str) -> Response:
+async def wait_index(request: Request, zone: str) -> Response:
     return templates.TemplateResponse('visualize-wait.html', {
         'request': request,
         'zone': zone
     })
-    
+
+
 atexit.register(exit_handler)
 
 if __name__ == '__main__':
