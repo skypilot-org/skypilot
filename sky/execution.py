@@ -1323,5 +1323,13 @@ def serve_down(
         os.remove(controller_yaml_path)
     handle = global_user_state.get_handle_from_service_name(service_name)
     assert handle is not None
-    handle.cleanup_ephemeral_storage()
+    try:
+        handle.cleanup_ephemeral_storage()
+    # same as above.
+    except Exception as e:  # pylint: disable=broad-except
+        if purge:
+            logger.warning('Ignoring error when cleaning up ephemeral storage '
+                           f'of service {service_name}: {e}')
+        else:
+            raise RuntimeError(e) from e
     global_user_state.remove_service(service_name)
