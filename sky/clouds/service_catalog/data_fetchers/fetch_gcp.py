@@ -532,8 +532,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     SINGLE_THREADED = args.single_threaded
-    ZONES = set(args.zones)
-    EXCLUDED_REGIONS = set(args.exclude)
+    ZONES = set(args.zones) if args.zones else set()
+    EXCLUDED_REGIONS = set(args.exclude) if args.exclude else set()
 
     region_prefix_filter = '' if args.zones or args.all_regions else 'us-'
     catalog_df = get_catalog_df(region_prefix_filter)
