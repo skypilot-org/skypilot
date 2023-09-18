@@ -1834,6 +1834,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             head_ip = handle.external_ips()[0]
             click.echo(head_ip)
             return
+        hints = []
         nonreserved_cluster_records = []
         reserved_clusters = []
         for cluster_record in cluster_records:
