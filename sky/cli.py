@@ -1132,16 +1132,13 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     old_resources = list(task.resources)[0]
     new_resources = old_resources.copy(**override_params)
 
-    # We need to update envs before we set resources, since the envs might
-    # contains docker login config, which will be used in setting up the
-    # resources.
-    task.update_envs(env)
     task.set_resources({new_resources})
 
     if num_nodes is not None:
         task.num_nodes = num_nodes
     if name is not None:
         task.name = name
+    task.update_envs(env)
     # TODO(wei-lin): move this validation into Python API.
     if new_resources.accelerators is not None:
         acc, _ = list(new_resources.accelerators.items())[0]
