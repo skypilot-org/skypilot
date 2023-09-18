@@ -105,23 +105,33 @@ def _fill_in_env_vars_in_file_mounts(
     return json.loads(file_mounts_str)
 
 
-def _with_docker_login_config(
-    resources_set: Set['resources_lib.Resources'],
-    task_envs: Dict[str, str],
-) -> Set['resources_lib.Resources']:
-    all_keys = {
-        constants.DOCKER_USERNAME_ENV_VAR,
-        constants.DOCKER_PASSWORD_ENV_VAR,
-        constants.DOCKER_SERVER_ENV_VAR,
-    }
+def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
+    """Checks if there is a valid docker login config in task_envs.
+
+    If any of the docker login env vars is set, all of them must be set.
+
+    Raises:
+        ValueError: if any of the docker login env vars is set, but not all of
+            them are set.
+    """
+    all_keys = constants.DOCKER_LOGIN_ENV_VARS
     existing_keys = all_keys & set(task_envs.keys())
     if not existing_keys:
-        return resources_set
+        return False
     if len(existing_keys) != len(all_keys):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'If any of {", ".join(all_keys)} is set, all of them must '
                 f'be set. Missing envs: {all_keys - existing_keys}')
+    return True
+
+
+def _with_docker_login_config(
+    resources_set: Set['resources_lib.Resources'],
+    task_envs: Dict[str, str],
+) -> Set['resources_lib.Resources']:
+    if not _check_docker_login_config(task_envs):
+        return resources_set
     docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
         task_envs)
 
@@ -129,9 +139,10 @@ def _with_docker_login_config(
         docker_image = resources.extract_docker_image()
         if docker_image is None:
             logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
-                           f'{", ".join(all_keys)} are provided, but no docker '
-                           'image is specified in `image_id`. The login configs'
-                           f' will be ignored.{colorama.Style.RESET_ALL}')
+                           f'{", ".join(constants.DOCKER_LOGIN_ENV_VARS)} '
+                           'are provided, but no docker image is specified '
+                           'in `image_id`. The login configs will be '
+                           f'ignored.{colorama.Style.RESET_ALL}')
             return resources
         # Already checked in extract_docker_image
         assert len(resources.image_id) == 1
@@ -502,6 +513,12 @@ class Task:
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs.update(envs)
+        # If the update_envs() is called after set_resources(), we need to
+        # manually update docker login config in task resources, in case the
+        # docker login envs are newly added.
+        if _check_docker_login_config(self._envs):
+            self.resources = _with_docker_login_config(self.resources,
+                                                       self._envs)
         return self
 
     @property
