@@ -129,8 +129,8 @@ def get_num_wait(zone: str, time: str, resource: str):
     return fastapi.responses.JSONResponse(content=data, status_code=200)
 
 
-@app.get('/get-zone-info')
-def get_zone_info():
+@app.get('/get-all-zone-info')
+def get_all_zone_info():
     zone_info = zone_monitor.get_zone_info()
     data = {
         'zone_info': zone_info,
