@@ -136,14 +136,24 @@ def _with_docker_login_config(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
-        if resources.extract_docker_image() is None:
+        docker_image = resources.extract_docker_image()
+        if docker_image is None:
             logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
                            f'{", ".join(constants.DOCKER_LOGIN_ENV_VARS)} '
                            'are provided, but no docker image is specified '
                            'in `image_id`. The login configs will be '
                            f'ignored.{colorama.Style.RESET_ALL}')
             return resources
-        return resources.copy(_docker_login_config=docker_login_config)
+        # Already checked in extract_docker_image
+        assert len(resources.image_id) == 1, resources.image_id
+        region = list(resources.image_id.keys())[0]
+        # We automatically add the server prefix to the image name if
+        # the user did not add it.
+        server_prefix = f'{docker_login_config.server}/'
+        if not docker_image.startswith(server_prefix):
+            docker_image = f'{server_prefix}{docker_image}'
+        return resources.copy(image_id={region: 'docker:' + docker_image},
+                              _docker_login_config=docker_login_config)
 
     return {_add_docker_login_config(resources) for resources in resources_set}
 
