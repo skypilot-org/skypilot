@@ -131,6 +131,19 @@ def main():
 def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                       no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
+    sync_cmd = ('aws configure set default.s3.max_concurrent_requests '
+                  f'{num_threads};')
+    sync_cmd += f' aws s3 sync {src_path} s3://{dst}'
+    if delete:
+        sync_cmd += ' --delete'
+    if no_follow_symlinks:
+        sync_cmd += ' --no-follow-symlinks'
+    return sync_cmd
+
+"""
+def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
+                      no_follow_symlinks: bool):
+    """"""Builds sync command for aws s3""""""
     config_cmd = ('aws configure set default.s3.max_concurrent_requests '
                   f'{num_threads}')
     subprocess.run(config_cmd, shell=True)
@@ -140,7 +153,7 @@ def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
     if no_follow_symlinks:
         sync_cmd += ' --no-follow-symlinks'
     return sync_cmd
-
+"""
 
 def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                        no_follow_symlinks: bool):
@@ -180,6 +193,11 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
             with subprocess.Popen(sync_cmd, start_new_session=True,
                                   shell=True) as proc:
                 _set_running_csync_sync_pid(csync_pid, proc.pid)
+                if storetype == 's3':
+                    # set number of threads back to its default value
+                    config_cmd = \
+                        'aws configure set default.s3.max_concurrent_requests 10'
+                    subprocess.run(config_cmd, shell=True, check=True)
                 proc.wait()
                 _set_running_csync_sync_pid(csync_pid, -1)
         except subprocess.CalledProcessError:
@@ -202,13 +220,6 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
                            f'{max_retries} number of retries. Check '
                            'the log file in ~/.sky/ for more'
                            'details') from None
-
-    # run necessary post-processes
-    if storetype == 's3':
-        # set number of threads back to its default value
-        config_cmd = \
-            'aws configure set default.s3.max_concurrent_requests 10'
-        subprocess.run(config_cmd, shell=True, check=True)
 
 
 @main.command()

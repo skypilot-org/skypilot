@@ -459,6 +459,7 @@ class Storage(object):
         assert mode in StorageMode
         if self.mode != StorageMode.CSYNC:
             assert interval_seconds is None
+        self.interval_seconds = interval_seconds
         self.sync_on_reconstruction = sync_on_reconstruction
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
