@@ -55,6 +55,9 @@ class ProcessStatus(enum.Enum):
     # The process is finished and success
     SUCCESS = 'SUCCESS'
 
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
+
     # The process failed
     FAILED = 'FAILED'
 
@@ -79,7 +82,17 @@ class ReplicaStatusProperty:
         # Process status of sky.down. None means sky.down is not called yet.
         self.sky_down_status: Optional[ProcessStatus] = None
 
+    def __repr__(self) -> str:
+        return (f'ReplicaStatusProperty('
+                f'sky_launch_status={self.sky_launch_status}, '
+                f'user_app_failed={self.user_app_failed}, '
+                f'service_ready_now={self.service_ready_now}, '
+                f'service_once_ready={self.service_once_ready}, '
+                f'sky_down_status={self.sky_down_status})')
+
     def is_scale_down_no_failure(self) -> bool:
+        if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+            return True
         if self.sky_launch_status != ProcessStatus.SUCCESS:
             return False
         if self.sky_down_status != ProcessStatus.SUCCESS:
@@ -110,6 +123,12 @@ class ReplicaStatusProperty:
             if self.sky_down_status == ProcessStatus.FAILED:
                 # sky.down failed
                 return status_lib.ReplicaStatus.FAILED_CLEANUP
+            if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+                # sky.launch interrupted and sky.down finished.
+                # Still show SHUTTING_DOWN since it is a normal scale
+                # down without failure. This record will be cleaned
+                # soon after.
+                return status_lib.ReplicaStatus.SHUTTING_DOWN
             if self.user_app_failed:
                 # Failed on user setup/run
                 return status_lib.ReplicaStatus.FAILED
@@ -190,6 +209,7 @@ class ReplicaInfo:
             'name': self.cluster_name,
             'status': self.status,
             'version': self.version,
+            'status_property': self.status_property,
         }
         if with_handle:
             info_dict['handle'] = self.handle
@@ -529,8 +549,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 'and deleted the cluster.')
             self._teardown_cluster(cluster_name, sync_down_logs=False)
             info = self.replica_info[cluster_name]
-            # Set to success here for correctly display as shutting down
-            info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
             del self.launch_process_pool[cluster_name]
             return
         # We should sync down log here since the cluster is already UP.

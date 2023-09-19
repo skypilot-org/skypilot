@@ -120,6 +120,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
+        StatusColumn('LATEST_VERSION', _get_service_version),
         StatusColumn('LAUNCHED', _get_launched, show_by_default=False),
         StatusColumn('UPTIME', _get_uptime),
         StatusColumn('STATUS', _get_service_status_colored),
@@ -155,6 +156,7 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
     status_columns = [
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
+        StatusColumn('VERSION', _get_replica_version),
         StatusColumn('IP', _get_head_ip),
         StatusColumn(
             'RESOURCES',
@@ -390,6 +392,7 @@ _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 _get_replica_id = lambda replica_record: replica_record['replica_id']
+_get_replica_version = lambda replica_record: replica_record['version']
 _get_service_name = (lambda replica_record: replica_record['service_name'])
 
 
@@ -400,6 +403,13 @@ def _get_service_handle(
 
 def _get_controller_name(service_record: _ServiceRecord) -> str:
     return service_record['controller_name']
+
+
+def _get_service_version(service_record: _ServiceRecord) -> str:
+    handle = _get_service_handle(service_record)
+    if handle.version is None:
+        return '-'
+    return str(handle.version)
 
 
 def _get_policy(service_record: _ServiceRecord) -> str:

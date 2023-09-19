@@ -2747,6 +2747,7 @@ def _refresh_service_record_no_lock(
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.uptime = latest_info['uptime']
+    service_handle.version = latest_info['version']
 
     # When the service is shutting down, there is a period of time which the
     # controller still responds to the request, and the replica is not

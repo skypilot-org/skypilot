@@ -82,6 +82,7 @@ class SkyServeController:
                 'replica_info':
                     self.infra_provider.get_replica_info(verbose=True),
                 'uptime': self.infra_provider.get_uptime(),
+                'version': self.infra_provider.get_latest_version(),
             }
             latest_info = {
                 k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
@@ -108,6 +109,7 @@ class SkyServeController:
             logger.info(f'Update to task: {task_config}')
             logger.info(f'Service spec: {service}')
             latest_version = self.infra_provider.get_latest_version() + 1
+            logger.info(f'Latest version: {latest_version}')
             latest_task_yaml = serve.generate_remote_task_yaml_file_name(
                 self.service_name, latest_version)
             if ('resources' in task_config and

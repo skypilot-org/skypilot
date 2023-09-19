@@ -320,6 +320,7 @@ class ServiceHandle(object):
         requested_controller_resources: 'sky.Resources',
         auto_restart: bool,
         uptime: Optional[int] = None,
+        version: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
         load_balancer_port: Optional[int] = None,
@@ -329,6 +330,7 @@ class ServiceHandle(object):
         self._version = self._VERSION
         self.service_name = service_name
         self.uptime = uptime
+        self.version = version
         self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
@@ -343,6 +345,7 @@ class ServiceHandle(object):
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
                 f'\n\tuptime={self.uptime},'
+                f'\n\tversion={self.version},'
                 f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
