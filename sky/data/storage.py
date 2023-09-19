@@ -872,7 +872,9 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        force_delete = config.pop('_force_delete', False)
+        force_delete = config.pop('_force_delete', None)
+        if force_delete is None:
+            force_delete = False
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
@@ -880,7 +882,9 @@ class Storage(object):
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
-        persistent = config.pop('persistent', True)
+        persistent = config.pop('persistent', None)
+        if persistent is None:
+            persistent = True
 
         assert not config, f'Invalid storage args: {config.keys()}'
 
