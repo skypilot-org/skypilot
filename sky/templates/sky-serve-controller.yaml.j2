@@ -20,7 +20,7 @@ run: |
   mkdir -p {{service_dir}}
   # Start sky serve controller.
   python -u -m sky.serve.controller --service-name {{service_name}} \
-    --task-yaml {{remote_task_yaml_path}} --controller-port {{controller_port}} \
+    --version {{version}} --controller-port {{controller_port}} \
     > {{controller_log_file}} 2>&1 &
   # Wait for controller to start.
   sleep 10
@@ -28,5 +28,5 @@ run: |
   # foreground so that the job will not finish, thus prevent our controller
   # from auto down.
   python -u -m sky.serve.load_balancer --load-balancer-port {{load_balancer_port}} \
-    --app-port {{app_port}} --controller-addr http://localhost:{{controller_port}} \
+    --controller-addr http://localhost:{{controller_port}} \
     > {{load_balancer_log_file}} 2>&1

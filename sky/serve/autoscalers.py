@@ -2,10 +2,15 @@
 import logging
 import threading
 import time
+import typing
 from typing import Optional
 
 from sky.serve import constants
 from sky.serve import infra_providers
+from sky.serve import serve_utils
+
+if typing.TYPE_CHECKING:
+    from sky.serve import service_spec
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +25,13 @@ class Autoscaler:
 
     def __init__(self,
                  infra_provider: infra_providers.InfraProvider,
+                 initial_version: int,
                  auto_restart: bool,
                  frequency: int,
                  min_nodes: int = 1,
                  max_nodes: Optional[int] = None) -> None:
         self.infra_provider = infra_provider
+        self.current_version = initial_version
         self.auto_restart = auto_restart
         self.min_nodes: int = min_nodes
         # Default to fixed node, i.e. min_nodes == max_nodes.
@@ -35,6 +42,13 @@ class Autoscaler:
                            'controller sync interval. It might '
                            'not always got the latest information.')
 
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        self.current_version = version
+        self.auto_restart = spec.auto_restart
+        self.min_nodes = spec.min_replicas
+        self.max_nodes = spec.max_replicas or spec.min_replicas
+
     def evaluate_scaling(self) -> None:
         raise NotImplementedError
 
@@ -42,9 +56,9 @@ class Autoscaler:
         logger.debug(f'Scaling up by {num_nodes_to_add} nodes')
         self.infra_provider.scale_up(num_nodes_to_add)
 
-    def scale_down(self, num_nodes_to_remove: int) -> None:
-        logger.debug(f'Scaling down by {num_nodes_to_remove} nodes')
-        self.infra_provider.scale_down(num_nodes_to_remove)
+    def scale_down(self, replica_id: Optional[int]) -> None:
+        logger.debug(f'Scaling down replica id: {replica_id}.')
+        self.infra_provider.scale_down(replica_id)
 
     def run(self) -> None:
         logger.info('Starting autoscaler monitor.')
@@ -93,6 +107,12 @@ class RequestRateAutoscaler(Autoscaler):
         # Lower threshold for scale down. If None, no scale down.
         self.lower_threshold: Optional[float] = lower_threshold
 
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        super().update_version(version, spec)
+        self.upper_threshold = spec.qps_upper_threshold
+        self.lower_threshold = spec.qps_lower_threshold
+
     def set_num_requests(self, num_requests: int) -> None:
         self.num_requests = num_requests
 
@@ -101,8 +121,9 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(self) -> None:
         current_time = time.time()
-        num_nodes = self.infra_provider.total_replica_num(
+        replica_infos = self.infra_provider.filter_replica_info(
             count_failed_replica=not self.auto_restart)
+        num_nodes = len(replica_infos)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -145,7 +166,16 @@ class RequestRateAutoscaler(Autoscaler):
                 logger.info('Requests per node is below lower threshold '
                             f'{self.lower_threshold}qps/node. '
                             'Scaling down by 1 node.')
-                self.scale_down(1)
+                self.scale_down(replica_id=None)
                 self.last_scale_operation = current_time
         else:
+            for info in replica_infos:
+                if info.version != self.current_version:
+                    logger.info(f'Scaling down replica with wrong version: '
+                                f'{info.version}.')
+                    replica_id = serve_utils.get_replica_id_from_cluster_name(
+                        info.cluster_name)
+                    self.scale_down(replica_id)
+                    self.last_scale_operation = current_time
+                    break
             logger.info('No scaling needed.')

@@ -67,3 +67,6 @@ DEFAULT_MIN_REPLICAS = 1
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
+
+# Initial version of service.
+INITIAL_VERSION = 1

@@ -27,15 +27,13 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(
-        self, controller_url: str, load_balancer_port: int, app_port: int,
+        self, controller_url: str, load_balancer_port: int,
         load_balancing_policy: load_balancing_policies.LoadBalancingPolicy
     ) -> None:
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
         # This is the port where the load balancer listens to.
         self.load_balancer_port = load_balancer_port
-        # This is the port where the replica app listens to.
-        self.app_port = app_port
         self.load_balancing_policy = load_balancing_policy
         self.setup_query_interval()
 
@@ -84,15 +82,15 @@ class SkyServeLoadBalancer:
 
     async def _redirect_handler(self, request: fastapi.Request):
         self.load_balancing_policy.increment_request_count(1)
-        replica_ip = self.load_balancing_policy.select_replica(request)
+        replica_url = self.load_balancing_policy.select_replica(request)
 
-        if replica_ip is None:
+        if replica_url is None:
             raise fastapi.HTTPException(status_code=503,
                                         detail='No available replicas. '
                                         'Use "sky serve status [SERVICE_ID]" '
                                         'to check the replica status.')
 
-        path = f'http://{replica_ip}:{self.app_port}{request.url.path}'
+        path = f'http://{replica_url}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -118,10 +116,6 @@ if __name__ == '__main__':
                         type=int,
                         help='Port to run the load balancer on.',
                         required=True)
-    parser.add_argument('--app-port',
-                        type=int,
-                        help='Port that runs app on replica.',
-                        required=True)
     parser.add_argument('--controller-addr',
                         type=str,
                         help='Controller address (ip:port).',
@@ -135,6 +129,5 @@ if __name__ == '__main__':
     load_balancer = SkyServeLoadBalancer(
         controller_url=args.controller_addr,
         load_balancer_port=args.load_balancer_port,
-        app_port=args.app_port,
         load_balancing_policy=_load_balancing_policy)
     load_balancer.run()

@@ -2,12 +2,13 @@
 from concurrent import futures
 import enum
 import logging
-import random
+import os
 import signal
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import typing
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import psutil
 import requests
@@ -19,6 +20,9 @@ from sky.serve import constants
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.utils import env_options
+
+if typing.TYPE_CHECKING:
+    from sky.serve import service_spec
 
 logger = logging.getLogger(__name__)
 
@@ -146,9 +150,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str) -> None:
+    def __init__(self, replica_id: int, cluster_name: str,
+                 version: int) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
+        self.version: int = version
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[int] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -183,6 +189,7 @@ class ReplicaInfo:
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
+            'version': self.version,
         }
         if with_handle:
             info_dict['handle'] = self.handle
@@ -192,22 +199,29 @@ class ReplicaInfo:
 class InfraProvider:
     """Each infra provider manages one service."""
 
-    def __init__(
-            self,
-            controller_port: int,
-            readiness_suffix: str,
-            initial_delay_seconds: int,
-            post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
+    def __init__(self, controller_port: int, initial_version: int,
+                 initial_spec: 'service_spec.SkyServiceSpec') -> None:
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
         self.controller_port = controller_port
-        self.readiness_suffix: str = readiness_suffix
-        self.initial_delay_seconds: int = initial_delay_seconds
-        self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
+        self.latest_version: int = initial_version
+        self.version2spec: serve_utils.ThreadSafeDict[
+            int, 'service_spec.SkyServiceSpec'] = serve_utils.ThreadSafeDict()
+        self.version2spec[initial_version] = initial_spec
         self.uptime: Optional[float] = None
-        logger.info(f'Readiness probe suffix: {self.readiness_suffix}')
-        logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
-        logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
+        logger.info(f'Readiness probe suffix: {initial_spec.readiness_suffix}')
+        logger.info('Initial delay seconds: '
+                    f'{initial_spec.initial_delay_seconds}')
+        logger.info(f'Post data: {initial_spec.post_data} '
+                    f'({type(initial_spec.post_data)})')
+
+    def update_version(self, version: int,
+                       spec: 'service_spec.SkyServiceSpec') -> None:
+        self.version2spec[version] = spec
+        self.latest_version = version
+
+    def get_latest_version(self) -> int:
+        return self.latest_version
 
     def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
         # Get replica info for all replicas
@@ -216,8 +230,9 @@ class InfraProvider:
     def get_uptime(self) -> Optional[float]:
         return self.uptime
 
-    def total_replica_num(self, count_failed_replica: bool) -> int:
-        # Returns the total number of replicas
+    def filter_replica_info(self,
+                            count_failed_replica: bool) -> List[ReplicaInfo]:
+        # Returns replica info according to the filter
         raise NotImplementedError
 
     def get_ready_replicas(self) -> Set[str]:
@@ -227,9 +242,7 @@ class InfraProvider:
     def scale_up(self, n: int) -> None:
         raise NotImplementedError
 
-    def scale_down(self, n: int) -> None:
-        # TODO - Scale down must also pass in a list of replicas to
-        # delete or the number of replicas to delete
+    def scale_down(self, replica_id: Optional[int]) -> None:
         raise NotImplementedError
 
     def terminate(self) -> Optional[str]:
@@ -244,10 +257,8 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, service_name: str, *args,
-                 **kwargs) -> None:
+    def __init__(self, service_name: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
         self.next_replica_id: int = 1
         self.launch_process_pool: serve_utils.ThreadSafeDict[
@@ -257,6 +268,11 @@ class SkyPilotInfraProvider(InfraProvider):
 
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
+
+    def _get_task_yaml_path(self) -> str:
+        task_yaml = serve_utils.generate_remote_task_yaml_file_name(
+            self.service_name, self.latest_version)
+        return os.path.expanduser(task_yaml)
 
     # This process periodically checks all sky.launch and sky.down process
     # on the fly. If any of them finished, it will update the status of
@@ -389,20 +405,28 @@ class SkyPilotInfraProvider(InfraProvider):
             for info in self.replica_info.values()
         ]
 
-    def total_replica_num(self, count_failed_replica: bool) -> int:
+    def filter_replica_info(self,
+                            count_failed_replica: bool) -> List[ReplicaInfo]:
         if count_failed_replica:
-            return len(self.replica_info)
-        return len([
+            return list(self.replica_info.values())
+        return [
             i for i in self.replica_info.values()
             if i.status != status_lib.ReplicaStatus.FAILED
-        ])
+        ]
+
+    def _get_ready_infos(self) -> Set[ReplicaInfo]:
+        ready_infos = set()
+        for info in self.replica_info.values():
+            if info.status == status_lib.ReplicaStatus.READY:
+                ready_infos.add(info)
+        return ready_infos
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
-        for info in self.replica_info.values():
-            if info.status == status_lib.ReplicaStatus.READY:
-                assert info.ip is not None
-                ready_replicas.add(info.ip)
+        for info in self._get_ready_infos():
+            assert info.ip is not None
+            spec = self.version2spec[info.version]
+            ready_replicas.add(f'{info.ip}:{spec.app_port}')
         return ready_replicas
 
     def _launch_cluster(self, replica_id: int) -> None:
@@ -413,7 +437,10 @@ class SkyPilotInfraProvider(InfraProvider):
                            'already exists. Skipping.')
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
-        cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
+        cmd = [
+            'sky', 'launch',
+            self._get_task_yaml_path(), '-c', cluster_name, '-y'
+        ]
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
         fn = serve_utils.generate_replica_launch_log_file_name(
             self.service_name, replica_id)
@@ -425,7 +452,8 @@ class SkyPilotInfraProvider(InfraProvider):
                                  stderr=f)
         self.launch_process_pool[cluster_name] = p
         assert cluster_name not in self.replica_info
-        self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
+        self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name,
+                                                      self.latest_version)
 
     def _scale_up(self, n: int) -> None:
         # Launch n new clusters
@@ -481,29 +509,11 @@ class SkyPilotInfraProvider(InfraProvider):
         info = self.replica_info[cluster_name]
         info.status_property.sky_down_status = ProcessStatus.RUNNING
 
-    def _scale_down(self, n: int) -> None:
-        # Randomly delete n ready replicas
-        all_ready_replicas = self.get_ready_replicas()
-        num_replicas = len(all_ready_replicas)
-        if num_replicas > 0:
-            if n > num_replicas:
-                logger.warning(
-                    f'Trying to delete {n} replicas, but only {num_replicas} '
-                    'replicas exist. Deleting all replicas.')
-                n = num_replicas
-            cluster_to_terminate = random.sample(all_ready_replicas, n)
-            for cluster_name in cluster_to_terminate:
-                logger.info(f'Scaling down cluster {cluster_name}')
-                self._teardown_cluster(cluster_name)
-
-    def scale_down(self, n: int) -> None:
-        self._scale_down(n)
-
-    def terminate(self) -> Optional[str]:
-        logger.info('Terminating infra provider daemon threads...')
-        self._terminate_daemon_threads()
-        logger.info('Terminating all clusters...')
-        for name, p in self.launch_process_pool.items():
+    def _gracefully_terminate_cluster(self, cluster_name: str) -> None:
+        if cluster_name in self.down_process_pool:
+            return
+        if cluster_name in self.launch_process_pool:
+            p = self.launch_process_pool[cluster_name]
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
             # Edge case: sky.launched finished after the
@@ -514,12 +524,36 @@ class SkyPilotInfraProvider(InfraProvider):
                 # here since sky.launch has great handling for it.
                 _interrupt_process_and_children(p.pid)
                 p.wait()
-                logger.info(f'Interrupted launch process for cluster {name} '
-                            'and deleted the cluster.')
-                self._teardown_cluster(name, sync_down_logs=False)
-                info = self.replica_info[name]
-                # Set to success here for correctly display as shutting down
-                info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+            logger.info(
+                f'Interrupted launch process for cluster {cluster_name} '
+                'and deleted the cluster.')
+            self._teardown_cluster(cluster_name, sync_down_logs=False)
+            info = self.replica_info[cluster_name]
+            # Set to success here for correctly display as shutting down
+            info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+            del self.launch_process_pool[cluster_name]
+            return
+        # We should sync down log here since the cluster is already UP.
+        self._teardown_cluster(cluster_name)
+
+    def scale_down(self, replica_id: Optional[int]) -> None:
+        if replica_id is None:
+            ready_infos = self._get_ready_infos()
+            if not ready_infos:
+                logger.warning('No ready replicas found. Skipping scale down.')
+                return
+            cluster_name = list(ready_infos)[0].cluster_name
+        else:
+            cluster_name = serve_utils.generate_replica_cluster_name(
+                self.service_name, replica_id)
+        self._gracefully_terminate_cluster(cluster_name)
+
+    def terminate(self) -> Optional[str]:
+        logger.info('Terminating infra provider daemon threads...')
+        self._terminate_daemon_threads()
+        logger.info('Terminating all clusters...')
+        for name in list(self.launch_process_pool.keys()):
+            self._gracefully_terminate_cluster(name)
         msg = []
         for name, info in self.replica_info.items():
             if info.status in [
@@ -572,14 +606,15 @@ class SkyPilotInfraProvider(InfraProvider):
 
         def _probe_replica(info: ReplicaInfo) -> Tuple[str, bool]:
             replica_ip = info.ip
+            spec = self.version2spec[info.version]
             try:
                 msg = ''
-                readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
-                if self.post_data is not None:
+                readiness_suffix = f'http://{replica_ip}{spec.readiness_suffix}'
+                if spec.post_data is not None:
                     msg += 'Post'
                     response = requests.post(
                         readiness_suffix,
-                        json=self.post_data,
+                        json=spec.post_data,
                         timeout=constants.READINESS_PROBE_TIMEOUT)
                 else:
                     msg += 'Get'
@@ -620,6 +655,7 @@ class SkyPilotInfraProvider(InfraProvider):
         for future in futures.as_completed(probe_futures):
             cluster_name, res = future.result()
             info = self.replica_info[cluster_name]
+            spec = self.version2spec[info.version]
             info.status_property.service_ready_now = res
             if res:
                 info.consecutive_failure_times.clear()
@@ -647,7 +683,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                 'Skipping.')
             else:
                 current_delay_seconds = current_time - info.first_not_ready_time
-                if current_delay_seconds > self.initial_delay_seconds:
+                if current_delay_seconds > spec.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeding initial delay seconds. '
                                 'Terminating the replica...')
@@ -657,4 +693,4 @@ class SkyPilotInfraProvider(InfraProvider):
                     logger.info(
                         f'Replica {cluster_name} is not ready but within '
                         f'initial delay seconds ({current_delay_seconds}s / '
-                        f'{self.initial_delay_seconds}s). Skipping.')
+                        f'{spec.initial_delay_seconds}s). Skipping.')

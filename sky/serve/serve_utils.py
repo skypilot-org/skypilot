@@ -69,6 +69,10 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
         with self._lock:
             return self._dict.items()
 
+    def keys(self):
+        with self._lock:
+            return self._dict.keys()
+
     def values(self):
         with self._lock:
             return self._dict.values()
@@ -102,10 +106,10 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     return os.path.join(constants.SERVE_PREFIX, service_name)
 
 
-def generate_remote_task_yaml_file_name(service_name: str) -> str:
+def generate_remote_task_yaml_file_name(service_name: str, version: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, 'task.yaml')
+    return os.path.join(dir_name, f'v{version}.yaml')
 
 
 def generate_remote_controller_log_file_name(service_name: str) -> str:

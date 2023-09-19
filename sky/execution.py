@@ -1078,8 +1078,9 @@ def serve_up(
                 'spot_recovery' in task_config['resources']):
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
+        version = serve.INITIAL_VERSION
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
-            service_name)
+            service_name, version)
         controller_log_file = (
             serve.generate_remote_controller_log_file_name(service_name))
         load_balancer_log_file = (
@@ -1087,13 +1088,13 @@ def serve_up(
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
+            'version': version,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'service_dir': serve.generate_remote_service_dir_name(service_name),
             'service_name': service_name,
             'controller_port': controller_port,
             'load_balancer_port': load_balancer_port,
-            'app_port': task.service.app_port,
             'controller_log_file': controller_log_file,
             'load_balancer_log_file': load_balancer_log_file,
         }

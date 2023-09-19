@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import base64
 import logging
+import os
 import pickle
 from typing import Optional
 
@@ -17,6 +18,7 @@ from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import infra_providers
+from sky.utils import common_utils
 from sky.utils import env_options
 
 # Use the explicit logger name so that the logger is under the
@@ -41,9 +43,11 @@ class SkyServeController:
     """
 
     def __init__(self,
+                 service_name: str,
                  port: int,
                  infra_provider: infra_providers.InfraProvider,
                  autoscaler: Optional[autoscalers.Autoscaler] = None) -> None:
+        self.service_name = service_name
         self.port = port
         self.infra_provider = infra_provider
         self.autoscaler = autoscaler
@@ -85,6 +89,36 @@ class SkyServeController:
             }
             return latest_info
 
+        @self.app.post('/controller/update_version')
+        def update_version(request: fastapi.Request):
+            if self.autoscaler is None:
+                return {
+                    'message': ('Update service is not allowed '
+                                'without autoscaler.')
+                }
+            request_data = asyncio.run(request.json())
+            task_config = request_data['task']
+            if 'service' not in task_config:
+                return {
+                    'message': ('Update service is not allowed '
+                                'without service spec.')
+                }
+            service = serve.SkyServiceSpec.from_yaml_config(
+                task_config['service'])
+            logger.info(f'Update to task: {task_config}')
+            logger.info(f'Service spec: {service}')
+            latest_version = self.infra_provider.get_latest_version() + 1
+            latest_task_yaml = serve.generate_remote_task_yaml_file_name(
+                self.service_name, latest_version)
+            if ('resources' in task_config and
+                    'spot_recovery' in task_config['resources']):
+                del task_config['resources']['spot_recovery']
+            common_utils.dump_yaml(os.path.expanduser(latest_task_yaml),
+                                   task_config)
+            self.infra_provider.update_version(latest_version, service)
+            self.autoscaler.update_version(latest_version, service)
+            return {'message': 'Success'}
+
         @self.app.post('/controller/terminate')
         def terminate(request: fastapi.Request):
             del request
@@ -119,9 +153,9 @@ if __name__ == '__main__':
                         type=str,
                         help='Name of the service',
                         required=True)
-    parser.add_argument('--task-yaml',
-                        type=str,
-                        help='Task YAML file',
+    parser.add_argument('--version',
+                        type=int,
+                        help='Service version',
                         required=True)
     parser.add_argument('--controller-port',
                         type=int,
@@ -133,19 +167,23 @@ if __name__ == '__main__':
     # are executed at the same time.
     authentication.get_or_generate_keys()
 
+    # Generate corresponding task yaml file name
+    task_yaml = serve.generate_remote_task_yaml_file_name(
+        args.service_name, args.version)
+    task_yaml = os.path.expanduser(task_yaml)
+
     # ======= Infra Provider =========
-    service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
+    service_spec = serve.SkyServiceSpec.from_yaml(task_yaml)
     _infra_provider = infra_providers.SkyPilotInfraProvider(
-        args.task_yaml,
         args.service_name,
         controller_port=args.controller_port,
-        readiness_suffix=service_spec.readiness_suffix,
-        initial_delay_seconds=service_spec.initial_delay_seconds,
-        post_data=service_spec.post_data)
+        initial_version=args.version,
+        initial_spec=service_spec)
 
     # ======= Autoscaler =========
     _autoscaler = autoscalers.RequestRateAutoscaler(
         _infra_provider,
+        initial_version=args.version,
         auto_restart=service_spec.auto_restart,
         frequency=20,
         min_nodes=service_spec.min_replicas,
@@ -156,6 +194,6 @@ if __name__ == '__main__':
         query_interval=60)
 
     # ======= SkyServeController =========
-    controller = SkyServeController(args.controller_port, _infra_provider,
-                                    _autoscaler)
+    controller = SkyServeController(args.service_name, args.controller_port,
+                                    _infra_provider, _autoscaler)
     controller.run()
