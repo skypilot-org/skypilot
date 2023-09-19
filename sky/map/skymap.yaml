@@ -1,5 +1,5 @@
 resources:
-  cpus: 2+
+  cpus: 16+
   cloud: gcp
 
 workdir: .
@@ -23,3 +23,5 @@ service:
     path: /health
     initial_delay_seconds: 20
   replicas: 1
+  controller_resources:
+    cloud: gcp

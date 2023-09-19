@@ -1,3 +1,6 @@
 """Constants used for SkyMap."""
 
 UNAVAILABLE_FLOAT = -1.0
+
+SKY_MAP_IP_ADDR = '34.171.237.206'
+SKY_MAP_PORT = 30001

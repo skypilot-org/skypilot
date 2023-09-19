@@ -79,7 +79,3 @@ USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
-
-# SkyMap constants
-SKY_MAP_IP_ADDR = '172.172.230.61'
-SKY_MAP_PORT = 30001

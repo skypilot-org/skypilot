@@ -8,7 +8,7 @@ import requests
 from starlette.responses import Response
 
 from sky import sky_logging
-from sky.skylet import constants
+from sky.map import constants
 
 logger = sky_logging.init_logger('sky.map.map_utils')
 
@@ -71,6 +71,30 @@ def report_wait(zone: Optional[str], wait_time: float, resource: Optional[str]):
         logger.info('SkyMap - Timeout')
     except requests.ConnectionError:
         logger.info('SkyMap - ConnectionError')
+
+
+def get_average_preemption(zone: str, duration: float) -> float:
+
+    sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
+    sky_map_port = constants.SKY_MAP_PORT
+
+    response = requests.get(
+        f'http://{sky_map_ip_addr}:{sky_map_port}/get-average-preempt-time/{zone}/{duration}'  # pylint: disable=line-too-long
+    )
+
+    return response.json()['preempt_time']
+
+
+def get_average_wait(zone: str, duration: float) -> float:
+
+    sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
+    sky_map_port = constants.SKY_MAP_PORT
+
+    response = requests.get(
+        f'http://{sky_map_ip_addr}:{sky_map_port}/get-average-wait-time/{zone}/{duration}'  # pylint: disable=line-too-long
+    )
+
+    return response.json()['wait_time']
 
 
 class PrettyJSONResponse(Response):
