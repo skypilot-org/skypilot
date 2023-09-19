@@ -191,7 +191,7 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost.
 
         TODO: takes into account "per month" accumulation per account.

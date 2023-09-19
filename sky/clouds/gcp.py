@@ -330,7 +330,7 @@ class GCP(clouds.Cloud):
                                                            zone=zone,
                                                            clouds='gcp')
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://cloud.google.com/storage/pricing#network-pricing
         # NOTE: egress to worldwide (excl. China, Australia).

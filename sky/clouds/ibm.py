@@ -136,10 +136,10 @@ class IBM(clouds.Cloud):
         # Currently Isn't implemented in the same manner by aws and azure.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost. Currently true for us-south, i.e. Dallas.
         based on https://cloud.ibm.com/objectstorage/create#pricing. """
-        cost = 0
+        cost = 0.
         price_thresholds = [{
             'threshold': 150,
             'price_per_gb': 0.05
