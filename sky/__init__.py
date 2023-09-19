@@ -35,6 +35,7 @@ from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
 from sky.execution import serve_up
+from sky.execution import serve_update
 from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget

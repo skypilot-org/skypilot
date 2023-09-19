@@ -1063,12 +1063,10 @@ def serve_up(
     # TODO(tian): Use skyserve constants, or maybe refactor these constants
     # out of spot constants since their name is mostly not spot-specific.
     _maybe_translate_local_file_mounts_and_sync_up(task)
-    ephemeral_storage = []
     if task.storage_mounts is not None:
         for storage in task.storage_mounts.values():
             if not storage.persistent:
-                ephemeral_storage.append(storage.to_yaml_config())
-    service_handle.ephemeral_storage = ephemeral_storage
+                service_handle.add_ephemeral_storage(storage)
     global_user_state.set_service_handle(service_name, service_handle)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
@@ -1203,3 +1201,82 @@ def serve_up(
               f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
         print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
         print('Please use the above command to find the latest status.')
+
+
+@usage_lib.entrypoint
+def serve_update(service_name: str, task: 'sky.Task') -> None:
+    service_record = global_user_state.get_service_from_name(service_name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist.')
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Service {service_name!r} is still initializing its '
+                'controller. Please try again later.')
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r}\'s controller failed. '
+                             'Cannot update.')
+    service_handle: serve.ServiceHandle = service_record['handle']
+    if service_handle.controller_port is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Controller job of service {service_name!r} not '
+                             'found.')
+    controller_name = service_record['controller_name']
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
+    if handle is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot find controller for service {service_name}.')
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot update a non-service task.')
+    if task.service.controller_resources is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot update controller resources.')
+
+    assert len(task.resources) == 1, task
+
+    service_handle.requested_resources = list(task.resources)[0]
+    service_handle.policy = task.service.policy_str()
+    service_handle.auto_restart = task.service.auto_restart
+
+    _maybe_translate_local_file_mounts_and_sync_up(task)
+    if task.storage_mounts is not None:
+        for storage in task.storage_mounts.values():
+            if not storage.persistent:
+                service_handle.add_ephemeral_storage(storage)
+
+    global_user_state.set_service_handle(service_name, service_handle)
+
+    task_config = task.to_yaml_config()
+    if ('resources' in task_config and
+            'spot_recovery' in task_config['resources']):
+        del task_config['resources']['spot_recovery']
+    code = serve.ServeCodeGen.update_service(service_handle.controller_port,
+                                             task_config)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    returncode, update_service_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+    subprocess_utils.handle_returncode(returncode,
+                                       code,
+                                       'Failed to update service',
+                                       stderr,
+                                       stream_logs=False)
+    update_service_result = serve.load_update_service_result(
+        update_service_payload)
+    if update_service_result.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to update service {service_name!r}: '
+                               f'{update_service_result.text}')
+
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
+          f'{colorama.Style.RESET_ALL}\n'
+          f'Please use {backend_utils.BOLD}sky serve status {service_name} '
+          f'{backend_utils.RESET_BOLD}to check the latest status.')

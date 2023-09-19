@@ -357,6 +357,11 @@ class ServiceHandle(object):
                 f'\n\tjob_id={self.job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
+    def add_ephemeral_storage(self, storage: storage_lib.Storage) -> None:
+        if self.ephemeral_storage is None:
+            self.ephemeral_storage = []
+        self.ephemeral_storage.append(storage.to_yaml_config())
+
     def cleanup_ephemeral_storage(self) -> None:
         if self.ephemeral_storage is None:
             return
@@ -384,6 +389,21 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
         k: pickle.loads(base64.b64decode(v)) for k, v in latest_info.items()
     }
     return latest_info
+
+
+def update_service(controller_port: int, task_config: Dict[str, Any]) -> str:
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/update_service',
+        json={'task': task_config})
+    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
+    return common_utils.encode_payload(resp)
+
+
+def load_update_service_result(payload: str) -> Any:
+    update_resp = common_utils.decode_payload(payload)
+    update_resp = pickle.loads(base64.b64decode(update_resp))
+    return update_resp
 
 
 def terminate_service(controller_port: int) -> str:
@@ -591,6 +611,15 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.get_latest_info({controller_port})',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def update_service(cls, controller_port: int,
+                       task_config: Dict[str, Any]) -> str:
+        code = [
+            f'msg = serve_utils.update_service({controller_port}, '
+            f'{task_config!r})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

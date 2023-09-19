@@ -4101,8 +4101,7 @@ def serve_up(
                       'Please clean up the service and try again.')
         else:
             prompt = (f'Service {service_name!r} already exists. '
-                      'Updating a service will be supported in the future. '
-                      'For now, `sky serve down` first and try again.')
+                      'To update a service , use `sky serve update`.')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
@@ -4263,6 +4262,85 @@ def serve_status(all: bool, service_names: List[str]):
         plural = '' if num_failed == 1 else 's'
         click.echo(f'\n* {num_failed} service{plural} with failed controller '
                    'found. The replica info and number might not be accurate.')
+
+
+@serve.command('update', cls=_DocumentedCodeCommand)
+@click.argument('service_name',
+                required=True,
+                type=str,
+                **_get_shell_complete_args(_complete_service_name))
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def serve_update(
+    service_name: str,
+    entrypoint: List[str],
+    yes: bool,
+):
+    """Update a SkyServe service."""
+
+    previous_service_record = global_user_state.get_service_from_name(
+        service_name)
+    if previous_service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Service {service_name!r} not exist. '
+                               'To create a new service, use `sky serve up`.')
+    elif previous_service_record['status'] in [
+            status_lib.ServiceStatus.CONTROLLER_FAILED,
+            status_lib.ServiceStatus.FAILED
+    ]:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Service {service_name!r} has failed. '
+                               'Please clean up the service and try again.')
+
+    task = _make_task_or_dag_from_entrypoint_with_overrides(
+        entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
+    assert isinstance(task, sky.Task)
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the YAML file.')
+    if task.service.controller_resources is not None:
+        click.secho(
+            'Updating controller_resources is not allowed. '
+            'This section will be ignored.',
+            fg='yellow')
+        task.service.set_controller_resources(None)
+
+    assert len(task.resources) == 1
+    requested_resources = list(task.resources)[0]
+    if requested_resources.ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Specifying ports in resources is not allowed. SkyServe will '
+                'use the port specified in the service section.')
+    app_port = int(task.service.app_port)
+    task.set_resources(requested_resources.copy(ports=[app_port]))
+
+    click.secho('\nService Spec:', fg='cyan')
+    click.echo(task.service)
+
+    click.secho('Each replica will use the following resources (estimated):',
+                fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+    sky.optimize(dag)
+    click.echo()
+
+    if not yes:
+        prompt = f'Updating service {service_name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    sky.serve_update(service_name, task)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

@@ -57,6 +57,10 @@ class SkyServiceSpec:
         self._controller_resources = controller_resources
         self._auto_restart = auto_restart
 
+    def set_controller_resources(
+            self, controller_resources: Optional[Dict[str, Any]]) -> None:
+        self._controller_resources = controller_resources
+
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
         backend_utils.validate_schema(config, schemas.get_service_schema(),

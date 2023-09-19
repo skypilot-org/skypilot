@@ -90,20 +90,16 @@ class SkyServeController:
             }
             return latest_info
 
-        @self.app.post('/controller/update_version')
-        def update_version(request: fastapi.Request):
+        @self.app.post('/controller/update_service')
+        def update_service(request: fastapi.Request):
             if self.autoscaler is None:
-                return {
-                    'message': ('Update service is not allowed '
-                                'without autoscaler.')
-                }
+                raise ValueError('Update service is not allowed '
+                                 'without autoscaler.')
             request_data = asyncio.run(request.json())
             task_config = request_data['task']
             if 'service' not in task_config:
-                return {
-                    'message': ('Update service is not allowed '
-                                'without service spec.')
-                }
+                raise ValueError('Update service is not allowed '
+                                 'without service spec.')
             service = serve.SkyServiceSpec.from_yaml_config(
                 task_config['service'])
             logger.info(f'Update to task: {task_config}')
@@ -112,13 +108,10 @@ class SkyServeController:
             logger.info(f'Latest version: {latest_version}')
             latest_task_yaml = serve.generate_remote_task_yaml_file_name(
                 self.service_name, latest_version)
-            if ('resources' in task_config and
-                    'spot_recovery' in task_config['resources']):
-                del task_config['resources']['spot_recovery']
             common_utils.dump_yaml(os.path.expanduser(latest_task_yaml),
                                    task_config)
             self.infra_provider.update_version(latest_version, service)
-            self.autoscaler.update_version(latest_version, service)
+            self.autoscaler.update_spec(service)
             return {'message': 'Success'}
 
         @self.app.post('/controller/terminate')
@@ -185,7 +178,6 @@ if __name__ == '__main__':
     # ======= Autoscaler =========
     _autoscaler = autoscalers.RequestRateAutoscaler(
         _infra_provider,
-        initial_version=args.version,
         auto_restart=service_spec.auto_restart,
         frequency=20,
         min_nodes=service_spec.min_replicas,

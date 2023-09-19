@@ -25,13 +25,11 @@ class Autoscaler:
 
     def __init__(self,
                  infra_provider: infra_providers.InfraProvider,
-                 initial_version: int,
                  auto_restart: bool,
                  frequency: int,
                  min_nodes: int = 1,
                  max_nodes: Optional[int] = None) -> None:
         self.infra_provider = infra_provider
-        self.current_version = initial_version
         self.auto_restart = auto_restart
         self.min_nodes: int = min_nodes
         # Default to fixed node, i.e. min_nodes == max_nodes.
@@ -42,9 +40,7 @@ class Autoscaler:
                            'controller sync interval. It might '
                            'not always got the latest information.')
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
-        self.current_version = version
+    def update_spec(self, spec: 'service_spec.SkyServiceSpec') -> None:
         self.auto_restart = spec.auto_restart
         self.min_nodes = spec.min_replicas
         self.max_nodes = spec.max_replicas or spec.min_replicas
@@ -107,9 +103,8 @@ class RequestRateAutoscaler(Autoscaler):
         # Lower threshold for scale down. If None, no scale down.
         self.lower_threshold: Optional[float] = lower_threshold
 
-    def update_version(self, version: int,
-                       spec: 'service_spec.SkyServiceSpec') -> None:
-        super().update_version(version, spec)
+    def update_spec(self, spec: 'service_spec.SkyServiceSpec') -> None:
+        super().update_spec(spec)
         self.upper_threshold = spec.qps_upper_threshold
         self.lower_threshold = spec.qps_lower_threshold
 
@@ -170,7 +165,7 @@ class RequestRateAutoscaler(Autoscaler):
                 self.last_scale_operation = current_time
         else:
             for info in replica_infos:
-                if info.version != self.current_version:
+                if info.version != self.infra_provider.get_latest_version():
                     logger.info(f'Scaling down replica with wrong version: '
                                 f'{info.version}.')
                     replica_id = serve_utils.get_replica_id_from_cluster_name(
