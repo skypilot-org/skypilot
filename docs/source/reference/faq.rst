@@ -109,7 +109,7 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
   # Fetch all regions for GCP
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
-  # Run in single-threaded mode. This is useful when multiple processes don't work well with the gcp client due to ssl issues.
+  # Run in single-threaded mode. This is useful when multiple processes don't work well with the GCP client due to SSL issues.
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --single-threaded
 
   # Azure
@@ -117,7 +117,7 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
-  # Run in single-threaded mode. This is useful when multiple processes don't work well with the azure client due to ssl issues.
+  # Run in single-threaded mode. This is useful when multiple processes don't work well with the Azure client due to SSL issues.
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --single-threaded
   # Fetch the specified regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
