@@ -114,10 +114,6 @@ class SkyServeLoadBalancer:
 if __name__ == '__main__':
     # Add argparse
     parser = argparse.ArgumentParser(description='SkyServe Load Balancer')
-    parser.add_argument('--task-yaml',
-                        type=str,
-                        help='Task YAML file',
-                        required=True)
     parser.add_argument('--load-balancer-port',
                         type=int,
                         help='Port to run the load balancer on.',
