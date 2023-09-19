@@ -236,12 +236,11 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         axis='columns',
     )
 
-
     def create_gpu_map(df):
         # Map of Azure's machine with GPU to their corresponding memory
         # Result is hard-coded since Azure's API to not return such info
         # may be outdated so need to be maintained
-        gpu_map = { 
+        gpu_map = {
             'Standard_NC6': 12,
             'Standard_NC12': 24,
             'Standard_NC24': 48,
@@ -270,7 +269,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
             'Standard_NG8ads_V620_v1': 8,
             'Standard_NG16ads_V620_v1': 16,
             'Standard_NG32ads_V620_v1': 32,
-            'Standard_NG32adms_V620_v1' : 32,
+            'Standard_NG32adms_V620_v1': 32,
             'Standard_NV6': 8,
             'Standard_NV12': 16,
             'Standard_NV24': 32,
@@ -291,9 +290,9 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
             'Standard_NV12_Promo': 32,
             'Standard_NV24_Promo': 48
         }
-            
+
         all_instance = df.InstanceType.unique()
-        
+
         for instance in all_instance:
             if instance not in gpu_map:
                 gpu_map[instance] = ''
@@ -301,7 +300,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
     def map_device_memory(row, dic):
         return dic[row]
-
 
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
