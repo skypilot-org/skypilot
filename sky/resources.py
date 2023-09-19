@@ -299,33 +299,18 @@ class Resources:
             p3.2xlarge, {'V100': 1}
 
         """
-        accelerators = ''
+        acc_str = ''
         if self.accelerators is not None:
-            accelerators = f', {self.accelerators}'
-
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({self.accelerators})'
+            acc_list = [
+                '{}-{}'.format(k, v) for k, v in self.accelerators.items()
+            ]
+            acc_str = ','.join(acc_list)
 
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
 
-        if self._instance_type is not None:
-            instance_type = f'{self._instance_type}'
-        else:
-            instance_type = ''
-
-        # Do not show region/zone here as `sky status -a` would show them as
-        # separate columns. Also, Resources repr will be printed during
-        # failover, and the region may be dynamically determined.
-        hardware_str = (f'{instance_type}{use_spot}'
-                        f'{accelerators}')
-        # It may have leading ',' (for example, instance_type not set) or empty
-        # spaces.  Remove them.
-        while hardware_str and hardware_str[0] in (',', ' '):
-            hardware_str = hardware_str[1:]
-
-        return f'{hardware_str}'
+        return f'{acc_str}{use_spot}'
 
     @property
     def cloud(self):

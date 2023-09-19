@@ -13,6 +13,19 @@ from sky.map import constants
 logger = sky_logging.init_logger('sky.map.map_utils')
 
 
+class PrettyJSONResponse(Response):
+    media_type = 'application/json'
+
+    def render(self, content: typing.Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=4,
+            separators=(', ', ': '),
+        ).encode('utf-8')
+
+
 def report_preemption(zone: Optional[str], life_time: float,
                       resource: Optional[str]):
     """Report preemption to SkyMap."""
@@ -26,6 +39,10 @@ def report_preemption(zone: Optional[str], life_time: float,
 
     if resource is None:
         logger.info('No resource specified. Skipping preemption report.')
+        return
+
+    if resource in ['', '[Spot]']:
+        logger.info('No accelerator specified. Skipping preemption report.')
         return
 
     json_data = {'zone': zone, 'time': life_time, 'resource': resource}
@@ -55,6 +72,10 @@ def report_wait(zone: Optional[str], wait_time: float, resource: Optional[str]):
 
     if resource is None:
         logger.info('No resource specified. Skipping wait report.')
+        return
+
+    if resource in ['', '[Spot]']:
+        logger.info('No accelerator specified. Skipping wait report.')
         return
 
     json_data = {'zone': zone, 'time': wait_time, 'resource': resource}
@@ -95,16 +116,3 @@ def get_average_wait(zone: str, duration: float) -> float:
     )
 
     return response.json()['wait_time']
-
-
-class PrettyJSONResponse(Response):
-    media_type = 'application/json'
-
-    def render(self, content: typing.Any) -> bytes:
-        return json.dumps(
-            content,
-            ensure_ascii=False,
-            allow_nan=False,
-            indent=4,
-            separators=(', ', ': '),
-        ).encode('utf-8')
