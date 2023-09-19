@@ -1,6 +1,6 @@
 """Util constants/functions for the backends."""
-import collections
 import copy
+import dataclasses
 from datetime import datetime
 import difflib
 import enum
@@ -15,7 +15,8 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    Union)
 import uuid
 
 import colorama
@@ -50,7 +51,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -102,18 +103,58 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Mapping from reserved cluster names to the corresponding group name (logging
-# purpose).
-# NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
-}
 
-# Mapping from reserved cluster prefixes to the corresponding group name
-# (logging purpose).
-SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
-    serve_lib.CONTROLLER_PREFIX: 'SkyServe controller',
-}
+@dataclasses.dataclass
+class ReservedClusterRecord:
+    """Record for reserved cluster group."""
+    group_name: str
+    check: Callable[[str], bool]
+    sky_status_hint: str
+    decline_stop_hint: str
+    decline_cancel_hint: str
+    check_cluster_name_hint: str
+
+
+class ReservedClusterGroup(enum.Enum):
+    """Reserved cluster groups for skypilot."""
+    # NOTE(dev): Keep this align with
+    # sky/cli.py::_RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE
+    SPOT_CONTROLLER = ReservedClusterRecord(
+        group_name='Managed spot controller',
+        check=lambda name: name == spot_lib.SPOT_CONTROLLER_NAME,
+        sky_status_hint=(
+            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
+            f'sky spot queue{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=('Spot controller will be auto-stopped after all '
+                           'spot jobs finish.'),
+        decline_cancel_hint=(
+            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
+            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
+            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
+        check_cluster_name_hint=(
+            f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
+            'managed spot controller. '))
+    SKY_SERVE_CONTROLLER = ReservedClusterRecord(
+        group_name='Sky Serve controller',
+        check=lambda name: name.startswith(serve_lib.CONTROLLER_PREFIX),
+        sky_status_hint=(
+            f'* To see detailed service status: {colorama.Style.BRIGHT}'
+            f'sky serve status{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=(f'To teardown a service, use {colorama.Style.BRIGHT}'
+                           f'sky serve down{colorama.Style.RESET_ALL}.'),
+        decline_cancel_hint=(
+            'Cancelling the sky serve controller\'s jobs is not allowed.'),
+        check_cluster_name_hint=(
+            f'Cluster prefix {serve_lib.CONTROLLER_PREFIX} is reserved for '
+            'sky serve controller. '))
+
+    @classmethod
+    def get_group(cls, name: str) -> Optional['ReservedClusterGroup']:
+        for group in cls:
+            if group.value.check(name):
+                return group
+        return None
+
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -1297,7 +1338,7 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(head_ip,
                                              port=22,
                                              **ssh_credentials)
-    with log_utils.console.status(
+    with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
@@ -1347,7 +1388,6 @@ def wait_until_ray_cluster_ready(
             elif (nodes_launching_progress_timeout is not None and
                   time.time() - start > nodes_launching_progress_timeout and
                   nodes_so_far != num_nodes):
-                worker_status.stop()
                 logger.error(
                     'Timed out: waited for more than '
                     f'{nodes_launching_progress_timeout} seconds for new '
@@ -1358,7 +1398,6 @@ def wait_until_ray_cluster_ready(
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
                 # forgotten. The correct behavior should be for it to error out.
-                worker_status.stop()
                 logger.error(
                     'Failed to launch multiple nodes on '
                     'GCP due to a nondeterministic bug in ray autoscaler.')
@@ -1450,7 +1489,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
+    with rich_utils.safe_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
@@ -1485,7 +1524,7 @@ def generate_cluster_name():
 
 
 def generate_service_name():
-    return f'service-{uuid.uuid4().hex[:4]}'
+    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def get_cleaned_username(username: str = '') -> str:
@@ -2032,17 +2071,23 @@ def _update_cluster_status_no_lock(
             # triggered.
             if external_ips is None or len(external_ips) == 0:
                 logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
-                             f'IPs found. External IPs: {external_ips}')
+                             f'IPs found. Handle: {handle}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+
+            # Potentially refresh the external SSH ports, in case the existing
+            # cluster before #2491 was launched without external SSH ports
+            # cached.
+            external_ssh_ports = handle.external_ssh_ports()
+            head_ssh_port = external_ssh_ports[0]
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
-            assert handle.head_ssh_port is not None, handle
+
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
-                                                     port=handle.head_ssh_port)
+                                                     port=head_ssh_port)
             rc, output, stderr = runner.run(
                 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
@@ -2067,6 +2112,12 @@ def _update_cluster_status_no_lock(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
             logger.debug(str(e))
+        except Exception as e:  # pylint: disable=broad-except
+            # This can be raised by `external_ssh_ports()`, due to the
+            # underlying call to kubernetes API.
+            logger.debug(
+                f'Refreshing status ({cluster_name!r}) failed: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return False
 
     # Determining if the cluster is healthy (UP):
@@ -2384,10 +2435,15 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    record = global_user_state.get_cluster_from_name(cluster_name)
     if dryrun:
-        record = global_user_state.get_cluster_from_name(cluster_name)
         assert record is not None, cluster_name
         return record['handle']
+
+    previous_cluster_status = None
+    if record is not None:
+        previous_cluster_status = record['status']
+
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2406,7 +2462,6 @@ def check_cluster_available(
             f'Failed to refresh the status for cluster {cluster_name!r}. It is '
             f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
         if record is None:
             cluster_status, handle = None, None
         else:
@@ -2415,10 +2470,27 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
+        error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
+                     'provider.')
+        if previous_cluster_status is not None:
+            assert record is not None, previous_cluster_status
+            actions = []
+            if record['handle'].launched_resources.use_spot:
+                actions.append('preempted')
+            if record['autostop'] > 0 and record['to_down']:
+                actions.append('autodowned')
+            actions.append('manually terminated in console')
+            if len(actions) > 1:
+                actions[-1] = 'or ' + actions[-1]
+            actions_str = ', '.join(actions)
+            message = f' It was likely {actions_str}.'
+            if len(actions) > 1:
+                message = message.replace('likely', 'either')
+            error_msg += message
+
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist.{reset}')
+            raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
+    assert cluster_status is not None, 'handle is not None but status is None'
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
             backend, backends.CloudVmRayBackend):
@@ -2504,7 +2576,7 @@ def get_clusters(
     if not include_reserved:
         records = [
             record for record in records
-            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+            if ReservedClusterGroup.get_group(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2614,18 +2686,6 @@ def get_clusters(
     return kept_records
 
 
-def _service_status_from_replica_info(
-        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
-    status2num = collections.Counter([i['status'] for i in replica_info])
-    # If one replica is READY, the service is READY.
-    if status2num[status_lib.ReplicaStatus.READY] > 0:
-        return status_lib.ServiceStatus.READY
-    if sum(status2num[status]
-           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
-        return status_lib.ServiceStatus.FAILED
-    return status_lib.ServiceStatus.REPLICA_INIT
-
-
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Refresh the service, and return the possibly updated record.
@@ -2664,27 +2724,29 @@ def _refresh_service_record_no_lock(
     if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_name!r} '
-                        'is not found.')
+        return record, None
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     if service_handle.controller_port is None:
-        return record, 'Controller task is not successfully launched.'
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
 
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)
-    returncode, latest_info_payload, stderr = backend.run_on_head(
+    returncode, latest_info_payload, _ = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        return record, ('Failed to refresh replica info from the controller. '
-                        f'Using the cached record. Reason: {stderr}')
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
     service_handle.uptime = latest_info['uptime']
@@ -2700,7 +2762,7 @@ def _refresh_service_record_no_lock(
             status_lib.ServiceStatus.SHUTTING_DOWN,
             status_lib.ServiceStatus.CONTROLLER_INIT,
     ]:
-        local_record['status'] = _service_status_from_replica_info(
+        local_record['status'] = serve_lib.replica_info_to_service_status(
             latest_info['replica_info'])
 
     global_user_state.add_or_update_service(**local_record)
@@ -2725,13 +2787,31 @@ def _refresh_service_record(
 
 # TODO(tian): Maybe aggregate services using same controller to reduce SSH
 # overhead?
-def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
-    if service_name is None:
-        service_names = [
-            record['name'] for record in global_user_state.get_services()
-        ]
-    else:
-        service_names = [service_name]
+def refresh_service_status(
+        service_names: Optional[Union[str, List[str]]]) -> List[Dict[str, Any]]:
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    records = global_user_state.get_services()
+    if service_names is not None:
+        if isinstance(service_names, str):
+            service_names = [service_names]
+        new_records = []
+        not_exist_service_names = []
+        for service_name in service_names:
+            for record in records:
+                if record['name'] == service_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_service_names.append(service_name)
+        if not_exist_service_names:
+            services_str = ', '.join(not_exist_service_names)
+            logger.info(f'Service(s) not found: {bright}{services_str}{reset}.')
+        records = new_records
+
+    service_names = [record['name'] for record in records]
 
     plural = 's' if len(service_names) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -2746,9 +2826,8 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
         record, msg = _refresh_service_record(service_name)
         if msg is not None:
             progress.stop()
-            print(
-                f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
-                f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+            print(f'{yellow}Error occurred when refreshing service '
+                  f'{service_name}: {msg}{reset}')
             progress.start()
         progress.update(task, advance=1)
         return record
@@ -2838,16 +2917,11 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
-    msg = None
-    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-    for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
-        if cluster_name is not None and cluster_name.startswith(prefix):
-            msg = (f'Cluster prefix {prefix!r} is reserved for the '
-                   f'{SKY_RESERVED_CLUSTER_PREFIXES[prefix].lower()}.')
-            break
-    if msg is not None:
+    if cluster_name is None:
+        return
+    group = ReservedClusterGroup.get_group(cluster_name)
+    if group is not None:
+        msg = group.value.check_cluster_name_hint
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():

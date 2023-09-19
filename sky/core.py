@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
+import os
 import sys
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -12,6 +12,7 @@ from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
+from sky import serve
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
@@ -20,13 +21,10 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky import serve
 
 logger = sky_logging.init_logger(__name__)
 
@@ -114,67 +112,6 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
 
 @usage_lib.entrypoint
-def service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
-    return backend_utils.refresh_service_status(service_name)
-
-
-@usage_lib.entrypoint
-def serve_tail_logs(service_name: str,
-                    controller: bool = False,
-                    load_balancer: bool = False,
-                    replica_id: Optional[int] = None,
-                    follow: bool = True) -> None:
-    """Tail logs for a service.
-
-    Usage:
-        core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
-
-    One and only one of <target> must be specified: controller, load_balancer,
-    or replica_id.
-
-    To tail controller logs:
-        # follow default to True
-        core.serve_tail_logs(service_name, controller=True)
-
-    To print replica 3 logs:
-        core.serve_tail_logs(service_name, replica_id=3, follow=False)
-    """
-    have_replica_id = replica_id is not None
-    if (controller + load_balancer + have_replica_id) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('One and only one of controller, load_balancer, '
-                             'or replica_id must be specified.')
-    service_record = global_user_state.get_service_from_name(service_name)
-    if service_record is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist. '
-                             'Cannot stream logs.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Service {service_name!r} is still initializing its '
-                'controller. Please try again later.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r}\'s controller failed. '
-                             'Cannot tail logs.')
-    service_handle: 'serve.ServiceHandle' = service_record['handle']
-    controller_name = service_record['controller_name']
-    handle = global_user_state.get_handle_from_cluster_name(controller_name)
-    if handle is None:
-        raise ValueError(f'Cannot find controller for service {service_name}.')
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle,
-                            service_handle,
-                            controller,
-                            load_balancer,
-                            replica_id,
-                            follow=follow)
-
-
-@usage_lib.entrypoint
 def cost_report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
@@ -247,17 +184,20 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if cluster_name == spot.SPOT_CONTROLLER_NAME:
+    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for the spot controller. Pass '
+                             'supported for skypilot controllers. Pass '
                              '`down=False` or omit it instead.')
         if idle_minutes_to_autostop is not None:
             raise ValueError(
                 'Passing a custom autostop setting is currently not '
-                'supported when starting the spot controller. To '
+                'supported when starting skypilot controllers. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
+        # TODO(tian): Maybe we should merge the two MINUTES_TO_AUTOSTOP
+        # together. Currently, the two value is the same so we just use spot
+        # constant here.
         idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
@@ -362,7 +302,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed spot controller.
     """
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
         raise exceptions.NotSupportedError(
             f'Stopping sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -485,7 +425,7 @@ def autostop(
     if is_cancel:
         option_str = '{stop,down}'
     operation = f'{verb} auto{option_str}'
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -863,12 +803,11 @@ def spot_queue(refresh: bool,
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        log_utils.force_update_rich_status(
-            '[cyan] Checking spot jobs - restarting '
-            'controller[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+                                       'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
-        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as
@@ -1045,3 +984,246 @@ def storage_delete(name: str) -> None:
                                     source=handle.source,
                                     sync_on_reconstruction=False)
         store_object.delete()
+
+
+# ======================
+# = Service Management =
+# ======================
+
+
+@usage_lib.entrypoint
+def serve_status(
+    service_names: Optional[Union[str,
+                                  List[str]]] = None) -> List[Dict[str, Any]]:
+    """Get service statuses.
+
+    If service_names is given, return those services. Otherwise, return all
+    services.
+
+    Each returned value has the following fields:
+
+    .. code-block:: python
+
+        {
+            'name': (str) service name,
+            'launched_at': (int) timestamp of creation,
+            'controller_name': (str) name of the controller cluster of the
+              service,
+            'handle': (serve.ServiceHandle) handle of the service,
+            'status': (sky.ServiceStatus) service status,
+            'replica_info': (List[Dict[str, Any]]) replica information,
+        }
+
+    Each entry in replica_info has the following fields:
+
+    .. code-block:: python
+
+        {
+            'replica_id': (int) replica id,
+            'name': (str) replica name,
+            'status': (sky.ReplicaStatus) replica status,
+            'handle': (ResourceHandle) handle of the replica cluster,
+        }
+
+    For possible service statuses and replica statuses, please refer to
+    sky.cli.serve_status.
+
+    Args:
+        service_names: a list of service names to query. If None, query all
+            services.
+
+    Returns:
+        A list of dicts, with each dict containing the information of a service.
+        If a service is not found, it will be omitted from the returned list.
+    """
+    return backend_utils.refresh_service_status(service_names)
+
+
+@usage_lib.entrypoint
+def serve_tail_logs(
+    service_name: str,
+    *,
+    controller: bool = False,
+    load_balancer: bool = False,
+    replica_id: Optional[int] = None,
+    follow: bool = True,
+) -> None:
+    """Tail logs for a service.
+
+    Usage:
+        core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
+
+    One and only one of <target> must be specified: controller, load_balancer,
+    or replica_id.
+
+    To tail controller logs:
+        # follow default to True
+        core.serve_tail_logs(service_name, controller=True)
+
+    To print replica 3 logs:
+        core.serve_tail_logs(service_name, replica_id=3, follow=False)
+    """
+    have_replica_id = replica_id is not None
+    if (controller + load_balancer + have_replica_id) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('One and only one of controller, load_balancer, '
+                             'or replica_id must be specified.')
+    service_record = global_user_state.get_service_from_name(service_name)
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} does not exist. '
+                             'Cannot stream logs.')
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Service {service_name!r} is still initializing its '
+                'controller. Please try again later.')
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r}\'s controller failed. '
+                             'Cannot tail logs.')
+    service_handle: serve.ServiceHandle = service_record['handle']
+    controller_name = service_record['controller_name']
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
+    if handle is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cannot find controller for service {service_name}.')
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    backend.tail_serve_logs(handle,
+                            service_handle,
+                            controller,
+                            load_balancer,
+                            replica_id,
+                            follow=follow)
+
+
+@usage_lib.entrypoint
+def serve_down(service_name: str, purge: bool = False) -> None:
+    """Teardown a service.
+
+    Please refer to the sky.cli.serve_down for the document.
+
+    Args:
+        service_name: Name of the service.
+        purge: If true, ignore errors when cleaning up the controller.
+    """
+    service_record = global_user_state.get_service_from_name(service_name)
+
+    if service_record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name!r} not found.')
+
+    service_handle: serve.ServiceHandle = service_record['handle']
+    controller_name = service_record['controller_name']
+    global_user_state.set_service_status(service_name,
+                                         status_lib.ServiceStatus.SHUTTING_DOWN)
+    handle = global_user_state.get_handle_from_cluster_name(controller_name)
+
+    if handle is not None:
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        try:
+            if service_handle.controller_port is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Controller job of service {service_name!r} '
+                        'not found.')
+
+            code = serve.ServeCodeGen.terminate_service(
+                service_handle.controller_port)
+            returncode, terminate_service_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when submit terminate request to controller '
+                       f'of service {service_name!r}'),
+                stderr,
+                stream_logs=False)
+
+            resp = serve.load_terminate_service_result(
+                terminate_service_payload)
+            if resp.status_code != 200:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Failed to terminate replica of service '
+                                       f'{service_name!r} due to request '
+                                       f'failure: {resp.text}')
+            msg = resp.json()['message']
+            if msg:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Unexpected message when tearing down replica of '
+                        f'service {service_name!r}: {msg}. Please login to '
+                        'the controller and make sure the service is properly '
+                        'cleaned up.')
+
+        # We want to make sure no matter what error happens, we can still
+        # clean up the record if purge is True.
+        except Exception as e:  # pylint: disable=broad-except
+            if purge:
+                logger.warning('Ignoring error when cleaning replicas of '
+                               f'{service_name!r}: {e}')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(e) from e
+    else:
+        if not purge:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Cannot find controller of service {service_name!r}.')
+
+    try:
+        if handle is not None:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            backend = backends.CloudVmRayBackend()
+            backend.register_info(minimize_logging=True)
+
+            # Cancel the controller and load balancer jobs.
+            # For the case when controller / load_balancer job failed to submit.
+            jobs = []
+            if service_handle.job_id is not None:
+                jobs.append(service_handle.job_id)
+            backend.cancel_jobs(handle, jobs=jobs)
+
+            # Cleanup all files on controller related to this service.
+            # We have a 10-min grace period for the controller to autostop,
+            # so it should be fine if this is the last service on the
+            # controller and its job is the only one running.
+            code = serve.ServeCodeGen.cleanup_service_files(service_name)
+            returncode, _, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True,
+                                                        stream_logs=False,
+                                                        separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode,
+                code, ('Failed when cleaning up service files on controller '
+                       f'of service {service_name!r}'),
+                stderr,
+                stream_logs=False)
+
+    # same as above.
+    except Exception as e:  # pylint: disable=broad-except
+        if purge:
+            logger.warning(
+                'Ignoring error when stopping controller and '
+                f'load balancer jobs of service {service_name!r}: {e}')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(e) from e
+
+    # TODO(tian): Maybe add a post_cleanup function?
+    controller_yaml_path = serve.generate_controller_yaml_file_name(
+        service_name)
+    if os.path.exists(controller_yaml_path):
+        os.remove(controller_yaml_path)
+    handle = global_user_state.get_handle_from_service_name(service_name)
+    assert handle is not None
+    handle.cleanup_ephemeral_storage()
+    global_user_state.remove_service(service_name)

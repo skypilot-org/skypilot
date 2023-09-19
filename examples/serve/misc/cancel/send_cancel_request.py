@@ -8,10 +8,10 @@ redirector_endpoint = input('Enter redirector endpoint: ')
 async def fetch(session, url):
     try:
         async with session.get(url) as response:
-            print("Got response!")
+            print('Got response!')
             return await response.text()
     except asyncio.CancelledError:
-        print("Request was cancelled!")
+        print('Request was cancelled!')
         raise
 
 
@@ -30,7 +30,7 @@ async def main():
         try:
             await task
         except asyncio.CancelledError:
-            print("Main function caught the cancelled exception.")
+            print('Main function caught the cancelled exception.')
 
 
 asyncio.run(main())

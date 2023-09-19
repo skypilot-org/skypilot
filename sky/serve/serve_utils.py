@@ -1,5 +1,6 @@
 """User interface with the SkyServe."""
 import base64
+import collections
 import os
 import pickle
 import re
@@ -279,6 +280,18 @@ def get_available_controller_name(
                key=lambda k: available_controller_to_service_num[k]), False
 
 
+def replica_info_to_service_status(
+        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
+    status2num = collections.Counter([i['status'] for i in replica_info])
+    # If one replica is READY, the service is READY.
+    if status2num[status_lib.ReplicaStatus.READY] > 0:
+        return status_lib.ServiceStatus.READY
+    if sum(status2num[status]
+           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
+        return status_lib.ServiceStatus.FAILED
+    return status_lib.ServiceStatus.REPLICA_INIT
+
+
 class ServiceHandle(object):
     """A pickle-able tuple of:
 
@@ -286,6 +299,7 @@ class ServiceHandle(object):
     - (required) Service autoscaling policy description str.
     - (required) Service requested resources.
     - (required) Service requested controller resources.
+    - (required) Whether the service have auto restart enabled.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
     - (optional) Controller port.
@@ -304,6 +318,7 @@ class ServiceHandle(object):
         policy: str,
         requested_resources: 'sky.Resources',
         requested_controller_resources: 'sky.Resources',
+        auto_restart: bool,
         uptime: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
@@ -318,12 +333,13 @@ class ServiceHandle(object):
         self.policy = policy
         self.requested_resources = requested_resources
         self.requested_controller_resources = requested_controller_resources
+        self.auto_restart = auto_restart
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
         self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
                 f'\n\tuptime={self.uptime},'
@@ -332,6 +348,7 @@ class ServiceHandle(object):
                 f'\n\trequested_resources={self.requested_resources},'
                 '\n\trequested_controller_resources='
                 f'{self.requested_controller_resources},'
+                f'\n\tauto_restart={self.auto_restart},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
                 f'\n\tjob_id={self.job_id},'

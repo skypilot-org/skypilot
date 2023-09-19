@@ -9,14 +9,15 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger('sky.map.active_probe')
 
+
 class ActiveProbe:
     """Actively probing different regions for SkyMap."""
 
     def __init__(self) -> None:
         pass
 
-    def _active_probe_thread(self, cloud: str,
-                            region: str, accelerator: str) -> None:
+    def _active_probe_thread(self, cloud: str, region: str,
+                             accelerator: str) -> None:
 
         task = sky.Task(run='nvidia-smi')
 
@@ -65,6 +66,10 @@ class ActiveProbe:
     def active_probe(self, cloud: str, region: str, accelerator: str) -> None:
 
         thr = threading.Thread(target=self._active_probe_thread,
-                               args=(cloud, region, accelerator,))
+                               args=(
+                                   cloud,
+                                   region,
+                                   accelerator,
+                               ))
         thr.start()
         logger.info(thr.is_alive())

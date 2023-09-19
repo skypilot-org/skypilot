@@ -16,7 +16,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -368,7 +368,8 @@ class AWS(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -809,7 +810,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the source image {cluster_name!r} from {region} to be available on AWS.'
         )
         # Wait for the image to be available
@@ -856,7 +857,7 @@ class AWS(clouds.Cloud):
             stderr=stderr,
             stream_logs=True)
 
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Waiting for the target image {target_image_id!r} on {target_region} to be '
             'available on AWS.')
         wait_image_cmd = (
@@ -878,7 +879,7 @@ class AWS(clouds.Cloud):
         sky_logging.print(
             f'The target image {target_image_id!r} is created successfully.')
 
-        log_utils.force_update_rich_status('Deleting the source image.')
+        rich_utils.force_update_status('Deleting the source image.')
         cls.delete_image(image_id, source_region)
         return target_image_id
 
