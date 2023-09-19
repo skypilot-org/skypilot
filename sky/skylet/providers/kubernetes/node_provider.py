@@ -300,8 +300,8 @@ class KubernetesNodeProvider(NodeProvider):
                 break
             time.sleep(1)
 
-        # Wait for pod containers to be ready - they may be pulling images or
-        # may be in the process of container creation.
+        # Wait for pods and their containers to be ready - they may be
+        # pulling images or may be in the process of container creation.
         while True:
             all_pods_running = True
             # Iterate over each pod to check their status
@@ -312,7 +312,7 @@ class KubernetesNodeProvider(NodeProvider):
                 # pod are succesfully created and running.
                 if pod.status.phase == 'Running' \
                     and all(
-                        [container.state.running 
+                        [container.state.running
                          for container in pod.status.container_statuses]):
                     continue
                 else:
@@ -329,6 +329,7 @@ class KubernetesNodeProvider(NodeProvider):
                                             'your network connection. Error details: '
                                             f'{container_status.state.waiting.message}.'
                                         )
+                    break
 
             if all_pods_running:
                 break
@@ -362,7 +363,6 @@ class KubernetesNodeProvider(NodeProvider):
                 stdout=True,
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
-
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
