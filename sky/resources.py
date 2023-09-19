@@ -104,7 +104,8 @@ class Resources:
             spot to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/spot/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
-          region: the region to use.
+          region: the region(s) to use. If a region is prefixed with `-`, it
+            it will be excluded. 
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
             of the image id from the cloud, such as AWS:
@@ -134,6 +135,7 @@ class Resources:
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
         self._region_list = None
+        self._excluded_regions = None
         if isinstance(region, list):
             if len(region) > 1:
                 self._region_list = region
@@ -142,6 +144,14 @@ class Resources:
                 region = region[0]
             else:  # len(region) == 0
                 region = None
+
+        if region is not None and region.startswith('-'):
+            self._excluded_regions = [region.strip('-')]
+            region = None
+        elif self._region_list is not None:
+            self._excluded_regions = [r.strip('-') for r in self._region_list if r.startswith('-')]
+            self._region_list = [r for r in self._region_list if not r.startswith('-')]
+
         self._set_region_zone(region, zone)
 
         self._instance_type = instance_type
@@ -297,6 +307,10 @@ class Resources:
     @property
     def region_list(self):
         return self._region_list
+    
+    @property
+    def excluded_regions(self):
+        return self._excluded_regions
 
     @property
     def zone(self):
@@ -1044,6 +1058,16 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+        regions = []
+        if self.region is not None:
+            regions.append(self.region)
+        elif self.region_list is not None:
+            regions.extend(self.region_list)
+        if self.excluded_regions is not None:
+            regions.extend(['-' + r for r in self.excluded_regions])
+        if len(regions) == 0:
+            regions = None
+
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1055,9 +1079,7 @@ class Resources:
             use_spot=override.pop('use_spot', use_spot),
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
-            region=override.pop(
-                'region',
-                self.region if self.region_list is None else self.region_list),
+            region=override.pop('region', regions),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
@@ -1163,10 +1185,17 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
             add_if_not_none('spot_recovery', self.spot_recovery)
         add_if_not_none('disk_size', self.disk_size)
+
+        regions = []
         if self.region is not None:
-            add_if_not_none('region', self.region)
+            regions.append(self.region)
         elif self.region_list is not None:
-            add_if_not_none('region', self.region_list)
+            regions.extend(self.region_list)
+        if self.excluded_regions is not None:
+            regions.extend(['-' + r for r in self.excluded_regions])
+        if len(regions) > 0:
+            add_if_not_none('region', regions)
+
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)

@@ -1167,6 +1167,12 @@ def _fill_in_launchable_resources(
                     cloud_candidates[cloud] = feasible_resources
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
+            
+            # Filter out the configured excluded regions.
+            if resources.excluded_regions is not None:
+                for excluded_region in resources.excluded_regions:
+                    blocked_resources.append(resources.copy(region=excluded_region))
+
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
