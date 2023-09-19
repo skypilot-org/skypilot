@@ -19,7 +19,7 @@ from sky.map import map_utils
 from sky.map.zone_monitor import ZoneMonitor
 from sky.map.active_probe import ActiveProbe
 
-logger = sky_logging.init_logger('sky.map.zone_monitor')
+logger = sky_logging.init_logger('sky.map.main')
 
 app = fastapi.FastAPI()
 backing_store = BackingStore('')
