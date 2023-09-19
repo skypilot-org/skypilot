@@ -7,7 +7,7 @@ import pickle
 from sky import sky_logging
 from sky.map import zone_monitor
 
-logger = sky_logging.init_logger('sky.serve.backing_store')
+logger = sky_logging.init_logger('sky.map.backing_store')
 
 
 class BackingStore:

@@ -10,7 +10,7 @@ from starlette.responses import Response
 from sky import sky_logging
 from sky.skylet import constants
 
-logger = sky_logging.init_logger(__name__)
+logger = sky_logging.init_logger('sky.map.map_utils')
 
 
 def report_preemption(zone: Optional[str], life_time: float,
@@ -32,10 +32,16 @@ def report_preemption(zone: Optional[str], life_time: float,
     sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
     sky_map_port = constants.SKY_MAP_PORT
 
-    response = requests.post(
-        f'http://{sky_map_ip_addr}:{sky_map_port}/add-preempt', json=json_data)
-
-    logger.info(response)
+    try:
+        response = requests.post(
+            f'http://{sky_map_ip_addr}:{sky_map_port}/add-preempt',
+            json=json_data,
+            timeout=1.5)
+        logger.info(response)
+    except requests.Timeout:
+        logger.info('SkyMap - Timeout')
+    except requests.ConnectionError:
+        logger.info('SkyMap - ConnectionError')
 
 
 def report_wait(zone: Optional[str], wait_time: float, resource: Optional[str]):
@@ -55,10 +61,16 @@ def report_wait(zone: Optional[str], wait_time: float, resource: Optional[str]):
     sky_map_ip_addr = constants.SKY_MAP_IP_ADDR
     sky_map_port = constants.SKY_MAP_PORT
 
-    response = requests.post(
-        f'http://{sky_map_ip_addr}:{sky_map_port}/add-wait', json=json_data)
-
-    logger.info(response)
+    try:
+        response = requests.post(
+            f'http://{sky_map_ip_addr}:{sky_map_port}/add-wait',
+            json=json_data,
+            timeout=1.5)
+        logger.info(response)
+    except requests.Timeout:
+        logger.info('SkyMap - Timeout')
+    except requests.ConnectionError:
+        logger.info('SkyMap - ConnectionError')
 
 
 class PrettyJSONResponse(Response):

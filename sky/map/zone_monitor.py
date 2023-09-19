@@ -9,7 +9,7 @@ from sky import sky_logging
 from sky.map import constants
 from sky.map import zone_store
 
-logger = sky_logging.init_logger('sky.serve.zone_monitor')
+logger = sky_logging.init_logger('sky.map.zone_monitor')
 
 
 class ZoneMonitor:

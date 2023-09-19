@@ -17,12 +17,14 @@ import uvicorn
 from sky import sky_logging
 from sky.map import map_utils
 from sky.map.zone_monitor import ZoneMonitor
+from sky.map.active_probe import ActiveProbe
 
 logger = sky_logging.init_logger('sky.map.zone_monitor')
 
 app = fastapi.FastAPI()
 backing_store = BackingStore('')
 zone_monitor = ZoneMonitor()
+active_explorer = ActiveProbe()
 templates = Jinja2Templates(directory='sky/map/templates')
 counter = 0
 
@@ -82,6 +84,11 @@ def flush_to_disk():
     user_data = {'status': 'success'}
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
+@app.post('/active-explore/{cloud}/{region}/{accelerator}')
+def active_explore(cloud: str, region: str, accelerator: str):
+    active_explorer.active_probe(cloud, region, accelerator)
+    user_data = {'status': 'success'}
+    return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
 @app.get('/get-average-wait-time/{zone}/{time}/{resource}')
 def get_average_wait_time(zone: str, time: str, resource: str):
