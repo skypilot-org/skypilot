@@ -3,8 +3,9 @@ import logging
 import threading
 import time
 import typing
-from typing import Optional
+from typing import List, Optional
 
+from sky import status_lib
 from sky.serve import constants
 from sky.serve import infra_providers
 from sky.serve import serve_utils
@@ -118,7 +119,24 @@ class RequestRateAutoscaler(Autoscaler):
         current_time = time.time()
         replica_infos = self.infra_provider.filter_replica_info(
             count_failed_replica=not self.auto_restart)
-        num_nodes = len(replica_infos)
+        replicas_version_match: List[infra_providers.ReplicaInfo] = []
+        replicas_version_mismatch: List[infra_providers.ReplicaInfo] = []
+        ready_replicas: List[infra_providers.ReplicaInfo] = []
+        provisioning_replicas_version_mismatch: List[
+            infra_providers.ReplicaInfo] = []
+        for info in replica_infos:
+            if info.version == self.infra_provider.get_latest_version():
+                replicas_version_match.append(info)
+            else:
+                replicas_version_mismatch.append(info)
+                if info.status == status_lib.ReplicaStatus.PROVISIONING:
+                    provisioning_replicas_version_mismatch.append(info)
+            if info.status == status_lib.ReplicaStatus.READY:
+                ready_replicas.append(info)
+        # Only count replicas with the latest version. This will help us to fast
+        # bootstrapping when we are updating the service.
+        num_nodes = len(replicas_version_match)
+        num_ready_replicas = len(ready_replicas)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -147,30 +165,54 @@ class RequestRateAutoscaler(Autoscaler):
             self.scale_up(
                 min(self.min_nodes - num_nodes, _MAX_BOOTSTRAPPING_NUM))
             self.last_scale_operation = current_time
-        elif (self.upper_threshold is not None and
-              requests_per_node > self.upper_threshold):
+            return
+
+        # We have some replicas with mismatched version.
+        if replicas_version_mismatch:
+
+            # Case 1. We have ready replica with mismatched version.
+            #   In such case, we want to keep the number of ready replicas,
+            #   until total number of replicas is greater than max_nodes.
+            #   Then we scale down the replica with mismatched version.
+            # TODO(tian): For the case when quota is exactly used up,
+            # we should scale down first, rather than +n, -1, -1, -1...
+            if num_ready_replicas > self.max_nodes:
+                info = replicas_version_mismatch[0]
+                replica_id = serve_utils.get_replica_id_from_cluster_name(
+                    info.cluster_name)
+                self.scale_down(replica_id)
+                self.last_scale_operation = current_time
+                return
+
+            # Case 2. We have some provisioning replica with mismatched version.
+            #   In such case, we interrupt the provisioning process to decrease
+            #   cost and time.
+            if provisioning_replicas_version_mismatch:
+                info = provisioning_replicas_version_mismatch[0]
+                replica_id = serve_utils.get_replica_id_from_cluster_name(
+                    info.cluster_name)
+                self.scale_down(replica_id)
+                self.last_scale_operation = current_time
+                return
+
+        if (self.upper_threshold is not None and
+                requests_per_node > self.upper_threshold):
             if num_nodes < self.max_nodes:
                 logger.info('Requests per node is above upper threshold '
                             f'{self.upper_threshold}qps/node. '
                             'Scaling up by 1 node.')
                 self.scale_up(1)
                 self.last_scale_operation = current_time
-        elif (self.lower_threshold is not None and
-              requests_per_node < self.lower_threshold):
+                return
+
+        if (self.lower_threshold is not None and
+                requests_per_node < self.lower_threshold):
             if num_nodes > self.min_nodes:
                 logger.info('Requests per node is below lower threshold '
                             f'{self.lower_threshold}qps/node. '
                             'Scaling down by 1 node.')
                 self.scale_down(replica_id=None)
                 self.last_scale_operation = current_time
-        else:
-            for info in replica_infos:
-                if info.version != self.infra_provider.get_latest_version():
-                    logger.info(f'Scaling down replica with wrong version: '
-                                f'{info.version}.')
-                    replica_id = serve_utils.get_replica_id_from_cluster_name(
-                        info.cluster_name)
-                    self.scale_down(replica_id)
-                    self.last_scale_operation = current_time
-                    break
-            logger.info('No scaling needed.')
+                return
+
+        logger.info('No scaling needed.')
