@@ -36,6 +36,24 @@ def test_ordered_resources_list():
                dryrun=True)
 
 
+def test_ordered_region_resources_list():
+    task.set_resources([
+        sky.Resources(region=['us-central1', 'asia-east1'],
+                      accelerators={'T4': 1}),
+        sky.Resources(region=['asia-east1'], accelerators={'V100': 1}),
+        sky.Resources(region=['us-central1', 'asia-east1'],
+                      accelerators={'K80': 1}),
+        sky.Resources(region=['asia-east1'], accelerators={'T4': 4}),
+    ],
+                       is_resources_ordered=True)
+
+    sky.launch(task,
+               cluster_name=f'my-cluster',
+               stream_logs=False,
+               down=False,
+               dryrun=True)
+
+
 def test_unordered_resources_list():
     task.set_resources({
         sky.Resources(accelerators={'T4': 1}),
@@ -56,3 +74,4 @@ if __name__ == "__main__":
     test_demand_spot_mix_resources_list()
     test_ordered_resources_list()
     test_unordered_resources_list()
+    test_ordered_region_resources_list()

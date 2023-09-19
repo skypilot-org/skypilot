@@ -3613,10 +3613,10 @@ def spot_launch(
         # cluster name against the regex, and the cloud-specific validation will
         # be done by the spot controller when actually launching the spot
         # cluster.
-        resources = list(task.resources)[0]
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
-        task_cloud.check_cluster_name_is_valid(name)
+        for resources in list(task.resources):
+            task_cloud = (resources.cloud
+                          if resources.cloud is not None else clouds.Cloud)
+            task_cloud.check_cluster_name_is_valid(name)
 
     sky.spot_launch(dag,
                     name,
