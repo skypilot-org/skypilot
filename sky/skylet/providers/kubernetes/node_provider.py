@@ -177,6 +177,8 @@ class KubernetesNodeProvider(NodeProvider):
                 sorted(events.items,
                 key=lambda e: e.metadata.creation_timestamp,
                 reverse=True)
+
+            event_message = None
             for event in events_desc_by_time:
                 if event.reason == 'FailedScheduling':
                     event_message = event.message
@@ -216,6 +218,7 @@ class KubernetesNodeProvider(NodeProvider):
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
+    
 
     def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
