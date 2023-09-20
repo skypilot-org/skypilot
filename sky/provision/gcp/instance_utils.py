@@ -124,6 +124,7 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             zone=zone,
             instance=instance,
+            discardLocalSsd=False,
         ).execute()
         return operation
 
