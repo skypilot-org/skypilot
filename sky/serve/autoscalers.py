@@ -188,10 +188,10 @@ class RequestRateAutoscaler(Autoscaler):
             #   In such case, we interrupt the provisioning process to decrease
             #   cost and time.
             if provisioning_replicas_version_mismatch:
-                info = provisioning_replicas_version_mismatch[0]
-                replica_id = serve_utils.get_replica_id_from_cluster_name(
-                    info.cluster_name)
-                self.scale_down(replica_id)
+                for info in provisioning_replicas_version_mismatch:
+                    replica_id = serve_utils.get_replica_id_from_cluster_name(
+                        info.cluster_name)
+                    self.scale_down(replica_id)
                 self.last_scale_operation = current_time
                 return
 

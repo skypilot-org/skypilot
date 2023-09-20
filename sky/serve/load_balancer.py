@@ -75,7 +75,7 @@ class SkyServeLoadBalancer:
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Replica IPs: {ready_replicas}')
+                    logger.info(f'Available Replica URLs: {ready_replicas}')
                     self.load_balancing_policy.set_ready_replicas(
                         ready_replicas)
             time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
