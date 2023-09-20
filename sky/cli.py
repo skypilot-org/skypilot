@@ -4285,7 +4285,16 @@ def serve_update(
     entrypoint: List[str],
     yes: bool,
 ):
-    """Update a SkyServe service."""
+    """Update a SkyServe service.
+
+    ENTRYPOINT must point to a valid YAML file.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky serve update sky-service-16aa new_service.yaml
+    """
 
     previous_service_record = global_user_state.get_service_from_name(
         service_name)

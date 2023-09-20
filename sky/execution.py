@@ -1203,6 +1203,7 @@ def serve_up(
         print('Please use the above command to find the latest status.')
 
 
+# TODO(tian): Use _execute to sync file, run
 @usage_lib.entrypoint
 def serve_update(service_name: str, task: 'sky.Task') -> None:
     service_record = global_user_state.get_service_from_name(service_name)
