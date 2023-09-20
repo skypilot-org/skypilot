@@ -333,6 +333,8 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
         sku for sku in skus if sku['category']['resourceGroup'] == 'GPU'
     ]
     df = _get_gpus(region_prefix)
+    if df.empty:
+        raise ValueError('No GPUs found.')
 
     def get_gpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
