@@ -177,7 +177,7 @@ class RequestRateAutoscaler(Autoscaler):
             # TODO(tian): For the case when quota is exactly used up,
             # we should scale down first, rather than +n, -1, -1, -1...
             if num_ready_replicas > self.max_nodes:
-                for i in range(num_ready_replicas-self.max_nodes):
+                for i in range(num_ready_replicas - self.max_nodes):
                     info = replicas_version_mismatch[i]
                     replica_id = serve_utils.get_replica_id_from_cluster_name(
                         info.cluster_name)
