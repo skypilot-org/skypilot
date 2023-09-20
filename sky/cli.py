@@ -4120,8 +4120,6 @@ def serve_up(
             raise ValueError(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
-    app_port = int(task.service.app_port)
-    task.set_resources(requested_resources.copy(ports=[app_port]))
 
     click.secho('\nService Spec:', fg='cyan')
     click.echo(task.service)
