@@ -1018,6 +1018,14 @@ def serve_up(
     assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
+    if requested_resources.ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Specifying ports in resources is not allowed. SkyServe will '
+                'use the port specified in the service section.')
+
+    task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
+
     service_handle = serve.ServiceHandle(
         service_name=service_name,
         policy=task.service.policy_str(),
