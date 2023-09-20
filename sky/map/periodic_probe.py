@@ -17,3 +17,4 @@ while True:
 
 # http://35.232.140.79:30001/get-all-zone-info
 # http://35.232.140.79:30001/visualize-wait/us-central1-a/V100-1
+# http://35.232.140.79:30001/get-num-wait/us-central1-a/10000/V100-1

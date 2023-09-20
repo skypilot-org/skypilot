@@ -30,7 +30,7 @@ class ZoneStore:
 
     def add_wait_data(self, time_in_s: float, timestamp: datetime,
                       resource: str) -> None:
-        if resource not in self._preempt_data:
+        if resource not in self._wait_data:
             self._wait_data[resource] = []
         self._wait_data[resource].append((time_in_s, timestamp))
 

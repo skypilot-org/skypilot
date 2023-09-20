@@ -206,14 +206,6 @@ class SpotController:
                                task_id=task_id,
                                start_time=remote_job_submitted_at,
                                callback_func=callback_func)
-
-        (_, handle) = backend_utils.refresh_cluster_status_handle(
-            cluster_name, force_refresh_statuses=set(status_lib.ClusterStatus))
-        map_utils.report_wait(
-            zone=handle.launched_resources.zone,
-            wait_time=time.time() - submitted_at,
-            resource=handle.launched_resources.get_short_repr())
-
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
