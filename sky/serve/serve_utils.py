@@ -106,10 +106,15 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     return os.path.join(constants.SERVE_PREFIX, service_name)
 
 
-def generate_remote_task_yaml_file_name(service_name: str, version: int) -> str:
+def generate_remote_task_yaml_file_name(service_name: str,
+                                        version: int,
+                                        *,
+                                        expand_user: bool = False) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
-    # Don't expand here since it is used for remote machine.
-    return os.path.join(dir_name, f'v{version}.yaml')
+    path = os.path.join(dir_name, f'v{version}.yaml')
+    if expand_user:
+        path = os.path.expanduser(path)
+    return path
 
 
 def generate_remote_controller_log_file_name(service_name: str) -> str:
@@ -300,6 +305,7 @@ class ServiceHandle(object):
     - (required) Service requested resources.
     - (required) Service requested controller resources.
     - (required) Whether the service have auto restart enabled.
+    - (required) Service version.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
     - (optional) Controller port.
@@ -319,8 +325,8 @@ class ServiceHandle(object):
         requested_resources: 'sky.Resources',
         requested_controller_resources: 'sky.Resources',
         auto_restart: bool,
+        version: int,
         uptime: Optional[int] = None,
-        version: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
         controller_port: Optional[int] = None,
         load_balancer_port: Optional[int] = None,
@@ -329,8 +335,8 @@ class ServiceHandle(object):
     ) -> None:
         self._version = self._VERSION
         self.service_name = service_name
-        self.uptime = uptime
         self.version = version
+        self.uptime = uptime
         self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
@@ -344,8 +350,8 @@ class ServiceHandle(object):
     def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
-                f'\n\tuptime={self.uptime},'
                 f'\n\tversion={self.version},'
+                f'\n\tuptime={self.uptime},'
                 f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
@@ -391,19 +397,14 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
     return latest_info
 
 
-def update_service(controller_port: int, task_config: Dict[str, Any]) -> str:
+def update_service(controller_port: int, version: int) -> str:
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/update_service',
-        json={'task': task_config})
-    resp = base64.b64encode(pickle.dumps(resp)).decode('utf-8')
-    return common_utils.encode_payload(resp)
-
-
-def load_update_service_result(payload: str) -> Any:
-    update_resp = common_utils.decode_payload(payload)
-    update_resp = pickle.loads(base64.b64decode(update_resp))
-    return update_resp
+        json={'version': version})
+    if resp.status_code != 200:
+        raise ValueError(f'Failed to update service: {resp.text}')
+    return resp.json()['message']
 
 
 def terminate_service(controller_port: int) -> str:
@@ -615,11 +616,10 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_service(cls, controller_port: int,
-                       task_config: Dict[str, Any]) -> str:
+    def update_service(cls, controller_port: int, version: int) -> str:
         code = [
             f'msg = serve_utils.update_service({controller_port}, '
-            f'{task_config!r})', 'print(msg, end="", flush=True)'
+            f'{version})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

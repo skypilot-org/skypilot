@@ -969,6 +969,32 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
             storage_obj.force_delete = True
 
 
+def _wait_until_job_reaching_status_on_controller(
+        controller_cluster_handle: backends.CloudVmRayResourceHandle,
+        job_id: Optional[int], expected_status: job_lib.JobStatus) -> bool:
+    if job_id is None:
+        return False
+    backend = backend_utils.get_backend_from_handle(controller_cluster_handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+    backend.register_info(minimize_logging=True)
+    for _ in range(serve.SERVE_STARTUP_TIMEOUT):
+        job_statuses = backend.get_job_status(controller_cluster_handle,
+                                              [job_id],
+                                              stream_logs=False)
+        job_status = job_statuses.get(str(job_id), None)
+        if job_status == expected_status:
+            return True
+        if job_status is not None and job_status.is_terminal():
+            raise ValueError(
+                f'Job {job_id} is expected to reach status {expected_status}, '
+                f'but it reached terminal status {job_status}.')
+        time.sleep(1)
+    # Cancel any jobs that are still pending after timeout.
+    if job_status == job_lib.JobStatus.PENDING:
+        backend.cancel_jobs(controller_cluster_handle, jobs=[job_id])
+    return False
+
+
 @usage_lib.entrypoint
 def serve_up(
     task: 'sky.Task',
@@ -1026,12 +1052,15 @@ def serve_up(
 
     task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
 
+    version = serve.INITIAL_VERSION
     service_handle = serve.ServiceHandle(
         service_name=service_name,
         policy=task.service.policy_str(),
         requested_resources=requested_resources,
         requested_controller_resources=controller_resources,
-        auto_restart=task.service.auto_restart)
+        auto_restart=task.service.auto_restart,
+        version=version,
+    )
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller
@@ -1084,7 +1113,6 @@ def serve_up(
                 'spot_recovery' in task_config['resources']):
             del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
-        version = serve.INITIAL_VERSION
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name, version)
         controller_log_file = (
@@ -1146,29 +1174,11 @@ def serve_up(
                     'Controller failed to launch. Please check the logs above.')
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend), backend
-        backend.register_info(minimize_logging=True)
         service_handle.endpoint_ip = handle.head_ip
         global_user_state.set_service_handle(service_name, service_handle)
 
-        def _wait_until_job_is_running_on_controller(
-                job_id: Optional[int]) -> bool:
-            if job_id is None:
-                return False
-            for _ in range(serve.SERVE_STARTUP_TIMEOUT):
-                job_statuses = backend.get_job_status(handle, [job_id],
-                                                      stream_logs=False)
-                job_status = job_statuses.get(str(job_id), None)
-                if job_status == job_lib.JobStatus.RUNNING:
-                    return True
-                time.sleep(1)
-            # Cancel any jobs that are still pending after timeout.
-            if job_status == job_lib.JobStatus.PENDING:
-                backend.cancel_jobs(handle, jobs=[job_id])
-            return False
-
-        if not _wait_until_job_is_running_on_controller(job_id):
+        if not _wait_until_job_reaching_status_on_controller(
+                handle, job_id, job_lib.JobStatus.RUNNING):
             global_user_state.set_service_status(
                 service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
             with ux_utils.print_exception_no_traceback():
@@ -1238,6 +1248,8 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Cannot find controller for service {service_name}.')
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot update a non-service task.')
@@ -1246,8 +1258,16 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
             raise ValueError('Cannot update controller resources.')
 
     assert len(task.resources) == 1, task
+    requested_resources = list(task.resources)[0]
+    if requested_resources.ports is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Specifying ports in resources is not allowed. SkyServe will '
+                'use the port specified in the service section.')
 
-    service_handle.requested_resources = list(task.resources)[0]
+    task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
+
+    service_handle.requested_resources = requested_resources
     service_handle.policy = task.service.policy_str()
     service_handle.auto_restart = task.service.auto_restart
 
@@ -1257,33 +1277,46 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
             if not storage.persistent:
                 service_handle.add_ephemeral_storage(storage)
 
-    global_user_state.set_service_handle(service_name, service_handle)
+    service_handle.version += 1
+    with tempfile.NamedTemporaryFile(
+            prefix=f'{service_name}-v{service_handle.version}', mode='w') as f:
+        task_config = task.to_yaml_config()
+        if ('resources' in task_config and
+                'spot_recovery' in task_config['resources']):
+            del task_config['resources']['spot_recovery']
+        common_utils.dump_yaml(f.name, task_config)
+        remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
+            service_name, service_handle.version)
+        code = serve.ServeCodeGen.update_service(service_handle.controller_port,
+                                                 service_handle.version)
+        update_task = task_lib.Task(
+            name=(f'sky-serve-update-{service_name}'
+                  f'-v{service_handle.version}'),
+            run=code,
+        )
+        update_task.set_file_mounts({remote_task_yaml_path: f.name})
+        update_task.set_resources({sky.Resources()})
+        job_id = _execute(
+            entrypoint=update_task,
+            handle=handle,
+            stages=[
+                Stage.SYNC_FILE_MOUNTS,
+                Stage.EXEC,
+            ],
+            cluster_name=controller_name,
+            minimize_logging=True,
+        )
 
-    task_config = task.to_yaml_config()
-    if ('resources' in task_config and
-            'spot_recovery' in task_config['resources']):
-        del task_config['resources']['spot_recovery']
-    code = serve.ServeCodeGen.update_service(service_handle.controller_port,
-                                             task_config)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend), backend
-    returncode, update_service_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-    subprocess_utils.handle_returncode(returncode,
-                                       code,
-                                       'Failed to update service',
-                                       stderr,
-                                       stream_logs=False)
-    update_service_result = serve.load_update_service_result(
-        update_service_payload)
-    if update_service_result.status_code != 200:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Failed to update service {service_name!r}: '
-                               f'{update_service_result.text}')
+        if not _wait_until_job_reaching_status_on_controller(
+                handle, job_id, job_lib.JobStatus.SUCCEEDED):
+            global_user_state.set_service_status(
+                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to update service {service_name!r}. '
+                    f'Please check the logs above.')
+
+    global_user_state.set_service_handle(service_name, service_handle)
 
     print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
           f'{colorama.Style.RESET_ALL}\n'

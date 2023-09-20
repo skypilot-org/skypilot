@@ -23,7 +23,6 @@ from sky.serve.serve_utils import generate_replica_cluster_name
 from sky.serve.serve_utils import get_available_controller_name
 from sky.serve.serve_utils import load_latest_info
 from sky.serve.serve_utils import load_terminate_service_result
-from sky.serve.serve_utils import load_update_service_result
 from sky.serve.serve_utils import replica_info_to_service_status
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceHandle

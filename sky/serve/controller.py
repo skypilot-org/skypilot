@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import base64
 import logging
-import os
 import pickle
 from typing import Optional
 
@@ -18,7 +17,6 @@ from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import infra_providers
-from sky.utils import common_utils
 from sky.utils import env_options
 
 # Use the explicit logger name so that the logger is under the
@@ -96,20 +94,12 @@ class SkyServeController:
                 raise ValueError('Update service is not allowed '
                                  'without autoscaler.')
             request_data = asyncio.run(request.json())
-            task_config = request_data['task']
-            if 'service' not in task_config:
-                raise ValueError('Update service is not allowed '
-                                 'without service spec.')
-            service = serve.SkyServiceSpec.from_yaml_config(
-                task_config['service'])
-            logger.info(f'Update to task: {task_config}')
-            logger.info(f'Service spec: {service}')
-            latest_version = self.infra_provider.get_latest_version() + 1
+            latest_version = request_data['version']
             logger.info(f'Latest version: {latest_version}')
             latest_task_yaml = serve.generate_remote_task_yaml_file_name(
-                self.service_name, latest_version)
-            common_utils.dump_yaml(os.path.expanduser(latest_task_yaml),
-                                   task_config)
+                self.service_name, latest_version, expand_user=True)
+            service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+            logger.info(f'Service spec: {service}')
             self.infra_provider.update_version(latest_version, service)
             self.autoscaler.update_spec(service)
             return {'message': 'Success'}
@@ -163,9 +153,9 @@ if __name__ == '__main__':
     authentication.get_or_generate_keys()
 
     # Generate corresponding task yaml file name
-    task_yaml = serve.generate_remote_task_yaml_file_name(
-        args.service_name, args.version)
-    task_yaml = os.path.expanduser(task_yaml)
+    task_yaml = serve.generate_remote_task_yaml_file_name(args.service_name,
+                                                          args.version,
+                                                          expand_user=True)
 
     # ======= Infra Provider =========
     service_spec = serve.SkyServiceSpec.from_yaml(task_yaml)

@@ -2,7 +2,6 @@
 from concurrent import futures
 import enum
 import logging
-import os
 import signal
 import subprocess
 import threading
@@ -290,9 +289,8 @@ class SkyPilotInfraProvider(InfraProvider):
         self._start_job_status_fetcher()
 
     def _get_task_yaml_path(self) -> str:
-        task_yaml = serve_utils.generate_remote_task_yaml_file_name(
-            self.service_name, self.latest_version)
-        return os.path.expanduser(task_yaml)
+        return serve_utils.generate_remote_task_yaml_file_name(
+            self.service_name, self.latest_version, expand_user=True)
 
     # This process periodically checks all sky.launch and sky.down process
     # on the fly. If any of them finished, it will update the status of
