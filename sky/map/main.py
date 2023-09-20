@@ -85,9 +85,9 @@ def flush_to_disk():
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 
 
-@app.post('/active-explore/{cloud}/{region}/{accelerator}')
-def active_explore(cloud: str, region: str, accelerator: str):
-    active_explorer.active_probe(cloud, region, accelerator)
+@app.post('/active-explore/{cloud}/{region}/{accelerator}/{password}')
+def active_explore(cloud: str, region: str, accelerator: str, password: str):
+    active_explorer.active_probe(cloud, region, accelerator, password)
     user_data = {'status': 'success'}
     return fastapi.responses.JSONResponse(content=user_data, status_code=201)
 

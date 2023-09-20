@@ -17,7 +17,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
-from sky.map import map_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
