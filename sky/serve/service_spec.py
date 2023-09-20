@@ -2,7 +2,7 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -24,7 +24,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
-        post_data: Optional[Union[str, Dict[str, Any]]] = None,
+        post_data: Optional[Dict[str, Any]] = None,
         controller_resources: Optional[Dict[str, Any]] = None,
         auto_restart: bool = False,
     ) -> None:
@@ -234,7 +234,7 @@ class SkyServiceSpec:
         return self._qps_lower_threshold
 
     @property
-    def post_data(self) -> Optional[Union[str, Dict[str, Any]]]:
+    def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
 
     @property

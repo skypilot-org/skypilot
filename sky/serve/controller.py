@@ -94,13 +94,13 @@ class SkyServeController:
                 raise ValueError('Update service is not allowed '
                                  'without autoscaler.')
             request_data = asyncio.run(request.json())
-            latest_version = request_data['version']
-            logger.info(f'Latest version: {latest_version}')
+            version = request_data['version']
+            logger.info(f'Update to version: {version}')
             latest_task_yaml = serve.generate_remote_task_yaml_file_name(
-                self.service_name, latest_version, expand_user=True)
+                self.service_name, version, expand_user=True)
             service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
             logger.info(f'Service spec: {service}')
-            self.infra_provider.update_version(latest_version, service)
+            self.infra_provider.update_version(version, service)
             self.autoscaler.update_spec(service)
             return {'message': 'Success'}
 
