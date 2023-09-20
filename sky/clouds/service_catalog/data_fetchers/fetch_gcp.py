@@ -148,9 +148,8 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
     removes any zones present in the global EXCLUDED_REGIONS (if defined).
     """
 
-    def wrapper(*arguments, **kwargs) -> List[str]:  # Renamed args to arguments
-        # Get the original zones from the decorated function
-        original_zones = set(func(*arguments, **kwargs))
+    def wrapper(*args, **kwargs) -> List[str]:  # pylint: disable=redefined-outer-name
+        original_zones = set(func(*args, **kwargs))
 
         # Intersect with ZONES if defined
         if ZONES:
@@ -159,6 +158,10 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
         # Remove zones from EXCLUDED_REGIONS if defined
         if EXCLUDED_REGIONS:
             original_zones -= EXCLUDED_REGIONS
+
+        # Raise an error if no zones are left
+        if not original_zones:
+            raise ValueError('No zones to fetch. Please check your arguments.')
 
         return list(original_zones)
 
