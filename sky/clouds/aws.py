@@ -13,6 +13,7 @@ from sky import clouds
 from sky import exceptions
 from sky import provision as provision_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -48,6 +49,15 @@ _CREDENTIAL_FILES = [
 ]
 
 DEFAULT_AMI_GB = 45
+
+# Temporary measure, as deleting per-cluster SGs is too slow.
+# See https://github.com/skypilot-org/skypilot/pull/742.
+# Generate the name of the security group we're looking for.
+# (username, last 4 chars of hash of hostname): for uniquefying
+# users on shared-account scenarios.
+DEFAULT_SECURITY_GROUP_NAME = f'sky-sg-{common_utils.user_and_hostname_hash()}'
+# Security group to use when user specified ports in their resources.
+USER_PORTS_SECURITY_GROUP_NAME = 'sky-sg-{}'
 
 
 class AWSIdentityType(enum.Enum):
@@ -335,7 +345,8 @@ class AWS(clouds.Cloud):
                                                                 clouds='aws')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
 
@@ -357,6 +368,19 @@ class AWS(clouds.Cloud):
         image_id = self._get_image_id(image_id_to_use, region_name,
                                       r.instance_type)
 
+        user_security_group = skypilot_config.get_nested(
+            ('aws', 'security_group_name'), None)
+        if resources.ports is not None:
+            # Already checked in Resources._try_validate_ports
+            assert user_security_group is None
+            security_group = USER_PORTS_SECURITY_GROUP_NAME.format(
+                cluster_name_on_cloud)
+        elif user_security_group is not None:
+            assert resources.ports is None
+            security_group = user_security_group
+        else:
+            security_group = DEFAULT_SECURITY_GROUP_NAME
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
@@ -364,6 +388,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zone_names),
             'image_id': image_id,
+            'security_group': security_group,
             **AWS._get_disk_specs(r.disk_tier)
         }
 

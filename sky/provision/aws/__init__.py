@@ -3,6 +3,7 @@
 from sky.provision.aws.config import bootstrap_instances
 from sky.provision.aws.instance import cleanup_ports
 from sky.provision.aws.instance import get_cluster_metadata
+from sky.provision.aws.instance import open_ports
 from sky.provision.aws.instance import query_instances
 from sky.provision.aws.instance import run_instances
 from sky.provision.aws.instance import stop_instances

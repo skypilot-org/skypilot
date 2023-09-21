@@ -105,6 +105,17 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
+def open_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Open ports for inbound traffic."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,

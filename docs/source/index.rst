@@ -125,11 +125,12 @@ Documentation
    :caption: User Guides
 
    examples/docker-containers
+   examples/ports
    examples/iterative-dev-project
    reference/interactive-nodes
    reference/faq
    reference/logging
-   reference/local/index
+   reference/kubernetes/index
 
 .. toctree::
    :maxdepth: 1
