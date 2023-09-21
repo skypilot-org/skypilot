@@ -216,6 +216,9 @@ def _get_machine_types(region_prefix: str) -> pd.DataFrame:
 
 def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     df = _get_machine_types(region_prefix)
+    if df.empty:
+        return df
+
     # Drop the unsupported series.
     df = df[df['InstanceType'].str.startswith(
         tuple(f'{series}-' for series in SERIES_TO_DISCRIPTION))]
@@ -334,7 +337,7 @@ def get_gpu_df(skus: List[Dict[str, Any]], region_prefix: str) -> pd.DataFrame:
     ]
     df = _get_gpus(region_prefix)
     if df.empty:
-        raise ValueError('No GPUs found.')
+        return df
 
     def get_gpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
@@ -488,7 +491,8 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     # Drop regions without the given prefix.
     # NOTE: We intentionally do not drop any TPU regions.
     vm_df = vm_df[vm_df['Region'].str.startswith(region_prefix)]
-    gpu_df = gpu_df[gpu_df['Region'].str.startswith(region_prefix)]
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith(
+        region_prefix)] if not gpu_df.empty else gpu_df
 
     gcp_tpu_skus = get_skus(TPU_SERVICE_ID)
     tpu_df = get_tpu_df(gcp_tpu_skus)
