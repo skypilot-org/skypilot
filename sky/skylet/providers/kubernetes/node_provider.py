@@ -218,7 +218,6 @@ class KubernetesNodeProvider(NodeProvider):
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
-    
 
     def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
