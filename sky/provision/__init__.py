@@ -6,7 +6,7 @@ providers supported by SkyPilot need to follow.
 import functools
 import importlib
 import inspect
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib

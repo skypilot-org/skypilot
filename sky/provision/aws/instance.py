@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import aws
+from sky.clouds import aws as aws_cloud
 from sky.provision import common
 from sky.provision.aws import utils
-from sky.clouds import aws as aws_cloud
 from sky.utils import common_utils
 from sky.utils import resources_utils
 

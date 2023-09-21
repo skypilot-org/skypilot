@@ -1589,7 +1589,8 @@ class RetryingVmProvisioner(object):
                 if provision_metadata is not None:
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
-                            to_provision, region, zones))
+                            to_provision, handle.cluster_name_on_cloud, region,
+                            zones))
                     config_dict['provision_metadata'] = provision_metadata
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
@@ -2892,7 +2893,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     region=provision_metadata.region,
                     zone=provision_metadata.zone)
                 self._update_after_cluster_provisioned(
-                    handle, task, prev_cluster_status, handle.external_ips(),
+                    handle, to_provision_config.prev_handle, task,
+                    prev_cluster_status, handle.external_ips(),
                     handle.external_ssh_ports(), lock_path)
                 return handle
 
