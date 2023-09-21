@@ -4234,7 +4234,8 @@ def serve_status(all: bool, service_names: List[str]):
         query_services = _get_glob_services(service_names)
     service_records = core.serve_status(query_services)
     status_utils.show_service_table(service_records, all)
-    outdated_replica_infos = []
+    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
         handle: 'serve_lib.ServiceHandle' = service_record['handle']
@@ -4246,18 +4247,8 @@ def serve_status(all: bool, service_names: List[str]):
             if (all or not handle.auto_restart or replica_record['status'] !=
                     status_lib.ReplicaStatus.FAILED):
                 replica_record['service_name'] = service_record['name']
-                if handle.version == replica_record['version']:
-                    replica_infos.append(replica_record)
-                else:
-                    outdated_replica_infos.append(replica_record)
-
-    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Replicas{colorama.Style.RESET_ALL}')
+                replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
-    if outdated_replica_infos:
-        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'Outdated Replicas{colorama.Style.RESET_ALL}')
-        status_utils.show_replica_table(outdated_replica_infos, all)
 
     failed_controllers = [
         record['name']
