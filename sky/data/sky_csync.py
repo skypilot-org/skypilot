@@ -21,7 +21,7 @@ _CURSOR = None
 _CONN = None
 _DB = None
 _MAX_SYNC_RETRIES = 10
-# Allowing minimal seconds of inteval between SYNC calls. 
+# Allowing minimal seconds of inteval between SYNC calls.
 _MIN_SYNC_CALL_INTERVAL = 3
 CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
@@ -205,9 +205,9 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
             # successfully completed sync process
             return
     raise RuntimeError(f'Failed to sync {src_to_bucket} after '
-                        f'{_MAX_SYNC_RETRIES} number of retries. Check '
-                        'the log file in ~/.sky/ for more'
-                        'details') from None
+                       f'{_MAX_SYNC_RETRIES} number of retries. Check '
+                       'the log file in ~/.sky/ for more'
+                       'details') from None
 
 
 @main.command()
