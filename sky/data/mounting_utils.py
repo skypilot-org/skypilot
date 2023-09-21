@@ -42,10 +42,14 @@ def get_mounting_command(
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if mount_mode == storage_utils.StorageMode.MOUNT:
         script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
+        assert csync_log_path is None, ('CSYNC log path should '
+                                        'not be defined for MOUNT mode.')
         if version_check_cmd is not None:
             installed_check += f' && {version_check_cmd}'
     else:  # script path for CSYNC mode
         script_path = f'~/.sky/csync_{random.randint(0, 1000000)}.sh'
+        assert install_cmd is None, ('Installing commands should '
+                                     'not be defined for CSYNC mode.')
 
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash

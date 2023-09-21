@@ -16,10 +16,14 @@ logger = sky_logging.init_logger(__name__)
 
 _CSYNC_DB_PATH = '~/.sky/sky_csync.db'
 
-_DB = None
+_BOOT_TIME = None
 _CURSOR = None
 _CONN = None
-_BOOT_TIME = None
+_DB = None
+_MAX_SYNC_RETRIES = 10
+# Allowing minimal seconds of inteval between SYNC calls. 
+_MIN_SYNC_CALL_INTERVAL = 3
+CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
 
 def connect_db(func):
@@ -143,7 +147,7 @@ def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
 def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
                        no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
-    sync_cmd = (f'gsutil -m -o \'GSUtil:parallel_thread_count={num_threads}\' '
+    sync_cmd = (f'gsutil -m -o "GSUtil:parallel_thread_count={num_threads}" '
                 'rsync -r')
     if delete:
         sync_cmd += ' -d'
@@ -156,8 +160,8 @@ def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
 def run_sync(src: str, storetype: str, dst: str, num_threads: int,
              interval_seconds: int, delete: bool, no_follow_symlinks: bool,
              csync_pid: int):
-    """Runs the sync command to from src to storetype bucket"""
-    #TODO(Doyoung): add enum type class to handle storetypes
+    """Runs the sync command from src to storetype bucket"""
+    # TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
         sync_cmd = get_s3_upload_cmd(src, dst, num_threads, delete,
@@ -168,12 +172,13 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
     else:
         raise ValueError(f'Unsupported store type: {storetype}')
 
-    max_retries = 10
+    src_to_bucket = (f'{src!r} to {dst!r} '
+                     f'at {storetype!r}')
     # interval_seconds/2 is heuristically determined
     # as initial backoff
     initial_backoff = int(interval_seconds / 2)
     backoff = common_utils.Backoff(initial_backoff)
-    for _ in range(max_retries):
+    for i in range(_MAX_SYNC_RETRIES):
         try:
             with subprocess.Popen(sync_cmd, start_new_session=True,
                                   shell=True) as proc:
@@ -189,23 +194,20 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
         except subprocess.CalledProcessError:
             # reset sync pid as the sync process is terminated
             _set_running_csync_sync_pid(csync_pid, -1)
-            src_to_bucket = (f'\'{src}\' to \'{dst}\' '
-                             f'at \'{storetype}\'')
             wait_time = backoff.current_backoff()
             logger.warning('Encountered an error while syncing '
                            f'{src_to_bucket}. Retrying sync '
-                           f'in {wait_time}s. {max_retries} more reattempts'
-                           ' remaining. Check the log file in ~/.sky/ '
-                           'for more details.')
+                           f'in {wait_time}s. {_MAX_SYNC_RETRIES-i-1} more '
+                           'reattempts remaining. Check the log file '
+                           'in ~/.sky/ for more details.')
             time.sleep(wait_time)
         else:
             # successfully completed sync process
-            break
-    else:
-        raise RuntimeError(f'Failed to sync {src_to_bucket} after '
-                           f'{max_retries} number of retries. Check '
-                           'the log file in ~/.sky/ for more'
-                           'details') from None
+            return
+    raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+                        f'{_MAX_SYNC_RETRIES} number of retries. Check '
+                        'the log file in ~/.sky/ for more'
+                        'details') from None
 
 
 @main.command()
@@ -215,7 +217,7 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
 @click.option('--num-threads', required=False, default=10, type=int, help='')
 @click.option('--interval-seconds',
               required=False,
-              default=600,
+              default=CSYNC_DEFAULT_INTERVAL_SECONDS,
               type=int,
               help='')
 @click.option('--delete',
@@ -265,13 +267,14 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         # operation, we compute remaining time to wait before the next
         # sync operation.
         elapsed_time = int(end_time - start_time)
-        remaining_interval = max(0, interval_seconds - elapsed_time)
+        remaining_interval = max(_MIN_SYNC_CALL_INTERVAL,
+                                 interval_seconds - elapsed_time)
         # sync_pid column is set to 0 when sync is not running
         time.sleep(remaining_interval)
 
 
 @main.command()
-@click.argument('paths', nargs=-1, required=False, type=str)
+@click.argument('paths', nargs=-1, required=False)
 @click.option('--all',
               '-a',
               default=False,
@@ -279,8 +282,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
               required=False,
               help='Terminates all CSYNC processes.')
 def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
-    """Terminates all the CSYNC daemon running after checking if all the
-    sync process has completed.
+    """Terminates the CSYNC daemon running.
 
     Args:
         paths (List[str]): list of CSYNC-mounted paths
@@ -297,13 +299,12 @@ def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=r
 
 
 def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
-    """Terminates all the CSYNC daemon running after checking if all the
-    sync process has completed.
+    """Terminates the CSYNC daemon running.
+    
+    Before terminating the running CSYNC daemon, it checks if the sync process
+    spawned by the daemon is running. If it is, we wait until the sync gets
+    completed, and then proceed to terminate the daemon.
     """
-    # TODO(Doyoung): Currently, this terminates all the CSYNC daemon by
-    # default. Make an option of --all to terminate all and make the default
-    # behavior to take a source name to terminate only one daemon.
-    # Call the function to terminate the csync processes here
     if all:
         csync_pid_set = set(_get_all_running_csync_pid())
     else:

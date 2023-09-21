@@ -21,6 +21,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.backends import backend_utils
+from sky.data import sky_csync
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
@@ -313,7 +314,7 @@ class AbstractStore:
 
     def csync_command(self,
                       csync_path: str,
-                      interval_seconds: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = None) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
@@ -976,8 +977,7 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
-        if self.mode == StorageMode.CSYNC:
-            add_if_not_none('interval_seconds', self.interval_seconds)
+        add_if_not_none('interval_seconds', self.interval_seconds)
         if self.force_delete:
             config['_force_delete'] = True
         return config
@@ -992,7 +992,6 @@ class S3Store(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
-    _CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
     def __init__(self,
                  name: str,
@@ -1321,7 +1320,7 @@ class S3Store(AbstractStore):
           interval_seconds: int; runs the sync command every INTERVAL seconds
         """
         if interval_seconds is None:
-            interval_seconds = self._CSYNC_DEFAULT_INTERVAL_SECONDS
+            interval_seconds = sky_csync.CSYNC_DEFAULT_INTERVAL_SECONDS
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -1337,7 +1336,7 @@ class S3Store(AbstractStore):
         # the exact mounting point being either the name of bucket
         # or subdirectory in it
         sync_point = result.path.split('/')[-1]
-        log_file_name = log_file_name = f'csync_s3_{sync_point}.log'
+        log_file_name = f'csync_s3_{sync_point}.log'
         log_path = f'~/.sky/{log_file_name}'
         csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f's3 {dst} --interval-seconds {interval_seconds} '
@@ -1421,7 +1420,6 @@ class GcsStore(AbstractStore):
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
     GCSFUSE_VERSION = '1.0.1'
-    _CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
     def __init__(self,
                  name: str,
@@ -1783,7 +1781,7 @@ class GcsStore(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval_seconds: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = None) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:
@@ -1791,7 +1789,7 @@ class GcsStore(AbstractStore):
           interval_seconds: int; runs the sync command every INTERVAL seconds
         """
         if interval_seconds is None:
-            interval_seconds = self._CSYNC_DEFAULT_INTERVAL_SECONDS
+            interval_seconds = sky_csync.CSYNC_DEFAULT_INTERVAL_SECONDS
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
@@ -2183,7 +2181,7 @@ class R2Store(AbstractStore):
 
     def csync_command(self,
                       csync_path: str,
-                      interval_seconds: Optional[int] = 600) -> str:
+                      interval_seconds: Optional[int] = None) -> str:
         """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
 
         Args:

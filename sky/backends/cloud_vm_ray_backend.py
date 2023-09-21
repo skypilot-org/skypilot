@@ -4423,7 +4423,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
-        log_file_name = f'storage_{mode_str}.log'
+        log_file_name = f'storage_{mode_str}s.log'
         log_path = os.path.join(self.log_dir, log_file_name)
 
         for dst, storage_obj in storage_mounts.items():
@@ -4482,15 +4482,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
 
         After converting Storage objects in 'storage_mounts' to metadata,
-        it stores {PATH:StorageMetadata} into the table.
+        it stores {PATH: StorageMetadata} into the table.
         """
         if not storage_mounts:
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
             storage_mounts_metadata[dst] = storage_obj.handle
-        lock_path = \
-            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name)
+        lock_path = (
+            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
         with filelock.FileLock(lock_path):
             global_user_state.set_cluster_storage_mounts_metadata(
                 cluster_name, storage_mounts_metadata)
