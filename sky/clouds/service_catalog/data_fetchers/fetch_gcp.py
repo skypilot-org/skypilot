@@ -147,24 +147,15 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
     It first intersects the result with the global ZONES (if defined) and then
     removes any zones present in the global EXCLUDED_REGIONS (if defined).
     """
-
     def wrapper(*args, **kwargs) -> List[str]:  # pylint: disable=redefined-outer-name
         original_zones = set(func(*args, **kwargs))
-
-        # Intersect with ZONES if defined
         if ZONES:
             original_zones &= ZONES
-
-        # Remove zones from EXCLUDED_REGIONS if defined
         if EXCLUDED_REGIONS:
             original_zones -= EXCLUDED_REGIONS
-
-        # Raise an error if no zones are left
         if not original_zones:
             raise ValueError('No zones to fetch. Please check your arguments.')
-
         return list(original_zones)
-
     return wrapper
 
 
