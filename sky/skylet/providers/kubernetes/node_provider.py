@@ -10,6 +10,7 @@ from ray.autoscaler.tags import NODE_KIND_HEAD
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
+from sky import clouds
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
@@ -257,9 +258,13 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
-        # Wait for all pods to be ready, and if it exceeds the timeout, raise an
-        # exception. If pod's container is ContainerCreating, then we can assume
-        # that resources have been allocated and we can exit.
+        # Wait for all pods including jump pod to be ready, and if it
+        # exceeds the timeout, raise an exception. If pod's container
+        # is ContainerCreating, then we can assume that resources have been
+        # allocated and we can exit.
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            clouds.Kubernetes.SKY_SSH_JUMP_NAME, self.namespace)
+        new_nodes.append(jump_pod)
         start = time.time()
         while True:
             if time.time() - start > self.timeout:
