@@ -67,7 +67,9 @@ class Kubernetes(clouds.Cloud):
                                                              'supported in '
                                                              'Kubernetes.',
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            ('Docker image is not supported in Kubernetes. ')
+            'Docker image is not supported in Kubernetes.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            'Opening ports is not supported in Kubernetes.'
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
