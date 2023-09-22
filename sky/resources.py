@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 from typing_extensions import Literal
-import yanl
+import yaml
 
 from sky import clouds
 from sky import global_user_state
