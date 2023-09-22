@@ -1130,6 +1130,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
+    if old_resources.use_spot_specified:
+        if not old_resources.use_spot:
+            click.secho(
+                'Field use_spot under resources section will be ignored and '
+                'use_spot will be set to True for `sky spot launch`.',
+                fg='yellow')
     new_resources = old_resources.copy(**override_params)
 
     task.set_resources({new_resources})
