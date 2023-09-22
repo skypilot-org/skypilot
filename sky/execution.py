@@ -627,6 +627,14 @@ def spot_launch(
                 'change task names to be unique, or specify the DAG name only '
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
+        resources = list(task_.resources)[0]
+        if resources.use_spot_specified and not resources.use_spot:
+            print(
+                f'{colorama.Fore.YELLOW}Field use_spot of task {task_.name!r} '
+                'will be ignored and use_spot will be set to True for '
+                f'sky.spot_launch. {colorama.Style.RESET_ALL}')
+        new_resources = resources.copy(use_spot=True)
+        task_.set_resources(new_resources)
         task_names.add(task_.name)
 
     dag_utils.fill_default_spot_config_in_dag(dag)

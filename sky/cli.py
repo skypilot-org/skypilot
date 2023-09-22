@@ -1132,12 +1132,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
-    if _is_called_by_sky_spot_launch and old_resources.use_spot_specified:
-        if not old_resources.use_spot:
+    if _is_called_by_sky_spot_launch:
+        if (old_resources.use_spot_specified and not old_resources.use_spot or
+                use_spot is not None and not use_spot):
             click.secho(
                 'Field use_spot under resources section will be ignored and '
                 'use_spot will be set to True for `sky spot launch`.',
                 fg='yellow')
+        override_params['use_spot'] = True
     new_resources = old_resources.copy(**override_params)
 
     task.set_resources({new_resources})
@@ -3651,12 +3653,6 @@ def spot_launch(
       sky spot launch 'echo hello!'
     """
     env = _merge_env_vars(env_file, env)
-    if use_spot is not None:
-        if not use_spot:
-            click.secho(
-                'Flag --no-use-spot will be ignored and use_spot '
-                'will be set to True for `sky spot launch`.',
-                fg='yellow')
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -3669,7 +3665,7 @@ def spot_launch(
         memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
-        use_spot=True,
+        use_spot=use_spot,
         image_id=image_id,
         env=env,
         disk_size=disk_size,
