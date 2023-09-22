@@ -14,6 +14,9 @@ class ZoneStore:
     This class is responsible for:
         - Storing zone preempt and wait time data
         - Provide a user interface to query these data
+
+    self._preempt_data: {resource: List[(life_time, timestamp), ...]}
+    self._wait_data: {resource: List[(wait_time, timestamp), ...]}
     """
 
     def __init__(self, name: str) -> None:

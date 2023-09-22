@@ -17,6 +17,8 @@ class ZoneMonitor:
 
     This class is responsible for:
         - query zone preempt and wait time data
+
+    self._zone_stores: {zone_name: ZoneStore}
     """
 
     def __init__(self) -> None:

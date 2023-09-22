@@ -228,7 +228,7 @@ if __name__ == '__main__':
     parser.add_argument('--backing-store',
                         type=str,
                         required=False,
-                        default='~/store.db')
+                        default='store.db')
     args = parser.parse_args()
     backing_store = BackingStore(args.backing_store)
     zone_monitor = backing_store.load()
