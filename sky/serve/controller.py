@@ -15,6 +15,7 @@ import uvicorn
 from sky import authentication
 from sky import serve
 from sky import sky_logging
+from sky import resources as resources_lib
 from sky.serve import autoscalers
 from sky.serve import infra_providers
 from sky.utils import env_options
@@ -135,9 +136,11 @@ if __name__ == '__main__':
 
     # ======= Infra Provider =========
     service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
+    resources = resources_lib.Resources.from_yaml(args.task_yaml)
     _infra_provider = infra_providers.SkyPilotInfraProvider(
         args.task_yaml,
         args.service_name,
+        resources.use_spot,
         controller_port=args.controller_port,
         readiness_suffix=service_spec.readiness_suffix,
         initial_delay_seconds=service_spec.initial_delay_seconds,

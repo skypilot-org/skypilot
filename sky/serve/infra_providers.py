@@ -74,6 +74,8 @@ class ReplicaStatusProperty:
         self.service_once_ready: bool = False
         # Process status of sky.down. None means sky.down is not called yet.
         self.sky_down_status: Optional[ProcessStatus] = None
+        # The replica's spot instance was preempted.
+        self.preempted: bool = False
 
     def is_scale_down_no_failure(self) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCESS:
@@ -82,6 +84,8 @@ class ReplicaStatusProperty:
             return False
         if self.user_app_failed:
             return False
+        if self.preempted:
+            return True
         if not self.service_ready_now:
             return False
         return self.service_once_ready
@@ -244,11 +248,12 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, service_name: str, *args,
-                 **kwargs) -> None:
+    def __init__(self, task_yaml_path: str, service_name: str, use_spot: bool,
+                 *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
         self.service_name: str = service_name
+        self.use_spot: bool = use_spot
         self.next_replica_id: int = 1
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             str, subprocess.Popen] = serve_utils.ThreadSafeDict()
@@ -301,11 +306,12 @@ class SkyPilotInfraProvider(InfraProvider):
                 # re-provision.
                 if info.status_property.is_scale_down_no_failure():
                     # This means the cluster is deleted due to
-                    # a scale down. Delete the replica info
+                    # a scale down or the cluster is recovering
+                    # from preemption. Delete the replica info
                     # so it won't count as a replica.
                     del self.replica_info[cluster_name]
-                    logger.info(f'Cluster {cluster_name} removed from the '
-                                'replica info normally.')
+                    removal_reason = 'for preemption recovery' if info.status_property.preempted else 'normally'
+                    logger.info(f'Cluster {cluster_name} removed from the replica info {removal_reason}.')
                 else:
                     logger.info(f'Termination of cluster {cluster_name} '
                                 'finished. Replica info is kept since some '
@@ -481,6 +487,12 @@ class SkyPilotInfraProvider(InfraProvider):
         info = self.replica_info[cluster_name]
         info.status_property.sky_down_status = ProcessStatus.RUNNING
 
+    def _recover_from_preemption(self, cluster_name: str) -> None:
+        logger.info(f'Beginning recovery for preempted cluster {cluster_name}.')
+        self.replica_info[cluster_name].status_property.preempted = True
+        # Logs are not synced because the cluster is no longer up.
+        self._teardown_cluster(cluster_name, sync_down_logs=False)
+
     def _scale_down(self, n: int) -> None:
         # Randomly delete n ready replicas
         all_ready_replicas = self.get_ready_replicas()
@@ -626,6 +638,32 @@ class SkyPilotInfraProvider(InfraProvider):
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
                 continue
+
+            if self.use_spot:
+                # Pull the actual cluster status from the cloud provider to
+                # determine whether the cluster is preempted.
+                (cluster_status,
+                    _) = backends.backend_utils.refresh_cluster_status_handle(
+                        cluster_name,
+                        force_refresh_statuses=set(status_lib.ClusterStatus))
+
+                if cluster_status != status_lib.ClusterStatus.UP:
+                    # The cluster is (partially) preempted. It can be down, INIT
+                    # or STOPPED, based on the interruption behavior of the cloud.
+                    # Spot recovery is needed.
+                    cluster_status_str = (
+                        '' if cluster_status is None else
+                        f' (status: {cluster_status.value})')
+                    logger.info(
+                        f'Cluster {cluster_name} is preempted{cluster_status_str}.'
+                    )
+                    self._recover_from_preemption(cluster_name)
+
+                    # TODO(tgriggs): This currently attempts preemption recovery
+                    # infinitely. Add support for setting retry limits in the
+                    # recovery policy.
+                    continue
+
             current_time = time.time()
             if info.first_not_ready_time is None:
                 info.first_not_ready_time = current_time
@@ -635,7 +673,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                             info.consecutive_failure_times[0])
                 if (consecutive_failure_time >=
                         _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
-                    logger.info(f'Replica {cluster_name} is  not ready for too '
+                    logger.info(f'Replica {cluster_name} is not ready for too '
                                 'long and exceeding consecutive failure '
                                 'threshold. Terminating the replica...')
                     self._teardown_cluster(cluster_name)
