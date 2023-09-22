@@ -163,6 +163,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -177,6 +178,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
+        del cluster_name_on_cloud  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -256,16 +258,9 @@ class IBM(clouds.Cloud):
                                                          clouds='ibm')
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
-        """Returns a list of feasible and launchable resources.
-
-        Feasible resources refer to an offering respecting the resource
-        requirements.  Currently, this function implements "filtering" the
-        cloud's offerings only w.r.t. accelerators constraints.
-
-        Launchable resources require a cloud and an instance type be assigned.
-        """
-        fuzzy_candidate_list: Optional[List[str]] = []
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)

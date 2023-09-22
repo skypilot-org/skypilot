@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
-import collections
+import copy
+import dataclasses
 from datetime import datetime
 import difflib
 import enum
@@ -14,7 +15,8 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
+                    Union)
 import uuid
 
 import colorama
@@ -49,7 +51,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -101,18 +103,58 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Mapping from reserved cluster names to the corresponding group name (logging
-# purpose).
-# NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
-}
 
-# Mapping from reserved cluster prefixes to the corresponding group name
-# (logging purpose).
-SKY_RESERVED_CLUSTER_PREFIXES: Dict[str, str] = {
-    serve_lib.CONTROLLER_PREFIX: 'SkyServe controller',
-}
+@dataclasses.dataclass
+class ReservedClusterRecord:
+    """Record for reserved cluster group."""
+    group_name: str
+    check: Callable[[str], bool]
+    sky_status_hint: str
+    decline_stop_hint: str
+    decline_cancel_hint: str
+    check_cluster_name_hint: str
+
+
+class ReservedClusterGroup(enum.Enum):
+    """Reserved cluster groups for skypilot."""
+    # NOTE(dev): Keep this align with
+    # sky/cli.py::_RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE
+    SPOT_CONTROLLER = ReservedClusterRecord(
+        group_name='Managed spot controller',
+        check=lambda name: name == spot_lib.SPOT_CONTROLLER_NAME,
+        sky_status_hint=(
+            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
+            f'sky spot queue{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=('Spot controller will be auto-stopped after all '
+                           'spot jobs finish.'),
+        decline_cancel_hint=(
+            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
+            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
+            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
+        check_cluster_name_hint=(
+            f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
+            'managed spot controller. '))
+    SKY_SERVE_CONTROLLER = ReservedClusterRecord(
+        group_name='Sky Serve controller',
+        check=lambda name: name.startswith(serve_lib.CONTROLLER_PREFIX),
+        sky_status_hint=(
+            f'* To see detailed service status: {colorama.Style.BRIGHT}'
+            f'sky serve status{colorama.Style.RESET_ALL}'),
+        decline_stop_hint=(f'To teardown a service, use {colorama.Style.BRIGHT}'
+                           f'sky serve down{colorama.Style.RESET_ALL}.'),
+        decline_cancel_hint=(
+            'Cancelling the sky serve controller\'s jobs is not allowed.'),
+        check_cluster_name_hint=(
+            f'Cluster prefix {serve_lib.CONTROLLER_PREFIX} is reserved for '
+            'sky serve controller. '))
+
+    @classmethod
+    def get_group(cls, name: str) -> Optional['ReservedClusterGroup']:
+        for group in cls:
+            if group.value.check(name):
+                return group
+        return None
+
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -146,8 +188,13 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
+# - firewall_rule: This is a newly added section for gcp in provider section.
+# - security_group: In #2485 we introduces the changed of security group, so we
+#   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    ('provider', 'firewall_rule'),
+    ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
@@ -879,7 +926,6 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
-        ports: Optional[List[Union[int, str]]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -905,6 +951,10 @@ def write_cluster_config(
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
     assert cloud is not None, to_provision
+
+    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=cloud.max_cluster_name_length())
+
     # This can raise a ResourcesUnavailableError when:
     #  * The region/zones requested does not appear in the catalog. It can be
     #    triggered if the user changed the catalog file while there is a cluster
@@ -917,7 +967,8 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(region, zones)
+    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
+                                                        region, zones)
     config_dict = {}
 
     azure_subscription_id = None
@@ -998,14 +1049,6 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        cluster_name, max_length=cloud.max_cluster_name_length())
-
-    # Only using new security group names for clusters with ports specified.
-    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
-    if ports is not None:
-        default_aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1016,7 +1059,6 @@ def write_cluster_config(
             **{
                 'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
-                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -1026,13 +1068,6 @@ def write_cluster_config(
                     'SKYPILOT_USER', '')),
 
                 # AWS only:
-                # Temporary measure, as deleting per-cluster SGs is too slow.
-                # See https://github.com/skypilot-org/skypilot/pull/742.
-                # Generate the name of the security group we're looking for.
-                # (username, last 4 chars of hash of hostname): for uniquefying
-                # users on shared-account scenarios.
-                'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), default_aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -1296,7 +1331,7 @@ def wait_until_ray_cluster_ready(
     runner = command_runner.SSHCommandRunner(head_ip,
                                              port=22,
                                              **ssh_credentials)
-    with log_utils.console.status(
+    with rich_utils.safe_status(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
@@ -1346,7 +1381,6 @@ def wait_until_ray_cluster_ready(
             elif (nodes_launching_progress_timeout is not None and
                   time.time() - start > nodes_launching_progress_timeout and
                   nodes_so_far != num_nodes):
-                worker_status.stop()
                 logger.error(
                     'Timed out: waited for more than '
                     f'{nodes_launching_progress_timeout} seconds for new '
@@ -1357,7 +1391,6 @@ def wait_until_ray_cluster_ready(
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
                 # forgotten. The correct behavior should be for it to error out.
-                worker_status.stop()
                 logger.error(
                     'Failed to launch multiple nodes on '
                     'GCP due to a nondeterministic bug in ray autoscaler.')
@@ -1368,7 +1401,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str,
                              docker_user: Optional[str] = None
-                            ) -> Dict[str, str]:
+                            ) -> Dict[str, Any]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -1384,6 +1417,10 @@ def ssh_credential_from_yaml(cluster_yaml: str,
     }
     if docker_user is not None:
         credentials['docker_user'] = docker_user
+    ssh_provider_module = config['provider']['module']
+    # If we are running ssh command on kubernetes node.
+    if 'kubernetes' in ssh_provider_module:
+        credentials['disable_control_master'] = True
     return credentials
 
 
@@ -1449,7 +1486,7 @@ def parallel_data_transfer_to_nodes(
                f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
                f'{style.BRIGHT}{target}{style.RESET_ALL}')
     logger.info(message)
-    with log_utils.safe_rich_status(f'[bold cyan]{action_message}[/]'):
+    with rich_utils.safe_status(f'[bold cyan]{action_message}[/]'):
         subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
@@ -1484,7 +1521,7 @@ def generate_cluster_name():
 
 
 def generate_service_name():
-    return f'service-{uuid.uuid4().hex[:4]}'
+    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def get_cleaned_username(username: str = '') -> str:
@@ -2031,17 +2068,23 @@ def _update_cluster_status_no_lock(
             # triggered.
             if external_ips is None or len(external_ips) == 0:
                 logger.debug(f'Refreshing status ({cluster_name!r}): No cached '
-                             f'IPs found. External IPs: {external_ips}')
+                             f'IPs found. Handle: {handle}')
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+
+            # Potentially refresh the external SSH ports, in case the existing
+            # cluster before #2491 was launched without external SSH ports
+            # cached.
+            external_ssh_ports = handle.external_ssh_ports()
+            head_ssh_port = external_ssh_ports[0]
 
             # Check if ray cluster status is healthy.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                        handle.docker_user)
-            assert handle.head_ssh_port is not None, handle
+
             runner = command_runner.SSHCommandRunner(external_ips[0],
                                                      **ssh_credentials,
-                                                     port=handle.head_ssh_port)
+                                                     port=head_ssh_port)
             rc, output, stderr = runner.run(
                 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
@@ -2066,6 +2109,12 @@ def _update_cluster_status_no_lock(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')
         except RuntimeError as e:
             logger.debug(str(e))
+        except Exception as e:  # pylint: disable=broad-except
+            # This can be raised by `external_ssh_ports()`, due to the
+            # underlying call to kubernetes API.
+            logger.debug(
+                f'Refreshing status ({cluster_name!r}) failed: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         return False
 
     # Determining if the cluster is healthy (UP):
@@ -2383,10 +2432,15 @@ def check_cluster_available(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
+    record = global_user_state.get_cluster_from_name(cluster_name)
     if dryrun:
-        record = global_user_state.get_cluster_from_name(cluster_name)
         assert record is not None, cluster_name
         return record['handle']
+
+    previous_cluster_status = None
+    if record is not None:
+        previous_cluster_status = record['status']
+
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except exceptions.ClusterStatusFetchingError as e:
@@ -2405,7 +2459,6 @@ def check_cluster_available(
             f'Failed to refresh the status for cluster {cluster_name!r}. It is '
             f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
         if record is None:
             cluster_status, handle = None, None
         else:
@@ -2414,10 +2467,27 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
+        error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
+                     'provider.')
+        if previous_cluster_status is not None:
+            assert record is not None, previous_cluster_status
+            actions = []
+            if record['handle'].launched_resources.use_spot:
+                actions.append('preempted')
+            if record['autostop'] > 0 and record['to_down']:
+                actions.append('autodowned')
+            actions.append('manually terminated in console')
+            if len(actions) > 1:
+                actions[-1] = 'or ' + actions[-1]
+            actions_str = ', '.join(actions)
+            message = f' It was likely {actions_str}.'
+            if len(actions) > 1:
+                message = message.replace('likely', 'either')
+            error_msg += message
+
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist.{reset}')
+            raise ValueError(f'{colorama.Fore.YELLOW}{error_msg}{reset}')
+    assert cluster_status is not None, 'handle is not None but status is None'
     backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
             backend, backends.CloudVmRayBackend):
@@ -2503,7 +2573,7 @@ def get_clusters(
     if not include_reserved:
         records = [
             record for record in records
-            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+            if ReservedClusterGroup.get_group(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2613,18 +2683,6 @@ def get_clusters(
     return kept_records
 
 
-def _service_status_from_replica_info(
-        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
-    status2num = collections.Counter([i['status'] for i in replica_info])
-    # If one replica is READY, the service is READY.
-    if status2num[status_lib.ReplicaStatus.READY] > 0:
-        return status_lib.ServiceStatus.READY
-    if sum(status2num[status]
-           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
-        return status_lib.ServiceStatus.FAILED
-    return status_lib.ServiceStatus.REPLICA_INIT
-
-
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Refresh the service, and return the possibly updated record.
@@ -2636,59 +2694,77 @@ def _refresh_service_record_no_lock(
         A tuple of a possibly updated record and an error message if any error
         occurred when refreshing the service.
     """
-    record = global_user_state.get_service_from_name(service_name)
-    if record is None:
+    local_record = global_user_state.get_service_from_name(service_name)
+    if local_record is None:
         return None, None
-    service_handle: serve_lib.ServiceHandle = record['handle']
+
+    # We use a copy of the record with default value of replica_info to return
+    # when there is an error.
+    record = copy.deepcopy(local_record)
+    record['replica_info'] = []
+    service_handle: serve_lib.ServiceHandle = local_record['handle']
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    if not service_handle.endpoint:
+    if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
-    controller_cluster_name = service_handle.controller_cluster_name
-    cluster_record = global_user_state.get_cluster_from_name(
-        controller_cluster_name)
-    if (cluster_record is None or
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
+    controller_name = local_record['controller_name']
+    cluster_record = global_user_state.get_cluster_from_name(controller_name)
+
+    # We don't check controller status here since it might be in INIT status
+    # when other services is starting up and launching the controller.
+    if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, (f'Controller cluster {controller_cluster_name!r} '
-                        'is not found or UP.')
+        return record, None
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_lib.ServeCodeGen.get_latest_info()
-    returncode, latest_info_payload, stderr = backend.run_on_head(
+    if service_handle.controller_port is None:
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
+
+    code = serve_lib.ServeCodeGen.get_latest_info(
+        service_handle.controller_port)
+    returncode, latest_info_payload, _ = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        return record, ('Failed to refresh replica info from the controller. '
-                        f'Using the cached record. Reason: {stderr}')
+        global_user_state.set_service_status(
+            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
+        return record, None
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    service_handle.replica_info = latest_info['replica_info']
     service_handle.uptime = latest_info['uptime']
 
     # When the service is shutting down, there is a period of time which the
     # controller still responds to the request, and the replica is not
     # terminated, so the return value for _service_status_from_replica_info
     # will still be READY, but we don't want change service status to READY.
-    if record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-        record['status'] = _service_status_from_replica_info(
+    # For controller init, there is a small chance that the controller is
+    # running but the load balancer is not. In this case, the service status
+    # shouldn't be refreshed too.
+    if local_record['status'] not in [
+            status_lib.ServiceStatus.SHUTTING_DOWN,
+            status_lib.ServiceStatus.CONTROLLER_INIT,
+    ]:
+        local_record['status'] = serve_lib.replica_info_to_service_status(
             latest_info['replica_info'])
 
-    global_user_state.add_or_update_service(**record)
-    return record, None
+    global_user_state.add_or_update_service(**local_record)
+    local_record['replica_info'] = latest_info['replica_info']
+    return local_record, None
 
 
 def _refresh_service_record(
@@ -2706,13 +2782,33 @@ def _refresh_service_record(
         return global_user_state.get_service_from_name(service_name), msg
 
 
-def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
-    if service_name is None:
-        service_names = [
-            record['name'] for record in global_user_state.get_services()
-        ]
-    else:
-        service_names = [service_name]
+# TODO(tian): Maybe aggregate services using same controller to reduce SSH
+# overhead?
+def refresh_service_status(
+        service_names: Optional[Union[str, List[str]]]) -> List[Dict[str, Any]]:
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    records = global_user_state.get_services()
+    if service_names is not None:
+        if isinstance(service_names, str):
+            service_names = [service_names]
+        new_records = []
+        not_exist_service_names = []
+        for service_name in service_names:
+            for record in records:
+                if record['name'] == service_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_service_names.append(service_name)
+        if not_exist_service_names:
+            services_str = ', '.join(not_exist_service_names)
+            logger.info(f'Service(s) not found: {bright}{services_str}{reset}.')
+        records = new_records
+
+    service_names = [record['name'] for record in records]
 
     plural = 's' if len(service_names) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -2727,9 +2823,8 @@ def refresh_service_status(service_name: Optional[str]) -> List[Dict[str, Any]]:
         record, msg = _refresh_service_record(service_name)
         if msg is not None:
             progress.stop()
-            print(
-                f'{colorama.Fore.YELLOW}Error occurred when refreshing service '
-                f'{service_name}: {msg}{colorama.Style.RESET_ALL}')
+            print(f'{yellow}Error occurred when refreshing service '
+                  f'{service_name}: {msg}{reset}')
             progress.start()
         progress.update(task, advance=1)
         return record
@@ -2778,10 +2873,16 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
-    """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
+def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+    """Returns the resources dict of the task"""
+    # TODO: CPU and other memory resources are not supported yet
+    # except for sky serve controller task.
+    resources_dict = {
+        # We set CPU resource for sky serve controller to a smaller value
+        # to support a larger number of services.
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND if
+                task.is_sky_serve_controller_task else DEFAULT_TASK_CPU_DEMAND)
+    }
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2789,17 +2890,14 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+    if resources is not None and resources.accelerators is not None:
+        resources_dict.update(resources.accelerators)
+    return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
-    if resources_dict is None:
-        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
-    else:
-        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
 
@@ -2816,16 +2914,11 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
-    msg = None
-    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-    for prefix in SKY_RESERVED_CLUSTER_PREFIXES:
-        if cluster_name is not None and cluster_name.startswith(prefix):
-            msg = (f'Cluster prefix {prefix!r} is reserved for the '
-                   f'{SKY_RESERVED_CLUSTER_PREFIXES[prefix].lower()}.')
-            break
-    if msg is not None:
+    if cluster_name is None:
+        return
+    group = ReservedClusterGroup.get_group(cluster_name)
+    if group is not None:
+        msg = group.value.check_cluster_name_hint
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
@@ -2856,12 +2949,23 @@ def stop_handler(signum, frame):
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
-def validate_schema(obj, schema, err_msg_prefix=''):
-    """Validates an object against a JSON schema.
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
+    """Validates an object against a given JSON schema.
+
+    Args:
+        obj: The object to validate.
+        schema: The JSON schema against which to validate the object.
+        err_msg_prefix: The string to prepend to the error message if
+          validation fails.
+        skip_none: If True, removes fields with value None from the object
+          before validation. This is useful for objects that will never contain
+          None because yaml.safe_load() loads empty fields as None.
 
     Raises:
         ValueError: if the object does not match the schema.
     """
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
     err_msg = None
     try:
         validator.SchemaValidator(schema).validate(obj)

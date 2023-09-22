@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from packaging import version
-import rich.console as rich_console
 import yaml
 
 from sky import global_user_state
@@ -19,12 +18,12 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 # Placeholder variable for generated cluster config when
 # `sky admin deploy` is run.
@@ -359,7 +358,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
             worker_ips, *ssh_credentials)
 
     # Stops all running Ray instances on all nodes
-    with console.status('[bold cyan]Stopping ray cluster'):
+    with rich_utils.safe_status('[bold cyan]Stopping ray cluster'):
 
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             backend_utils.run_command_and_handle_ssh_failure(
@@ -379,7 +378,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
                 f'--resources={head_resources!r} --num-gpus={head_gpu_count} '
                 f'--temp-dir {constants.SKY_REMOTE_RAY_TEMPDIR}')
 
-    with console.status('[bold cyan]Launching ray cluster on head'):
+    with rich_utils.safe_status('[bold cyan]Launching ray cluster on head'):
         backend_utils.run_command_and_handle_ssh_failure(
             head_runner,
             head_cmd,
@@ -407,7 +406,7 @@ def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
                 f'{ray_dashboard_port}:localhost:{ray_dashboard_port} '
                 f'{ssh_options} {ssh_user}@{head_ip} '
                 '\'while true; do sleep 86400; done\'')
-    with console.status('[bold cyan]Waiting for workers.'):
+    with rich_utils.safe_status('[bold cyan]Waiting for workers.'):
 
         def _start_ray_workers(
                 runner_tuple: Tuple[command_runner.SSHCommandRunner, int]):
@@ -498,7 +497,7 @@ def check_local_cloud_args(cloud: Optional[str] = None,
         yaml_config: User's task yaml loaded into a JSON dictionary.
     """
     yaml_cloud = None
-    if yaml_config is not None and 'resources' in yaml_config:
+    if yaml_config is not None and yaml_config.get('resources') is not None:
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if (cluster_name is not None and check_if_local_cloud(cluster_name)):

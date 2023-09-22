@@ -68,14 +68,20 @@ def get_resources_schema():
                 'type': 'string',
             },
             'ports': {
-                'type': 'array',
-                'items': {
-                    'anyOf': [{
-                        'type': 'string',
-                    }, {
-                        'type': 'integer',
-                    }]
-                }
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'integer',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'integer',
+                        }]
+                    }
+                }],
             },
             'accelerator_args': {
                 'type': 'object',
@@ -198,6 +204,9 @@ def get_service_schema():
                     },
                     'qps_lower_threshold': {
                         'type': 'number',
+                    },
+                    'auto_restart': {
+                        'type': 'boolean',
                     },
                 }
             },

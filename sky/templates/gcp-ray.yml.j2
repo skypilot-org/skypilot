@@ -28,12 +28,11 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
-{%- if ports %}
-  ports:
-{%- for port in ports %}
-    - {{port}}
-{%- endfor %}
-{%- endif %}
+  # The firewall rule name for customized firewall rules. Only enabled
+  # if we have ports requirement.
+{% if firewall_rule is not none %}
+  firewall_rule: {{firewall_rule}}
+{% endif %}
 {%- if docker_login_config is not none %}
   # We put docker login config in provider section because ray's schema disabled
   # additionalProperties for docker config.

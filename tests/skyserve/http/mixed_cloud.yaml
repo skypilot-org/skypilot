@@ -2,7 +2,7 @@ resources:
   cloud: gcp
   cpus: 2+
 
-workdir: sky/serve/examples/http_server
+workdir: examples/serve/http_server
 
 run: python3 server.py
 

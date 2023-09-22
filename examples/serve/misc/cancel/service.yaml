@@ -9,6 +9,6 @@ service:
 resources:
   cpus: 2+
 
-workdir: sky/serve/examples/misc/cancel
+workdir: examples/serve/misc/cancel
 
 run: python3 server.py --port 9000

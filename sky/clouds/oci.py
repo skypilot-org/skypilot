@@ -180,8 +180,9 @@ class OCI(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
@@ -282,7 +283,8 @@ class OCI(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)

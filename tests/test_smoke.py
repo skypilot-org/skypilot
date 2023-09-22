@@ -2809,6 +2809,46 @@ def test_skyserve_replica_failure():
     run_one_test(test)
 
 
+@pytest.mark.gcp
+def test_skyserve_auto_restart():
+    """Test skyserve with auto restart"""
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    # Reference: test_spot_recovery_gcp
+    def terminate_replica(replica_id: int) -> str:
+        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+        query_cmd = (f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{cluster_name})" '
+                     f'--zones={zone} --format="value(name)"')
+        return (f'gcloud compute instances delete --zone={zone}'
+                f' --quiet $({query_cmd})')
+
+    test = Test(
+        f'test-skyserve-auto-restart',
+        [
+            # TODO(tian): we can dynamically generate YAML from template to
+            # avoid maintaining too many YAML files
+            f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            terminate_replica(1),
+            'sleep 180',  # Wait for consecutive failure timeout passed.
+            # Currently failed replica will still count as replica num in sky serve status.
+            # TODO(tian): Fix this in the future.
+            '(while true; do'
+            f'    output=$(sky serve status {name});'
+            '     echo "$output" | grep -q "1/2" && break;'
+            '     sleep 10;'
+            f'done); sleep {serve.CONTROLLER_SYNC_INTERVAL};',
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 @pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):

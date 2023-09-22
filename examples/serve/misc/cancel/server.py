@@ -11,20 +11,20 @@ async def handle(request):
     try:
         # Simulate a computation that takes 10 seconds
         for i in range(10):
-            print("Computing... step", i)
+            print('Computing... step', i)
             await asyncio.sleep(1)
             await response.write(b' ')  # Sending a space as a heartbeat
         await response.write(b'Completed after 10 seconds.')
     except (asyncio.CancelledError, ConnectionResetError):
-        print("Client disconnected, stopping computation.")
+        print('Client disconnected, stopping computation.')
         return response
 
     return response
 
 
 async def health_check(request):
-    print("Received health check")
-    return web.Response(text="Healthy")
+    print('Received health check')
+    return web.Response(text='Healthy')
 
 
 if __name__ == '__main__':

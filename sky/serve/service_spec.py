@@ -26,7 +26,8 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         controller_resources: Optional[Dict[str, Any]] = None,
-    ):
+        auto_restart: bool = False,
+    ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -36,12 +37,6 @@ class SkyServiceSpec:
                 raise ValueError(
                     'max_replicas must be greater than or equal to min_replicas'
                 )
-        if app_port == constants.CONTROLLER_PORT:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'App port cannot be {constants.CONTROLLER_PORT} '
-                    'since it is reserved for the controller. '
-                    'Please use a different port.')
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
@@ -60,12 +55,10 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._controller_resources = controller_resources
+        self._auto_restart = auto_restart
 
     @staticmethod
-    def from_yaml_config(config: Optional[Dict[str, Any]]):
-        if config is None:
-            return None
-
+    def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
         backend_utils.validate_schema(config, schemas.get_service_schema(),
                                       'Invalid service YAML: ')
         if 'replicas' in config and 'replica_policy' in config:
@@ -113,6 +106,7 @@ class SkyServiceSpec:
             service_config['max_replicas'] = None
             service_config['qps_upper_threshold'] = None
             service_config['qps_lower_threshold'] = None
+            service_config['auto_restart'] = False
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -121,6 +115,8 @@ class SkyServiceSpec:
                 'qps_upper_threshold', None)
             service_config['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
+            service_config['auto_restart'] = policy_section.get(
+                'auto_restart', False)
 
         service_config['controller_resources'] = config.pop(
             'controller_resources', None)
@@ -128,7 +124,7 @@ class SkyServiceSpec:
         return SkyServiceSpec(**service_config)
 
     @staticmethod
-    def from_yaml(yaml_path: str):
+    def from_yaml(yaml_path: str) -> 'SkyServiceSpec':
         with open(os.path.expanduser(yaml_path), 'r') as f:
             config = yaml.safe_load(f)
 
@@ -147,7 +143,7 @@ class SkyServiceSpec:
 
         return SkyServiceSpec.from_yaml_config(config['service'])
 
-    def to_yaml_config(self):
+    def to_yaml_config(self) -> Dict[str, Any]:
         config = dict()
 
         def add_if_not_none(section, key, value, no_empty: bool = False):
@@ -172,6 +168,7 @@ class SkyServiceSpec:
                         self.qps_upper_threshold)
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
+        add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
         add_if_not_none('controller_resources', None,
                         self._controller_resources)
 
@@ -193,11 +190,11 @@ class SkyServiceSpec:
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
-            Readiness probe method:        {self.probe_str()}
-            Replica autoscaling policy:    {self.policy_str()}
-            Service initial delay seconds: {self.initial_delay_seconds}
-
-            Please refer to SkyPilot Serve document for detailed explanations.
+            Readiness probe method:           {self.probe_str()}
+            Readiness initial delay seconds:  {self.initial_delay_seconds}
+            Replica autoscaling policy:       {self.policy_str()}
+            Replica auto restart:             {self.auto_restart}
+            Please refer to SkyServe document for detailed explanations.
         """)
 
     @property
@@ -239,3 +236,7 @@ class SkyServiceSpec:
     @property
     def controller_resources(self) -> Optional[Dict[str, Any]]:
         return self._controller_resources
+
+    @property
+    def auto_restart(self) -> bool:
+        return self._auto_restart

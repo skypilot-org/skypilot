@@ -136,12 +136,13 @@ class Local(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the

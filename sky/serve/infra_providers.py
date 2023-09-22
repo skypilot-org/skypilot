@@ -15,6 +15,7 @@ import requests
 from sky import backends
 from sky import global_user_state
 from sky import status_lib
+from sky.serve import constants
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.utils import env_options
@@ -26,8 +27,6 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 _ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
-_CONSECUTIVE_FAILURE_THRESHOLD_COUNT = (
-    _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT // _ENDPOINT_PROBE_INTERVAL)
 
 
 def _interrupt_process_and_children(pid: int) -> None:
@@ -151,7 +150,7 @@ class ReplicaInfo:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
-        self.consecutive_failure_cnt: int = 0
+        self.consecutive_failure_times: List[int] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
 
     @property
@@ -195,11 +194,13 @@ class InfraProvider:
 
     def __init__(
             self,
+            controller_port: int,
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
+        self.controller_port = controller_port
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
@@ -215,9 +216,8 @@ class InfraProvider:
     def get_uptime(self) -> Optional[float]:
         return self.uptime
 
-    def total_replica_num(self) -> int:
-        # Returns the total number of replicas, including those under
-        # provisioning and deletion
+    def total_replica_num(self, count_failed_replica: bool) -> int:
+        # Returns the total number of replicas
         raise NotImplementedError
 
     def get_ready_replicas(self) -> Set[str]:
@@ -389,8 +389,13 @@ class SkyPilotInfraProvider(InfraProvider):
             for info in self.replica_info.values()
         ]
 
-    def total_replica_num(self) -> int:
-        return len(self.replica_info)
+    def total_replica_num(self, count_failed_replica: bool) -> int:
+        if count_failed_replica:
+            return len(self.replica_info)
+        return len([
+            i for i in self.replica_info.values()
+            if i.status != status_lib.ReplicaStatus.FAILED
+        ])
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
@@ -410,7 +415,8 @@ class SkyPilotInfraProvider(InfraProvider):
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
-        fn = serve_utils.generate_replica_launch_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_launch_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
@@ -438,17 +444,18 @@ class SkyPilotInfraProvider(InfraProvider):
                            'exists. Skipping.')
             return
 
+        replica_id = serve_utils.get_replica_id_from_cluster_name(cluster_name)
         if sync_down_logs:
             logger.info(f'Syncing down logs for cluster {cluster_name}...')
-            replica_id = serve_utils.get_replica_id_from_cluster_name(
-                cluster_name)
-            code = serve_utils.ServeCodeGen.stream_logs(
+            code = serve_utils.ServeCodeGen.stream_replica_logs(
                 self.service_name,
+                self.controller_port,
                 replica_id,
                 follow=False,
                 skip_local_log_file_check=True)
             local_log_file_name = (
-                serve_utils.generate_replica_local_log_file_name(cluster_name))
+                serve_utils.generate_replica_local_log_file_name(
+                    self.service_name, replica_id))
             with open(local_log_file_name, 'w') as f:
                 try:
                     subprocess.run(code, shell=True, check=True, stdout=f)
@@ -462,7 +469,8 @@ class SkyPilotInfraProvider(InfraProvider):
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']
-        fn = serve_utils.generate_replica_down_log_file_name(cluster_name)
+        fn = serve_utils.generate_replica_down_log_file_name(
+            self.service_name, replica_id)
         with open(fn, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
@@ -569,12 +577,15 @@ class SkyPilotInfraProvider(InfraProvider):
                 readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
                 if self.post_data is not None:
                     msg += 'Post'
-                    response = requests.post(readiness_suffix,
-                                             json=self.post_data,
-                                             timeout=3)
+                    response = requests.post(
+                        readiness_suffix,
+                        json=self.post_data,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 else:
                     msg += 'Get'
-                    response = requests.get(readiness_suffix, timeout=3)
+                    response = requests.get(
+                        readiness_suffix,
+                        timeout=constants.READINESS_PROBE_TIMEOUT)
                 msg += (f' request to {replica_ip} returned status code '
                         f'{response.status_code}')
                 if response.status_code == 200:
@@ -611,29 +622,31 @@ class SkyPilotInfraProvider(InfraProvider):
             info = self.replica_info[cluster_name]
             info.status_property.service_ready_now = res
             if res:
+                info.consecutive_failure_times.clear()
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
                 continue
+            current_time = time.time()
             if info.first_not_ready_time is None:
-                info.first_not_ready_time = time.time()
+                info.first_not_ready_time = current_time
             if info.status_property.service_once_ready:
-                info.consecutive_failure_cnt += 1
-                if (info.consecutive_failure_cnt >=
-                        _CONSECUTIVE_FAILURE_THRESHOLD_COUNT):
+                info.consecutive_failure_times.append(current_time)
+                consecutive_failure_time = (info.consecutive_failure_times[-1] -
+                                            info.consecutive_failure_times[0])
+                if (consecutive_failure_time >=
+                        _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
                     logger.info(f'Replica {cluster_name} is  not ready for too '
                                 'long and exceeding consecutive failure '
                                 'threshold. Terminating the replica...')
                     self._teardown_cluster(cluster_name)
                 else:
-                    current_unready_time = (info.consecutive_failure_cnt *
-                                            _ENDPOINT_PROBE_INTERVAL)
                     logger.info(f'Replica {cluster_name} is not ready but '
                                 'within consecutive failure threshold '
-                                f'({current_unready_time}s / '
+                                f'({consecutive_failure_time}s / '
                                 f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
             else:
-                current_delay_seconds = time.time() - info.first_not_ready_time
+                current_delay_seconds = current_time - info.first_not_ready_time
                 if current_delay_seconds > self.initial_delay_seconds:
                     logger.info(f'Replica {cluster_name} is not ready and '
                                 'exceeding initial delay seconds. '
