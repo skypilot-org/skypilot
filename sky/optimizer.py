@@ -71,7 +71,8 @@ class Optimizer:
 
     @staticmethod
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
-                     gigabytes: float):
+                     gigabytes: float) -> float:
+        """Returns estimated egress cost."""
         if isinstance(src_cloud, DummyCloud) or isinstance(
                 dst_cloud, DummyCloud):
             return 0.0
@@ -84,7 +85,7 @@ class Optimizer:
 
     @staticmethod
     def _egress_time(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
-                     gigabytes: float):
+                     gigabytes: float) -> float:
         """Returns estimated egress time in seconds."""
         # FIXME: estimate bandwidth between each cloud-region pair.
         if isinstance(src_cloud, DummyCloud) or isinstance(
@@ -205,7 +206,7 @@ class Optimizer:
         parent_resources: resources_lib.Resources,
         node: task_lib.Task,
         resources: resources_lib.Resources,
-    ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], float]:
+    ) -> Tuple[Optional[clouds.Cloud], Optional[clouds.Cloud], Optional[float]]:
         if isinstance(parent_resources.cloud, DummyCloud):
             # Special case.  The current 'node' is a real
             # source node, and its input may be on a different
@@ -229,7 +230,8 @@ class Optimizer:
         """Computes the egress cost or time depending on 'minimize_cost'."""
         src_cloud, dst_cloud, nbytes = Optimizer._get_egress_info(
             parent, parent_resources, node, resources)
-        if nbytes == 0:
+        if not nbytes:
+            # nbytes can be None, if the task has no inputs/outputs.
             return 0
         assert src_cloud is not None and dst_cloud is not None
 

@@ -173,7 +173,7 @@ and storage mounting:
       # s3://sky-multisource-storage/datasets/. ~/mydir/myfile.txt will appear
       # at s3://sky-multisource-storage/myfile.txt.
       /datasets-multisource-storage:
-        name: sky-multisource-storage2 # Make sure this name is unique or you own this bucket
+        name: sky-multisource-storage # Make sure this name is unique or you own this bucket
         source: [~/mydir/myfile.txt, ~/datasets]
 
 

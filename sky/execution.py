@@ -17,7 +17,7 @@ import enum
 import getpass
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union, Dict
 import uuid
 
 import colorama
@@ -628,6 +628,9 @@ def spot_launch(
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
         task_names.add(task_.name)
+
+    dag_utils.fill_default_spot_config_in_dag(dag)
+
     for task_ in dag.tasks:
 
         new_resources_list = []
@@ -762,7 +765,7 @@ def spot_launch(
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {dag.name} from spot controller...'
+              f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
