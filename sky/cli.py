@@ -1061,6 +1061,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
+    # pylint: disable=invalid-name
+    _is_called_by_sky_spot_launch: bool = False,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -1130,7 +1132,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     assert len(task.resources) == 1
     old_resources = list(task.resources)[0]
-    if old_resources.use_spot_specified:
+    if _is_called_by_sky_spot_launch and old_resources.use_spot_specified:
         if not old_resources.use_spot:
             click.secho(
                 'Field use_spot under resources section will be ignored and '
@@ -3674,6 +3676,7 @@ def spot_launch(
         disk_tier=disk_tier,
         ports=ports,
         spot_recovery=spot_recovery,
+        _is_called_by_sky_spot_launch=True,
     )
     # Deprecation.
     if retry_until_up is not None:
