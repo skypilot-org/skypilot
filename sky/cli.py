@@ -3643,6 +3643,12 @@ def spot_launch(
       sky spot launch 'echo hello!'
     """
     env = _merge_env_vars(env_file, env)
+    if use_spot is not None:
+        if not use_spot:
+            click.secho(
+                'Flag --no-use-spot will be ignored and use_spot '
+                'will be set to True for `sky spot launch`.',
+                fg='yellow')
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
@@ -3655,7 +3661,7 @@ def spot_launch(
         memory=memory,
         instance_type=instance_type,
         num_nodes=num_nodes,
-        use_spot=use_spot,
+        use_spot=True,
         image_id=image_id,
         env=env,
         disk_size=disk_size,
