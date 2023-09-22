@@ -61,7 +61,7 @@ To get the latest features/updates, install [from source](https://skypilot.readt
 pip install -U "skypilot-nightly[aws,gcp,azure,ibm,oci,scp,lambda,kubernetes]"  # choose your clouds
 ```
 
-Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare, Kubernetes):
+Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare, any Kubernetes cluster):
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-dark.png">
