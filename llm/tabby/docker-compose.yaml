@@ -1,0 +1,22 @@
+version: '3.5'
+
+services:
+  scheduler:
+    image: tabbyml/tabby
+    container_name: tabby-scheduler
+    platform: linux/amd64
+    command: scheduler --now
+    volumes:
+      - "$PWD/tabby:/data"
+
+  tabby:
+    depends_on:
+      - scheduler
+    restart: always
+    container_name: tabby
+    image: tabbyml/tabby
+    command: serve --model TabbyML/SantaCoder-1B
+    volumes:
+      - "$PWD/tabby:/data"
+    ports:
+      - 8080:8080
