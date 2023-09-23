@@ -985,7 +985,7 @@ class Optimizer:
                         task = node,
                         blocked_resources = blocked_resources,
                         try_fix_with_sky_check = True,
-                        check_resource_satisfying = True
+                        check_resource_satisfying = False
                 )
                 # Remove candidate that is not launchable.
                 launchable_resources_map = {
@@ -1117,7 +1117,7 @@ def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-    check_resource_satisfying: bool = False
+    check_resource_satisfying: bool = True
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str]]:
     """Fills in the launchable resources for the task.
@@ -1143,7 +1143,7 @@ def _fill_in_launchable_resources(
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(task, blocked_resources)
+                return _fill_in_launchable_resources(task, blocked_resources, False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'task_lib.Task {task} requires {resources.cloud} which is '
