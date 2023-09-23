@@ -195,11 +195,12 @@ def validate_region_zone_impl(
                     region.lower(), df['Region'].str.lower().unique())
                 if not candidate_strs:
                     if cloud_name in ('azure', 'gcp'):
-                        faq_msg = ('\nIf your regions are not in this list, '
-                                   'please check the FAQ docs for more info. \n'
-                                   'https://skypilot.readthedocs.io/en/latest/'
-                                   'reference/faq.html#advanced-how-to-make-'
-                                   'skypilot-use-all-global-regions')
+                        faq_msg = (
+                            '\nIf a region is not included in the following '
+                            'list, please check the FAQ docs for how to fetch '
+                            'its catalog info.\nhttps://skypilot.readthedocs.io'
+                            '/en/latest/reference/faq.html#advanced-how-to-'
+                            'make-skypilot-use-all-global-regions')
                         error_msg += faq_msg + _get_all_supported_regions_str()
                     else:
                         error_msg += _get_all_supported_regions_str()
