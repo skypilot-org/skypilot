@@ -753,7 +753,6 @@ class Optimizer:
 
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
-
             accelerators = resources.get_accelerators_str()
             spot = '[Spot]' if resources.use_spot else ''
             cloud = resources.cloud

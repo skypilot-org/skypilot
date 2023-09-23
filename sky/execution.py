@@ -567,6 +567,13 @@ def exec(  # pylint: disable=redefined-builtin
             f'{colorama.Style.RESET_ALL}')
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
+    if isinstance(entrypoint, sky.Task):
+        resources = entrypoint.resources
+        if len(resources) > 1:
+            logger.warning(f'{colorama.Fore.YELLOW} Passing multiple resources '
+                           'to sky.exec is not supported.'
+                           f'{colorama.Style.RESET_ALL}')
+            return
 
     handle = backend_utils.check_cluster_available(
         cluster_name,

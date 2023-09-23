@@ -3,12 +3,12 @@ name: multi-resources
 resources:
   cloud: gcp
   # zone: us-east-1d
-  use_spot: True
+  # use_spot: True
 
   region: [us-west1, asia-east1]
 
   # spot_recovery: FAILOVER
-  spot_recovery: EAGER_NEXT_REGION
+  # spot_recovery: EAGER_NEXT_REGION
 
   # Ordered Accelerators List
   resources_ordered: True
