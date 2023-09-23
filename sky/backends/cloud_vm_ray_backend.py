@@ -2613,7 +2613,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 does not match the existing cluster.
 
         If multiple resources are specified, this will pass when
-        at one resource has an exact match to the cluster.
+        at least one resource has an exact match to the cluster.
         """
 
         # If the task has multiple resources, it should be an exact match

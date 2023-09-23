@@ -323,8 +323,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            UPDATE spot SET
-            status=(?), start_at=(?), last_recovered_at=(?)
+            UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))

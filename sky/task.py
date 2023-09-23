@@ -449,9 +449,7 @@ class Task:
                 tmp_resources_list.append(
                     sky.Resources.from_yaml_config(tmp_resource))
 
-            if isinstance(accelerators, set):
-                task.set_resources(tmp_resources_list, resources_ordered)
-            elif isinstance(accelerators, list):
+            if isinstance(accelerators, (list, set)):
                 task.set_resources(tmp_resources_list, resources_ordered)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
@@ -652,7 +650,6 @@ class Task:
 
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
-
         new_resources_list = []
         for res in self.get_resources_list():
             new_resources = res.copy(**override_params)

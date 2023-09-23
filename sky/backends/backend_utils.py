@@ -2666,7 +2666,6 @@ def get_backend_from_handle(
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
-    resources = None
     if task.best_resources is not None:
         resources = task.best_resources
     elif len(list(task.resources)) == 1:
@@ -2680,9 +2679,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
             if resource.accelerators is not None:
                 for key, value in resource.accelerators.items():
                     accelerator_dict[key] = value
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+        return accelerator_dict
+    return resources.accelerators
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:

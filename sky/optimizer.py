@@ -126,8 +126,8 @@ class Optimizer:
         try:
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
-                # Only support
-                # assert len(dag.tasks) == 1
+                # Take dag.tasks[0], the actual task
+                # dag can store dummy tasks.
                 resources_list = dag.tasks[0].get_resources_list()
                 accelerators_str = ', '.join([
                     r.get_accelerators_str() + r.get_spot_str()
@@ -281,14 +281,12 @@ class Optimizer:
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, cloud_candidates, fuzzy_candidates = \
-                    _fill_in_launchable_resources(
-                        node,
-                        blocked_resources
-                    )
+                launchable_resources, cloud_candidates, fuzzy_candidates = (
+                    _fill_in_launchable_resources(node, blocked_resources))
                 node_to_candidate_map[node] = cloud_candidates
 
                 # Remove candidate that is not launchable.
+                # Needed for multi resources setting.
                 launchable_resources = {
                     k: v for k, v in launchable_resources.items() if v
                 }
@@ -841,11 +839,10 @@ class Optimizer:
                 ) == chosen_resources.to_yaml_config():
                     chosen_cost = cost
                     break
-
-            best_per_cloud[str(chosen_resources.cloud) +
-                           chosen_resources.get_accelerators_str() +
-                           chosen_resources.get_spot_str()] = (chosen_resources,
-                                                               chosen_cost)
+            resource_table_key = str(
+                chosen_resources.cloud) + chosen_resources.get_accelerators_str(
+                ) + chosen_resources.get_spot_str()
+            best_per_cloud[resource_table_key] = (chosen_resources, chosen_cost)
             rows = []
             for resources, cost in best_per_cloud.values():
                 if minimize_cost:
@@ -862,11 +859,11 @@ class Optimizer:
 
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
+            # x[-4] region, x[1] instance_type, x[-2] cost
             if task.is_resources_ordered:
                 rows = sorted(
                     rows,
-                    key=lambda x:
-                    (  # x[-4] region, x[1] instance_type, x[-2] cost.
+                    key=lambda x: (
                         resources_pref_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
                             '[Spot]' if '[Spot]' in x[1] else '')),  # pylint: disable=cell-var-from-loop
                         x[-2]))  # pylint: disable=cell-var-from-loop

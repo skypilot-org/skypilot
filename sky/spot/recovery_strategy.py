@@ -95,17 +95,13 @@ class StrategyExecutor:
         """Create a strategy from a task."""
 
         resource_list = task.get_resources_list()
-
         spot_recovery = resource_list[0].spot_recovery
         if spot_recovery is None:
             spot_recovery = SPOT_DEFAULT_STRATEGY
-
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
-
         new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
         task.set_resources(new_resources_list, task.is_resources_ordered)
-
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
@@ -418,9 +414,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             if self._launched_cloud_region is not None:
                 task = self.dag.tasks[0]
                 launched_cloud, launched_region = self._launched_cloud_region
-
                 original_resources = task.get_resources_list()
-
                 # Remove the spot_recovery field from the resources, as
                 # the strategy will be handled by the strategy class.
                 new_resources_list = []
@@ -440,10 +434,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
-
                 task.set_resources(original_resources,
                                    task.is_resources_ordered)
-
                 if job_submitted_at is not None:
                     return job_submitted_at
 
