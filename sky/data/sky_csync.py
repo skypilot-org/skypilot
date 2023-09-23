@@ -300,7 +300,7 @@ def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=r
 
 def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
     """Terminates the CSYNC daemon running.
-    
+
     Before terminating the running CSYNC daemon, it checks if the sync process
     spawned by the daemon is running. If it is, we wait until the sync gets
     completed, and then proceed to terminate the daemon.
@@ -324,10 +324,9 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
         for csync_pid in remove_process_set:
             try:
                 psutil.Process(int(csync_pid)).terminate()
-            except psutil.NoSuchProcess as e:
-                if 'process no longer exists' in str(e):
-                    _delete_running_csync(csync_pid)
-                    continue
+            except psutil.NoSuchProcess:
+                _delete_running_csync(csync_pid)
+                continue
             _delete_running_csync(csync_pid)
             print(f'deleted {csync_pid}')
             csync_pid_set.remove(csync_pid)

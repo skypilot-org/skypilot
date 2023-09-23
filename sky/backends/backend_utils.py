@@ -2905,8 +2905,6 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     # When cluster is in INIT status, attempt to fetch IP fails raising an error
     except exceptions.FetchIPError:
         return
-    if not ip_list:
-        return
     port_list = handle.external_ssh_ports()
     ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user)

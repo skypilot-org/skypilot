@@ -4423,8 +4423,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle.cluster_yaml, handle.docker_user)
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, port_list=port_list, **ssh_credentials)
-        log_file_name = f'storage_{mode_str}s.log'
-        log_path = os.path.join(self.log_dir, log_file_name)
+        log_path = os.path.join(self.log_dir, f'storage_{mode_str}s.log')
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
