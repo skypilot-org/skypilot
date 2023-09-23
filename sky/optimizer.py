@@ -985,7 +985,7 @@ class Optimizer:
                         task = node,
                         blocked_resources = blocked_resources,
                         try_fix_with_sky_check = True,
-                        print_logger = False
+                        check_resource_satisfying = True
                 )
                 # Remove candidate that is not launchable.
                 launchable_resources_map = {
@@ -1117,7 +1117,7 @@ def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-    print_logger: bool = True
+    check_resource_satisfying: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str]]:
     """Fills in the launchable resources for the task.
@@ -1143,8 +1143,7 @@ def _fill_in_launchable_resources(
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(task, blocked_resources,
-                                                     False)
+                return _fill_in_launchable_resources(task, blocked_resources)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'task_lib.Task {task} requires {resources.cloud} which is '
@@ -1180,13 +1179,11 @@ def _fill_in_launchable_resources(
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
-                    clouds_list[0])
+                    clouds_list[0])                    
 
-                if not print_logger:
-                    continue
-
-                logger.info(f'No resource satisfying {resources} '
-                            f'on {clouds_str}.')
+                if check_resource_satisfying:
+                    logger.info(f'No resource satisfying {resources} '
+                                f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
                                 f'{colorama.Fore.CYAN}'

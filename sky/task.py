@@ -439,6 +439,9 @@ class Task:
             elif isinstance(accelerators, dict):
                 accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
 
+            # In yaml file, we store accelerators as a list: [accelerator 1, ... accelerator N]
+            # In Task, we store [resource 1, .... resource N] each with 1 accelerator.
+            # This for loop is for format conversion.
             tmp_resources_list = []
             for acc in accelerators:
                 tmp_resource = resources_config.copy()
