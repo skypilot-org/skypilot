@@ -1143,7 +1143,8 @@ def _fill_in_launchable_resources(
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(task, blocked_resources, False)
+                return _fill_in_launchable_resources(task, blocked_resources,
+                                                     False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'task_lib.Task {task} requires {resources.cloud} which is '
