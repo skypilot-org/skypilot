@@ -164,7 +164,6 @@ class SpotController:
             # uninitialized columns.
             spot_state.set_started(job_id=self._job_id,
                                    task_id=task_id,
-                                   resources_str='',
                                    start_time=time.time(),
                                    callback_func=callback_func)
             spot_state.set_succeeded(job_id=self._job_id,
@@ -207,12 +206,10 @@ class SpotController:
         assert handle is not None, 'handle should not be None'
         launched_resources = handle.launched_resources
         assert launched_resources is not None, 'launched_resources should not be None'  # pylint: disable=line-too-long
-        resources_str = f'{task.num_nodes}x [{launched_resources.get_accelerators_str()}]'  # pylint: disable=line-too-long
 
         spot_state.set_started(job_id=self._job_id,
                                task_id=task_id,
                                start_time=remote_job_submitted_at,
-                               resources_str=resources_str,
                                callback_func=callback_func)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -339,12 +336,10 @@ class SpotController:
 
             assert handle is not None, 'handle should not be None'  # pylint: disable=line-too-long
             assert handle.launched_resources is not None, 'handle.launched_resources should not be None'  # pylint: disable=line-too-long
-            resources_str = f'{task.num_nodes}x [{launched_resources.get_accelerators_str()}]'  # pylint: disable=line-too-long
 
             spot_state.set_recovered(self._job_id,
                                      task_id,
                                      recovered_time=recovered_time,
-                                     resources_str=resources_str,
                                      callback_func=callback_func)
 
     def run(self):

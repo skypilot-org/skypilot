@@ -124,9 +124,10 @@ class Optimizer:
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
         try:
-
             if _is_dag_with_res_list(dag):
                 # Honor the user's choice.
+                # Only support
+                # assert len(dag.tasks) == 1
                 resources_list = dag.tasks[0].get_resources_list()
                 accelerators_str = ', '.join([
                     r.get_accelerators_str() + r.get_spot_str()
@@ -823,13 +824,14 @@ class Optimizer:
             best_per_cloud: Dict[str, Tuple[resources_lib.Resources,
                                             float]] = {}
             for resources, cost in v.items():
-                cloud = str(resources.cloud) + resources.get_accelerators_str(
-                ) + resources.get_spot_str()
-                if cloud in best_per_cloud:
-                    if cost < best_per_cloud[cloud][1]:
-                        best_per_cloud[cloud] = (resources, cost)
+                resource_table_key = str(
+                    resources.cloud) + resources.get_accelerators_str(
+                    ) + resources.get_spot_str()
+                if resource_table_key in best_per_cloud:
+                    if cost < best_per_cloud[resource_table_key][1]:
+                        best_per_cloud[resource_table_key] = (resources, cost)
                 else:
-                    best_per_cloud[cloud] = (resources, cost)
+                    best_per_cloud[resource_table_key] = (resources, cost)
 
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
@@ -864,7 +866,8 @@ class Optimizer:
             if task.is_resources_ordered:
                 rows = sorted(
                     rows,
-                    key=lambda x: (
+                    key=lambda x:
+                    (  # x[-4] region, x[1] instance_type, x[-2] cost.
                         resources_pref_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
                             '[Spot]' if '[Spot]' in x[1] else '')),  # pylint: disable=cell-var-from-loop
                         x[-2]))  # pylint: disable=cell-var-from-loop
@@ -1046,7 +1049,7 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
 
 def _make_launchables_for_valid_region_zones(
     launchable_resources: resources_lib.Resources,
-    required_regions: Optional[List[str]] = None,
+    allowed_region: Optional[List[str]] = None,
 ) -> List[resources_lib.Resources]:
     assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
@@ -1074,9 +1077,9 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     filtered_regions = []
-    if required_regions is not None:
+    if allowed_region is not None:
         for region in regions:
-            if region.name in required_regions:
+            if region.name in allowed_region:
                 filtered_regions.append(region)
     else:
         filtered_regions = regions

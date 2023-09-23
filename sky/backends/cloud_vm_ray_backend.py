@@ -2612,8 +2612,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
 
-        If multiple resources are specified, this will pass only when
-        there exists an exact match to the cluster.
+        If multiple resources are specified, this will pass when
+        at one resource has an exact match to the cluster.
         """
 
         # If the task has multiple resources, it should be an exact match
@@ -2621,6 +2621,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         launched_resources = handle.launched_resources
         cluster_name = handle.cluster_name
+        usage_lib.messages.usage.update_cluster_resources(
+            handle.launched_nodes, launched_resources)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is not None:
+            usage_lib.messages.usage.update_cluster_status(record['status'])
 
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
@@ -4232,9 +4237,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        for r in task.resources:
-            if r is not None and r.cloud is not None:
-                task_cloud = r.cloud
+        for task_resources in task.resources:
+            if task_resources is not None and task_resources.cloud is not None:
+                task_cloud = task_resources.cloud
             else:
                 task_cloud = clouds.Cloud
 

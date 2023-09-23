@@ -317,18 +317,17 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
 
 
 def set_started(job_id: int, task_id: int, start_time: float,
-                resources_str: str, callback_func: CallbackType):
+                callback_func: CallbackType):
     """Set the task to started state."""
     logger.info('Job started.')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET
-            resources=(?),
             status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (resources_str, SpotStatus.RUNNING.value,
-                             start_time, start_time, job_id, task_id))
+            task_id=(?)""",
+            (SpotStatus.RUNNING.value, start_time, start_time, job_id, task_id))
     callback_func('STARTED')
 
 
@@ -347,17 +346,16 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
 
 
 def set_recovered(job_id: int, task_id: int, recovered_time: float,
-                  resources_str: str, callback_func: CallbackType):
+                  callback_func: CallbackType):
     """Set the task to recovered."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
             UPDATE spot SET
-            resources=(?),
             status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (resources_str, SpotStatus.RUNNING.value,
-                             recovered_time, job_id, task_id))
+            task_id=(?)""",
+            (SpotStatus.RUNNING.value, recovered_time, job_id, task_id))
     logger.info('==== Recovered. ====')
     callback_func('RECOVERED')
 

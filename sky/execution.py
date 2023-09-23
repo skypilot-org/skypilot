@@ -17,7 +17,7 @@ import enum
 import getpass
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 import uuid
 
 import colorama
@@ -632,19 +632,6 @@ def spot_launch(
     dag_utils.fill_default_spot_config_in_dag(dag)
 
     for task_ in dag.tasks:
-
-        new_resources_list = []
-        for res in task_.get_resources_list():
-
-            override_params: Dict[str, Any] = {}
-            if not res.use_spot_specified:
-                override_params['use_spot'] = True
-            if res.spot_recovery is None:
-                override_params['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
-            new_resources = res.copy(**override_params)
-            new_resources_list.append(new_resources)
-        task_.set_resources(new_resources_list, task_.is_resources_ordered)
-
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',

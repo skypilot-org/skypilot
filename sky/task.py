@@ -437,7 +437,7 @@ class Task:
             elif isinstance(accelerators, list):
                 pass
             elif isinstance(accelerators, dict):
-                accelerators = {f'{k}:{v}' for k, v in accelerators.items()}
+                accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
 
             tmp_resources_list = []
             for acc in accelerators:

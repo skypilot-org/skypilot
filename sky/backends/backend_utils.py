@@ -2680,7 +2680,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
                 for key, value in resource.accelerators.items():
                     accelerator_dict[key] = value
     if resources is not None:
-         accelerator_dict = resources.accelerators
+        accelerator_dict = resources.accelerators
     return accelerator_dict
 
 

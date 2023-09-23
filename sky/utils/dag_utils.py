@@ -91,14 +91,18 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
 
 def fill_default_spot_config_in_dag(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
-        assert len(task_.resources) == 1, task_
-        resources = list(task_.resources)[0]
 
-        change_default_value: Dict[str, Any] = {}
-        if not resources.use_spot_specified:
-            change_default_value['use_spot'] = True
-        if resources.spot_recovery is None:
-            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+        new_resources_list = []
+        for resources in task_.get_resources_list():
 
-        new_resources = resources.copy(**change_default_value)
-        task_.set_resources({new_resources})
+            change_default_value: Dict[str, Any] = {}
+            if not resources.use_spot_specified:
+                change_default_value['use_spot'] = True
+            if resources.spot_recovery is None:
+                change_default_value[
+                    'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+
+            new_resources = resources.copy(**change_default_value)
+            new_resources_list.append(new_resources)
+        task_.set_resources(new_resources_list,
+                            is_resources_ordered=task_.is_resources_ordered)
