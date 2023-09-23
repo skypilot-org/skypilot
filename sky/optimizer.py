@@ -1177,7 +1177,6 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
-
                 if check_resource_satisfying:
                     logger.info(f'No resource satisfying {resources} '
                                 f'on {clouds_str}.')

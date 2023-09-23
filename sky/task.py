@@ -433,9 +433,7 @@ class Task:
             resources_config.pop('resources_ordered', None)
 
             if isinstance(accelerators, str):
-                accelerators = {accelerators}
-            elif isinstance(accelerators, list):
-                pass
+                accelerators = [accelerators]
             elif isinstance(accelerators, dict):
                 accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
 
@@ -449,7 +447,7 @@ class Task:
                 tmp_resources_list.append(
                     sky.Resources.from_yaml_config(tmp_resource))
 
-            if isinstance(accelerators, (list, set)):
+            if isinstance(accelerators, list):
                 task.set_resources(tmp_resources_list, resources_ordered)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')

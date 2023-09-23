@@ -136,13 +136,13 @@ class Resources:
         self._zone: Optional[str] = None
         self._region_list = None
         if isinstance(region, list):
-            if len(region) > 1:
-                self._region_list = region
-                region = None
-            elif len(region) == 1:
-                region = region[0]
-            else:  # len(region) == 0
-                region = None
+             if len(region) > 1:
+                 self._region_list = region
+                 region = None
+             elif len(region) == 1:
+                 region = region[0]
+             else:  # len(region) == 0
+                 region = None
         self._set_region_zone(region, zone)
 
         self._instance_type = instance_type
