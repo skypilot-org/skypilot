@@ -468,11 +468,8 @@ class Storage(object):
         # buckets, this can be deprecated.
         self.force_delete = False
 
-        if self.sync_on_reconstruction:
-            # Validate and correct inputs if necessary
-            self._validate_storage_spec(name)
-        elif name:
-            self.name = name
+        # Validate and correct inputs if necessary
+        self._validate_storage_spec(name)
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones

@@ -23,6 +23,7 @@ _DB = None
 _MAX_SYNC_RETRIES = 10
 # Allowing minimal seconds of inteval between SYNC calls.
 _MIN_SYNC_CALL_INTERVAL = 3
+_DEFAULT_S3_NUM_THREAD = 10
 CSYNC_DEFAULT_INTERVAL_SECONDS = 600
 
 
@@ -130,65 +131,75 @@ def main():
     pass
 
 
-def get_s3_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
-                      no_follow_symlinks: bool):
+def get_s3_upload_cmd(source: str, destination: str, num_threads: int,
+                      delete: bool, no_follow_symlinks: bool):
     """Builds sync command for aws s3"""
-    config_cmd = ('aws configure set default.s3.max_concurrent_requests '
-                  f'{num_threads}')
-    subprocess.check_output(config_cmd, shell=True)
-    sync_cmd = f'aws s3 sync {src_path} s3://{dst}'
+    # aws s3 sync does not support options to set number of threads so we need
+    # a separate command for configuration
+    thread_configure_cmd = (
+        'aws configure set default.s3.max_concurrent_requests {num_threads}')
+    sync_cmd = [thread_configure_cmd.format(num_threads=num_threads)]
+    sync_cmd.append(';')
+
+    sync_cmd.extend(['aws', 's3', 'sync', source, f's3://{destination}'])
+    # Conditionally add flags based on the function arguments
     if delete:
-        sync_cmd += ' --delete'
+        sync_cmd.append('--delete')
     if no_follow_symlinks:
-        sync_cmd += ' --no-follow-symlinks'
-    return sync_cmd
+        sync_cmd.append('--no-follow-symlinks')
+    sync_cmd.append(';')
+
+    # set number of threads back to its default value after
+    # running the sync command
+    sync_cmd.append(
+        thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
+    sync_cmd.append(';')
+    return ' '.join(sync_cmd)
 
 
-def get_gcs_upload_cmd(src_path: str, dst: str, num_threads: int, delete: bool,
-                       no_follow_symlinks: bool):
+def get_gcs_upload_cmd(source: str, destination: str, num_threads: int,
+                       delete: bool, no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
-    sync_cmd = (f'gsutil -m -o "GSUtil:parallel_thread_count={num_threads}" '
-                'rsync -r')
+    sync_cmd = [
+        'gsutil', '-m', f'-o "GSUtil:parallel_thread_count={num_threads}"',
+        'rsync', '-r'
+    ]
+    # Conditionally add flags based on the function arguments
     if delete:
-        sync_cmd += ' -d'
+        sync_cmd.append('-d')
     if no_follow_symlinks:
-        sync_cmd += ' -e'
-    sync_cmd += f' {src_path} gs://{dst}'
-    return sync_cmd
+        sync_cmd.append('-e')
+
+    sync_cmd.extend([source, f'gs://{destination}'])
+
+    return ' '.join(sync_cmd)
 
 
-def run_sync(src: str, storetype: str, dst: str, num_threads: int,
+def run_sync(source: str, storetype: str, destination: str, num_threads: int,
              interval_seconds: int, delete: bool, no_follow_symlinks: bool,
              csync_pid: int):
-    """Runs the sync command from src to storetype bucket"""
+    """Runs the sync command from source to storetype bucket"""
     # TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
     if storetype == 's3':
-        sync_cmd = get_s3_upload_cmd(src, dst, num_threads, delete,
+        sync_cmd = get_s3_upload_cmd(source, destination, num_threads, delete,
                                      no_follow_symlinks)
     elif storetype == 'gcs':
-        sync_cmd = get_gcs_upload_cmd(src, dst, num_threads, delete,
+        sync_cmd = get_gcs_upload_cmd(source, destination, num_threads, delete,
                                       no_follow_symlinks)
     else:
         raise ValueError(f'Unsupported store type: {storetype}')
 
-    src_to_bucket = (f'{src!r} to {dst!r} '
-                     f'at {storetype!r}')
+    source_to_bucket = (f'{source!r} to {destination!r} '
+                        f'at {storetype!r}')
     # interval_seconds/2 is heuristically determined
     # as initial backoff
-    initial_backoff = int(interval_seconds / 2)
-    backoff = common_utils.Backoff(initial_backoff)
+    backoff = common_utils.Backoff(int(interval_seconds / 2))
     for i in range(_MAX_SYNC_RETRIES):
         try:
             with subprocess.Popen(sync_cmd, start_new_session=True,
                                   shell=True) as proc:
                 _set_running_csync_sync_pid(csync_pid, proc.pid)
-                if storetype == 's3':
-                    # set number of threads back to its default value
-                    config_cmd = \
-                        ('aws configure '
-                         'set default.s3.max_concurrent_requests 10')
-                    subprocess.run(config_cmd, shell=True, check=True)
                 proc.wait()
                 _set_running_csync_sync_pid(csync_pid, -1)
         except subprocess.CalledProcessError:
@@ -196,7 +207,7 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
             _set_running_csync_sync_pid(csync_pid, -1)
             wait_time = backoff.current_backoff()
             logger.warning('Encountered an error while syncing '
-                           f'{src_to_bucket}. Retrying sync '
+                           f'{source_to_bucket}. Retrying sync '
                            f'in {wait_time}s. {_MAX_SYNC_RETRIES-i-1} more '
                            'reattempts remaining. Check the log file '
                            'in ~/.sky/ for more details.')
@@ -204,7 +215,7 @@ def run_sync(src: str, storetype: str, dst: str, num_threads: int,
         else:
             # successfully completed sync process
             return
-    raise RuntimeError(f'Failed to sync {src_to_bucket} after '
+    raise RuntimeError(f'Failed to sync {source_to_bucket} after '
                        f'{_MAX_SYNC_RETRIES} number of retries. Check '
                        'the log file in ~/.sky/ for more'
                        'details') from None
