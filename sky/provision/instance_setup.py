@@ -96,7 +96,7 @@ def _hint_worker_log_path(cluster_name: str,
 def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              digest: str,
                              cluster_metadata: common.ClusterMetadata,
-                             ssh_credentials: Dict[str, str]) -> List[Any]:
+                             ssh_credentials: Dict[str, Any]) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
         for instance_id, metadata in cluster_metadata.instances.items():
@@ -121,7 +121,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
 @_log_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
                       cluster_metadata: common.ClusterMetadata,
-                      ssh_credentials: Dict[str, str]) -> Optional[str]:
+                      ssh_credentials: Dict[str, Any]) -> Optional[str]:
     """Setup docker on the cluster."""
     if not docker_config:
         return None
@@ -153,7 +153,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
 @_log_start_end
 def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              cluster_metadata: common.ClusterMetadata,
-                             ssh_credentials: Dict[str, str]) -> None:
+                             ssh_credentials: Dict[str, Any]) -> None:
     """Setup internal dependencies."""
     _hint_worker_log_path(cluster_name, cluster_metadata,
                           'setup_runtime_on_cluster')
@@ -194,7 +194,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
 @_auto_retry
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            cluster_metadata: common.ClusterMetadata,
-                           ssh_credentials: Dict[str, str]) -> None:
+                           ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the head node."""
     ip_list = cluster_metadata.get_feasible_ips()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
@@ -243,7 +243,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str],
                               cluster_metadata: common.ClusterMetadata,
-                              ssh_credentials: Dict[str, str]) -> None:
+                              ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the worker nodes."""
     if len(cluster_metadata.instances) <= 1:
         return
@@ -314,7 +314,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 @_auto_retry
 def start_skylet_on_head_node(cluster_name: str,
                               cluster_metadata: common.ClusterMetadata,
-                              ssh_credentials: Dict[str, str]) -> None:
+                              ssh_credentials: Dict[str, Any]) -> None:
     """Start skylet on the head node."""
     del cluster_name
     ip_list = cluster_metadata.get_feasible_ips()
