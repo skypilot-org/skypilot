@@ -1209,6 +1209,7 @@ class GCP(clouds.Cloud):
 
     def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
-        # Remove the cached property.
+        # We should avoid saving third-party object to the state, as it may
+        # cause unpickling error when the third-party API is updated.
         state.pop('_list_reservations_cache', None)
         return state
