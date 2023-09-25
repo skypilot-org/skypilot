@@ -799,6 +799,13 @@ class Storage(object):
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
 
+        if self.mode == StorageMode.CSYNC:
+            if store_type in (StoreType.R2, StoreType.IBM):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSpecError(
+                        f'Currently, {store_type} does not support '
+                        'CSYNC mode.')
+
         # Initialize store object and get/create bucket
         try:
             store = store_cls(
