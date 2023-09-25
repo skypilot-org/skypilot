@@ -131,53 +131,56 @@ def main():
     pass
 
 
-def build_command(*args):
+def build_command(*args) -> str:
     """Helper function to construct a command with a terminating semicolon."""
     return ' '.join(args) + ' ;'
 
 
-def get_s3_upload_cmd(source: str, destination: str, num_threads: int,
-                      delete: bool, no_follow_symlinks: bool):
-    """Builds sync command for aws s3."""
-    # aws s3 sync does not support options to set number of threads so we need
-    # a separate command for configuration
-    thread_configure_cmd = (
-        'aws configure set default.s3.max_concurrent_requests {num_threads}')
-    user_configured_thread_cmd = build_command(
-        thread_configure_cmd.format(num_threads=num_threads))
+def get_upload_cmd(storetype: str, source: str, destination: str,
+                   num_threads: int, delete: bool,
+                   no_follow_symlinks: bool) -> str:
+    """Builds sync command given storetype"""
 
-    # Construct the main sync command
-    base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
-    if delete:
-        base_sync_cmd.append('--delete')
-    if no_follow_symlinks:
-        base_sync_cmd.append('--no-follow-symlinks')
-    main_sync_cmd = build_command(*base_sync_cmd)
+    if storetype == 's3':
+        # aws s3 sync does not support options to set number of threads
+        # so we need a separate command for configuration
+        thread_configure_cmd = (
+            'aws configure set default.s3.max_concurrent_requests '
+            '{num_threads}')
+        user_configured_thread_cmd = build_command(
+            thread_configure_cmd.format(num_threads=num_threads))
 
-    # Reset the number of threads back to its default value after the sync
-    reset_thread_cmd = build_command(
-        thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
+        # Construct the main sync command
+        base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
+        if delete:
+            base_sync_cmd.append('--delete')
+        if no_follow_symlinks:
+            base_sync_cmd.append('--no-follow-symlinks')
+        main_sync_cmd = build_command(*base_sync_cmd)
 
-    full_cmd = ' '.join(
-        [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])
-    return full_cmd
+        # Reset the number of threads back to its default value after the sync
+        reset_thread_cmd = build_command(
+            thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
 
+        full_cmd = ' '.join(
+            [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])
 
-def get_gcs_upload_cmd(source: str, destination: str, num_threads: int,
-                       delete: bool, no_follow_symlinks: bool):
-    """Builds sync command for gcp gcs"""
-    base_sync_cmd = [
-        'gsutil', '-m', f'-o "GSUtil:parallel_thread_count={num_threads}"',
-        'rsync', '-r'
-    ]
-    # Conditionally add flags based on the function arguments
-    if delete:
-        base_sync_cmd.append('-d')
-    if no_follow_symlinks:
-        base_sync_cmd.append('-e')
+    elif storetype == 'gcs':
+        base_sync_cmd = [
+            'gsutil', '-m', f'-o "GSUtil:parallel_thread_count={num_threads}"',
+            'rsync', '-r'
+        ]
+        # Conditionally add flags based on the function arguments
+        if delete:
+            base_sync_cmd.append('-d')
+        if no_follow_symlinks:
+            base_sync_cmd.append('-e')
 
-    base_sync_cmd.extend([source, f'gs://{destination}'])
-    full_cmd = build_command(*base_sync_cmd)
+        base_sync_cmd.extend([source, f'gs://{destination}'])
+        full_cmd = build_command(*base_sync_cmd)
+    else:
+        raise ValueError(f'Unsupported store type: {storetype}')
+
     return full_cmd
 
 
@@ -187,14 +190,8 @@ def run_sync(source: str, storetype: str, destination: str, num_threads: int,
     """Runs the sync command from source to storetype bucket"""
     # TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
-    if storetype == 's3':
-        sync_cmd = get_s3_upload_cmd(source, destination, num_threads, delete,
-                                     no_follow_symlinks)
-    elif storetype == 'gcs':
-        sync_cmd = get_gcs_upload_cmd(source, destination, num_threads, delete,
-                                      no_follow_symlinks)
-    else:
-        raise ValueError(f'Unsupported store type: {storetype}')
+    sync_cmd = get_upload_cmd(storetype, source, destination, num_threads,
+                              delete, no_follow_symlinks)
 
     source_to_bucket = (f'{source!r} to {destination!r} '
                         f'at {storetype!r}')

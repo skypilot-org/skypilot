@@ -224,6 +224,7 @@ class AbstractStore:
         self.region = region
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
+        self.bucket = None
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
@@ -323,23 +324,28 @@ class AbstractStore:
         """
         store_type = StoreType.from_store(self)
         store_type_str = store_type.value.lower()
-        
+
         # Set default interval_seconds if not provided
         if interval_seconds is None:
             interval_seconds = sky_csync.CSYNC_DEFAULT_INTERVAL_SECONDS
 
+        # Set the destination which is either root of the bucket
+        # or subdirectory of the bucket
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
                     if store_type == StoreType.GCS:
                         destination = str(self.source).replace('gs://', '')
                     else:
-                        destination = str(self.source).replace(f'{store_type_str}://', '')
+                        destination = str(self.source).replace(
+                            f'{store_type_str}://', '')
                 elif isinstance(self.source, list):
                     raise TypeError(
-                        'CSYNC mode does not supprot multiple sources for a single storage.'
-                    )
+                        'CSYNC mode does not supprot multiple sources '
+                        'for a single storage.')
         else:
+            assert self.bucket is not None, (
+                'Bucket should be initialized before calling csync_command')
             destination = self.bucket.name
 
         # Parse destination to get sync_point for log file naming
@@ -347,17 +353,16 @@ class AbstractStore:
         # or the subdirectory in it
         result = urllib.parse.urlsplit(destination)
         sync_point = result.path.split('/')[-1]
-        log_file_name = log_file_name = f'csync_{store_type_str}_{sync_point}.log'
+        log_file_name = f'csync_{store_type_str}_{sync_point}.log'
         log_path = f'~/.sky/{log_file_name}'
 
         csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
-                     f'{store_type_str} {destination} --interval-seconds {interval_seconds} '
-                     '--delete --no-follow-symlinks')
+                     f'{store_type_str} {destination} --interval-seconds '
+                     f'{interval_seconds} --delete --no-follow-symlinks')
         return mounting_utils.get_mounting_command(StorageMode.CSYNC,
                                                    csync_path,
                                                    csync_cmd,
                                                    csync_log_path=log_path)
-
 
     def __deepcopy__(self, memo):
         # S3 Client and GCS Client cannot be deep copied, hence the
@@ -1355,7 +1360,6 @@ class S3Store(AbstractStore):
                                                    mount_path, mount_cmd,
                                                    install_cmd)
 
-
     def _create_s3_bucket(self,
                           bucket_name: str,
                           region='us-east-2') -> StorageHandle:
@@ -1789,7 +1793,6 @@ class GcsStore(AbstractStore):
                                                    install_cmd,
                                                    version_check_cmd)
 
-
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
 
@@ -2153,17 +2156,6 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd)
-
-    def csync_command(self,
-                      csync_path: str,
-                      interval_seconds: Optional[int] = None) -> str:
-        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
-
-        Args:
-          csync_path: str; Path to continuously sync the bucket to.
-          interval_seconds: int; runs the sync command every INTERVAL seconds
-        """
-        raise NotImplementedError
 
     def _create_r2_bucket(self,
                           bucket_name: str,
