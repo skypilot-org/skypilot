@@ -1,9 +1,9 @@
 0a1,4
-> # Adapted from https://github.com/ray-project/ray/blob/ray-2.6.1/python/ray/_private/worker.py
+> # Adapted from https://github.com/ray-project/ray/blob/ray-2.7.0/python/ray/_private/worker.py
 > # Fixed the problem in ray's issue https://github.com/ray-project/ray/issues/9233
 > # Tracked in PR https://github.com/ray-project/ray/pull/21977/files.
 > 
-1892a1897,1904
+1944a1949,1955
 >     
 >     def end_for(line: str) -> str:
 >         if sys.platform == "win32":
@@ -11,8 +11,7 @@
 >         if line.startswith("\r") and not line[1:].strip().startswith("100%"):
 >             return ""
 >         return "\n"
-> 
-1916a1929
+1968a1980
 >                     end=end_for(line),
-1934a1948
+1986a1999
 >                     end=end_for(line),

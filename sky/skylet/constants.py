@@ -18,7 +18,7 @@ SKY_REMOTE_RAY_PORT_DICT_STR = (
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
-SKY_REMOTE_RAY_VERSION = '2.6.1'
+SKY_REMOTE_RAY_VERSION = '2.7.0'
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
 UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
