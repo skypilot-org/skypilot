@@ -458,8 +458,6 @@ class Storage(object):
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
-        if self.mode != StorageMode.CSYNC:
-            assert interval_seconds is None
         self.interval_seconds = interval_seconds
         self.sync_on_reconstruction = sync_on_reconstruction
 
@@ -650,6 +648,13 @@ class Storage(object):
                         '`source: s3://mybucket/`). If you are trying to '
                         'create a new bucket, please use the `store` field to '
                         'specify the store type (e.g. `store: s3`).')
+
+        # interval_seconds is a field only used with CSYNC mode
+        if self.mode != StorageMode.CSYNC and self.interval_seconds is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSourceError(
+                    'The field "interval_seconds" can be specified only '
+                    'with CSYNC mdoe.')
 
         if self.source is None:
             # If the mode is COPY, the source must be specified
