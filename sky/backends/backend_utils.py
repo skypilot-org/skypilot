@@ -2895,7 +2895,7 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
         cluster_name: Cluster name (see `sky status`)
     """
     record = global_user_state.get_cluster_from_name(cluster_name)
-    assert record is not None
+    assert record is not None, cluster_name
     handle = record['handle']
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
@@ -2919,13 +2919,13 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
                                    require_outputs=True)
 
         if rc:
-            #TODO(Doyoung): Set the following to 'warning' when #2504 is resolved
-            # Currently, the logger interrupts the rich progress bar.
+            # TODO(Doyoung): Set the following to 'warning' when #2504 is
+            # resolved. Currently, the logger interrupts the rich progress bar
             logger.debug(
                 f'CSYNC: failed to terminate the CSYNC on {runner.ip}. '
                 f'Details: {stderr}')
 
-    #TODO(Doyoung): Set the following to 'info' when #2504 is resolved
+    # TODO(Doyoung): Set the following to 'info' when #2504 is resolved
     logger.debug(f'CSYNC termination initiated for {cluster_name}. If a '
                  'sync process is currently running, CSYNC will terminate '
                  'after it completes.\n')
