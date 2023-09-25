@@ -329,7 +329,7 @@ def _get_resources(cluster_record: _ClusterRecord) -> str:
             launched_resource_str = str(handle.launched_resources)
             # accelerator_args is way too long.
             # Convert from:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.5.0'}  # pylint: disable=line-too-long
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
             # to:
             #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
             pattern = ', accelerator_args={.*}'

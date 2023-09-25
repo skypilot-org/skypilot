@@ -1,9 +1,10 @@
 """IBM Web Services."""
-import colorama
-import os
 import json
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+import colorama
 
 from sky import clouds
 from sky import sky_logging
@@ -38,6 +39,10 @@ class IBM(clouds.Cloud):
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
                 (f'Migrating disk is not supported in {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+                (f'Docker image is not supported in {cls._REPR}. '
+                 'You can try running docker command inside the '
+                 '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
                 (f'Custom disk tier is not supported in {cls._REPR}.'),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
@@ -45,7 +50,7 @@ class IBM(clouds.Cloud):
         }
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -131,10 +136,10 @@ class IBM(clouds.Cloud):
         # Currently Isn't implemented in the same manner by aws and azure.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost. Currently true for us-south, i.e. Dallas.
         based on https://cloud.ibm.com/objectstorage/create#pricing. """
-        cost = 0
+        cost = 0.
         price_thresholds = [{
             'threshold': 150,
             'price_per_gb': 0.05
@@ -158,6 +163,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -172,6 +178,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
+        del cluster_name_on_cloud  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -251,16 +258,9 @@ class IBM(clouds.Cloud):
                                                          clouds='ibm')
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
-        """Returns a list of feasible and launchable resources.
-
-        Feasible resources refer to an offering respecting the resource
-        requirements.  Currently, this function implements "filtering" the
-        cloud's offerings only w.r.t. accelerators constraints.
-
-        Launchable resources require a cloud and an instance type be assigned.
-        """
-        fuzzy_candidate_list: Optional[List[str]] = []
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -310,8 +310,8 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_image(cls, region) -> str:
-        """
-        Returns default image id, currently stock ubuntu 22-04.
+        """Returns default image id, currently stock ubuntu 22-04.
+
         if user specified 'image_id' in ~/.ibm/credentials.yaml
             matching this 'region', returns it instead.
         """
@@ -345,7 +345,8 @@ class IBM(clouds.Cloud):
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         assert region is not None, (image_id, region)
         client = ibm.client(region=region)
         try:

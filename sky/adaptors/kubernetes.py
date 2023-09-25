@@ -5,7 +5,8 @@
 import functools
 import os
 
-from sky.utils import ux_utils, env_options
+from sky.utils import env_options
+from sky.utils import ux_utils
 
 kubernetes = None
 urllib3 = None
@@ -138,3 +139,8 @@ def config_exception():
 @import_package
 def max_retry_error():
     return urllib3.exceptions.MaxRetryError
+
+
+@import_package
+def stream():
+    return kubernetes.stream.stream

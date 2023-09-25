@@ -1,4 +1,5 @@
 """Utilities for GCP instances."""
+import re
 from typing import Dict, List, Optional
 
 from sky import sky_logging
@@ -9,6 +10,9 @@ logger = sky_logging.init_logger(__name__)
 # Using v2 according to
 # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
 TPU_VERSION = 'v2'
+
+_FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/global/firewalls/.*\' was not found')
 
 
 def instance_to_handler(instance: str):
@@ -56,7 +60,7 @@ class GCPInstance:
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -77,6 +81,18 @@ class GCPInstance:
         project_id: str,
         firewall_rule_name: str,
     ) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def create_or_update_firewall_rule(
+        cls,
+        firewall_rule_name: str,
+        project_id: str,
+        zone: str,
+        instances: List[str],
+        cluster_name_on_cloud: str,
+        ports: List[str],
+    ) -> Optional[dict]:
         raise NotImplementedError
 
 
@@ -108,6 +124,11 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             zone=zone,
             instance=instance,
+            # This is needed for the instance that has local SSDs attached by
+            # default, such as a2-highgpu-8g. Otherwise, an error will be
+            # raised. Refer to issue #2586
+            # https://cloud.google.com/compute/docs/disks/local-ssd#stop_instance
+            discardLocalSsd=False,
         ).execute()
         return operation
 
@@ -175,17 +196,25 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
-        result = (cls.load_resource().zoneOperations().get(
-            project=project_id,
-            operation=operation['name'],
-            zone=zone,
-        ).execute())
+                           zone: Optional[str]) -> bool:
+        if zone is not None:
+            op_type = 'zone'
+            result = (cls.load_resource().zoneOperations().get(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            ).execute())
+        else:
+            op_type = 'global'
+            result = (cls.load_resource().globalOperations().get(
+                project=project_id,
+                operation=operation['name'],
+            ).execute())
         if 'error' in result:
             raise Exception(result['error'])
 
         if result['status'] == 'DONE':
-            logger.debug('wait_for_compute_zone_operation: '
+            logger.debug(f'wait_for_compute_{op_type}_operation: '
                          f'Operation {operation["name"]} finished.')
             return True
         return False
@@ -197,8 +226,10 @@ class GCPComputeInstance(GCPInstance):
         firewall_rule_name: str,
     ) -> None:
         rule = cls.load_resource().firewalls().list(
-            project=project_id, filter=f'name={firewall_rule_name}')
-        if not rule:
+            project=project_id, filter=f'name={firewall_rule_name}').execute()
+        # For the return value format, please refer to
+        # https://developers.google.com/resources/api-libraries/documentation/compute/alpha/python/latest/compute_alpha.firewalls.html#list # pylint: disable=line-too-long
+        if 'items' not in rule:
             logger.warning(f'Firewall rule {firewall_rule_name} not found. '
                            'Skip cleanup.')
             return
@@ -206,6 +237,68 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             firewall=firewall_rule_name,
         ).execute()
+
+    @classmethod
+    def create_or_update_firewall_rule(
+        cls,
+        firewall_rule_name: str,
+        project_id: str,
+        zone: str,
+        instances: List[str],
+        cluster_name_on_cloud: str,
+        ports: List[str],
+    ) -> Optional[dict]:
+        try:
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick one.
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instances[0],
+            ).execute()
+            # Format: projects/PROJECT_ID/global/networks/VPC_NAME
+            vpc_link = response['networkInterfaces'][0]['network']
+            vpc_name = vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            logger.warning(
+                f'Failed to get VPC name for instance {instances[0]}: '
+                f'{e.reason}. Skip opening ports for it.')
+            return None
+        try:
+            body = cls.load_resource().firewalls().get(
+                project=project_id, firewall=firewall_rule_name).execute()
+            body['allowed'][0]['ports'] = ports
+            operation = cls.load_resource().firewalls().update(
+                project=project_id,
+                firewall=firewall_rule_name,
+                body=body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            if _FIREWALL_RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+                logger.warning(
+                    f'Failed to update firewall rule {firewall_rule_name}: '
+                    f'{e.reason}')
+                return None
+            body = {
+                'name': firewall_rule_name,
+                'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
+                'network': f'projects/{project_id}/global/networks/{vpc_name}',
+                'selfLink': f'projects/{project_id}/global/firewalls/' +
+                            firewall_rule_name,
+                'direction': 'INGRESS',
+                'priority': 65534,
+                'allowed': [{
+                    'IPProtocol': 'tcp',
+                    'ports': ports,
+                }],
+                'sourceRanges': ['0.0.0.0/0'],
+                'targetTags': [cluster_name_on_cloud],
+            }
+            operation = cls.load_resource().firewalls().insert(
+                project=project_id,
+                body=body,
+            ).execute()
+        return operation
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -230,7 +323,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
         result = (cls.load_resource().projects().locations().operations().get(

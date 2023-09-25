@@ -803,35 +803,6 @@ def get_usable_vpc(config):
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
 
-    # Configure user specified rules
-    ports = config["provider"].get("ports", [])
-    user_rules = []
-    for port in ports:
-        cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
-            config["cluster_name"]
-        )
-        name = f"user-ports-{cluster_name_hash}-{port}"
-        user_rules.append(
-            {
-                "name": name,
-                "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
-                "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-                "selfLink": "projects/{PROJ_ID}/global/firewalls/" + name,
-                "direction": "INGRESS",
-                "priority": 65534,
-                "allowed": [
-                    {
-                        "IPProtocol": "tcp",
-                        "ports": [str(port)],
-                    },
-                ],
-                "sourceRanges": ["0.0.0.0/0"],
-                "targetTags": [config["cluster_name"]],
-            }
-        )
-
-    _create_rules(config, compute, user_rules, usable_vpc_name, proj_id)
-
     return usable_vpc_name
 
 
@@ -888,7 +859,7 @@ def _configure_subnet(config, compute):
             # the created VM.
             node_config["tags"]["items"].append(config["cluster_name"])
         else:
-            assert get_node_type(node_config) == GCPNodeType.GCPTPU, node_config
+            assert get_node_type(node_config) == GCPNodeType.TPU, node_config
             # TPU VM has a different api for tags. See
             # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
             if "tags" not in node_config:

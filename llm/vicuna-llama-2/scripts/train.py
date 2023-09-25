@@ -30,22 +30,22 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 import json
-import pathlib
 import os
+import pathlib
 import shutil
 import subprocess
 from typing import Dict, Optional
 
+from fastchat.conversation import SeparatorStyle
+from fastchat.model.model_adapter import get_conversation_template
 import torch
 from torch.utils.data import Dataset
 import transformers
 from transformers import Trainer
 from transformers.trainer_pt_utils import LabelSmoother
-
-from fastchat.conversation import SeparatorStyle
-from fastchat.model.model_adapter import get_conversation_template
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 

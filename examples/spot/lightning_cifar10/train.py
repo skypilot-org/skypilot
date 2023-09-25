@@ -1,21 +1,25 @@
 # Code modified from https://pytorch-lightning.readthedocs.io/en/stable/notebooks/lightning_examples/cifar10-baseline.html
 
+import argparse
+import glob
 import os
 
+from pl_bolts.datamodules import CIFAR10DataModule
+from pl_bolts.transforms.dataset_normalizations import cifar10_normalization
+from pytorch_lightning import LightningModule
+from pytorch_lightning import seed_everything
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
-from pl_bolts.datamodules import CIFAR10DataModule
-from pl_bolts.transforms.dataset_normalizations import cifar10_normalization
-from pytorch_lightning import LightningModule, Trainer, seed_everything
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
 from torch.optim.lr_scheduler import OneCycleLR
-from torch.optim.swa_utils import AveragedModel, update_bn
+from torch.optim.swa_utils import AveragedModel
+from torch.optim.swa_utils import update_bn
 from torchmetrics.functional import accuracy
-
-import argparse, glob
+import torchvision
 
 seed_everything(7)
 

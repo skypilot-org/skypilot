@@ -1,8 +1,8 @@
-import tensorflow_datasets as tfds
 import tensorflow as tf
+import tensorflow_datasets as tfds
 import tensorflow_text as tf_text
-from transformers import TFDistilBertForSequenceClassification
 from transformers import TFBertForSequenceClassification
+from transformers import TFDistilBertForSequenceClassification
 
 tpu = tf.distribute.cluster_resolver.TPUClusterResolver()
 tf.config.experimental_connect_to_cluster(tpu)

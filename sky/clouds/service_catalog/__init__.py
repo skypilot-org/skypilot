@@ -4,12 +4,10 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL,
-    CATALOG_SCHEMA_VERSION,
-    LOCAL_CATALOG_DIR,
-)
-from sky.clouds.service_catalog.config import use_default_catalog
+from sky.clouds.service_catalog.config import fallback_to_default_catalog
+from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
+from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
+from sky.clouds.service_catalog.constants import LOCAL_CATALOG_DIR
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -47,7 +45,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
-@use_default_catalog
+@fallback_to_default_catalog
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
@@ -213,7 +211,8 @@ def get_instance_type_for_accelerator(
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
@@ -331,7 +330,7 @@ __all__ = [
     'get_image_id_from_tag',
     'is_image_tag_valid',
     # Configuration
-    'use_default_catalog',
+    'fallback_to_default_catalog',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',

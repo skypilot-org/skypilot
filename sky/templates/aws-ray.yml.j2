@@ -1,9 +1,20 @@
-cluster_name: {{cluster_name}}
+cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
 max_workers: {{num_nodes - 1}}
 upscaling_speed: {{num_nodes - 1}}
 idle_timeout_minutes: 60
+
+{%- if docker_image is not none %}
+docker:
+  image: {{docker_image}}
+  container_name: {{docker_container_name}}
+  run_options:
+    - --ulimit nofile=1048576:1048576
+    {%- if custom_resources is not none %}
+      --gpus all
+    {%- endif %}
+{%- endif %}
 
 provider:
   type: external
@@ -21,11 +32,14 @@ provider:
   # AWSNodeProvider.
   vpc_name: {{vpc_name}}
 {% endif %}
-{%- if ports %}
-  ports:
-{%- for port in ports %}
-    - {{port}}
-{%- endfor %}
+{%- if docker_login_config is not none %}
+  # We put docker login config in provider section because ray's schema disabled
+  # additionalProperties for docker config.
+  # See: https://github.com/ray-project/ray/blob/d2fc4823126927b2c54f89ec72fa3d24b442e6a3/python/ray/autoscaler/ray-schema.json#L227
+  docker_login_config:
+    username: {{docker_login_config.username}}
+    password: {{docker_login_config.password}}
+    server: {{docker_login_config.server}}
 {%- endif %}
   use_internal_ips: {{use_internal_ips}}
   # Disable launch config check for worker nodes as it can cause resource
@@ -183,7 +197,6 @@ initialization_commands: []
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 setup_commands:
-  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # We set auto_activate_base to be false for pre-installed conda.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
@@ -196,10 +209,13 @@ setup_commands:
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     source ~/.bashrc;
-    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
     (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[remote,aws]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    {%- endif %}
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
@@ -212,16 +228,20 @@ setup_commands:
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
 head_start_ray_commands:
+  # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials from environment
+  #   variables set by user. SkyPilot's ray cluster should use the `~/.aws/` credentials, as that is
+  #   the one used to create the cluster, and the autoscaler module started by the `ray start` command
+  #   should use the same credentials. Otherwise, `ray status` will fail to fetch the available nodes. Reference: https://github.com/skypilot-org/skypilot/issues/2441
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
-  - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
+  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
     {{dump_port_command}};
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
+  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []

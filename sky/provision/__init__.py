@@ -3,11 +3,10 @@
 This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
-from typing import Any, Dict, List, Optional
-
 import functools
 import importlib
 import inspect
+from typing import Any, Dict, List, Optional
 
 from sky import status_lib
 
@@ -41,7 +40,7 @@ def _route_to_cloud_impl(func):
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
@@ -58,7 +57,7 @@ def query_instances(
 @_route_to_cloud_impl
 def stop_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
@@ -69,7 +68,7 @@ def stop_instances(
 @_route_to_cloud_impl
 def terminate_instances(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
@@ -78,9 +77,20 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
+def open_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Open ports for inbound traffic."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
 def cleanup_ports(
     provider_name: str,
-    cluster_name: str,
+    cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""

@@ -21,7 +21,7 @@ class TestExecutionOnExistingClusters:
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn, enable_all_clouds):
         """Add clusters to the global state.
-        
+
         This fixture adss three clusters to the global state:
         - test-cluster1: AWS, 2x p4d.24xlarge (8x A100)
         - test-cluster2: GCP, 1x n1-highmem-64, 4x V100
@@ -31,6 +31,7 @@ class TestExecutionOnExistingClusters:
 
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster1',
+            cluster_name_on_cloud='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
             launched_nodes=2,
             launched_resources=sky.Resources(sky.AWS(),
@@ -45,6 +46,7 @@ class TestExecutionOnExistingClusters:
             ready=True)
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster2',
+            cluster_name_on_cloud='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.GCP(),
@@ -60,6 +62,7 @@ class TestExecutionOnExistingClusters:
             ready=True)
         handle = backends.CloudVmRayResourceHandle(
             cluster_name='test-cluster3',
+            cluster_name_on_cloud='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.Azure(),
@@ -74,7 +77,7 @@ class TestExecutionOnExistingClusters:
 
     def test_launch_exec(self, _mock_cluster_state, monkeypatch):
         """Test launch and exec on existing clusters.
-        
+
         This test runs launch and exec with less demanding resources
         than the existing clusters can pass the check.
         """

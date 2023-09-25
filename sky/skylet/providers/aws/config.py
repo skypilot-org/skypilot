@@ -1001,47 +1001,21 @@ def _update_inbound_rules(target_security_group, sgids, config):
     extended_rules = (
         config["provider"].get("security_group", {}).get("IpPermissions", [])
     )
-    user_specified_rules = _retrieve_user_specified_rules(
-        config["provider"].get("ports", [])
-    )
-    ip_permissions = _create_default_inbound_rules(
-        sgids, user_specified_rules, extended_rules
-    )
+    ip_permissions = _create_default_inbound_rules(sgids, extended_rules)
     target_security_group.authorize_ingress(IpPermissions=ip_permissions)
 
 
-def _create_default_inbound_rules(sgids, user_specified_rules, extended_rules=None):
+def _create_default_inbound_rules(sgids, extended_rules=None):
     if extended_rules is None:
         extended_rules = []
     intracluster_rules = _create_default_intracluster_inbound_rules(sgids)
     ssh_rules = _create_default_ssh_inbound_rules()
     merged_rules = itertools.chain(
-        user_specified_rules,
         intracluster_rules,
         ssh_rules,
         extended_rules,
     )
     return list(merged_rules)
-
-
-def _retrieve_user_specified_rules(ports):
-    rules = []
-    for port in ports:
-        if isinstance(port, int):
-            from_port = to_port = port
-        else:
-            from_port, to_port = port.split("-")
-            from_port = int(from_port)
-            to_port = int(to_port)
-        rules.append(
-            {
-                "FromPort": from_port,
-                "ToPort": to_port,
-                "IpProtocol": "tcp",
-                "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
-            }
-        )
-    return rules
 
 
 def _create_default_intracluster_inbound_rules(intracluster_sgids):

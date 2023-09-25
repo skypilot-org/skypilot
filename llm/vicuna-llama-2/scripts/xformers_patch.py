@@ -21,8 +21,8 @@ import math
 from typing import Optional, Tuple
 
 import torch
-import transformers.models.llama.modeling_llama
 from torch import nn
+import transformers.models.llama.modeling_llama
 
 try:
     import xformers.ops

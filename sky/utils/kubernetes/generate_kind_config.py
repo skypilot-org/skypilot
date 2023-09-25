@@ -10,8 +10,8 @@ def generate_kind_config(path: str,
                          port_start: int = 30000,
                          port_end: int = 32768,
                          num_nodes=1) -> None:
-    """
-    Generate a kind cluster config file with ports mapped from host to container
+    """Generate a kind cluster config with ports mapped from host to container
+
     Args:
         path: Path to generate the config file at
         port_start: Port range start
