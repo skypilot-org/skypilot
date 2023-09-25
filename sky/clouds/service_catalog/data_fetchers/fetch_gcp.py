@@ -510,6 +510,22 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     # Round the prices.
     df['Price'] = df['Price'].round(PRICE_ROUNDING)
     df['SpotPrice'] = df['SpotPrice'].round(PRICE_ROUNDING)
+    gpu_map = {
+        'L4': 24,
+        'A100': 40,
+        'A100-80GB': 80,
+        'A100-40GB': 40,
+        'T4': 16,
+        'P4': 8,
+        'V100': 16,
+        'P100': 16,
+        'K80': 12,
+        '': ''
+    }
+    df['Device_Memory'] = df.apply(
+        lambda row: gpu_map[row['AcceleratorName']] * row['AcceleratorCount']
+        if pd.notnull(row['AcceleratorName']) else np.nan,
+        axis=1)
     return df
 
 
