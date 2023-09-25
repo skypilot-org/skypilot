@@ -131,48 +131,54 @@ def main():
     pass
 
 
+def build_command(*args):
+    """Helper function to construct a command with a terminating semicolon."""
+    return ' '.join(args) + ' ;'
+
+
 def get_s3_upload_cmd(source: str, destination: str, num_threads: int,
                       delete: bool, no_follow_symlinks: bool):
-    """Builds sync command for aws s3"""
+    """Builds sync command for aws s3."""
     # aws s3 sync does not support options to set number of threads so we need
     # a separate command for configuration
     thread_configure_cmd = (
         'aws configure set default.s3.max_concurrent_requests {num_threads}')
-    sync_cmd = [thread_configure_cmd.format(num_threads=num_threads)]
-    sync_cmd.append(';')
+    user_configured_thread_cmd = build_command(
+        thread_configure_cmd.format(num_threads=num_threads))
 
-    sync_cmd.extend(['aws', 's3', 'sync', source, f's3://{destination}'])
-    # Conditionally add flags based on the function arguments
+    # Construct the main sync command
+    base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
     if delete:
-        sync_cmd.append('--delete')
+        base_sync_cmd.append('--delete')
     if no_follow_symlinks:
-        sync_cmd.append('--no-follow-symlinks')
-    sync_cmd.append(';')
+        base_sync_cmd.append('--no-follow-symlinks')
+    main_sync_cmd = build_command(*base_sync_cmd)
 
-    # set number of threads back to its default value after
-    # running the sync command
-    sync_cmd.append(
+    # Reset the number of threads back to its default value after the sync
+    reset_thread_cmd = build_command(
         thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
-    sync_cmd.append(';')
-    return ' '.join(sync_cmd)
+
+    full_cmd = ' '.join(
+        [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])
+    return full_cmd
 
 
 def get_gcs_upload_cmd(source: str, destination: str, num_threads: int,
                        delete: bool, no_follow_symlinks: bool):
     """Builds sync command for gcp gcs"""
-    sync_cmd = [
+    base_sync_cmd = [
         'gsutil', '-m', f'-o "GSUtil:parallel_thread_count={num_threads}"',
         'rsync', '-r'
     ]
     # Conditionally add flags based on the function arguments
     if delete:
-        sync_cmd.append('-d')
+        base_sync_cmd.append('-d')
     if no_follow_symlinks:
-        sync_cmd.append('-e')
+        base_sync_cmd.append('-e')
 
-    sync_cmd.extend([source, f'gs://{destination}'])
-
-    return ' '.join(sync_cmd)
+    base_sync_cmd.extend([source, f'gs://{destination}'])
+    full_cmd = build_command(*base_sync_cmd)
+    return full_cmd
 
 
 def run_sync(source: str, storetype: str, destination: str, num_threads: int,
