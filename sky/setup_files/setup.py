@@ -84,7 +84,16 @@ install_requires = [
     # Light weight requirement, can be replaced with "typing" once
     # we deprecate Python 3.7 (this will take a while).
     "typing_extensions; python_version < '3.8'",
-    'filelock>=3.6.0',
+    'filelock >= 3.6.0',
+    # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
+    # ray start is called (#2054).
+    # Tracking issue: https://github.com/ray-project/ray/issues/30984
+    "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
+    # Original issue: https://github.com/ray-project/ray/issues/33833
+    "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
+    "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
     'packaging',
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/86fab1764e618215d8131e8e5068f0d493c77023/python/setup.py#L326
@@ -137,17 +146,6 @@ extras_require: Dict[str, List[str]] = {
     'scp': [],
     'oci': ['oci'],
     'kubernetes': ['kubernetes'],
-    'remote': [
-        # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
-        # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
-        # ray start is called (#2054).
-        # Tracking issue: https://github.com/ray-project/ray/issues/30984
-        "grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < '3.10' and sys_platform == 'darwin'",  # noqa:E501
-        "grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= '3.10' and sys_platform == 'darwin'",  # noqa:E501
-        # Original issue: https://github.com/ray-project/ray/issues/33833
-        "grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < '3.10' and sys_platform != 'darwin'",  # noqa:E501
-        "grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= '3.10' and sys_platform != 'darwin'",  # noqa:E501
-    ]
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
