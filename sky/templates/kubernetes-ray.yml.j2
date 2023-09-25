@@ -34,7 +34,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account
 
     # Role created by the autoscaler for the head node pod that it runs in.
     # If this field isn't provided, the role referenced in
@@ -45,7 +45,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account-role
         # TODO(romilb): This is a very permissive role - gives all access in the
         #  namespace. We should restrict this. For reference, this is required
         #  for autodown and creating more SkyPilot clusters from within the pod.
@@ -63,13 +63,13 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account-role-binding
         subjects:
         - kind: ServiceAccount
-          name: autoscaler
+          name: skypilot-service-account
         roleRef:
             kind: Role
-            name: autoscaler
+            name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
     services:
@@ -134,7 +134,7 @@ available_node_types:
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
-        serviceAccountName: autoscaler
+        serviceAccountName: skypilot-service-account
 
         restartPolicy: Never
 
