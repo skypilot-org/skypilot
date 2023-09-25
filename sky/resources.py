@@ -510,7 +510,7 @@ class Resources:
                     if use_tpu_vm:
                         accelerator_args['runtime_version'] = 'tpu-vm-base'
                     else:
-                        accelerator_args['runtime_version'] = '2.5.0'
+                        accelerator_args['runtime_version'] = '2.12.0'
                     logger.info(
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
