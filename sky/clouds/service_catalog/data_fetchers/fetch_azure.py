@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-US_REGIONS = [
+US_REGIONS = {
     'centralus',
     'eastus',
     'eastus2',
@@ -24,7 +24,7 @@ US_REGIONS = [
     'westus',
     'westus2',
     'westus3',
-]
+}
 
 # Exclude the following regions as they do not have ProductName in the
 # pricing table. Reference: #1768 #2548
@@ -325,7 +325,6 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-<<<<<<< HEAD
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--all-regions',
                        action='store_true',
@@ -357,16 +356,6 @@ if __name__ == '__main__':
 
     if not region_filter:
         raise ValueError('No regions to fetch. Please check your arguments.')
-=======
-    parser.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.')
-    args = parser.parse_args()
-
-    region_filter = get_regions() if args.all_regions else US_REGIONS
-    region_filter = set(region_filter) - EXCLUDED_REGIONS
->>>>>>> AddDeviceMemory
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
