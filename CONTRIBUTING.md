@@ -67,7 +67,7 @@ It has some convenience features which you might find helpful (see [Dockerfile](
 * Common dependencies and some utilities (rsync, screen, vim, nano etc) are pre-installed
 * requirements-dev.txt is pre-installed
 * Environment variables for dev/debug are set correctly
-* Automatically clones the latest master to `/sky_repo` when the container is launched.
+* Automatically clones the latest master to `/sky_repo/skypilot` when the container is launched.
   * Note that you still have to manually run `pip install -e ".[all]"` to install skypilot, it is not pre-installed.
   * If your branch is on the SkyPilot repo, you can run `git checkout <your_branch>` to switch to your branch.
 
