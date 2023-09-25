@@ -985,9 +985,10 @@ def _wait_until_job_reaching_status_on_controller(
         if job_status == expected_status:
             return True
         if job_status is not None and job_status.is_terminal():
-            raise ValueError(
-                f'Job {job_id} is expected to reach status {expected_status}, '
-                f'but it reached terminal status {job_status}.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Job {job_id} is expected to reach status '
+                                 f'{expected_status}, but it reached terminal '
+                                 f'status {job_status}.')
         time.sleep(1)
     # Cancel any jobs that are still pending after timeout.
     if job_status == job_lib.JobStatus.PENDING:
