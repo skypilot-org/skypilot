@@ -4299,17 +4299,21 @@ def serve_update(
 
     previous_service_record = global_user_state.get_service_from_name(
         service_name)
+    prompt = None
     if previous_service_record is None:
+        prompt = (f'Service {service_name!r} not exist. '
+                  'To create a new service, use `sky serve up`.')
+    elif (previous_service_record['status'] ==
+          status_lib.ServiceStatus.CONTROLLER_FAILED):
+        prompt = (f'Service {service_name!r} has a failed controller. '
+                  'Please clean up the service and try again.')
+    elif (previous_service_record['status'] ==
+          status_lib.ServiceStatus.CONTROLLER_INIT):
+        prompt = (f'Service {service_name!r} is still initializing '
+                  'its controller. Please try again later.')
+    if prompt is not None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Service {service_name!r} not exist. '
-                               'To create a new service, use `sky serve up`.')
-    elif previous_service_record['status'] in [
-            status_lib.ServiceStatus.CONTROLLER_FAILED,
-            status_lib.ServiceStatus.FAILED
-    ]:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(f'Service {service_name!r} has failed. '
-                               'Please clean up the service and try again.')
+            raise RuntimeError
 
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')

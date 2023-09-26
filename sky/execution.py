@@ -1267,15 +1267,13 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
 
     task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
 
-    service_handle.requested_resources = requested_resources
-    service_handle.policy = task.service.policy_str()
-    service_handle.auto_restart = task.service.auto_restart
-
     _maybe_translate_local_file_mounts_and_sync_up(task)
     if task.storage_mounts is not None:
         for storage in task.storage_mounts.values():
             if not storage.persistent:
                 service_handle.add_ephemeral_storage(storage)
+    # Set handle immediately to avoid leaking the ephemeral storage.
+    global_user_state.set_service_handle(service_name, service_handle)
 
     service_handle.version += 1
     with tempfile.NamedTemporaryFile(
@@ -1316,6 +1314,10 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
                     f'Failed to update service {service_name!r}. '
                     f'Please check the logs above.')
 
+    # These should only be set after the update is successful.
+    service_handle.requested_resources = requested_resources
+    service_handle.policy = task.service.policy_str()
+    service_handle.auto_restart = task.service.auto_restart
     global_user_state.set_service_handle(service_name, service_handle)
 
     print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'

@@ -333,7 +333,10 @@ class SkyPilotInfraProvider(InfraProvider):
                 # design, we want to fail early if user code have any error.
                 # This will prevent infinite loop of teardown and
                 # re-provision.
-                if info.status_property.is_scale_down_no_failure():
+                # Don't keep failed record for version mismatch replicas,
+                # since user should fixed the error and re-provision.
+                if (info.version != self.latest_version or
+                        info.status_property.is_scale_down_no_failure()):
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.
