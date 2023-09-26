@@ -114,9 +114,10 @@ def _bulk_provision(
             config = provision.bootstrap_instances(provider_name, region_name,
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
-        except Exception:
+        except Exception as e:
             logger.error('Failed to bootstrap configurations for '
-                         f'{cluster_name!r}.')
+                         f'{cluster_name!r} with the following error:\n'
+                         f'{common_utils.format_exception(e)}')
             raise
 
         provision_metadata = provision.run_instances(
