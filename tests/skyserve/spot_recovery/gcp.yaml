@@ -4,7 +4,7 @@ resources:
   zone: us-central1-a
   use_spot: True
 
-workdir: sky/serve/examples/http_server
+workdir: examples/serve/http_server
 
 # Use 8080 to test jupyter service is terminated
 run: python3 server.py --port 8080
