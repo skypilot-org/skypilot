@@ -119,16 +119,11 @@ def _bulk_provision(
                          f'{cluster_name!r}.')
             raise
 
-        try:
-            provision_metadata = provision.run_instances(
-                provider_name,
-                region_name,
-                cluster_name.name_on_cloud,
-                config=config)
-        except Exception:  # pylint: disable=broad-except
-            logger.debug(f'Starting instances for {cluster_name!r} '
-                         f'failed. Stacktrace:\n{traceback.format_exc()}')
-            raise
+        provision_metadata = provision.run_instances(
+            provider_name,
+            region_name,
+            cluster_name.name_on_cloud,
+            config=config)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
@@ -197,9 +192,9 @@ def bulk_provision(
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
-            logger.error(f'Failed to provision {cluster_name.display_name!r} '
+            logger.debug(f'Failed to provision {cluster_name.display_name!r} '
                          f'on {cloud} ({zone_str}).')
-            logger.debug(f'Starting instances for {cluster_name!r} '
+            logger.debug(f'bulk_provision for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
@@ -208,7 +203,7 @@ def bulk_provision(
             # sky launch, somehow failed, then we may be terminating it here.
             terminate = not is_prev_cluster_healthy
             terminate_str = ('Terminating' if terminate else 'Stopping')
-            logger.error(f'{terminate_str} the failed cluster.')
+            logger.debug(f'{terminate_str} the failed cluster.')
             teardown_cluster(repr(cloud),
                              cluster_name,
                              terminate=terminate,
