@@ -2866,7 +2866,7 @@ def _down_or_stop_clusters(
                     hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(
-                    f'To proceed, please check the warning above and type '
+                    f'To proceed, please check the information above and type '
                     f'{colorama.Style.BRIGHT}{confirm_str!r}'
                     f'{colorama.Style.RESET_ALL}',
                     type=str)
