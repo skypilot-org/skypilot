@@ -120,11 +120,10 @@ def _bulk_provision(
                          f'{common_utils.format_exception(e)}')
             raise
 
-        provision_metadata = provision.run_instances(
-            provider_name,
-            region_name,
-            cluster_name.name_on_cloud,
-            config=config)
+        provision_metadata = provision.run_instances(provider_name,
+                                                     region_name,
+                                                     cluster_name.name_on_cloud,
+                                                     config=config)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
