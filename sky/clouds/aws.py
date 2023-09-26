@@ -116,7 +116,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {}
+        return dict()
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

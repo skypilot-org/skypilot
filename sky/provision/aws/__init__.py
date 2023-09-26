@@ -12,4 +12,4 @@ from sky.provision.aws.instance import wait_instances
 
 __all__ = ('bootstrap_instances', 'run_instances', 'stop_instances',
            'terminate_instances', 'wait_instances', 'get_cluster_metadata',
-           'cleanup_ports', 'query_instances')
+           'open_ports', 'cleanup_ports', 'query_instances')

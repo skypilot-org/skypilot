@@ -19,6 +19,7 @@ import colorama
 from sky import clouds
 from sky import provision
 from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_common
@@ -134,8 +135,10 @@ def _bulk_provision(
         time.sleep(1)
         for retry_cnt in range(_MAX_RETRY):
             try:
-                provision.wait_instances(provider_name, region_name,
-                                         cluster_name.name_on_cloud, 'running')
+                provision.wait_instances(provider_name,
+                                         region_name,
+                                         cluster_name.name_on_cloud,
+                                         state=status_lib.ClusterStatus.UP)
                 break
             except (aws.botocore_exceptions().WaiterError, RuntimeError):
                 time.sleep(backoff.current_backoff())
@@ -347,6 +350,7 @@ def _post_provision_setup(
     # TODO(suquark): Move wheel build here in future PRs.
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
     ip_list = cluster_metadata.get_feasible_ips()
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
     # TODO(suquark): Handle TPU VMs when dealing with GCP later.
     # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
@@ -354,8 +358,6 @@ def _post_provision_setup(
     #                 f'{style.RESET_ALL}')
     #     RetryingVmProvisioner._tpu_pod_setup(
     #         None, handle.cluster_yaml, handle)
-
-    ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:

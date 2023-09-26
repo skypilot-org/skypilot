@@ -677,7 +677,8 @@ def cleanup_ports(
         f'{BOTO_DELETE_MAX_ATTEMPTS} attempts. Please delete it manually.')
 
 
-def wait_instances(region: str, cluster_name: str, state: str) -> None:
+def wait_instances(region: str, cluster_name: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
     # TODO(suquark): unify state for different clouds
     # possible exceptions: https://github.com/boto/boto3/issues/176
@@ -691,7 +692,7 @@ def wait_instances(region: str, cluster_name: str, state: str) -> None:
         },
     ]
 
-    if state == 'running':
+    if state == status_lib.ClusterStatus.UP:
         # NOTE: there could be a terminated/terminating AWS cluster with
         # the same cluster name.
         # Wait the cluster result in errors (cannot wait for 'terminated').
@@ -700,7 +701,7 @@ def wait_instances(region: str, cluster_name: str, state: str) -> None:
             'Name': 'instance-state-name',
             'Values': ['pending', 'running'],
         })
-    elif state == 'stopped':
+    elif state == status_lib.ClusterStatus.STOPPED:
         filters.append({
             'Name': 'instance-state-name',
             'Values': ['stopping', 'stopped'],
@@ -712,11 +713,11 @@ def wait_instances(region: str, cluster_name: str, state: str) -> None:
     if not instances:
         raise RuntimeError(f'No instances found for cluster {cluster_name}.')
 
-    if state == 'running':
+    if state == status_lib.ClusterStatus.UP:
         waiter = client.get_waiter('instance_running')
-    elif state == 'stopped':
+    elif state == status_lib.ClusterStatus.STOPPED:
         waiter = client.get_waiter('instance_stopped')
-    elif state == 'terminated':
+    elif state is None:
         waiter = client.get_waiter('instance_terminated')
     else:
         raise ValueError(f'Unsupported state to wait: {state}')

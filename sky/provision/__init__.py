@@ -126,7 +126,7 @@ def cleanup_ports(
 
 @_route_to_cloud_impl
 def wait_instances(provider_name: str, region: str, cluster_name: str,
-                   state: str) -> None:
+                   state: Optional[status_lib.ClusterStatus]) -> None:
     """Wait instances until they ends up in the given state."""
     raise NotImplementedError
 
