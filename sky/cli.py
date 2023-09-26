@@ -2748,6 +2748,9 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     services = global_user_state.get_services_from_controller_name(
         controller_name)
     if services:
+        # TODO(tian): When we switch to database for storing replica
+        # information, we could check total replicas of each service and
+        # allow terminating the controller if there is no existing replicas.
         service_names = [service['name'] for service in services]
         with ux_utils.print_exception_no_traceback():
             plural = '' if len(service_names) == 1 else 's'

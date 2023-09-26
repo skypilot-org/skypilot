@@ -21,6 +21,7 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
@@ -1122,6 +1123,10 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                                          status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
+    controller_fetch_ip_error_message = (
+        'Failed to fetch controller IP. Please '
+        'check controller status and try again.')
+
     if handle is not None:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
@@ -1134,12 +1139,17 @@ def serve_down(service_name: str, purge: bool = False) -> None:
 
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
-            returncode, terminate_service_payload, stderr = backend.run_on_head(
-                handle,
-                code,
-                require_outputs=True,
-                stream_logs=False,
-                separate_stderr=True)
+
+            try:
+                (returncode, terminate_service_payload,
+                 stderr) = backend.run_on_head(handle,
+                                               code,
+                                               require_outputs=True,
+                                               stream_logs=False,
+                                               separate_stderr=True)
+            except exceptions.FetchIPError as e:
+                raise RuntimeError(controller_fetch_ip_error_message) from e
+
             subprocess_utils.handle_returncode(
                 returncode,
                 code, ('Failed when submit terminate request to controller '
@@ -1165,10 +1175,12 @@ def serve_down(service_name: str, purge: bool = False) -> None:
 
         # We want to make sure no matter what error happens, we can still
         # clean up the record if purge is True.
-        except Exception as e:  # pylint: disable=broad-except
+        # pylint: disable=broad-except
+        except Exception as e:
             if purge:
-                logger.warning('Ignoring error when cleaning replicas of '
-                               f'{service_name!r}: {e}')
+                logger.warning('Ignoring error when cleaning '
+                               f'replicas of {service_name!r}: '
+                               f'{common_utils.format_exception(e)}')
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(e) from e
@@ -1189,7 +1201,11 @@ def serve_down(service_name: str, purge: bool = False) -> None:
             jobs = []
             if service_handle.job_id is not None:
                 jobs.append(service_handle.job_id)
-            backend.cancel_jobs(handle, jobs=jobs)
+
+            try:
+                backend.cancel_jobs(handle, jobs=jobs)
+            except exceptions.FetchIPError as e:
+                raise RuntimeError(controller_fetch_ip_error_message) from e
 
             # Cleanup all files on controller related to this service.
             # We have a 10-min grace period for the controller to autostop,
@@ -1209,11 +1225,12 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                 stream_logs=False)
 
     # same as above.
-    except Exception as e:  # pylint: disable=broad-except
+    # pylint: disable=broad-except
+    except Exception as e:
         if purge:
-            logger.warning(
-                'Ignoring error when stopping controller and '
-                f'load balancer jobs of service {service_name!r}: {e}')
+            logger.warning('Ignoring error when stopping controller and '
+                           f'load balancer jobs of service {service_name!r}: '
+                           f'{common_utils.format_exception(e)}')
         else:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(e) from e
