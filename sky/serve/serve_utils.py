@@ -75,10 +75,27 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
 
 
 def get_existing_controller_names() -> Set[str]:
-    return {
+    """Get existing sky serve controller names.
+
+    There is two possible indicators for a controller:
+      1. It is in the cluster database, which means it is already created;
+      2. It is in the service database, which means it will be created
+         later in the future. This usually happens when multiple `sky serve up`
+         are running simultaneously.
+
+    Returns:
+        A set of existing sky serve controller names.
+    """
+    controller_in_service_db = {
         record['controller_name']
         for record in global_user_state.get_services()
     }
+    controller_in_cluster_db = {
+        record['name']
+        for record in global_user_state.get_clusters()
+        if record['name'].startswith(constants.CONTROLLER_PREFIX)
+    }
+    return controller_in_service_db | controller_in_cluster_db
 
 
 def generate_controller_cluster_name(existing_controllers: Set[str]) -> str:
