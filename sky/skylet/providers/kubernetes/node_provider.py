@@ -220,6 +220,36 @@ class KubernetesNodeProvider(NodeProvider):
         raise config.KubernetesError(f'{timeout_err_msg}')
 
     def create_node(self, node_config, tags, count):
+
+        def is_pod_scheduled(pod) -> bool:
+            """Check if a pod is scheduled."""
+            if pod.status.phase != 'Pending':
+                return True
+            # If container_statuses is None, then the pod hasn't
+            # been scheduled yet.
+            if not pod.status.container_statuses:
+                return False
+            for container_status in pod.status.container_statuses:
+                waiting = container_status.state.waiting
+                # Continue if container status is ContainerCreating
+                # This indicates this pod has been scheduled.
+                if waiting and waiting.reason == 'ContainerCreating':
+                    continue
+                # If the container wasn't in creating state,
+                # then we know pod wasn't scheduled or had some
+                # other error, such as image pull error.
+                # See list of possible reasons for waiting here:
+                # https://stackoverflow.com/a/57886025
+                return False
+            return True
+
+        def is_pod_running(pod) -> bool:
+            """Check if a pod and its containers are running."""
+            if pod.status.phase != 'Running':
+                return False
+            return all(container.state.running
+                       for container in pod.status.container_statuses)
+
         conf = copy.deepcopy(node_config)
         pod_spec = conf.get('pod', conf)
         service_spec = conf.get('service')
@@ -275,30 +305,13 @@ class KubernetesNodeProvider(NodeProvider):
                         'for pod scheduling failure. '
                         f'Error: {common_utils.format_exception(e)}') from None
 
-            all_ready = True
             for node in new_nodes:
                 pod = kubernetes.core_api().read_namespaced_pod(
                     node.metadata.name, self.namespace)
-                if pod.status.phase == 'Pending':
-                    # Iterate over each pod to check their status
-                    if pod.status.container_statuses is not None:
-                        for container_status in pod.status.container_statuses:
-                            # Continue if container status is ContainerCreating
-                            # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
-                                continue
-                            else:
-                                # If the container wasn't in creating state,
-                                # then we know pod wasn't scheduled or had some
-                                # other error, such as image pull error.
-                                # See list of possible reasons for waiting here:
-                                # https://stackoverflow.com/a/57886025
-                                all_ready = False
-                    else:
-                        # If container_statuses is None, then the pod hasn't
-                        # been scheduled yet.
-                        all_ready = False
-            if all_ready:
+                if not is_pod_scheduled(pod):
+                    break
+            else:
+                # All pods are scheduled
                 break
             time.sleep(1)
 
@@ -312,25 +325,20 @@ class KubernetesNodeProvider(NodeProvider):
                     node.metadata.name, self.namespace)
                 # Continue if pod and all the containers within the
                 # pod are succesfully created and running.
-                if pod.status.phase == 'Running' \
-                    and all(
-                        [container.state.running
-                         for container in pod.status.container_statuses]):
-                    continue
-                else:
+                if not is_pod_running(pod):
                     all_pods_running = False
                     if pod.status.phase == 'Pending':
                         # Iterate over each container in pod to check their status
                         for container_status in pod.status.container_statuses:
-                            if container_status.state.waiting is not None:
-                                if container_status.state.waiting.reason == 'ErrImagePull':
-                                    if 'rpc error: code = Unknown' in container_status.state.waiting.message:
-                                        raise config.KubernetesError(
-                                            'Failed to pull docker image while '
-                                            'launching the node. Please check '
-                                            'your network connection. Error details: '
-                                            f'{container_status.state.waiting.message}.'
-                                        )
+                            waiting = container_status.state.waiting
+                            if waiting and container_status.state.waiting.reason == 'ErrImagePull':
+                                if 'rpc error: code = Unknown' in container_status.state.waiting.message:
+                                    raise config.KubernetesError(
+                                        'Failed to pull docker image while '
+                                        'launching the node. Please check '
+                                        'your network connection. Error details: '
+                                        f'{container_status.state.waiting.message}.'
+                                    )
                     break
 
             if all_pods_running:
