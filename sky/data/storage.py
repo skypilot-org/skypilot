@@ -2157,6 +2157,17 @@ class R2Store(AbstractStore):
                                                    mount_path, mount_cmd,
                                                    install_cmd)
 
+    def csync_command(self,
+                      csync_path: str,
+                      interval_seconds: Optional[int] = None) -> str:
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval_seconds: int; runs the sync command every interval_seconds
+        """
+        raise NotImplementedError
+
     def _create_r2_bucket(self,
                           bucket_name: str,
                           region='auto') -> StorageHandle:
@@ -2566,6 +2577,17 @@ class IBMCosStore(AbstractStore):
         return mounting_utils.get_mounting_command(StorageMode.MOUNT,
                                                    mount_path, mount_cmd,
                                                    install_cmd)
+
+    def csync_command(self,
+                      csync_path: str,
+                      interval_seconds: Optional[int] = None) -> str:
+        """Returns command to mount CSYNC with Storage bucket on CSYNC_PATH.
+
+        Args:
+          csync_path: str; Path to continuously sync the bucket to.
+          interval_seconds: int; runs the sync command every interval_seconds
+        """
+        raise NotImplementedError
 
     def _create_cos_bucket(self,
                            bucket_name: str,
