@@ -95,7 +95,9 @@ class SkyServeController:
                                  'without autoscaler.')
             request_data = asyncio.run(request.json())
             version = request_data['version']
+            separate_replicas = request_data['separate_replicas']
             logger.info(f'Update to version: {version}')
+            self.infra_provider.set_separate_replicas(separate_replicas)
             latest_task_yaml = serve.generate_remote_task_yaml_file_name(
                 self.service_name, version, expand_user=True)
             service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)

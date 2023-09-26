@@ -414,11 +414,15 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
     return latest_info
 
 
-def update_service(controller_port: int, version: int) -> str:
+def update_service(controller_port: int, version: int,
+                   separate_replicas: bool) -> str:
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/update_service',
-        json={'version': version})
+        json={
+            'version': version,
+            'separate_replicas': separate_replicas
+        })
     if resp.status_code != 200:
         raise ValueError(f'Failed to update service: {resp.text}')
     return resp.json()['message']
@@ -633,10 +637,11 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_service(cls, controller_port: int, version: int) -> str:
+    def update_service(cls, controller_port: int, version: int,
+                       separate_replicas: bool) -> str:
         code = [
             f'msg = serve_utils.update_service({controller_port}, '
-            f'{version})', 'print(msg, end="", flush=True)'
+            f'{version}, {separate_replicas})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

@@ -1223,7 +1223,9 @@ def serve_up(
 
 
 @usage_lib.entrypoint
-def serve_update(service_name: str, task: 'sky.Task') -> None:
+def serve_update(service_name: str,
+                 task: 'sky.Task',
+                 separate_replicas: bool = False) -> None:
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         with ux_utils.print_exception_no_traceback():
@@ -1286,7 +1288,8 @@ def serve_update(service_name: str, task: 'sky.Task') -> None:
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name, service_handle.version)
         code = serve.ServeCodeGen.update_service(service_handle.controller_port,
-                                                 service_handle.version)
+                                                 service_handle.version,
+                                                 separate_replicas)
         update_task = task_lib.Task(
             name=(f'sky-serve-update-{service_name}'
                   f'-v{service_handle.version}'),

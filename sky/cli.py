@@ -4281,10 +4281,26 @@ def serve_status(all: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+# Disabling quote check here, as there seems to be a bug in pylint,
+# which incorrectly recognizes the help string as a docstring.
+# pylint: disable=bad-docstring-quotes
+@click.option(
+    '--separate-replicas',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Separate replicas with different versions. If this flag is set to '
+          'False, SkyServe will still send traffic to previously ready '
+          'replicas; otherwise, SkyServe will only send traffic to replicas '
+          'with same version, i.e. before the first replica with latest '
+          'version become ready, direct traffic only to previous replicas '
+          'with same version and after that, direct traffic only to the '
+          'new replicas.'))
 def serve_update(
     service_name: str,
     entrypoint: List[str],
     yes: bool,
+    separate_replicas: bool,
 ):
     """Update a SkyServe service.
 
@@ -4352,7 +4368,7 @@ def serve_update(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_update(service_name, task)
+    sky.serve_update(service_name, task, separate_replicas)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

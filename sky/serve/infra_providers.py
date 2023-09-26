@@ -1,4 +1,5 @@
 """InfraProvider: handles the creation and deletion of endpoint replicas."""
+import collections
 from concurrent import futures
 import enum
 import logging
@@ -222,7 +223,10 @@ class InfraProvider:
                  initial_spec: 'service_spec.SkyServiceSpec') -> None:
         self.replica_info: serve_utils.ThreadSafeDict[
             str, ReplicaInfo] = serve_utils.ThreadSafeDict()
-        self.controller_port = controller_port
+        self.controller_port: int = controller_port
+        # Whether to separate replica with different
+        # versions when getting ready replicas
+        self.separate_replicas: bool = False
         self.latest_version: int = initial_version
         self.version2spec: serve_utils.ThreadSafeDict[
             int, 'service_spec.SkyServiceSpec'] = serve_utils.ThreadSafeDict()
@@ -233,6 +237,9 @@ class InfraProvider:
                     f'{initial_spec.initial_delay_seconds}')
         logger.info(f'Post data: {initial_spec.post_data} '
                     f'({type(initial_spec.post_data)})')
+
+    def set_separate_replicas(self, separate_replicas: bool) -> None:
+        self.separate_replicas = separate_replicas
 
     def update_version(self, version: int,
                        spec: 'service_spec.SkyServiceSpec') -> None:
@@ -443,12 +450,24 @@ class SkyPilotInfraProvider(InfraProvider):
         return ready_infos
 
     def get_ready_replicas(self) -> Set[str]:
-        ready_replicas = set()
+        version2url = collections.defaultdict(list)
         for info in self._get_ready_infos():
             assert info.ip is not None
             spec = self.version2spec[info.version]
-            ready_replicas.add(f'{info.ip}:{spec.app_port}')
-        return ready_replicas
+            version2url[info.version].append(f'{info.ip}:{spec.app_port}')
+        if self.separate_replicas:
+            # Try all version in descending order. There is possibility that
+            # user consecutively update the service several times, and some
+            # version might not have any ready replicas.
+            version = self.latest_version
+            while version >= constants.INITIAL_VERSION:
+                if version in version2url:
+                    return set(version2url[version])
+                version -= 1
+            # If none of them found, the following code will return an empty
+            # set to represent no ready replicas.
+        # If not separate replicas, return all ready replicas.
+        return set(sum(version2url.values(), []))
 
     def _launch_cluster(self, replica_id: int) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(

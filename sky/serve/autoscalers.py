@@ -140,10 +140,12 @@ class RequestRateAutoscaler(Autoscaler):
         # Only count replicas with the latest version. This will help us to fast
         # bootstrapping when we are updating the service.
         num_nodes = len(ready_match_replicas + not_ready_match_replicas)
+        have_mismatched_replicas = bool(ready_mismatch_replicas +
+                                        not_ready_mismatch_replicas)
 
         # Check if cooldown period has passed since the last scaling operation.
-        # Only cooldown if bootstrapping is done.
-        if num_nodes >= self.min_nodes:
+        # Only cooldown if we don't have mismatched replicas.
+        if not have_mismatched_replicas:
             if current_time - self.last_scale_operation < self.cooldown:
                 logger.info(
                     f'Current time: {current_time}, '
@@ -171,41 +173,48 @@ class RequestRateAutoscaler(Autoscaler):
             return
 
         # We have some replicas with mismatched version.
-        if ready_mismatch_replicas or not_ready_mismatch_replicas:
+        if have_mismatched_replicas:
 
-            # Case 1. We have ready replica with mismatched version.
+            # TODO(tian): For the case when quota is exactly used up,
+            # we should scale down first, rather than +n, -1, -1, -1...
+            # Case 1. We have ready replica with mismatched version, and
+            #   separate replicas is True.
+            #   In such case, since once there is a ready match replica,
+            #   we will direct all traffic to it, we can scale down all
+            #   mismatched replicas.
+            if self.infra_provider.separate_replicas and len(
+                    ready_match_replicas) > 0:
+                num_ready_replica_to_scale_down = len(ready_mismatch_replicas)
+            # Case 2. We have ready replica with mismatched version, and
+            #   separate replicas is False.
             #   In such case, we want to keep the number of ready replicas,
             #   until total number of replicas is greater than min_nodes.
             #   Then we scale down the replica with mismatched version.
-            # TODO(tian): For the case when quota is exactly used up,
-            # we should scale down first, rather than +n, -1, -1, -1...
-            num_ready_replicas = len(ready_match_replicas +
-                                     ready_mismatch_replicas)
-            if num_ready_replicas > self.min_nodes:
-                # Take min of the number of ready mismatched replicas and the
-                # number of replicas we can scale down. This is for the case
-                # when we scale up latest version to more than min_nodes, and
-                # still have some unready replicas with mismatched version.
-                for i in range(
-                        min(num_ready_replicas - self.min_nodes,
-                            len(ready_mismatch_replicas))):
-                    info = ready_mismatch_replicas[i]
-                    replica_id = serve_utils.get_replica_id_from_cluster_name(
-                        info.cluster_name)
-                    self.scale_down(replica_id)
-                self.last_scale_operation = current_time
-                return
+            else:
+                num_ready_replica_to_scale_down = len(
+                    ready_match_replicas +
+                    ready_mismatch_replicas) - self.min_nodes
+            # Take min of the number of ready mismatched replicas and the
+            # number of replicas we can scale down. This is for the case
+            # when we scale up latest version to more than min_nodes, and
+            # still have some unready replicas with mismatched version.
+            for i in range(
+                    min(num_ready_replica_to_scale_down,
+                        len(ready_mismatch_replicas))):
+                info = ready_mismatch_replicas[i]
+                replica_id = serve_utils.get_replica_id_from_cluster_name(
+                    info.cluster_name)
+                self.scale_down(replica_id)
 
-            # Case 2. We have some not ready replica with mismatched version.
+            # Case 3. We have some not ready replica with mismatched version.
             #   In such case, we immediately scale down the replica with
             #   mismatched version.
-            if not_ready_mismatch_replicas:
-                for info in not_ready_mismatch_replicas:
-                    replica_id = serve_utils.get_replica_id_from_cluster_name(
-                        info.cluster_name)
-                    self.scale_down(replica_id)
-                self.last_scale_operation = current_time
-                return
+            for info in not_ready_mismatch_replicas:
+                replica_id = serve_utils.get_replica_id_from_cluster_name(
+                    info.cluster_name)
+                self.scale_down(replica_id)
+
+            return
 
         if (self.upper_threshold is not None and
                 requests_per_node > self.upper_threshold):
