@@ -117,8 +117,8 @@ Available fields:
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.5.0
+        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.12.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
