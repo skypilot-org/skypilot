@@ -163,6 +163,11 @@ class KubernetesNodeProvider(NodeProvider):
         kubernetes.core_api().patch_namespaced_pod(node_id, self.namespace, pod)
 
     def _raise_pod_scheduling_errors(self, new_nodes):
+        """Raise pod scheduling failure reason.
+        
+        The reason for failure to schedule appears as events. Here, we read
+        the reason and surface it by raising an error.
+        """
         for new_node in new_nodes:
             pod_status = new_node.status.phase
             pod_name = new_node._metadata._name
@@ -225,7 +230,7 @@ class KubernetesNodeProvider(NodeProvider):
         Failure to schedule before timeout would cause to raise an error.
         """
         start_time = time.time()
-        while time.time() - start_time <= self.timeout:
+        while time.time() - start_time < self.timeout:
             all_pods_scheduled = True
             for node in new_nodes:
                 # Iterate over each pod to check their status
@@ -289,14 +294,13 @@ class KubernetesNodeProvider(NodeProvider):
                     # Iterate over each container in pod to check their status
                     for container_status in pod.status.container_statuses:
                         waiting = container_status.state.waiting
-                        if waiting and waiting.reason == 'ErrImagePull':
-                            if 'rpc error: code = Unknown' in waiting.message:
-                                raise config.KubernetesError(
-                                    'Failed to pull docker image while '
-                                    'launching the node. Please check '
-                                    'your network connection. Error details: '
-                                    f'{container_status.state.waiting.message}.'
-                                )
+                        if waiting and (waiting.reason == 'ErrImagePull' or \
+                            waiting.reason == 'ImagePullBackOff'):
+                            raise config.KubernetesError(
+                                'Failed to pull docker image while '
+                                'launching the node. Please check '
+                                'your network connection. Error details: '
+                                f'{container_status.state.waiting.message}.')
                 # If we reached here, one of the pods had an issue,
                 # so break out of the loop
                 break
