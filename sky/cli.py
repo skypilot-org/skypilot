@@ -1997,6 +1997,8 @@ def logs(
     if status:
         job_statuses = core.job_status(cluster, job_ids)
         job_id = list(job_statuses.keys())[0]
+        # If job_ids is None and no job has been submitted to the cluster,
+        # it will return {None: None}.
         if job_id is None:
             click.secho(f'No job found on cluster {cluster!r}.', fg='red')
             sys.exit(1)
