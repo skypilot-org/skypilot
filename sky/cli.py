@@ -4262,8 +4262,9 @@ def serve_status(all: bool, service_names: List[str]):
     if failed_controllers:
         num_failed = len(failed_controllers)
         plural = '' if num_failed == 1 else 's'
-        click.echo(f'\n* {num_failed} service{plural} with failed controller '
-                   'found. The replica info and number might not be accurate.')
+        click.echo(
+            f'\n* {num_failed} service{plural} with failed controller found. '
+            'Please manually check if there is any leaked resources.')
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
