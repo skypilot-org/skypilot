@@ -219,37 +219,128 @@ class KubernetesNodeProvider(NodeProvider):
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
 
-    def create_node(self, node_config, tags, count):
+    def wait_for_pods_to_schedule(self, new_nodes):
+        """Wait for all pods to be scheduled.
+        
+        Failure to schedule before timeout would cause to raise an error.
+        """
+        start_time = time.time()
+        while time.time() - start_time <= self.timeout:
+            all_pods_scheduled = True
+            for node in new_nodes:
+                # Iterate over each pod to check their status
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+                if pod.status.phase == 'Pending':
+                    # If container_statuses is None, then the pod hasn't
+                    # been scheduled yet.
+                    if not pod.status.container_statuses:
+                        all_pods_scheduled = False
+                        break
 
-        def is_pod_scheduled(pod) -> bool:
-            """Check if a pod is scheduled."""
-            if pod.status.phase != 'Pending':
-                return True
-            # If container_statuses is None, then the pod hasn't
-            # been scheduled yet.
-            if not pod.status.container_statuses:
-                return False
-            for container_status in pod.status.container_statuses:
-                waiting = container_status.state.waiting
-                # Continue if container status is ContainerCreating
-                # This indicates this pod has been scheduled.
-                if waiting and waiting.reason == 'ContainerCreating':
+                    for container_status in pod.status.container_statuses:
+                        # If the container wasn't in 'ContainerCreating'
+                        # state, then we know pod wasn't scheduled or
+                        # had some other error, such as image pull error.
+                        # See list of possible reasons for waiting here:
+                        # https://stackoverflow.com/a/57886025
+                        waiting = container_status.state.waiting
+                        if waiting and waiting.reason != 'ContainerCreating':
+                            all_pods_scheduled = False
+                            break
+
+            if all_pods_scheduled:
+                return
+            time.sleep(1)
+
+        # Handle pod scheduling errors
+        try:
+            self._raise_pod_scheduling_errors(new_nodes)
+        except config.KubernetesError:
+            raise
+        except Exception as e:
+            raise config.KubernetesError(
+                'An error occurred while trying to fetch the reason '
+                'for pod scheduling failure. '
+                f'Error: {common_utils.format_exception(e)}') from None
+
+    def wait_for_pods_to_run(self, new_nodes):
+        """Wait for pods and their containers to be ready.
+        
+        Pods may be pulling images or may be in the process of container
+        creation.
+        """
+        while True:
+            all_pods_running = True
+            # Iterate over each pod to check their status
+            for node in new_nodes:
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+
+                # Continue if pod and all the containers within the
+                # pod are succesfully created and running.
+                if pod.status.phase == 'Running' \
+                    and all([container.state.running
+                             for container in pod.status.container_statuses]):
                     continue
-                # If the container wasn't in creating state,
-                # then we know pod wasn't scheduled or had some
-                # other error, such as image pull error.
-                # See list of possible reasons for waiting here:
-                # https://stackoverflow.com/a/57886025
-                return False
-            return True
 
-        def is_pod_running(pod) -> bool:
-            """Check if a pod and its containers are running."""
-            if pod.status.phase != 'Running':
-                return False
-            return all(container.state.running
-                       for container in pod.status.container_statuses)
+                all_pods_running = False
+                if pod.status.phase == 'Pending':
+                    # Iterate over each container in pod to check their status
+                    for container_status in pod.status.container_statuses:
+                        waiting = container_status.state.waiting
+                        if waiting and waiting.reason == 'ErrImagePull':
+                            if 'rpc error: code = Unknown' in waiting.message:
+                                raise config.KubernetesError(
+                                    'Failed to pull docker image while '
+                                    'launching the node. Please check '
+                                    'your network connection. Error details: '
+                                    f'{container_status.state.waiting.message}.'
+                                )
+                # If we reached here, one of the pods had an issue,
+                # so break out of the loop
+                break
 
+            if all_pods_running:
+                break
+            time.sleep(1)
+
+    def set_env_vars_in_pods(self, new_nodes):
+        """Setting environment variables in pods.
+        
+        Once all containers are ready, we can exec into them and set env vars.
+        Kubernetes automatically populates containers with critical
+        environment variables, such as those for discovering services running
+        in the cluster and CUDA/nvidia environment variables. We need to
+        make sure these env vars are available in every task and ssh session.
+        This is needed for GPU support and service discovery.
+        See https://github.com/skypilot-org/skypilot/issues/2287 for
+        more details.
+
+        To do so, we capture env vars from the pod's runtime and write them to
+        /etc/profile.d/, making them available for all users in future
+        shell sessions.
+        """
+        set_k8s_env_var_cmd = [
+            '/bin/sh', '-c',
+            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+             'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        ]
+
+        for new_node in new_nodes:
+            kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_env_var_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+    def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
         pod_spec = conf.get('pod', conf)
         service_spec = conf.get('service')
@@ -289,90 +380,9 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
-        # Wait for all pods to be scheduled, and if it exceeds the timeout, raise an
-        # exception. If pod's container is ContainerCreating, then we can assume
-        # that resources have been allocated and we can exit.
-        start = time.time()
-        while True:
-            if time.time() - start > self.timeout:
-                try:
-                    self._raise_pod_scheduling_errors(new_nodes)
-                except config.KubernetesError:
-                    raise
-                except Exception as e:
-                    raise config.KubernetesError(
-                        'An error occurred while trying to fetch the reason '
-                        'for pod scheduling failure. '
-                        f'Error: {common_utils.format_exception(e)}') from None
-
-            for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
-                    node.metadata.name, self.namespace)
-                if not is_pod_scheduled(pod):
-                    break
-            else:
-                # All pods are scheduled
-                break
-            time.sleep(1)
-
-        # Wait for pods and their containers to be ready - they may be
-        # pulling images or may be in the process of container creation.
-        while True:
-            all_pods_running = True
-            # Iterate over each pod to check their status
-            for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
-                    node.metadata.name, self.namespace)
-                # Continue if pod and all the containers within the
-                # pod are succesfully created and running.
-                if not is_pod_running(pod):
-                    all_pods_running = False
-                    if pod.status.phase == 'Pending':
-                        # Iterate over each container in pod to check their status
-                        for container_status in pod.status.container_statuses:
-                            waiting = container_status.state.waiting
-                            if waiting and container_status.state.waiting.reason == 'ErrImagePull':
-                                if 'rpc error: code = Unknown' in container_status.state.waiting.message:
-                                    raise config.KubernetesError(
-                                        'Failed to pull docker image while '
-                                        'launching the node. Please check '
-                                        'your network connection. Error details: '
-                                        f'{container_status.state.waiting.message}.'
-                                    )
-                    break
-
-            if all_pods_running:
-                break
-            time.sleep(1)
-
-        # Once all containers are ready, we can exec into them and set env vars.
-        # Kubernetes automatically populates containers with critical
-        # environment variables, such as those for discovering services running
-        # in the cluster and CUDA/nvidia environment variables. We need to
-        # make sure these env vars are available in every task and ssh session.
-        # This is needed for GPU support and service discovery.
-        # See https://github.com/skypilot-org/skypilot/issues/2287 for
-        # more details.
-        # To do so, we capture env vars from the pod's runtime and write them to
-        # /etc/profile.d/, making them available for all users in future
-        # shell sessions.
-        set_k8s_env_var_cmd = [
-            '/bin/sh', '-c',
-            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
-             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-             'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
-        ]
-        for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_env_var_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+        self.wait_for_pods_to_schedule(new_nodes)
+        self.wait_for_pods_to_run(new_nodes)
+        self.set_env_vars_in_pods(new_nodes)
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
