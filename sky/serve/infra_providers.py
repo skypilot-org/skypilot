@@ -341,7 +341,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 # This will prevent infinite loop of teardown and
                 # re-provision.
                 # Don't keep failed record for version mismatch replicas,
-                # since user should fixed the error and re-provision.
+                # since user should fixed the error before update.
                 if (info.version != self.latest_version or
                         info.status_property.is_scale_down_no_failure()):
                     # This means the cluster is deleted due to

@@ -1254,7 +1254,7 @@ def serve_update(service_name: str,
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Cannot update a non-service task.')
+            raise ValueError('Service section not found in the task. ')
     if task.service.controller_resources is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot update controller resources.')

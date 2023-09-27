@@ -4329,7 +4329,7 @@ def serve_update(
                   'its controller. Please try again later.')
     if prompt is not None:
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError
+            raise RuntimeError(prompt)
 
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
@@ -4339,6 +4339,8 @@ def serve_update(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file.')
     if task.service.controller_resources is not None:
+        # Not raise error here since user might want to update service without
+        # deleting previously set controller resources.
         click.secho(
             'Updating controller_resources is not allowed. '
             'This section will be ignored.',

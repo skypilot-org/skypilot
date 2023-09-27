@@ -208,7 +208,7 @@ class RequestRateAutoscaler(Autoscaler):
 
             # Case 3. We have some not ready replica with mismatched version.
             #   In such case, we immediately scale down the replica with
-            #   mismatched version.
+            #   mismatched version to reduce cost.
             for info in not_ready_mismatch_replicas:
                 replica_id = serve_utils.get_replica_id_from_cluster_name(
                     info.cluster_name)
