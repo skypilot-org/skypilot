@@ -165,8 +165,9 @@ class KubernetesNodeProvider(NodeProvider):
     def _raise_pod_scheduling_errors(self, new_nodes):
         """Raise pod scheduling failure reason.
         
-        The reason for failure to schedule appears as events. Here, we read
-        the reason and surface it by raising an error.
+        When a pod fails to schedule in Kubernetes, the reasons for the failure
+        are recorded as events. This function retrieves those events and raises
+        descriptive errors for better debugging and user feedback.
         """
         for new_node in new_nodes:
             pod_status = new_node.status.phase
