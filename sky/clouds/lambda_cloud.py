@@ -103,6 +103,17 @@ class Lambda(clouds.Cloud):
                                                zone=zone,
                                                clouds='lambda')
 
+    def instance_type_to_hourly_carbon_cost(
+            self,
+            instance_type: str,
+            accelerators: Dict[str, int],
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> float:
+        # TODO: Investigate carbon cost for Lamda compute.
+        # For now, assume negative costs which interprets to 'unknown'
+        # for Lamda cloud
+        return -1.0
+
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
                                     use_spot: bool,
