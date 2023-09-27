@@ -27,7 +27,6 @@ Example workflow:
 import os
 import subprocess
 
-
 from sky.skylet import constants
 
 

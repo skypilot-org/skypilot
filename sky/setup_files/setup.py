@@ -89,7 +89,7 @@ install_requires = [
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
     # ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    "grpcio >= 1.32.0, != 1.48.0; python_version < '3.10'", # noqa:E501
+    "grpcio >= 1.32.0, != 1.48.0; python_version < '3.10'",  # noqa:E501
     "grpcio >= 1.42.0, != 1.48.0; python_version >= '3.10'",  # noqa:E501
     'packaging',
     # Adopted from ray's setup.py:
