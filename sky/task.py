@@ -816,9 +816,9 @@ class Task:
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
-        After syncing up, COPY-mode storage mounts are translated into regular
-        file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
-        }``.
+        After syncing up, COPY-mode and CSYNC-mode storage mounts are 
+        translated into regular file_mounts of the form 
+        ``{ /remote/path: {s3,gs,..}://<bucket path>}``.
         """
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
