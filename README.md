@@ -27,7 +27,7 @@
 
 ----
 :fire: *News* :fire:
-- [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a permissive LLM from Mistral, was released! Use SkyPilot to deploy it on any cloud: [**Mistral docs**](https://docs.mistral.ai/cloud-deployment/skypilot/)
+- [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a permissive LLM from Mistral, was just released! Deploy via SkyPilot on any cloud: [**Mistral docs**](https://docs.mistral.ai/cloud-deployment/skypilot/)
 - [Aug, 2023] New cookbook: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/), [**blog post**](https://blog.skypilot.co/finetuning-llama2-operational-guide/)
 - [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
