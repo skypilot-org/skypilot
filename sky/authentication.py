@@ -268,8 +268,10 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-# Cloud init script is encoded in base64 in azure, so we need to decode it
-# and replace the ssh user and public key content, then encode it back.
+# In Azure, cloud-init script must be encoded in base64. See
+# https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
+# for more information. Here we decode it and replace the ssh user
+# and public key content, then encode it back.
 def _replace_ssh_info_in_cloud_init(config: Dict[str, Any],
                                     public_key: str) -> Dict[str, Any]:
     for node_type in config['available_node_types']:
