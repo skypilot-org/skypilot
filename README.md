@@ -6,18 +6,18 @@
 </p>
 
 <p align="center">
-  <a href="https://skypilot.readthedocs.io/en/latest/"> 
+  <a href="https://skypilot.readthedocs.io/en/latest/">
     <img alt="Documentation" src="https://readthedocs.org/projects/skypilot/badge/?version=latest">
   </a>
-  
-  <a href="https://github.com/skypilot-org/skypilot/releases"> 
+
+  <a href="https://github.com/skypilot-org/skypilot/releases">
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
-  
-  <a href="http://slack.skypilot.co"> 
+
+  <a href="http://slack.skypilot.co">
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
-  
+
 </p>
 
 
@@ -27,18 +27,19 @@
 
 ----
 :fire: *News* :fire:
+- [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a permissive LLM from Mistral AI, just released! Use SkyPilot to deploy it on any cloud: [**Mistral docs**](https://docs.mistral.ai/cloud-deployment/skypilot/)
 - [Aug, 2023] New cookbook: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/), [**blog post**](https://blog.skypilot.co/finetuning-llama2-operational-guide/)
 - [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
 - [June, 2023] Serving LLM **24x Faster On the Cloud** with vLLM and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
 - [June, 2023] [**Two new clouds supported**](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html): Samsung SCP and Oracle OCI!
 - [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
-- [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!** 
+- [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!**
 ----
 
 SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
 
 SkyPilot **abstracts away cloud infra burdens**:
-- Launch jobs & clusters on any cloud 
+- Launch jobs & clusters on any cloud
 - Easy scale-out: queue and run many jobs, automatically managed
 - Easy access to object stores (S3, GCS, R2)
 
@@ -48,9 +49,9 @@ SkyPilot **maximizes GPU availability for your jobs**:
 SkyPilot **cuts your cloud costs**:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): 3-6x cost savings using spot VMs, with auto-recovery from preemptions
 * Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
-* [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
+* [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters
 
-SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
+SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 Install with pip:
 ```bash
@@ -78,7 +79,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 ## SkyPilot in 1 Minute
 
-A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
+A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands.
 
 Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This avoids vendor lock-in, and allows easily moving jobs to a different provider.
 
@@ -120,7 +121,7 @@ SkyPilot then performs the heavy-lifting for you, including:
 1. Find the lowest priced VM instance type across different clouds
 2. Provision the VM, with auto-failover if the cloud returned capacity errors
 3. Sync the local `workdir` to the VM
-4. Run the task's `setup` commands to prepare the VM for running the task 
+4. Run the task's `setup` commands to prepare the VM for running the task
 5. Run the task's `run` commands
 
 <p align="center">
@@ -157,7 +158,7 @@ Read the research:
 - [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
 
 ## Support and Questions
-We are excited to hear your feedback! 
+We are excited to hear your feedback!
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
