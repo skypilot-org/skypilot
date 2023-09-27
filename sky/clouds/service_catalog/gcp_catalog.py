@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.clouds.service_catalog import carbon_utils
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -35,6 +36,18 @@ _image_df = common.read_catalog('gcp/images.csv',
 
 _quotas_df = common.read_catalog('gcp/accelerator_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+_carbon_df = carbon_utils.read_carbon_file(
+    'gcp/cloudProviders_datacenters.csv',
+    filter_col='provider',
+    filter_val='gcp',
+    pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+_carbon_pue_df = carbon_utils.read_carbon_file(
+    'gcp/defaults_PUE.csv',
+    filter_col='provider',
+    filter_val='gcp',
+    pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 # We will select from the following three CPU instance families:
 _DEFAULT_INSTANCE_FAMILY = [
@@ -228,6 +241,30 @@ def get_hourly_cost(
         return 0
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
+
+
+def get_hourly_carbon_cost(
+    instance_type: str,
+    accelerators: Dict[str, int],
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+) -> float:
+    """Returns the hourly carbon cost of a VM instance in the given
+    region and zone.
+
+    Refer to get_hourly_carbon_cost in service_catalog/__init__.py
+    for the docstring.
+    """
+    assert region is not None
+
+    if accelerators is not None and len(accelerators) > 0:
+        acc_name, n_gpus = list(accelerators.items())[0]
+    else:
+        acc_name = ''
+        n_gpus = 0
+    return common.get_hourly_carbon_cost_impl(_df, _carbon_df, _carbon_pue_df,
+                                              instance_type, acc_name, n_gpus,
+                                              region, zone)
 
 
 def get_vcpus_mem_from_instance_type(

@@ -119,6 +119,17 @@ class Vsphere(clouds.Cloud):
     ) -> float:
         return 0.0
 
+    def instance_type_to_hourly_carbon_cost(
+            self,
+            instance_type: str,
+            accelerators: Dict[str, int],
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> float:
+        # TODO(dmatch01): Investigate carbon cost for vsphere compute.
+        # For now, assume negative costs which interprets to 'unknown'
+        # for OCI cloud.
+        return -1.0
+
     def accelerators_to_hourly_cost(
         self,
         accelerators: Dict[str, int],

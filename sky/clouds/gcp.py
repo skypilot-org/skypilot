@@ -290,6 +290,18 @@ class GCP(clouds.Cloud):
                                                zone=zone,
                                                clouds='gcp')
 
+    def instance_type_to_hourly_carbon_cost(
+            self,
+            instance_type: str,
+            accelerators: Dict[str, int],
+            region: Optional[str] = None,
+            zone: Optional[str] = None) -> float:
+        return service_catalog.get_hourly_carbon_cost(instance_type,
+                                                      accelerators,
+                                                      region=region,
+                                                      zone=zone,
+                                                      clouds='gcp')
+
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
                                     use_spot: bool,

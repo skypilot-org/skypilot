@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import aws
+from sky.clouds.service_catalog import carbon_utils
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
@@ -72,6 +73,14 @@ _image_df = common.read_catalog('aws/images.csv',
 
 _quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+_carbon_df = carbon_utils.read_carbon_file('aws/cloudProviders_datacenters.csv',
+                                           filter_col='provider',
+                                           filter_val='ibm')
+
+_carbon_pue_df = carbon_utils.read_carbon_file('aws/defaults_PUE.csv',
+                                               filter_col='provider',
+                                               filter_val='Unknown')
 
 
 def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
@@ -215,6 +224,30 @@ def get_hourly_cost(instance_type: str,
                     zone: Optional[str] = None) -> float:
     return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
                                        region, zone)
+
+
+def get_hourly_carbon_cost(
+    instance_type: str,
+    accelerators: Dict[str, int],
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+) -> float:
+    """Returns the hourly enery cost of a VM instance in the given region
+    and zone.
+
+    Refer to get_hourly_energy_cost in service_catalog/__init__.py for
+    the docstring.
+    """
+    assert region is not None
+
+    if accelerators is not None and len(accelerators) > 0:
+        acc_name, n_gpus = list(accelerators.items())[0]
+    else:
+        acc_name = ''
+        n_gpus = 0
+    return common.get_hourly_carbon_cost_impl(_get_df(), _carbon_df,
+                                              _carbon_pue_df, instance_type,
+                                              acc_name, n_gpus, region, zone)
 
 
 def get_vcpus_mem_from_instance_type(

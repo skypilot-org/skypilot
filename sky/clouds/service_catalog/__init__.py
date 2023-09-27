@@ -168,6 +168,19 @@ def get_hourly_cost(instance_type: str,
                                use_spot, region, zone)
 
 
+def get_hourly_carbon_cost(instance_type: str,
+                           accelerators: Dict[str, int],
+                           region: Optional[str],
+                           zone: Optional[str],
+                           clouds: CloudFilter = None) -> float:
+    """Returns the hourly carbon cost of a VM instance in the given
+    region and zone.
+
+    """
+    return _map_clouds_catalog(clouds, 'get_hourly_carbon_cost', instance_type,
+                               accelerators, region, zone)
+
+
 def get_vcpus_mem_from_instance_type(
         instance_type: str,
         clouds: CloudFilter = None) -> Tuple[Optional[float], Optional[float]]:

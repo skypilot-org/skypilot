@@ -1000,6 +1000,14 @@ class Resources:
     def get_spot_str(self) -> str:
         return '[Spot]' if self.use_spot else ''
 
+    def get_carbon_cost(self, seconds: float) -> float:
+        """Returns cost in grams CO2 footprint for the runtime in seconds."""
+        hours = seconds / 3600
+        # Instance + accelerators.
+        carbs = self.cloud.instance_type_to_hourly_carbon_cost(
+            self._instance_type, self.accelerators, self._region, self._zone)
+        return carbs * hours
+
     def make_deploy_variables(self, cluster_name_on_cloud: str,
                               region: clouds.Region,
                               zones: Optional[List[clouds.Zone]],
