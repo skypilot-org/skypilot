@@ -380,7 +380,11 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
+        # Wait until the pods are scheduled and surface cause for error
+        # if there is one
         self.wait_for_pods_to_schedule(new_nodes)
+        # Wait until the pods and their containers are up and running, and
+        # fail early if there is an error
         self.wait_for_pods_to_run(new_nodes)
         self.set_env_vars_in_pods(new_nodes)
 
