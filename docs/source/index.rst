@@ -41,7 +41,7 @@ SkyPilot **cuts your cloud costs**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare):
+Current supported providers (AWS, Azure, GCP, Lambda Cloud, IBM, Samsung, OCI, Cloudflare, any Kubernetes cluster):
 
 .. raw:: html
 
@@ -125,11 +125,12 @@ Documentation
    :caption: User Guides
 
    examples/docker-containers
+   examples/ports
    examples/iterative-dev-project
    reference/interactive-nodes
    reference/faq
    reference/logging
-   reference/local/index
+   reference/kubernetes/index
 
 .. toctree::
    :maxdepth: 1

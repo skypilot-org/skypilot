@@ -102,7 +102,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
                              accelerators={'tpu-v2-8': 1},
-                             accelerator_args={'runtime_version': '2.5.0'},
+                             accelerator_args={'runtime_version': '2.12.0'},
                              use_spot=False),
 }
 
@@ -110,13 +110,17 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 # command.
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
+_STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
+    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
+    'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
-def _get_glob_clusters(clusters: List[str]) -> List[str]:
+
+def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if len(glob_cluster) == 0:
+        if len(glob_cluster) == 0 and not silent:
             if onprem_utils.check_if_local_cloud(cluster):
                 click.echo(
                     constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
@@ -235,6 +239,14 @@ def _interactive_node_cli_command(cli_func):
                                  case_sensitive=False),
                              required=False,
                              help=resources_utils.DiskTier.cli_help_message())
+    ports = click.option(
+        '--ports',
+        required=False,
+        type=str,
+        multiple=True,
+        help=('Ports to open on the cluster. '
+              'If specified, overrides the "ports" config in the YAML. '),
+    )
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
@@ -306,6 +318,7 @@ def _interactive_node_cli_command(cli_func):
         memory,
         disk_size,
         disk_tier,
+        ports,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -481,6 +494,14 @@ _EXTRA_RESOURCES_OPTIONS = [
               '"resources.instance_type" config. Passing "none" resets the '
               'config.'),
     ),
+    click.option(
+        '--ports',
+        required=False,
+        type=str,
+        multiple=True,
+        help=('Ports to open on the cluster. '
+              'If specified, overrides the "ports" config in the YAML. '),
+    ),
 ]
 
 
@@ -643,17 +664,19 @@ def _add_click_options(options: List[click.Option]):
     return _add_options
 
 
-def _parse_override_params(cloud: Optional[str] = None,
-                           region: Optional[str] = None,
-                           zone: Optional[str] = None,
-                           gpus: Optional[str] = None,
-                           cpus: Optional[str] = None,
-                           memory: Optional[str] = None,
-                           instance_type: Optional[str] = None,
-                           use_spot: Optional[bool] = None,
-                           image_id: Optional[str] = None,
-                           disk_size: Optional[int] = None,
-                           disk_tier: Optional[str] = None) -> Dict[str, Any]:
+def _parse_override_params(
+        cloud: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        gpus: Optional[str] = None,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        instance_type: Optional[str] = None,
+        use_spot: Optional[bool] = None,
+        image_id: Optional[str] = None,
+        disk_size: Optional[int] = None,
+        disk_tier: Optional[str] = None,
+        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -702,6 +725,8 @@ def _parse_override_params(cloud: Optional[str] = None,
         override_params['disk_size'] = disk_size
     if disk_tier is not None:
         override_params['disk_tier'] = disk_tier
+    if ports:
+        override_params['ports'] = ports
     return override_params
 
 
@@ -1062,6 +1087,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
+    ports: Optional[Tuple[str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1100,7 +1126,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
-                                             disk_tier=disk_tier)
+                                             disk_tier=disk_tier,
+                                             ports=ports)
 
     if is_yaml:
         assert entrypoint is not None
@@ -1344,6 +1371,7 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    ports: Tuple[str],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
@@ -1393,6 +1421,7 @@ def launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        ports=ports,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1454,6 +1483,7 @@ def exec(
     zone: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
+    ports: Tuple[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1528,6 +1558,9 @@ def exec(
         if val is not None:
             click.secho(_IGNORE_OPTION_WARNING.format(OPT=opt, VAL=val),
                         fg='yellow')
+    if ports:
+        raise ValueError('`ports` is not supported by `sky exec`.')
+
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -1643,6 +1676,15 @@ def _get_spot_jobs(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.option('--ip',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Get the IP address of the head node of a cluster. This '
+                    'option will override all other options. For Kubernetes '
+                    'clusters, the returned IP address is the internal IP '
+                    'of the head pod, and may not be accessible from outside '
+                    'the cluster.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
@@ -1655,7 +1697,8 @@ def _get_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
+def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
+           clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1708,8 +1751,9 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
     # Using a pool with 1 worker to run the spot job query in parallel to speed
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
-        # Do not show spot queue if user specifies clusters.
-        show_spot_jobs = show_spot_jobs and not clusters
+        # Do not show spot queue if user specifies clusters, and if user
+        # specifies --ip.
+        show_spot_jobs = show_spot_jobs and not clusters and not ip
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1719,13 +1763,49 @@ def status(all: bool, refresh: bool, show_spot_jobs: bool, clusters: List[str]):
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                   f'{colorama.Style.RESET_ALL}')
+        if ip:
+            if len(clusters) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    plural = 's' if len(clusters) > 1 else ''
+                    cluster_num = (str(len(clusters))
+                                   if len(clusters) > 0 else 'No')
+                    raise ValueError(
+                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=cluster_num,
+                            plural=plural,
+                            verb='specified'))
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
         query_clusters: Optional[List[str]] = None
         if clusters:
-            query_clusters = _get_glob_clusters(clusters)
+            query_clusters = _get_glob_clusters(clusters, silent=ip)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
+        if ip:
+            if len(cluster_records) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    plural = 's' if len(cluster_records) > 1 else ''
+                    cluster_num = (str(len(cluster_records))
+                                   if len(clusters) > 0 else 'No')
+                    raise ValueError(
+                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=cluster_num,
+                            plural=plural,
+                            verb='found'))
+            cluster_record = cluster_records[0]
+            if cluster_record['status'] != status_lib.ClusterStatus.UP:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+                                       'is not in UP status.')
+            handle = cluster_record['handle']
+            if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Querying IP address is not supported '
+                                     'for local clusters.')
+            head_ip = handle.external_ips()[0]
+            click.echo(head_ip)
+            return
         nonreserved_cluster_records = []
         reserved_clusters = []
         for cluster_record in cluster_records:
@@ -2844,8 +2924,9 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            disk_tier: Optional[str], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            disk_tier: Optional[str], ports: Tuple[str],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2903,7 +2984,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_tier=disk_tier)
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'gpunode',
@@ -2928,8 +3010,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             memory: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], disk_tier: Optional[str],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            ports: Tuple[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2983,7 +3065,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               memory=memory,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_tier=disk_tier)
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'cpunode',
@@ -3009,8 +3092,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], disk_tier: Optional[str],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            ports: Tuple[str], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -3071,7 +3154,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
                               disk_size=disk_size,
-                              disk_tier=disk_tier)
+                              disk_tier=disk_tier,
+                              ports=ports)
 
     _create_and_ssh_into_node(
         'tpunode',
@@ -3525,6 +3609,7 @@ def spot_launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    ports: Tuple[str],
     detach_run: bool,
     retry_until_up: bool,
     yes: bool,
@@ -3561,6 +3646,7 @@ def spot_launch(
         env=env,
         disk_size=disk_size,
         disk_tier=disk_tier,
+        ports=ports,
         spot_recovery=spot_recovery,
     )
     # Deprecation.
@@ -3588,9 +3674,15 @@ def spot_launch(
         dag.name = name
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
+    dag_utils.fill_default_spot_config_in_dag(dag)
+
+    click.secho(
+        f'Managed spot job {dag.name!r} will be launched on (estimated):',
+        fg='yellow')
+    dag = sky.optimize(dag)
 
     if not yes:
-        prompt = f'Launching a new spot job {dag.name!r}. Proceed?'
+        prompt = f'Launching the spot job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
@@ -3930,6 +4022,14 @@ def bench():
               help=('Comma-separated list of GPUs to run benchmark on. '
                     'Example values: "T4:4,V100:8" (without blank spaces).'))
 @click.option(
+    '--ports',
+    required=False,
+    type=str,
+    multiple=True,
+    help=('Ports to open on the cluster. '
+          'If specified, overrides the "ports" config in the YAML. '),
+)
+@click.option(
     '--idle-minutes-to-autostop',
     '-i',
     default=None,
@@ -3939,6 +4039,9 @@ def bench():
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
           'If not set, the cluster will not be autostopped.'))
+# Disabling quote check here, as there seems to be a bug in pylint,
+# which incorrectly recognizes the help string as a docstring.
+# pylint: disable=bad-docstring-quotes
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3964,6 +4067,7 @@ def benchmark_launch(
     memory: Optional[str],
     disk_size: Optional[int],
     disk_tier: Optional[str],
+    ports: Tuple[str],
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
@@ -4028,6 +4132,9 @@ def benchmark_launch(
         if disk_tier is not None:
             if any('disk_tier' in candidate for candidate in candidates):
                 raise click.BadParameter(f'disk_tier {message}')
+        if ports:
+            if any('ports' in candidate for candidate in candidates):
+                raise click.BadParameter(f'ports {message}')
 
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
@@ -4071,7 +4178,8 @@ def benchmark_launch(
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
-                                             disk_tier=disk_tier)
+                                             disk_tier=disk_tier,
+                                             ports=ports)
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')

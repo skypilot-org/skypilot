@@ -138,10 +138,10 @@ class IBM(clouds.Cloud):
         # Currently Isn't implemented in the same manner by aws and azure.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost. Currently true for us-south, i.e. Dallas.
         based on https://cloud.ibm.com/objectstorage/create#pricing. """
-        cost = 0
+        cost = 0.
         price_thresholds = [{
             'threshold': 150,
             'price_per_gb': 0.05
@@ -165,6 +165,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -179,6 +180,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
+        del cluster_name_on_cloud  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
