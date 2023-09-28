@@ -413,6 +413,8 @@ class SkyPilotInfraProvider(InfraProvider):
                            'already exists. Skipping.')
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
+        # TODO(tian): We should do usage_lib.messages.usage.set_internal()
+        # after we change to python API.
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
         fn = serve_utils.generate_replica_launch_log_file_name(
