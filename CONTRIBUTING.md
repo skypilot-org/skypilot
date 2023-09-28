@@ -61,7 +61,7 @@ We have a dev container image `berkeleyskypilot/skypilot-debug` which we use for
 
 ```bash
 docker run -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
-# On Mac:
+# On Apple silicon Macs:
 docker run --platform linux/amd64 -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
 ```
 
