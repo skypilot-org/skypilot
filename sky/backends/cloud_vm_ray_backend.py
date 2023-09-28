@@ -4105,7 +4105,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             # This function could be directly called from status refresh,
             # where we need to cleanup the cluster profile.
-            metadata_utils.remove_cluster_info(handle.cluster_name)
+            metadata_utils.remove_cluster_metadata(handle.cluster_name)
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None

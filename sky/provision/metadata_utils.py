@@ -12,18 +12,18 @@ from sky import sky_logging
 SKY_METADATA_VERSION = 'v1'
 SKY_METADATA_PATH = (pathlib.Path.home() / '.sky' / 'metadata' /
                      SKY_METADATA_VERSION)
-SKY_cluster_info_PATH = SKY_METADATA_PATH / 'clusters'
+SKY_CLUSTER_METADATA_PATH = SKY_METADATA_PATH / 'clusters'
 logger = sky_logging.init_logger(__name__)
 
 
-def _get_cluster_info_dir(cluster_name: str) -> pathlib.Path:
-    dirname = SKY_cluster_info_PATH / cluster_name
+def _get_cluster_metadata_dir(cluster_name: str) -> pathlib.Path:
+    dirname = SKY_CLUSTER_METADATA_PATH / cluster_name
     dirname.mkdir(parents=True, exist_ok=True)
     return dirname.resolve()
 
 
-def _get_instance_info_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
-    dirname = (SKY_cluster_info_PATH / cluster_name / 'instances' / instance_id)
+def _get_instance_metadata_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
+    dirname = (SKY_CLUSTER_METADATA_PATH / cluster_name / 'instances' / instance_id)
     if instance_id != '*':
         dirname.mkdir(parents=True, exist_ok=True)
     return dirname.resolve()
@@ -80,8 +80,8 @@ def get_instance_cache_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     directory for the specified cluster and instance. If the directory
     does not exist, it is created.
     """
-    instance_info_dir = _get_instance_info_dir(cluster_name, instance_id)
-    path = instance_info_dir / 'cache'
+    instance_metadata_dir = _get_instance_metadata_dir(cluster_name, instance_id)
+    path = instance_metadata_dir / 'cache'
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -93,18 +93,18 @@ def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     log directory for the specified cluster and instance. If the
     directory does not exist, it is created.
     """
-    instance_info_dir = _get_instance_info_dir(cluster_name, instance_id)
-    path = instance_info_dir / 'logs'
+    instance_metadata_dir = _get_instance_metadata_dir(cluster_name, instance_id)
+    path = instance_metadata_dir / 'logs'
     if instance_id != '*':
         path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def remove_cluster_info(cluster_name: str) -> None:
+def remove_cluster_metadata(cluster_name: str) -> None:
     """Remove metadata of a cluster.
 
     This function is called when terminating the cluster.
     """
-    dirname = _get_cluster_info_dir(cluster_name)
+    dirname = _get_cluster_metadata_dir(cluster_name)
     logger.debug(f'Remove metadata of cluster {cluster_name}.')
     shutil.rmtree(dirname, ignore_errors=True)

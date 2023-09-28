@@ -209,7 +209,7 @@ def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
     if terminate:
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
-        metadata_utils.remove_cluster_info(cluster_name.name_on_cloud)
+        metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)
