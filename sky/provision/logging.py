@@ -20,25 +20,32 @@ config = _LoggingConfig()
 
 
 @contextlib.contextmanager
-def setup_provision_logging(log_path: str, file_handler: logging.FileHandler):
+def setup_provision_logging(log_dir: str):
     try:
         # Redirect underlying provision logs to file.
+        log_path = os.path.join(log_dir, 'provision.log')
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
         log_abs_path = pathlib.Path(log_path).expanduser().absolute()
+        fh = logging.FileHandler(log_abs_path)
+        fh.setFormatter(sky_logging.FORMATTER)
+        fh.setLevel(logging.DEBUG)
+
         provision_logger = logging.getLogger('sky.provision')
         stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
         stream_handler.setLevel(logging.WARNING)
 
-        provision_logger.addHandler(file_handler)
+        provision_logger.addHandler(fh)
         provision_logger.addHandler(stream_handler)
 
         config.log_path = log_abs_path
         yield
     finally:
-        provision_logger.removeHandler(file_handler)
+        provision_logger.removeHandler(fh)
         provision_logger.removeHandler(stream_handler)
         stream_handler.close()
+        fh.close()
 
 
 def get_log_path() -> pathlib.Path:

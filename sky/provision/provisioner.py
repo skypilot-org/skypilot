@@ -1,9 +1,7 @@
 """Cloud-neutral VM provision utils."""
 import collections
-import contextlib
 import dataclasses
 import json
-import logging
 import os
 import pathlib
 import shlex
@@ -46,24 +44,6 @@ class ClusterName:
 
     def __str__(self) -> str:
         return self.display_name
-
-
-@contextlib.contextmanager
-def _add_logger_handlers(log_path: str):
-    """Add file handler for logger."""
-    try:
-        log_abs_path = pathlib.Path(log_path).expanduser().absolute()
-        fh = logging.FileHandler(log_abs_path)
-        fh.setFormatter(sky_logging.FORMATTER)
-        fh.setLevel(logging.DEBUG)
-        logger.addHandler(fh)
-
-        # Redirect underlying provision logs to file.
-        with provision_logging.setup_provision_logging(log_path, fh):
-            yield
-    finally:
-        logger.removeHandler(fh)
-        fh.close()
 
 
 def _bulk_provision(
@@ -155,10 +135,6 @@ def bulk_provision(
     log_dir: str,
 ) -> Optional[provision_common.ProvisionRecord]:
     """Provisions a cluster and wait until fully provisioned."""
-    log_dir = os.path.abspath(os.path.expanduser(log_dir))
-    os.makedirs(log_dir, exist_ok=True)
-    log_abs_path = os.path.join(log_dir, 'provision.log')
-
     original_config = common_utils.read_yaml(cluster_yaml)
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
@@ -172,7 +148,7 @@ def bulk_provision(
         tags={},
         resume_stopped_nodes=True)
 
-    with _add_logger_handlers(log_abs_path):
+    with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(_TITLE.format('Provisioning'))
             logger.debug(
@@ -490,10 +466,7 @@ def post_provision_runtime_setup(
     3. Run setup commands to install dependencies.
     4. Starting ray cluster and skylet.
     """
-    log_path = os.path.join(log_dir, 'provision.log')
-    log_abs_path = os.path.abspath(os.path.expanduser(log_path))
-
-    with _add_logger_handlers(log_abs_path):
+    with provision_logging.setup_provision_logging(log_dir):
         try:
             logger.debug(_TITLE.format('System Setup After Provision'))
             return _post_provision_setup(cloud_name,
