@@ -11,6 +11,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
+import colorama
 
 from sky import clouds
 from sky import exceptions
@@ -83,7 +84,21 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+# Firewall rule name for user opened ports.
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
+
+# UX message when image not found in GCP.
+# pylint: disable=line-too-long
+_IMAGE_NOT_FOUND_UX_MESSAGE = (
+    'Image {image_id!r} not found in GCP.\n'
+    '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/images/<image-name>{colorama.Style.RESET_ALL}\n'
+    'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n'
+    '\nTo find machine images: https://cloud.google.com/compute/docs/machine-images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/machineImages/<machine-image-name>{colorama.Style.RESET_ALL}\n'
+    f'\nYou can query image id using: {colorama.Style.BRIGHT}gcloud compute images list --project <project-id> --no-standard-images{colorama.Style.RESET_ALL}'
+    f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
+)
 
 
 def _run_output(cmd):
@@ -364,7 +379,9 @@ class GCP(clouds.Cloud):
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
-                raise ValueError(f'Image {image_id!r} not found in GCP.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(image_id=image_id))
             project = image_attrs[1]
             image_name = image_attrs[-1]
             # We support both GCP's Machine Images and Custom Images, both
@@ -392,8 +409,9 @@ class GCP(clouds.Cloud):
                                      f'{image_id!r}') from None
             if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id!r} not found in '
-                                     'GCP.') from None
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(
+                            image_id=image_id)) from None
             raise
 
     @classmethod
