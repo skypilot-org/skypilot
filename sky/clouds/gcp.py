@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
 import colorama
@@ -84,6 +84,7 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
 # pylint: disable=line-too-long
 _IMAGE_NOT_FOUND_UX_MESSAGE = (
     'Image {image_id!r} not found in GCP.\n'
@@ -341,7 +342,7 @@ class GCP(clouds.Cloud):
                                                            zone=zone,
                                                            clouds='gcp')
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://cloud.google.com/storage/pricing#network-pricing
         # NOTE: egress to worldwide (excl. China, Australia).
@@ -427,7 +428,8 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', region: 'clouds.Region',
+            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -508,6 +510,12 @@ class GCP(clouds.Cloud):
             resources_vars['image_id'] = None
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
+
+        firewall_rule = None
+        if resources.ports is not None:
+            firewall_rule = (
+                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+        resources_vars['firewall_rule'] = firewall_rule
 
         return resources_vars
 
@@ -1213,3 +1221,10 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = self.__dict__.copy()
+        # We should avoid saving third-party object to the state, as it may
+        # cause unpickling error when the third-party API is updated.
+        state.pop('_list_reservations_cache', None)
+        return state

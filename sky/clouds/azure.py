@@ -96,7 +96,7 @@ class Azure(clouds.Cloud):
         # GPUs, while the task specifies to use 1 GPU.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://azure.microsoft.com/en-us/pricing/details/bandwidth/
         # NOTE: egress from US East.
@@ -225,8 +225,10 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', region: 'clouds.Region',
+            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert zones is None, ('Azure does not support zones', zones)
 
         region_name = region.name

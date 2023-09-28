@@ -49,6 +49,7 @@ from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1502,7 +1503,6 @@ class RetryingVmProvisioner(object):
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
-                    to_provision.ports,
                     _get_cluster_config_template(to_provision.cloud),
                     cluster_name,
                     self._local_wheel_path,
@@ -1707,6 +1707,8 @@ class RetryingVmProvisioner(object):
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml, cluster_handle.docker_user)
+        # Always fetch the latest IPs, since GCP may change them without notice
+        cluster_handle.update_cluster_ips()
         all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
@@ -2317,23 +2319,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_resources = self.launched_resources.copy(region=region)
 
     def update_ssh_ports(self, max_attempts: int = 1) -> None:
-        """Updates the cluster SSH ports cached in the handle."""
-        # TODO(romilb): Replace this with a call to the cloud class to get ports
-        # Use port 22 for everything except Kubernetes
-        if not isinstance(self.launched_resources.cloud, clouds.Kubernetes):
-            head_ssh_port = 22
-        else:
-            svc_name = f'{self.cluster_name_on_cloud}-ray-head-ssh'
-            retry_cnt = 0
-            while True:
-                try:
-                    head_ssh_port = clouds.Kubernetes.get_port(svc_name)
-                    break
-                except Exception:  # pylint: disable=broad-except
-                    retry_cnt += 1
-                    if retry_cnt >= max_attempts:
-                        raise
-            # TODO(romilb): Multinode doesn't work with Kubernetes yet.
+        """Fetches and sets the SSH ports for the cluster nodes.
+
+        Use this method to use any cloud-specific port fetching logic.
+        """
+        del max_attempts  # Unused.
+        head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))
 
@@ -2606,8 +2597,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                               self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def check_resources_fit_cluster(self, handle: CloudVmRayResourceHandle,
-                                    task: task_lib.Task):
+    def check_resources_fit_cluster(
+        self,
+        handle: CloudVmRayResourceHandle,
+        task: task_lib.Task,
+        check_ports: bool = False,
+    ):
         """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
@@ -2647,7 +2642,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # how many nodes satisfy task resource requirements.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(
-                    launched_resources, requested_num_nodes=task.num_nodes)):
+                    launched_resources,
+                    requested_num_nodes=task.num_nodes,
+                    check_ports=check_ports)):
             if (task_resources.region is not None and
                     task_resources.region != launched_resources.region):
                 with ux_utils.print_exception_no_traceback():
@@ -2710,13 +2707,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
-            to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name,
-                to_provision,
-                task.num_nodes,
-                prev_cluster_status=None,
-                prev_handle=None)
-            # Try to launch the exiting cluster first
+            # Try to launch the exiting cluster first. If no existing cluster,
+            # this function will create a to_provision_config with required
+            # resources.
             to_provision_config = self._check_existing_cluster(
                 task, to_provision, cluster_name, dryrun)
             assert to_provision_config.resources is not None, (
@@ -2864,13 +2857,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # launched in different zones (legacy clusters before
                     # #1700), leave the zone field of handle.launched_resources
                     # to None.
-            self._update_after_cluster_provisioned(handle, task,
-                                                   prev_cluster_status, ip_list,
-                                                   ssh_port_list, lock_path)
+            self._update_after_cluster_provisioned(
+                handle, to_provision_config.prev_handle, task,
+                prev_cluster_status, ip_list, ssh_port_list, lock_path)
             return handle
 
+    def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
+        cloud = handle.launched_resources.cloud
+        logger.debug(
+            f'Opening ports {handle.launched_resources.ports} for {cloud}')
+        config = common_utils.read_yaml(handle.cluster_yaml)
+        provider_config = config['provider']
+        provision_lib.open_ports(repr(cloud), handle.cluster_name_on_cloud,
+                                 handle.launched_resources.ports,
+                                 provider_config)
+
     def _update_after_cluster_provisioned(
-            self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
+            self, handle: CloudVmRayResourceHandle,
+            prev_handle: Optional[CloudVmRayResourceHandle],
+            task: task_lib.Task,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             ip_list: List[str], ssh_port_list: List[int],
             lock_path: str) -> None:
@@ -2917,6 +2922,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 returncode, cmd,
                 'Failed to set previously in-progress jobs to FAILED',
                 stdout + stderr)
+
+        prev_ports = None
+        if prev_handle is not None:
+            prev_ports = prev_handle.launched_resources.ports
+        current_ports = handle.launched_resources.ports
+        open_new_ports = bool(
+            resources_utils.port_ranges_to_set(current_ports) -
+            resources_utils.port_ranges_to_set(prev_ports))
+        if open_new_ports:
+            with rich_utils.safe_status(
+                    '[bold cyan]Launching - Opening new ports'):
+                self._open_ports(handle)
 
         with timeline.Event('backend.provision.post_process'):
             global_user_state.add_or_update_cluster(
@@ -3009,36 +3026,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
-    def _update_envs_for_k8s(self, handle: CloudVmRayResourceHandle,
-                             task: task_lib.Task) -> None:
-        """Update envs with env vars from Kubernetes if cloud is Kubernetes.
-
-        Kubernetes automatically populates containers with critical environment
-        variables, such as those for discovering services running in the
-        cluster and CUDA/nvidia environment variables. We need to update task
-        environment variables with these env vars. This is needed for GPU
-        support and service discovery.
-
-        See https://github.com/skypilot-org/skypilot/issues/2287 for
-        more details.
-        """
-        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-            temp_envs = copy.deepcopy(task.envs)
-            cloud_env_vars = handle.launched_resources.cloud.query_env_vars(
-                handle.cluster_name_on_cloud)
-            task.update_envs(cloud_env_vars)
-
-            # Re update the envs with the original envs to give priority to
-            # the original envs.
-            task.update_envs(temp_envs)
-
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
-
-        self._update_envs_for_k8s(handle, task)
 
         if task.setup is None:
             return
@@ -3347,8 +3339,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self.check_resources_fit_cluster(handle, task)
-        self._update_envs_for_k8s(handle, task)
+        # We need to check ports here since sky.exec shouldn't change resources
+        self.check_resources_fit_cluster(handle, task, check_ports=True)
 
         resources_str = backend_utils.get_task_resources_str(task)
 
@@ -3985,12 +3977,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
-            if isinstance(cloud, (clouds.AWS, clouds.GCP)):
-                # Clean up AWS SGs or GCP firewall rules
-                # We don't need to clean up on Azure since it is done by
-                # our sky node provider.
-                # TODO(tian): Adding a no-op cleanup_ports API after #2286
-                # merged.
+            # TODO(tian): Add some API like
+            # provision_lib.supports(cloud, 'cleanup_ports')
+            # so that our backend do not need to know the specific details
+            # for different clouds.
+            if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 
@@ -4187,9 +4178,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
+            assert len(task.resources) == 1
+            all_ports = resources_utils.port_set_to_ranges(
+                resources_utils.port_ranges_to_set(
+                    handle.launched_resources.ports) |
+                resources_utils.port_ranges_to_set(
+                    list(task.resources)[0].ports))
+            to_provision = handle.launched_resources
+            if all_ports:
+                to_provision = to_provision.copy(ports=all_ports)
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name,
-                handle.launched_resources,
+                to_provision,
                 handle.launched_nodes,
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle)

@@ -16,6 +16,7 @@ Install SkyPilot using pip:
   $ pip install skypilot
   $ # pip install "skypilot[gcp]"
   $ # pip install "skypilot[azure]"
+  $ # pip install "skypilot[kubernetes]"
   $ # pip install "skypilot[lambda]"
   $ # pip install "skypilot[ibm]"
   $ # pip install "skypilot[scp]"
@@ -240,6 +241,18 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
   Multi-node clusters are currently not supported on SCP.
 
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
+
+.. code-block:: console
+
+  $ # Place your kubeconfig at ~/.kube/config
+  $ mkdir -p ~/.kube
+  $ cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. _verify-cloud-access:
 

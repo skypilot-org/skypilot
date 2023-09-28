@@ -489,7 +489,7 @@ def list_accelerators_impl(
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
             'MemoryGiB'
         ],
-                            dropna=False).aggregate(min).reset_index()
+                            dropna=False).aggregate('min').reset_index()
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
