@@ -85,6 +85,7 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 DEFAULT_GCP_IMAGE_GB = 50
 
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
+
 # pylint: disable=line-too-long
 _IMAGE_NOT_FOUND_UX_MESSAGE = (
     'Image {image_id!r} not found in GCP.\n'
