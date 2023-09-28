@@ -22,8 +22,10 @@ def _get_cluster_metadata_dir(cluster_name: str) -> pathlib.Path:
     return dirname.resolve()
 
 
-def _get_instance_metadata_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
-    dirname = (SKY_CLUSTER_METADATA_PATH / cluster_name / 'instances' / instance_id)
+def _get_instance_metadata_dir(cluster_name: str,
+                               instance_id: str) -> pathlib.Path:
+    dirname = (SKY_CLUSTER_METADATA_PATH / cluster_name / 'instances' /
+               instance_id)
     if instance_id != '*':
         dirname.mkdir(parents=True, exist_ok=True)
     return dirname.resolve()
@@ -80,7 +82,8 @@ def get_instance_cache_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     directory for the specified cluster and instance. If the directory
     does not exist, it is created.
     """
-    instance_metadata_dir = _get_instance_metadata_dir(cluster_name, instance_id)
+    instance_metadata_dir = _get_instance_metadata_dir(cluster_name,
+                                                       instance_id)
     path = instance_metadata_dir / 'cache'
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -93,7 +96,8 @@ def get_instance_log_dir(cluster_name: str, instance_id: str) -> pathlib.Path:
     log directory for the specified cluster and instance. If the
     directory does not exist, it is created.
     """
-    instance_metadata_dir = _get_instance_metadata_dir(cluster_name, instance_id)
+    instance_metadata_dir = _get_instance_metadata_dir(cluster_name,
+                                                       instance_id)
     path = instance_metadata_dir / 'logs'
     if instance_id != '*':
         path.mkdir(parents=True, exist_ok=True)
