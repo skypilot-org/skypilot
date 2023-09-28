@@ -38,8 +38,9 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
     raise RuntimeError(prefix + error)
 
 
-def bootstrap_instances(region: str, cluster_name: str,
-                        config: common.InstanceConfig) -> common.InstanceConfig:
+def bootstrap_instances(
+        region: str, cluster_name: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
     """See sky/provision/__init__.py"""
     # create a copy of the input config to modify
     config = copy.deepcopy(config)

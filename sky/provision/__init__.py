@@ -60,8 +60,9 @@ def query_instances(
 
 
 @_route_to_cloud_impl
-def bootstrap_instances(provider_name: str, region: str, cluster_name: str,
-                        config: common.InstanceConfig) -> common.InstanceConfig:
+def bootstrap_instances(
+        provider_name: str, region: str, cluster_name: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
     """Bootstrap configurations for a cluster.
 
     This function sets up auxiliary resources for a specified cluster
@@ -77,7 +78,7 @@ def bootstrap_instances(provider_name: str, region: str, cluster_name: str,
 
 @_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name: str,
-                  config: common.InstanceConfig) -> common.ProvisionMetadata:
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError
 
@@ -132,7 +133,7 @@ def wait_instances(provider_name: str, region: str, cluster_name: str,
 
 
 @_route_to_cloud_impl
-def get_cluster_metadata(provider_name: str, region: str,
-                         cluster_name: str) -> common.ClusterMetadata:
+def get_cluster_info(provider_name: str, region: str,
+                     cluster_name: str) -> common.ClusterInfo:
     """Get the metadata of instances in a cluster."""
     raise NotImplementedError

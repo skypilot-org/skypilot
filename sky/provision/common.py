@@ -1,18 +1,19 @@
 """Common data structures for provisioning"""
+import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
-import pydantic
-
-# NOTE: we use pydantic instead of dataclasses or namedtuples, because
+# NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from
 # nested dictionaries. This makes our API more extensible and easier
 # to integrate with other frameworks like FastAPI etc.
 
 # -------------------- input data model -------------------- #
 
+InstanceId = str
 
-class InstanceConfig(pydantic.BaseModel):
-    """Metadata for instance configuration."""
+@dataclasses.dataclass
+class ProvisionConfig:
+    """Configuration for provisioning."""
     # Global configurations for the cloud provider.
     provider_config: Dict[str, Any]
     # Configurations for the authentication.
@@ -32,8 +33,9 @@ class InstanceConfig(pydantic.BaseModel):
 # -------------------- output data model -------------------- #
 
 
-class ProvisionMetadata(pydantic.BaseModel):
-    """Metadata from provisioning."""
+@dataclasses.dataclass
+class ProvisionRecord:
+    """Record for a provisioning process."""
     # The name of the cloud provider.
     provider_name: str
     # The name of the region.
@@ -43,14 +45,15 @@ class ProvisionMetadata(pydantic.BaseModel):
     zone: Optional[str]
     # The name of the cluster.
     cluster_name: str
-    # The head node ID.
-    head_instance_id: str
+    # The unique identifier of the head instance, i.e., the
+    # `instance_info.instance_id` of the head node.
+    head_instance_id: InstanceId
     # The IDs of all just resumed instances.
-    resumed_instance_ids: List[str]
+    resumed_instance_ids: List[InstanceId]
     # The IDs of all just created instances.
-    created_instance_ids: List[str]
+    created_instance_ids: List[InstanceId]
 
-    def is_instance_just_booted(self, instance_id: str) -> bool:
+    def is_instance_just_booted(self, instance_id: InstanceId) -> bool:
         """Whether or not the instance is just booted.
 
         Is an instance just booted,  so that there are no services running?
@@ -59,9 +62,10 @@ class ProvisionMetadata(pydantic.BaseModel):
                 instance_id in self.created_instance_ids)
 
 
-class InstanceMetadata(pydantic.BaseModel):
-    """Metadata from querying a cloud instance."""
-    instance_id: str
+@dataclasses.dataclass
+class InstanceInfo:
+    """Instance information."""
+    instance_id: InstanceId
     internal_ip: str
     external_ip: Optional[str]
     tags: Dict[str, str]
@@ -74,10 +78,13 @@ class InstanceMetadata(pydantic.BaseModel):
         return self.internal_ip
 
 
-class ClusterMetadata(pydantic.BaseModel):
-    """Metadata from querying a cluster."""
-    instances: Dict[str, InstanceMetadata]
-    head_instance_id: Optional[str]
+@dataclasses.dataclass
+class ClusterInfo:
+    """Cluster Information."""
+    instances: Dict[InstanceId, InstanceInfo]
+    # The unique identifier of the head instance, i.e., the
+    # `instance_info.instance_id` of the head node.
+    head_instance_id: Optional[InstanceId]
     docker_user: Optional[str] = None
 
     def ip_tuples(self) -> List[Tuple[str, Optional[str]]]:
@@ -128,7 +135,7 @@ class ClusterMetadata(pydantic.BaseModel):
         """Get external IPs if they exist, otherwise get internal ones."""
         return self._get_ips(not self.has_external_ips() or force_internal_ips)
 
-    def get_head_instance(self) -> Optional[InstanceMetadata]:
+    def get_head_instance(self) -> Optional[InstanceInfo]:
         """Get the instance metadata of the head node"""
         if self.head_instance_id is None:
             return None

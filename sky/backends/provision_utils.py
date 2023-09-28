@@ -84,8 +84,8 @@ def _bulk_provision(
     region: clouds.Region,
     zones: Optional[List[clouds.Zone]],
     cluster_name: ClusterName,
-    bootstrap_config: provision_common.InstanceConfig,
-) -> provision_common.ProvisionMetadata:
+    bootstrap_config: provision_common.ProvisionConfig,
+) -> provision_common.ProvisionRecord:
     provider_name = repr(cloud)
     region_name = region.name
 
@@ -122,10 +122,10 @@ def _bulk_provision(
                          f'{colorama.Style.RESET_ALL}')
             raise
 
-        provision_metadata = provision.run_instances(provider_name,
-                                                     region_name,
-                                                     cluster_name.name_on_cloud,
-                                                     config=config)
+        provision_record = provision.run_instances(provider_name,
+                                                   region_name,
+                                                   cluster_name.name_on_cloud,
+                                                   config=config)
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
@@ -154,7 +154,7 @@ def _bulk_provision(
     logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
                  f'seconds.')
 
-    return provision_metadata
+    return provision_record
 
 
 def bulk_provision(
@@ -166,14 +166,14 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Optional[provision_common.ProvisionMetadata]:
+) -> Optional[provision_common.ProvisionRecord]:
     """Provisions a cluster and wait until fully provisioned."""
     log_dir = os.path.abspath(os.path.expanduser(log_dir))
     os.makedirs(log_dir, exist_ok=True)
     log_abs_path = os.path.join(log_dir, 'provision.log')
 
     original_config = common_utils.read_yaml(cluster_yaml)
-    bootstrap_config = provision_common.InstanceConfig(
+    bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         docker_config=original_config.get('docker', {}),
@@ -188,8 +188,9 @@ def bulk_provision(
     with _add_logger_handlers(log_abs_path):
         try:
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug('Provision config:\n'
-                         f'{json.dumps(bootstrap_config.dict(), indent=2)}')
+            logger.debug(
+                'Provision config:\n'
+                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
         except Exception:  # pylint: disable=broad-except
@@ -221,7 +222,7 @@ def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
     if terminate:
         provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
                                       provider_config)
-        metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        metadata_utils.remove_cluster_info(cluster_name.name_on_cloud)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)
@@ -305,10 +306,10 @@ def _wait_ssh_connection_indirect(
     return proc.returncode == 0
 
 
-def wait_for_ssh(cluster_metadata: provision_common.ClusterMetadata,
+def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready."""
-    if (cluster_metadata.has_external_ips() and
+    if (cluster_info.has_external_ips() and
             ssh_credentials.get('ssh_proxy_command') is None):
         # If we can access public IPs, then it is more efficient to test SSH
         # connection with raw sockets.
@@ -316,7 +317,7 @@ def wait_for_ssh(cluster_metadata: provision_common.ClusterMetadata,
     else:
         # See https://github.com/skypilot-org/skypilot/pull/1512
         waiter = _wait_ssh_connection_indirect
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_info.get_feasible_ips()
 
     timeout = 60 * 10  # 10-min maximum timeout
     start = time.time()
@@ -337,12 +338,13 @@ def wait_for_ssh(cluster_metadata: provision_common.ClusterMetadata,
 def _post_provision_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         local_wheel_path: pathlib.Path, wheel_hash: str,
-        provision_metadata: provision_common.ProvisionMetadata,
-        custom_resource: Optional[str]) -> provision_common.ClusterMetadata:
-    cluster_metadata = provision.get_cluster_metadata(
-        cloud_name, provision_metadata.region, cluster_name.name_on_cloud)
+        provision_record: provision_common.ProvisionRecord,
+        custom_resource: Optional[str]) -> provision_common.ClusterInfo:
+    cluster_info = provision.get_cluster_info(cloud_name,
+                                              provision_record.region,
+                                              cluster_name.name_on_cloud)
 
-    if len(cluster_metadata.instances) > 1:
+    if len(cluster_info.instances) > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
@@ -350,19 +352,20 @@ def _post_provision_setup(
         logger.debug('For per-instance logs, run: '
                      f'tail -n 100 -f {per_instance_log_dir}/*.log')
 
-    logger.debug('Provision metadata:\n'
-                 f'{json.dumps(provision_metadata.dict(), indent=2)}\n'
-                 'Cluster metadata:\n'
-                 f'{json.dumps(cluster_metadata.dict(), indent=2)}')
+    logger.debug(
+        'Provision metadata:\n'
+        f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
+        'Cluster metadata:\n'
+        f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
 
-    head_instance = cluster_metadata.get_head_instance()
+    head_instance = cluster_info.get_head_instance()
     if head_instance is None:
         raise RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
                            'Could not find any head instance.')
 
     # TODO(suquark): Move wheel build here in future PRs.
     config_from_yaml = common_utils.read_yaml(cluster_yaml)
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
     # TODO(suquark): Handle TPU VMs when dealing with GCP later.
@@ -377,9 +380,9 @@ def _post_provision_setup(
 
         logger.debug(
             f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_metadata, ssh_credentials)
+        wait_for_ssh(cluster_info, ssh_credentials)
         logger.debug(f'SSH Conection ready for {cluster_name!r}')
-        plural = '' if len(cluster_metadata.instances) == 1 else 's'
+        plural = '' if len(cluster_info.instances) == 1 else 's'
         logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
                     f'or found existing instance{plural}.'
                     f'{colorama.Style.RESET_ALL}')
@@ -391,14 +394,14 @@ def _post_provision_setup(
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
-                cluster_metadata=cluster_metadata,
+                cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
             if docker_user is None:
                 raise RuntimeError(
                     f'Failed to retrieve docker user for {cluster_name!r}. '
                     'Please check your docker configuration.')
 
-            cluster_metadata.docker_user = docker_user
+            cluster_info.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
 
@@ -423,7 +426,7 @@ def _post_provision_setup(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
                                             file_mounts,
-                                            cluster_metadata,
+                                            cluster_info,
                                             ssh_credentials,
                                             wheel_hash=wheel_hash)
 
@@ -431,7 +434,7 @@ def _post_provision_setup(
             runtime_preparation_str.format(step=2, step_name='dependencies'))
         instance_setup.setup_runtime_on_cluster(
             cluster_name.name_on_cloud, config_from_yaml['setup_commands'],
-            cluster_metadata, ssh_credentials)
+            cluster_info, ssh_credentials)
 
         head_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                       port=22,
@@ -440,7 +443,7 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
-        if not provision_metadata.is_instance_just_booted(
+        if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
             # Check if head node Ray is alive
             returncode = head_runner.run(
@@ -457,7 +460,7 @@ def _post_provision_setup(
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
-                cluster_metadata=cluster_metadata,
+                cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
 
         # NOTE: We have to check all worker nodes to make sure they are all
@@ -465,8 +468,8 @@ def _post_provision_setup(
         #  nodes like this:
         #
         # worker_ips = []
-        # for inst in cluster_metadata.instances.values():
-        #     if provision_metadata.is_instance_just_booted(inst.instance_id):
+        # for inst in cluster_info.instances.values():
+        #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
         if len(ip_list) > 1:
@@ -474,24 +477,23 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
-                cluster_metadata=cluster_metadata,
+                cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
-                                                 cluster_metadata,
-                                                 ssh_credentials)
+                                                 cluster_info, ssh_credentials)
 
     logger.info(f'{colorama.Fore.GREEN}Successfully provisioned cluster: '
                 f'{cluster_name}{colorama.Style.RESET_ALL}')
-    return cluster_metadata
+    return cluster_info
 
 
 def post_provision_runtime_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         local_wheel_path: pathlib.Path, wheel_hash: str,
-        provision_metadata: provision_common.ProvisionMetadata,
+        provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str],
-        log_dir: str) -> provision_common.ClusterMetadata:
+        log_dir: str) -> provision_common.ClusterInfo:
     """Run internal setup commands after provisioning and before user setup.
 
     Here are the steps:
@@ -512,7 +514,7 @@ def post_provision_runtime_setup(
                                          cluster_yaml=cluster_yaml,
                                          local_wheel_path=local_wheel_path,
                                          wheel_hash=wheel_hash,
-                                         provision_metadata=provision_metadata,
+                                         provision_record=provision_record,
                                          custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
             logger.error('*** Failed setting up cluster. ***')
