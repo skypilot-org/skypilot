@@ -84,8 +84,10 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+# Firewall rule name for user opened ports.
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
 
+# UX message when image not found in GCP.
 # pylint: disable=line-too-long
 _IMAGE_NOT_FOUND_UX_MESSAGE = (
     'Image {image_id!r} not found in GCP.\n'
