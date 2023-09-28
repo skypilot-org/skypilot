@@ -137,7 +137,9 @@ extras_require: Dict[str, List[str]] = {
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
     ],
-    'gcp': ['google-api-python-client', 'google-cloud-storage'] + local_ray,
+    # We need google-api-python-client>=2.19.1 to enable 'reason' attribute
+    # of googleapiclient.errors.HttpError, which is widely used in our system.
+    'gcp': ['google-api-python-client>=2.19.1', 'google-cloud-storage'] + local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
