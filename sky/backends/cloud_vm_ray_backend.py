@@ -38,7 +38,7 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
-from sky.backends import provision_utils
+from sky.backends import provisioner
 from sky.backends import wheel_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -1574,11 +1574,11 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
-                provision_record = provision_utils.bulk_provision(
+                provision_record = provisioner.bulk_provision(
                     to_provision.cloud,
                     region,
                     zones,
-                    provision_utils.ClusterName(cluster_name,
+                    provisioner.ClusterName(cluster_name,
                                                 handle.cluster_name_on_cloud),
                     num_nodes=num_nodes,
                     cluster_yaml=handle.cluster_yaml,
@@ -2862,9 +2862,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 #    and other necessary files to the VM.
                 # 3. Run setup commands to install dependencies.
                 # 4. Starting ray cluster and skylet.
-                cluster_info = provision_utils.post_provision_runtime_setup(
+                cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
-                    provision_utils.ClusterName(handle.cluster_name,
+                    provisioner.ClusterName(handle.cluster_name,
                                                 handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
                     local_wheel_path=local_wheel_path,
@@ -3841,9 +3841,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'already been terminated. It is fine to skip this.')
 
             try:
-                provision_utils.teardown_cluster(
+                provisioner.teardown_cluster(
                     repr(cloud),
-                    provision_utils.ClusterName(cluster_name,
+                    provisioner.ClusterName(cluster_name,
                                                 cluster_name_on_cloud),
                     terminate=terminate,
                     provider_config=config['provider'])
