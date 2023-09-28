@@ -116,7 +116,7 @@ def _bulk_provision(
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
         except Exception as e:
-            logger.error('Failed to bootstrap configurations for '
+            logger.error('Failed to config the cloud for '
                          f'{cluster_name!r} with the following error:\n'
                          f'{common_utils.format_exception(e)}')
             raise
@@ -129,7 +129,7 @@ def _bulk_provision(
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
         logger.debug(
             f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update('[bold cyan]Launching - Checking instance statuses[/]')
+        status.update('[bold cyan]Launching - Checking instance status[/]')
         # AWS would take a very short time (<<1s) updating the state of the
         # instance.
         time.sleep(1)
@@ -515,9 +515,7 @@ def post_provision_runtime_setup(
                                          provision_metadata=provision_metadata,
                                          custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
-            logger.error(
-                f'*** Failed setting up cluster {cluster_name!r} after '
-                'provision. ***')
+            logger.error('*** Failed setting up cluster. ***')
             logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise
