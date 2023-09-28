@@ -116,9 +116,10 @@ def _bulk_provision(
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
         except Exception as e:
-            logger.error('Failed to config the cloud for '
+            logger.error(f'{colorama.Style.DIM}Failed to config the cloud for '
                          f'{cluster_name!r} with the following error:\n'
-                         f'{common_utils.format_exception(e)}')
+                         f'{common_utils.format_exception(e)}'
+                         f'{colorama.Style.RESET_ALL}')
             raise
 
         provision_metadata = provision.run_instances(provider_name,
