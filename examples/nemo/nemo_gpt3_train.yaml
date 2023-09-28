@@ -87,6 +87,7 @@ setup: |
   fi
 
 run: |
+  conda activate nemo
   # ============= Data Download =============
   # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
   # to our shared bucket at gs://${BUCKET_NAME}. 
@@ -109,9 +110,7 @@ run: |
       done
   fi 
   
-  # ============= Training =============
-  conda activate nemo
-  
+  # ============= Training =============  
   # Get the number of nodes and master address from SkyPilot envvars
   num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
   master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`

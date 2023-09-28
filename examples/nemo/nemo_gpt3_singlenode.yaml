@@ -82,6 +82,7 @@ setup: |
   fi
 
 run: |
+  conda activate nemo
   # ============= Data Download =============
   # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
   # For more on how to pre-process data, see nemo_gpt3_preprocessing.yaml
@@ -94,9 +95,7 @@ run: |
       gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
   fi 
   
-  # ============= Training =============
-  conda activate nemo
-    
+  # ============= Training =============    
   python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
     --config-path=conf \
     --config-name=megatron_gpt_config \
