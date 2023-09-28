@@ -9,7 +9,6 @@ import pathlib
 import shlex
 import socket
 import subprocess
-import sys
 import time
 import traceback
 from typing import Dict, List, Optional
