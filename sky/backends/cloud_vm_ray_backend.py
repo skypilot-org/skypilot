@@ -4520,9 +4520,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
+        envs_with_external = copy.deepcopy(task.envs)
+        envs_with_external['SKYPILOT_EXTERNAL_IPS'] = handle.external_ips()
         codegen.add_ray_task(
             bash_script=command_for_node,
-            env_vars=task.envs,
+            env_vars=envs_with_external,
             task_name=task.name,
             job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
@@ -4592,9 +4594,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
             use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
+            envs_with_external = copy.deepcopy(task.envs)
+            envs_with_external['SKYPILOT_EXTERNAL_IPS'] = handle.external_ips()
             codegen.add_ray_task(
                 bash_script=command_for_node,
-                env_vars=task.envs,
+                env_vars=envs_with_external,
                 task_name=task.name,
                 job_run_id=job_run_id,
                 ray_resources_dict=accelerator_dict,
