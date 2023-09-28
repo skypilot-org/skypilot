@@ -56,6 +56,7 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
+    'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
     # NOTE: required by awscli. To avoid ray automatically installing
@@ -102,11 +103,11 @@ install_requires = [
     'pydantic <2.0, >=1.10.8',
     # Cython 3.0 release breaks PyYAML 5.4.* (https://github.com/yaml/pyyaml/issues/601)
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
-    'pyyaml > 3.13, != 5.4.*'
+    'pyyaml > 3.13, != 5.4.*',
+    'requests',
 ]
 
-local_ray = [  
-    # Lower version of ray will cause dependency conflict for
+local_ray = [  # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
@@ -128,7 +129,9 @@ aws_dependencies = [
     'boto3>=1.26.1',
 ]
 extras_require: Dict[str, List[str]] = {
-    'aws': aws_dependencies,
+    # TODO(zwhu): remove the local_ray requirement once we resolve the
+    # non-critical dependency issues in #2625
+    'aws': aws_dependencies + local_ray,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
@@ -137,7 +140,7 @@ extras_require: Dict[str, List[str]] = {
     'azure': [
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
-    ],
+    ] + local_ray,
     # We need google-api-python-client>=2.19.1 to enable 'reason' attribute
     # of googleapiclient.errors.HttpError, which is widely used in our system.
     'gcp': ['google-api-python-client>=2.19.1', 'google-cloud-storage'] +

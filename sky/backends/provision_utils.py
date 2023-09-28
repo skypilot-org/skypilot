@@ -244,7 +244,7 @@ def _wait_ssh_connection_direct(
     except Exception:  # pylint: disable=broad-except
         pass
     logger.debug(f'Waiting for SSH to {ip}. Try: ssh -i {ssh_private_key} '
-                 '-o StrictHostKeyChecking=no -o ConnectTimeout=20s -o '
+                 '-o StrictHostKeyChecking=no -o ConnectTimeout=20s '
                  f'{ssh_user}@{ip} echo')
     return False
 
