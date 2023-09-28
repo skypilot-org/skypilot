@@ -124,6 +124,11 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             zone=zone,
             instance=instance,
+            # This is needed for the instance that has local SSDs attached by
+            # default, such as a2-highgpu-8g. Otherwise, an error will be
+            # raised. Refer to issue #2586
+            # https://cloud.google.com/compute/docs/disks/local-ssd#stop_instance
+            discardLocalSsd=False,
         ).execute()
         return operation
 

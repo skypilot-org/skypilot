@@ -8,7 +8,7 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
 
@@ -330,7 +330,7 @@ class GCP(clouds.Cloud):
                                                            zone=zone,
                                                            clouds='gcp')
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://cloud.google.com/storage/pricing#network-pricing
         # NOTE: egress to worldwide (excl. China, Australia).
@@ -1206,3 +1206,10 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = self.__dict__.copy()
+        # We should avoid saving third-party object to the state, as it may
+        # cause unpickling error when the third-party API is updated.
+        state.pop('_list_reservations_cache', None)
+        return state

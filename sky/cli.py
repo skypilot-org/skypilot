@@ -101,7 +101,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
                              accelerators={'tpu-v2-8': 1},
-                             accelerator_args={'runtime_version': '2.5.0'},
+                             accelerator_args={'runtime_version': '2.12.0'},
                              use_spot=False),
 }
 
@@ -2866,7 +2866,7 @@ def _down_or_stop_clusters(
                     hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(
-                    f'To proceed, please check the warning above and type '
+                    f'To proceed, please check the information above and type '
                     f'{colorama.Style.BRIGHT}{confirm_str!r}'
                     f'{colorama.Style.RESET_ALL}',
                     type=str)
@@ -4261,8 +4261,9 @@ def serve_status(all: bool, service_names: List[str]):
     if failed_controllers:
         num_failed = len(failed_controllers)
         plural = '' if num_failed == 1 else 's'
-        click.echo(f'\n* {num_failed} service{plural} with failed controller '
-                   'found. The replica info and number might not be accurate.')
+        click.echo(
+            f'\n* {num_failed} service{plural} with failed controller found. '
+            'Please manually check if there is any leaked resources.')
 
 
 @serve.command('update', cls=_DocumentedCodeCommand)

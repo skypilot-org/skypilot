@@ -55,6 +55,24 @@ python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
 
+#### Testing in a container
+It is often useful to test your changes in a clean environment set up from scratch. Using a container is a good way to do this.
+We have a dev container image `berkeleyskypilot/skypilot-debug` which we use for debugging skypilot inside a container. Use this image by running:
+
+```bash
+docker run -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
+# On Apple silicon Macs:
+docker run --platform linux/amd64 -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
+```
+
+It has some convenience features which you might find helpful (see [Dockerfile](https://github.com/skypilot-org/skypilot/blob/dev/dockerfile_debug/Dockerfile_debug)):
+* Common dependencies and some utilities (rsync, screen, vim, nano etc) are pre-installed
+* requirements-dev.txt is pre-installed
+* Environment variables for dev/debug are set correctly
+* Automatically clones the latest master to `/sky_repo/skypilot` when the container is launched.
+  * Note that you still have to manually run `pip install -e ".[all]"` to install skypilot, it is not pre-installed.
+  * If your branch is on the SkyPilot repo, you can run `git checkout <your_branch>` to switch to your branch.
+
 ### Submitting pull requests
 - Fork the SkyPilot repository and create a new branch for your changes.
 - If relevant, add tests for your changes. For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
