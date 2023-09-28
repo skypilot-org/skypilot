@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 InstanceId = str
 
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""

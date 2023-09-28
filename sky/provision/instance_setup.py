@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
-from sky.provision import config as provision_config
 from sky.provision import docker_utils
+from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -105,7 +105,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                                                 stage_name, digest)
             if cluster_info.head_instance_id == instance_id:
                 # Log the head node's output to the provision.log
-                log_path_abs = str(provision_config.config.provision_log)
+                log_path_abs = str(provision_logging.get_log_path())
             else:
                 log_dir_abs = metadata_utils.get_instance_log_dir(
                     cluster_name, instance_id)
@@ -201,7 +201,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
     # Log the head node's output to the provision.log
-    log_path_abs = str(provision_config.config.provision_log)
+    log_path_abs = str(provision_logging.get_log_path())
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
@@ -320,7 +320,7 @@ def start_skylet_on_head_node(cluster_name: str,
                                                  port=22,
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
-    log_path_abs = str(provision_config.config.provision_log)
+    log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
     returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,

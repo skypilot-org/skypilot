@@ -23,8 +23,8 @@ from sky import status_lib
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_common
-from sky.provision import config as provision_config
 from sky.provision import instance_setup
+from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -60,22 +60,10 @@ def _add_logger_handlers(log_path: str):
         logger.addHandler(fh)
 
         # Redirect underlying provision logs to file.
-        provision_logger = logging.getLogger('sky.provision')
-        stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
-        stream_handler.flush = sys.stdout.flush  # type: ignore
-        stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
-        stream_handler.setLevel(logging.WARNING)
-
-        provision_logger.addHandler(fh)
-        provision_logger.addHandler(stream_handler)
-
-        provision_config.config.provision_log = log_abs_path
-        yield
+        with provision_logging.setup_provision_logging(log_path, fh):
+            yield
     finally:
         logger.removeHandler(fh)
-        provision_logger.removeHandler(fh)
-        provision_logger.removeHandler(stream_handler)
-        stream_handler.close()
         fh.close()
 
 

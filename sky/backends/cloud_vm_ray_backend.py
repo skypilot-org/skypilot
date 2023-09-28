@@ -1579,7 +1579,7 @@ class RetryingVmProvisioner(object):
                     region,
                     zones,
                     provisioner.ClusterName(cluster_name,
-                                                handle.cluster_name_on_cloud),
+                                            handle.cluster_name_on_cloud),
                     num_nodes=num_nodes,
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
@@ -2798,7 +2798,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # in if retry_until_up is set, which will kick off new "rounds"
                 # of optimization infinitely.
                 try:
-                    provisioner = RetryingVmProvisioner(
+                    retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
                         self._dag,
                         self._optimize_target,
@@ -2806,7 +2806,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
-                    config_dict = provisioner.provision_with_retries(
+                    config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
@@ -2865,7 +2865,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
                     provisioner.ClusterName(handle.cluster_name,
-                                                handle.cluster_name_on_cloud),
+                                            handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
@@ -3841,12 +3841,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'already been terminated. It is fine to skip this.')
 
             try:
-                provisioner.teardown_cluster(
-                    repr(cloud),
-                    provisioner.ClusterName(cluster_name,
-                                                cluster_name_on_cloud),
-                    terminate=terminate,
-                    provider_config=config['provider'])
+                provisioner.teardown_cluster(repr(cloud),
+                                             provisioner.ClusterName(
+                                                 cluster_name,
+                                                 cluster_name_on_cloud),
+                                             terminate=terminate,
+                                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
