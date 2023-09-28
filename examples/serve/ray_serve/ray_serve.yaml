@@ -1,0 +1,15 @@
+resources:
+  cloud: gcp
+
+workdir: examples/serve/ray_serve
+
+setup: pip install "ray[serve]"
+
+run: serve run serve:app --host 0.0.0.0
+
+service:
+  port: 8000
+  readiness_probe: /
+  replicas: 1
+  controller_resources:
+    cloud: gcp
