@@ -1,5 +1,5 @@
 resources:
-  cloud: gcp
+  cpus: 2+
 
 workdir: examples/serve/ray_serve
 
@@ -11,5 +11,3 @@ service:
   port: 8000
   readiness_probe: /
   replicas: 1
-  controller_resources:
-    cloud: gcp
