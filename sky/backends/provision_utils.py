@@ -263,17 +263,38 @@ def _wait_ssh_connection_indirect(
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
+    del ssh_control_name
     # We test ssh with 'echo', because it is of the most common
     # commandline programs on both Unix-like and Windows platforms.
-    # NOTE: Ray uses 'uptime' command and 10s timeout.
+    # NOTE: Ray uses 'uptime' command and 10s timeout, we use the same
+    # setting here.
 
-    command = command_runner.ssh_options_list(
+    command = [
+        'ssh',
+        '-T',
+        '-i',
         ssh_private_key,
-        ssh_control_name=ssh_control_name,
-        ssh_proxy_command=ssh_proxy_command,
-        timeout=10)
-
-    proc = subprocess.run([f'{ssh_user}@{ip}'] + command + ['uptime'],
+        f'{ssh_user}@{ip}',
+        '-o',
+        'StrictHostKeyChecking=no',
+        '-o',
+        'ConnectTimeout=10s',
+        '-o',
+        'UserKnownHostsFile',
+        os.devnull,
+        '-o',
+        'IdentitiesOnly=yes',
+        '-o',
+        'ExitOnForwardFailure=yes',
+        '-o',
+        'ServerAliveInterval=5',
+        '-o',
+        'ServerAliveCountMax=3',
+    ]
+    if ssh_proxy_command is not None:
+        command += ['-o', f'ProxyCommand={ssh_proxy_command}']
+    command += ['uptime']
+    proc = subprocess.run(command,
                           shell=False,
                           check=False,
                           stdout=subprocess.DEVNULL,
