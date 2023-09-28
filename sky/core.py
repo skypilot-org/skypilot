@@ -1240,10 +1240,8 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         service_name)
     if os.path.exists(controller_yaml_path):
         os.remove(controller_yaml_path)
-    handle = global_user_state.get_handle_from_service_name(service_name)
-    assert handle is not None
     try:
-        handle.cleanup_ephemeral_storage()
+        service_handle.cleanup_ephemeral_storage()
     # same as above.
     except Exception as e:  # pylint: disable=broad-except
         if purge:
