@@ -60,7 +60,9 @@ It is often useful to test your changes in a clean environment set up from scrat
 We have a dev container image `berkeleyskypilot/skypilot-debug` which we use for debugging skypilot inside a container. Use this image by running:
 
 ```bash
-docker run -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash 
+docker run -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
+# On Apple silicon Macs:
+docker run --platform linux/amd64 -it --rm --name skypilot-debug berkeleyskypilot/skypilot-debug /bin/bash
 ```
 
 It has some convenience features which you might find helpful (see [Dockerfile](https://github.com/skypilot-org/skypilot/blob/dev/dockerfile_debug/Dockerfile_debug)):
