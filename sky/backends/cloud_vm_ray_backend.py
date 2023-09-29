@@ -4521,7 +4521,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
         envs_with_external = copy.deepcopy(task.envs)
-        envs_with_external['SKYPILOT_EXTERNAL_IPS'] = '\n'.join(handle.external_ips())
+        envs_with_external['SKYPILOT_EXTERNAL_IPS'] = '\n'.join(
+            handle.external_ips())
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=envs_with_external,
@@ -4595,7 +4596,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # the corresponding node, represented by private IPs.
             use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
             envs_with_external = copy.deepcopy(task.envs)
-            envs_with_external['SKYPILOT_EXTERNAL_IPS'] = '\n'.join(handle.external_ips())
+            envs_with_external['SKYPILOT_EXTERNAL_IPS'] = '\n'.join(
+                handle.external_ips())
             codegen.add_ray_task(
                 bash_script=command_for_node,
                 env_vars=envs_with_external,
