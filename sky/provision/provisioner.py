@@ -87,9 +87,9 @@ def _bulk_provision(
         except Exception as e:
             # UX: for users we print "configure the cloud" vs. "bootstrap".
             logger.error(f'{colorama.Style.DIM}Failed to configure the cloud '
-                         f'for {cluster_name!r} with the following error:\n'
-                         f'{common_utils.format_exception(e)}'
-                         f'{colorama.Style.RESET_ALL}')
+                         f'for {cluster_name!r} with the following error:'
+                         f'{colorama.Style.RESET_ALL}\n'
+                         f'{common_utils.format_exception(e)}')
             raise
 
         provision_record = provision.run_instances(provider_name,

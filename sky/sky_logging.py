@@ -28,9 +28,14 @@ class NewLineFormatter(logging.Formatter):
         msg = logging.Formatter.format(self, record)
         if record.message != '':
             parts = msg.partition(record.message)
-            msg = msg.replace('\n', '\r\n' + parts[0])
             if self.dim:
-                msg = colorama.Style.DIM + msg + colorama.Style.RESET_ALL
+                msg = '\r\n'.join([
+                    f'{colorama.Style.RESET_ALL}{parts[0]}{colorama.Style.DIM}{line}'
+                    f'{colorama.Style.RESET_ALL}'
+                    for line in parts[1].split('\n')
+                ])
+            else:
+                msg = msg.replace('\n', '\r\n' + parts[0])
         return msg
 
 
