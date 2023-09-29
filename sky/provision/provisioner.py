@@ -271,10 +271,11 @@ def _wait_ssh_connection_indirect(
                           shell=False,
                           check=False,
                           stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL)
+                          stderr=subprocess.PIPE)
     if proc.returncode != 0:
         logger.debug(
-            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}')
+            f'Waiting for SSH to {ip} with command: {_shlex_join(command)}\n'
+            f'Error: {proc.stderr.decode("utf-8")}')
     return proc.returncode == 0
 
 
