@@ -7,7 +7,7 @@ services:
     platform: linux/amd64
     command: scheduler --now
     volumes:
-      - "$PWD/tabby:/data"
+      - "./tabby:/data"
 
   tabby:
     depends_on:
@@ -17,7 +17,7 @@ services:
     image: tabbyml/tabby
     command: serve --model TabbyML/SantaCoder-1B --device cuda
     volumes:
-      - "$PWD/tabby:/data"
+      - "./tabby:/data"
     ports:
       - 8080:8080
     deploy:
