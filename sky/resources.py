@@ -12,8 +12,8 @@ from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -61,7 +61,7 @@ class Resources:
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
-        _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
+        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.

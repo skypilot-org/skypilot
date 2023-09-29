@@ -118,7 +118,9 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    test_name = common_utils.make_cluster_name_on_cloud(test_name, 24)
+    test_name = common_utils.make_cluster_name_on_cloud(test_name,
+                                                        24,
+                                                        add_user_hash=False)
     return f'{test_name}-{test_id}'
 
 
@@ -253,10 +255,10 @@ def test_aws_region():
     test = Test(
         'aws_region',
         [
-            f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
+            f'sky launch -y -c {name} --region us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
+            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -319,10 +321,10 @@ def test_aws_zone():
     test = Test(
         'aws_zone',
         [
-            f'sky launch -y -c {name} examples/minimal.yaml --zone us-west-2b',
-            f'sky exec {name} examples/minimal.yaml --zone us-west-2b',
+            f'sky launch -y -c {name} examples/minimal.yaml --zone us-east-2b',
+            f'sky exec {name} examples/minimal.yaml --zone us-east-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
+            f'sky status --all | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
@@ -443,22 +445,26 @@ def test_aws_image_id_dict_region():
     test = Test(
         'aws_image_id_dict_region',
         [
+            # YAML has
+            #   image_id:
+            #       us-west-2: skypilot:gpu-ubuntu-1804
+            #       us-east-2: skypilot:gpu-ubuntu-2004
             # Use region to filter image_id dict.
             f'sky launch -y -c {name} --region us-east-1 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
-            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
+            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
             # Ensure exec works.
-            f'sky exec {name} --region us-west-2 examples/per_region_images.yaml',
+            f'sky exec {name} --region us-east-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --cloud aws --region us-west-2 "ls ~"',
+            f'sky exec {name} --cloud aws --region us-east-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -509,23 +515,27 @@ def test_aws_image_id_dict_zone():
     test = Test(
         'aws_image_id_dict_zone',
         [
+            # YAML has
+            #   image_id:
+            #       us-west-2: skypilot:gpu-ubuntu-1804
+            #       us-east-2: skypilot:gpu-ubuntu-2004
             # Use zone to filter image_id dict.
             f'sky launch -y -c {name} --zone us-east-1b examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --zone us-west-2a examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-east-2a examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             # Fail due to image id mismatch.
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west-2a',  # Ensure the zone is correct.
+            f'sky status --all | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --zone us-west-2a examples/per_region_images.yaml',
+            f'sky exec {name} --zone us-east-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --cloud aws --region us-west-2 "ls ~"',
+            f'sky exec {name} --cloud aws --region us-east-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -581,7 +591,7 @@ def test_clone_disk_aws():
             f'sky launch --clone-disk-from {name} -y -c {name}-clone && exit 1 || true',
             f'sky stop {name} -y',
             'sleep 60',
-            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-west-2 "cat ~/user_file.txt | grep hello"',
+            f'sky launch --clone-disk-from {name} -y -c {name}-clone --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky launch --clone-disk-from {name} -y -c {name}-clone-2 --cloud aws -d --region us-east-2 "cat ~/user_file.txt | grep hello"',
             f'sky logs {name}-clone 1 --status',
             f'sky logs {name}-clone-2 1 --status',
@@ -656,7 +666,7 @@ def test_aws_stale_job_manual_restart():
     name = _get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.AWS.max_cluster_name_length())
-    region = 'us-west-2'
+    region = 'us-east-2'
     test = Test(
         'aws_stale_job_manual_restart',
         [
@@ -2051,8 +2061,8 @@ def test_spot_pipeline_recovery_aws(aws_config_region):
     user_hash = common_utils.get_user_hash()
     user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
-    if region != 'us-west-2':
-        pytest.skip('Only run spot pipeline recovery test in us-west-2')
+    if region != 'us-east-2':
+        pytest.skip('Only run spot pipeline recovery test in us-east-2')
     test = Test(
         'spot_pipeline_recovery_aws',
         [
@@ -2515,7 +2525,7 @@ def test_aws_disk_tier():
         name = _get_cluster_name() + '-' + disk_tier
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
-        region = 'us-west-2'
+        region = 'us-east-2'
         test = Test(
             'aws-disk-tier',
             [
@@ -2643,7 +2653,7 @@ def test_user_ray_cluster(generic_cloud: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} "ray start --head"',
             f'sky exec {name} "echo hi"',
             f'sky logs {name} 1 --status',
-            f'sky status -r | grep {name} | grep UP',
+            f'sky status -r {name} | grep UP',
             f'sky exec {name} "echo bye"',
             f'sky logs {name} 2 --status',
         ],

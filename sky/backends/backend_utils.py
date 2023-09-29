@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
+from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
@@ -123,7 +124,7 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 #   used for calculating the hash.
 # TODO(zhwu): Keep in sync with the fields used in https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/commands.py#L687-L701
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
-    'cluster_name', 'provider', 'auth', 'node_config'
+    'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
@@ -131,6 +132,9 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
 #    we use the new yaml's zone field, which is guaranteed to be the existing zone
 #    '1a'.
+# - docker_login_config: The docker_login_config field of the old yaml may be
+#   outdated or wrong. Users may want to fix the login config if a cluster fails
+#   to launch due to the login config.
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
@@ -139,17 +143,16 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    # AWS with new provisioner has docker_login_config in the
+    # docker field, instead of the provider field.
+    ('docker', 'docker_login_config'),
+    # Other clouds
+    ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
-
-# Command that calls `ray status` with SkyPilot's Ray port set.
-RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
 
 def is_ip(s: str) -> bool:
@@ -1153,22 +1156,16 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, clouds.AWS):
-        config = auth.setup_aws_authentication(config)
+    if isinstance(cloud, (clouds.AWS, clouds.Azure, clouds.OCI, clouds.SCP)):
+        config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    elif isinstance(cloud, clouds.Azure):
-        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
-    elif isinstance(cloud, clouds.SCP):
-        config = auth.setup_scp_authentication(config)
-    elif isinstance(cloud, clouds.OCI):
-        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1192,31 +1189,46 @@ def _count_healthy_nodes_from_ray(output: str,
                                  ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
 
-    def get_ready_nodes(pattern, output):
+    def get_ready_nodes_counts(pattern, output):
         result = pattern.findall(output)
-        # On-prem/local case is handled differently.
-        # `ray status` produces different output for local case, and
-        # we poll for number of nodes launched instead of counting for
-        # head and number of worker nodes separately (it is impossible
-        # to distinguish between head and worker node for local case).
-        if is_local_cloud:
-            # In the local case, ready_workers mean the total number
-            # of nodes launched, including head.
-            return len(result)
-        if len(result) == 0:
+        if not result:
             return 0
         assert len(result) == 1, result
         return int(result[0])
 
-    if is_local_cloud:
+    # Check if the ray cluster is started with ray autoscaler. In new
+    # provisioner (#1702) and local mode, we started the ray cluster without ray
+    # autoscaler.
+    # If ray cluster is started with ray autoscaler, the output will be:
+    #  1 ray.head.default
+    #  ...
+    # TODO(zhwu): once we deprecate the old provisioner, we can remove this
+    # check.
+    ray_autoscaler_head = get_ready_nodes_counts(_LAUNCHED_HEAD_PATTERN, output)
+    is_local_ray_cluster = ray_autoscaler_head == 0
+
+    if is_local_ray_cluster or is_local_cloud:
+        # Ray cluster is launched with new provisioner
+        # For new provisioner and local mode, the output will be:
+        #  1 node_xxxx
+        #  1 node_xxxx
         ready_head = 0
-        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN, output)
-    else:
-        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
-        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
-        ready_reserved_workers = get_ready_nodes(
-            _LAUNCHED_RESERVED_WORKER_PATTERN, output)
-        ready_workers += ready_reserved_workers
+        ready_workers = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+        ready_workers = len(ready_workers)
+        if is_local_ray_cluster:
+            ready_head = 1
+            ready_workers -= 1
+        return ready_head, ready_workers
+
+    # Count number of nodes by parsing the output of `ray status`. The output
+    # looks like:
+    #   1 ray.head.default
+    #   2 ray.worker.default
+    ready_head = ray_autoscaler_head
+    ready_workers = get_ready_nodes_counts(_LAUNCHED_WORKER_PATTERN, output)
+    ready_reserved_workers = get_ready_nodes_counts(
+        _LAUNCHED_RESERVED_WORKER_PATTERN, output)
+    ready_workers += ready_reserved_workers
     assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
     return ready_head, ready_workers
 
@@ -1280,14 +1292,14 @@ def wait_until_ray_cluster_ready(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 log_path=log_path,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
             subprocess_utils.handle_returncode(
-                rc, 'ray status', 'Failed to run ray status on head node.',
-                stderr)
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                'Failed to run ray status on head node.', stderr)
             logger.debug(output)
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(
@@ -1547,7 +1559,9 @@ def get_node_ips(cluster_yaml: str,
             on-prem clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
-        get_internal_ips: Whether to get internal IPs.
+        get_internal_ips: Whether to get internal IPs. When False, it is still
+            possible to get internal IPs if the cluster does not have external
+            IPs.
 
     Raises:
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
@@ -1558,6 +1572,15 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
+    # Use the new provisioner for AWS.
+    if '.aws' in ray_config['provider']['module']:
+        metadata = provision_lib.get_cluster_info(
+            'aws', ray_config['provider']['region'], ray_config['cluster_name'])
+        if len(metadata.instances) < expected_num_nodes:
+            # Simulate the exception when Ray head node is not up.
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return metadata.get_feasible_ips(get_internal_ips)
+
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
@@ -2027,7 +2050,7 @@ def _update_cluster_status_no_lock(
                                                      **ssh_credentials,
                                                      port=head_ssh_port)
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
@@ -2035,10 +2058,11 @@ def _update_cluster_status_no_lock(
                 raise RuntimeError(
                     f'Refreshing status ({cluster_name!r}): Failed to check '
                     f'ray cluster\'s healthiness with '
-                    f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
             raise RuntimeError(
@@ -2408,9 +2432,11 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
-        error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
-                     'provider.')
-        if previous_cluster_status is not None:
+        if previous_cluster_status is None:
+            error_msg = f'Cluster {cluster_name!r} does not exist.'
+        else:
+            error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
+                         'provider.')
             assert record is not None, previous_cluster_status
             actions = []
             if record['handle'].launched_resources.use_spot:
