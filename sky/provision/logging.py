@@ -40,6 +40,8 @@ def setup_provision_logging(log_dir: str):
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
         stream_handler.setLevel(logging.WARNING)
+        provision_logger.addHandler(fh)
+        provision_logger.addHandler(stream_handler)
 
         config.log_path = log_abs_path
         yield
