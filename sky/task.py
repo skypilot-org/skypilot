@@ -19,8 +19,8 @@ from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -132,7 +132,7 @@ def _with_docker_login_config(
 ) -> Set['resources_lib.Resources']:
     if not _check_docker_login_config(task_envs):
         return resources_set
-    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):

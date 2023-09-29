@@ -1046,8 +1046,8 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
         ssh_user=ssh_user, key_value=key_parts[1]
     )
 
-    common_instance_metadata = project["commonInstanceMetadata"]
-    items = common_instance_metadata.get("items", [])
+    common_instance_info = project["commonInstanceMetadata"]
+    items = common_instance_info.get("items", [])
 
     ssh_keys_i = next(
         (i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None
@@ -1060,13 +1060,11 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
         ssh_keys["value"] += "\n" + new_ssh_meta
         items[ssh_keys_i] = ssh_keys
 
-    common_instance_metadata["items"] = items
+    common_instance_info["items"] = items
 
     operation = (
         compute.projects()
-        .setCommonInstanceMetadata(
-            project=project["name"], body=common_instance_metadata
-        )
+        .setCommonInstanceMetadata(project=project["name"], body=common_instance_info)
         .execute()
     )
 
