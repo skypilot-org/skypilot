@@ -708,8 +708,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     if network_mode == KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip,
-            ssh_jump_port=ssh_jump_port)
+            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
@@ -720,7 +719,8 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
                                     vars_to_fill,
                                     output_path=port_fwd_proxy_cmd_path)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip,
+            private_key_path,
+            ssh_jump_ip,
             proxy_cmd_path=port_fwd_proxy_cmd_path)
     return ssh_jump_proxy_command
 
