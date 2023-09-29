@@ -85,8 +85,9 @@ def _bulk_provision(
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
         except Exception as e:
-            logger.error(f'{colorama.Style.DIM}Failed to config the cloud for '
-                         f'{cluster_name!r} with the following error:\n'
+            # UX: for users we print "configure the cloud" vs. "bootstrap".
+            logger.error(f'{colorama.Style.DIM}Failed to configure the cloud '
+                         f'for {cluster_name!r} with the following error:\n'
                          f'{common_utils.format_exception(e)}'
                          f'{colorama.Style.RESET_ALL}')
             raise
@@ -318,9 +319,9 @@ def _post_provision_setup(
                      f'tail -n 100 -f {per_instance_log_dir}/*.log')
 
     logger.debug(
-        'Provision metadata:\n'
+        'Provision info:\n'
         f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
-        'Cluster metadata:\n'
+        'Cluster info:\n'
         f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
 
     head_instance = cluster_info.get_head_instance()

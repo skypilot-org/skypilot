@@ -1,6 +1,4 @@
-"""Utils for managing provisioning config, instance status,
-and stage cache.
-"""
+"""Utils for managing provisioning config, instance status, and stage cache."""
 
 import contextlib
 import functools
