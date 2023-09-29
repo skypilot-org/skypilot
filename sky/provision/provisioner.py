@@ -327,7 +327,7 @@ def _post_provision_setup(
                      f'tail -n 100 -f {per_instance_log_dir}/*.log')
 
     logger.debug(
-        'Provision info:\n'
+        'Provision record:\n'
         f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
         'Cluster info:\n'
         f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
