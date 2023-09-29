@@ -30,18 +30,21 @@ def setup_provision_logging(log_dir: str):
         fh.setFormatter(sky_logging.FORMATTER)
         fh.setLevel(logging.DEBUG)
 
+        # Add the file handler to the provisioner logger, so the time stamps are
+        # logged.
+        provisioner_logger = logging.getLogger('sky.provisioner')
+        provisioner_logger.addHandler(fh)
+
         provision_logger = logging.getLogger('sky.provision')
         stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
         stream_handler.setLevel(logging.WARNING)
 
-        provision_logger.addHandler(fh)
-        provision_logger.addHandler(stream_handler)
-
         config.log_path = log_abs_path
         yield
     finally:
+        provisioner_logger.removeHandler(fh)
         provision_logger.removeHandler(fh)
         provision_logger.removeHandler(stream_handler)
         stream_handler.close()

@@ -28,7 +28,9 @@ from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
-logger = sky_logging.init_logger(__name__)
+# Do not use __name__ as we do not want to propagate logs to sky.provision,
+# which will be customized in sky.provision.logging.
+logger = sky_logging.init_logger('sky.provisioner')
 
 _MAX_RETRY = 3
 _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
