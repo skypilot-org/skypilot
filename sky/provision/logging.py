@@ -30,12 +30,17 @@ def setup_provision_logging(log_dir: str):
         fh.setFormatter(sky_logging.FORMATTER)
         fh.setLevel(logging.DEBUG)
 
-        # Add the file handler to the provisioner logger, so the time stamps are
-        # logged.
+        # Add the file handler to the sky.provision.provisioner logger, so the
+        # time stamps are logged. We use sky.provisioner for getting the logger
+        # because we do not want it to be affected by the handler added to the
+        # sky.provision logger. Refer to sky.provision.provisioner.
         provisioner_logger = logging.getLogger('sky.provisioner')
         provisioner_logger.addHandler(fh)
 
         provision_logger = logging.getLogger('sky.provision')
+        # Disable propagation to avoid streaming logs to the console, which is
+        # set up for sky root logger.
+        provision_logger.propagate = False
         stream_handler = sky_logging.RichSafeStreamHandler(sys.stdout)
         stream_handler.flush = sys.stdout.flush  # type: ignore
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
