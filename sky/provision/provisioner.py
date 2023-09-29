@@ -86,10 +86,9 @@ def _bulk_provision(
                                                    bootstrap_config)
         except Exception as e:
             # UX: for users we print "configure the cloud" vs. "bootstrap".
-            logger.error(f'{colorama.Style.DIM}Failed to configure the cloud '
+            logger.error(f'Failed to configure the cloud '
                          f'for {cluster_name!r} with the following error:'
-                         f'{colorama.Style.RESET_ALL}\n'
-                         f'{common_utils.format_exception(e)}')
+                         f'\n{common_utils.format_exception(e)}')
             raise
 
         provision_record = provision.run_instances(provider_name,
@@ -194,49 +193,12 @@ def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
                                  provider_config)
 
 
-def _wait_ssh_connection_direct(
-        ip: str,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
-    del ssh_control_name
-    assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
-    try:
-        with socket.create_connection((ip, 22), timeout=1) as s:
-            if s.recv(100).startswith(b'SSH'):
-                return True
-    except socket.timeout:  # this is the most expected exception
-        pass
-    except Exception:  # pylint: disable=broad-except
-        pass
-    logger.debug(f'Waiting for SSH to {ip}. Try: ssh -i {ssh_private_key} '
-                 '-o StrictHostKeyChecking=no -o ConnectTimeout=20s '
-                 f'{ssh_user}@{ip} echo')
-    return False
-
-
-def _shlex_join(command: List[str]) -> str:
-    """Join a command list into a shell command string.
-
-    This is copied from Python 3.8's shlex.join, which is not available in
-    Python 3.7.
-    """
-    return ' '.join(shlex.quote(arg) for arg in command)
-
-
-def _wait_ssh_connection_indirect(
-        ip: str,
-        ssh_user: str,
-        ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
-        ssh_proxy_command: Optional[str] = None) -> bool:
-    del ssh_control_name
-    # We test ssh with 'echo', because it is of the most common
-    # commandline programs on both Unix-like and Windows platforms.
+def _ssh_probe_command(ip: str,
+                       ssh_user: str,
+                       ssh_private_key: str,
+                       ssh_proxy_command: Optional[str] = None) -> List[str]:
     # NOTE: Ray uses 'uptime' command and 10s timeout, we use the same
     # setting here.
-
     command = [
         'ssh',
         '-T',
@@ -261,6 +223,50 @@ def _wait_ssh_connection_indirect(
     if ssh_proxy_command is not None:
         command += ['-o', f'ProxyCommand={ssh_proxy_command}']
     command += ['uptime']
+    return command
+
+
+def _shlex_join(command: List[str]) -> str:
+    """Join a command list into a shell command string.
+
+    This is copied from Python 3.8's shlex.join, which is not available in
+    Python 3.7.
+    """
+    return ' '.join(shlex.quote(arg) for arg in command)
+
+
+def _wait_ssh_connection_direct(
+        ip: str,
+        ssh_user: str,
+        ssh_private_key: str,
+        ssh_control_name: Optional[str] = None,
+        ssh_proxy_command: Optional[str] = None) -> bool:
+    del ssh_control_name
+    assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
+    try:
+        with socket.create_connection((ip, 22), timeout=1) as s:
+            if s.recv(100).startswith(b'SSH'):
+                return True
+    except socket.timeout:  # this is the most expected exception
+        pass
+    except Exception:  # pylint: disable=broad-except
+        pass
+    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+                                 ssh_proxy_command)
+    logger.debug(f'Waiting for SSH to {ip}. Try: '
+                 f'{_shlex_join(command)}')
+    return False
+
+
+def _wait_ssh_connection_indirect(
+        ip: str,
+        ssh_user: str,
+        ssh_private_key: str,
+        ssh_control_name: Optional[str] = None,
+        ssh_proxy_command: Optional[str] = None) -> bool:
+    del ssh_control_name
+    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+                                 ssh_proxy_command)
     proc = subprocess.run(command,
                           shell=False,
                           check=False,
