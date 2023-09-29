@@ -102,9 +102,6 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
                                  'TEXT DEFAULT "{}"')
 
-    db_utils.add_column_to_table(cursor, conn, 'clusters',
-                                 'storage_mounts_metadata', 'BLOB')
-
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
 
@@ -112,6 +109,9 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
+
+    db_utils.add_column_to_table(cursor, conn, 'clusters',
+                                 'storage_mounts_metadata', 'BLOB DEFAULT null')
 
     conn.commit()
 
@@ -536,6 +536,14 @@ def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
         return [record_owner]
 
 
+def _load_storage_mounts_metadata(
+    record_storage_mounts_metadata: Optional[bytes]
+) -> Optional[Dict[str, 'Storage.StorageMetadata']]:
+    if not record_storage_mounts_metadata:
+        return None
+    return pickle.loads(record_storage_mounts_metadata)
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
@@ -545,7 +553,7 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -557,8 +565,9 @@ def get_cluster_from_name(
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
-            'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
         return record
     return None
@@ -570,7 +579,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         storage_mounts_metadata, to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -582,8 +591,9 @@ def get_clusters() -> List[Dict[str, Any]]:
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
-            'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
 
         records.append(record)

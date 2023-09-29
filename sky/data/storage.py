@@ -382,6 +382,7 @@ class Storage(object):
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
                     f'\n\tmode={self.mode},'
+                    f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
@@ -463,34 +464,7 @@ class Storage(object):
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
-            for s_type, s_metadata in self.handle.sky_stores.items():
-                # When initializing from global_user_state, we override the
-                # source from the YAML
-                if s_type == StoreType.S3:
-                    store = S3Store.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.GCS:
-                    store = GcsStore.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.R2:
-                    store = R2Store.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.IBM:
-                    store = IBMCosStore.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Unknown store type: {s_type}')
-
-                self._add_store(store, is_reconstructed=True)
+            self._add_store_from_metadata(self.handle.sky_stores)
 
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
@@ -512,6 +486,7 @@ class Storage(object):
             }
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
+                                               mode=self.mode,
                                                sky_stores=sky_managed_stores)
 
             if self.source is not None:
@@ -719,6 +694,52 @@ class Storage(object):
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
+
+    def _add_store_from_metadata(self, sky_stores) -> None:
+        """Reconstructs Store obj from metadata and adds to Storage obj"""
+        for s_type, s_metadata in sky_stores.items():
+            # When initializing from global_user_state, we override the
+            # source from the YAML
+            if s_type == StoreType.S3:
+                store = S3Store.from_metadata(
+                    s_metadata,
+                    source=self.source,
+                    sync_on_reconstruction=self.sync_on_reconstruction)
+            elif s_type == StoreType.GCS:
+                store = GcsStore.from_metadata(
+                    s_metadata,
+                    source=self.source,
+                    sync_on_reconstruction=self.sync_on_reconstruction)
+            elif s_type == StoreType.R2:
+                store = R2Store.from_metadata(
+                    s_metadata,
+                    source=self.source,
+                    sync_on_reconstruction=self.sync_on_reconstruction)
+            elif s_type == StoreType.IBM:
+                store = IBMCosStore.from_metadata(
+                    s_metadata,
+                    source=self.source,
+                    sync_on_reconstruction=self.sync_on_reconstruction)
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unknown store type: {s_type}')
+
+            self._add_store(store, is_reconstructed=True)
+
+    @classmethod
+    def from_metadata(cls, metadata: StorageMetadata,
+                      **override_args) -> 'Storage':
+        """Create Storage from a StorageMetadata object.
+        Used when reconstructing Storage and Store objects from
+        global_user_state.
+        """
+        storage_obj = cls(name=override_args.get('name', metadata.storage_name),
+                          source=override_args.get('source', metadata.source),
+                          sync_on_reconstruction=override_args.get(
+                              'sync_on_reconstruction', True),
+                          mode=override_args.get('mode', metadata.mode))
+        storage_obj._add_store_from_metadata(metadata.sky_stores)
+        return storage_obj
 
     def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
         """Initializes and adds a new store to the storage.

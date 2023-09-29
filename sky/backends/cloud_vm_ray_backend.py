@@ -2864,7 +2864,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
-        self._set_cluster_storage_mounts_metadata(handle, storage_mounts)
+        self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)
 
     def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
                detach_setup: bool) -> None:
@@ -4271,39 +4271,44 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-    def _set_cluster_storage_mounts_metadata(
-            self, handle: CloudVmRayResourceHandle,
+    def _set_storage_mounts_metadata(
+            self, cluster_name: str,
             storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
-        """Sets 'storage_mounts' object in cluster's storage metadata"""
+        """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
+        After converting Storage objects in 'storage_mounts' to metadata,
+        it stores {PATH: StorageMetadata} into the table.
+        """
         if not storage_mounts:
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            storage_obj_metadata = storage_lib.Storage.StorageMetadata(
-                storage_name=storage_obj.name,
-                source=storage_obj.source,
-                mode=storage_obj.mode)
-            for _, store_obj in storage_obj.stores.items():
-                storage_obj_metadata.add_store(store_obj)
-            storage_mounts_metadata[dst] = storage_obj_metadata
-        global_user_state.set_cluster_storage_mounts_metadata(
-            handle.cluster_name, storage_mounts_metadata)
+            storage_mounts_metadata[dst] = storage_obj.handle
+        lock_path = (
+            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
+        with filelock.FileLock(lock_path):
+            global_user_state.set_cluster_storage_mounts_metadata(
+                cluster_name, storage_mounts_metadata)
 
-    def get_cluster_storage_mounts_metadata(
-        self, handle: CloudVmRayResourceHandle
-    ) -> Optional[Dict[Path, storage_lib.Storage]]:
-        """Gets 'storage_mounts' object from cluster's storage metadata"""
-        storage_mounts_metadata = global_user_state.get_cluster_storage_mounts_metadata(
-            handle.cluster_name)
+    def get_storage_mounts_metadata(
+            self,
+            cluster_name: str) -> Optional[Dict[Path, storage_lib.Storage]]:
+        """Gets 'storage_mounts' object from cluster's storage_mounts_metadata
+        After retrieving storage_mounts_metadata, it converts back the
+        StorageMetadata to Storage object and restores 'storage_mounts'
+        """
+        lock_path = (
+            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
+        with filelock.FileLock(lock_path):
+            storage_mounts_metadata = (
+                global_user_state.get_cluster_storage_mounts_metadata(
+                cluster_name))
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_obj = storage_lib.Storage(name=storage_metadata.name,
-                                              source=storage_metadata.source,
-                                              mode=storage_metadata.mode,
-                                              sync_on_reconstruction=False)
-            storage_mounts[dst] = storage_obj
+            storage_mounts[dst] = (
+                storage_lib.Storage.from_metadata(storage_metadata,
+                                                  sync_on_reconstruction=False))
         return storage_mounts
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
