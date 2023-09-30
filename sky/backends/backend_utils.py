@@ -1574,7 +1574,7 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
     if '.aws' in ray_config['provider']['module']:
-        metadata = provision_lib.get_cluster_metadata(
+        metadata = provision_lib.get_cluster_info(
             'aws', ray_config['provider']['region'], ray_config['cluster_name'])
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.

@@ -44,6 +44,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
+from sky.provision import provisioner
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1574,24 +1575,24 @@ class RetryingVmProvisioner(object):
                 assert to_provision.region == region.name, (to_provision,
                                                             region)
                 num_nodes = handle.launched_nodes
-                provision_metadata = provision_utils.bulk_provision(
+                provision_record = provisioner.bulk_provision(
                     to_provision.cloud,
                     region,
                     zones,
-                    provision_utils.ClusterName(cluster_name,
-                                                handle.cluster_name_on_cloud),
+                    provisioner.ClusterName(cluster_name,
+                                            handle.cluster_name_on_cloud),
                     num_nodes=num_nodes,
                     cluster_yaml=handle.cluster_yaml,
                     is_prev_cluster_healthy=is_prev_cluster_healthy,
                     log_dir=self.log_dir)
                 # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                 # in 'provision_utils.post_provision_runtime_setup()' in the caller.
-                if provision_metadata is not None:
+                if provision_record is not None:
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, handle.cluster_name_on_cloud, region,
                             zones))
-                    config_dict['provision_metadata'] = provision_metadata
+                    config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
                     return config_dict
@@ -2798,7 +2799,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # in if retry_until_up is set, which will kick off new "rounds"
                 # of optimization infinitely.
                 try:
-                    provisioner = RetryingVmProvisioner(
+                    retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
                         self._dag,
                         self._optimize_target,
@@ -2806,7 +2807,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         local_wheel_path,
                         wheel_hash,
                         blocked_resources=task.blocked_resources)
-                    config_dict = provisioner.provision_with_retries(
+                    config_dict = retry_provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
@@ -2850,10 +2851,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 return record['handle'] if record is not None else None
 
-            if 'provision_metadata' in config_dict:
+            if 'provision_record' in config_dict:
                 # New provisioner is used here.
                 handle = config_dict['handle']
-                provision_metadata = config_dict['provision_metadata']
+                provision_record = config_dict['provision_record']
                 resources_vars = config_dict['resources_vars']
 
                 # Setup SkyPilot runtime after the cluster is provisioned
@@ -2862,14 +2863,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 #    and other necessary files to the VM.
                 # 3. Run setup commands to install dependencies.
                 # 4. Starting ray cluster and skylet.
-                cluster_metadata = provision_utils.post_provision_runtime_setup(
+                cluster_info = provisioner.post_provision_runtime_setup(
                     repr(handle.launched_resources.cloud),
-                    provision_utils.ClusterName(handle.cluster_name,
-                                                handle.cluster_name_on_cloud),
+                    provisioner.ClusterName(handle.cluster_name,
+                                            handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
                     local_wheel_path=local_wheel_path,
                     wheel_hash=wheel_hash,
-                    provision_metadata=provision_metadata,
+                    provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
                 # We must query the IPs from the cloud provider, when the
@@ -2878,20 +2879,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # The staled IPs may be caused by the node being restarted
                 # manually or by the cloud provider.
                 # Optimize the case where the cluster's IPs can be retrieved
-                # from cluster_metadata.
-                internal_ips, external_ips = zip(*cluster_metadata.ip_tuples())
-                if not cluster_metadata.has_external_ips():
+                # from cluster_info.
+                internal_ips, external_ips = zip(*cluster_info.ip_tuples())
+                if not cluster_info.has_external_ips():
                     external_ips = internal_ips
                 handle.update_cluster_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           internal_ips=list(internal_ips),
                                           external_ips=list(external_ips))
                 handle.update_ssh_ports(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
-                handle.docker_user = cluster_metadata.docker_user
+                handle.docker_user = cluster_info.docker_user
 
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
-                    region=provision_metadata.region,
-                    zone=provision_metadata.zone)
+                    region=provision_record.region, zone=provision_record.zone)
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, handle.external_ips(),
@@ -3842,12 +3842,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'already been terminated. It is fine to skip this.')
 
             try:
-                provision_utils.teardown_cluster(
-                    repr(cloud),
-                    provision_utils.ClusterName(cluster_name,
-                                                cluster_name_on_cloud),
-                    terminate=terminate,
-                    provider_config=config['provider'])
+                provisioner.teardown_cluster(repr(cloud),
+                                             provisioner.ClusterName(
+                                                 cluster_name,
+                                                 cluster_name_on_cloud),
+                                             terminate=terminate,
+                                             provider_config=config['provider'])
             except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(

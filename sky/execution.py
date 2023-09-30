@@ -1,16 +1,6 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum

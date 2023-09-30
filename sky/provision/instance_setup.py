@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.provision import common
-from sky.provision import config as provision_config
 from sky.provision import docker_utils
+from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -84,30 +84,28 @@ def _log_start_end(func):
     return wrapper
 
 
-def _hint_worker_log_path(cluster_name: str,
-                          cluster_metadata: common.ClusterMetadata,
+def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
                           stage_name: str):
-    if len(cluster_metadata.instances) > 1:
+    if len(cluster_info.instances) > 1:
         worker_log_path = metadata_utils.get_instance_log_dir(
             cluster_name, '*') / (stage_name + '.log')
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
 
 
 def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
-                             digest: str,
-                             cluster_metadata: common.ClusterMetadata,
+                             digest: str, cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
-        for instance_id, metadata in cluster_metadata.instances.items():
+        for instance_id, metadata in cluster_info.instances.items():
             runner = command_runner.SSHCommandRunner(metadata.get_feasible_ip(),
                                                      port=22,
                                                      **ssh_credentials)
             wrapper = metadata_utils.cache_func(cluster_name, instance_id,
                                                 stage_name, digest)
-            if cluster_metadata.head_instance_id == instance_id:
+            if cluster_info.head_instance_id == instance_id:
                 # Log the head node's output to the provision.log
-                log_path_abs = str(provision_config.config.provision_log)
+                log_path_abs = str(provision_logging.get_log_path())
             else:
                 log_dir_abs = metadata_utils.get_instance_log_dir(
                     cluster_name, instance_id)
@@ -120,16 +118,16 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
 
 @_log_start_end
 def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
-                      cluster_metadata: common.ClusterMetadata,
+                      cluster_info: common.ClusterInfo,
                       ssh_credentials: Dict[str, Any]) -> Optional[str]:
     """Setup docker on the cluster."""
     if not docker_config:
         return None
-    _hint_worker_log_path(cluster_name, cluster_metadata, 'initialize_docker')
+    _hint_worker_log_path(cluster_name, cluster_info, 'initialize_docker')
 
     @_auto_retry
     def _initialize_docker(runner: command_runner.SSHCommandRunner,
-                           metadata: common.InstanceMetadata, log_path: str):
+                           metadata: common.InstanceInfo, log_path: str):
         del metadata  # Unused.
         docker_user = docker_utils.DockerInitializer(docker_config, runner,
                                                      log_path).initialize()
@@ -143,7 +141,7 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
         # Should not cache docker setup, as it needs to be
         # run every time a cluster is restarted.
         digest=str(time.time()),
-        cluster_metadata=cluster_metadata,
+        cluster_info=cluster_info,
         ssh_credentials=ssh_credentials)
     logger.debug(f'All docker users: {docker_users}')
     assert len(set(docker_users)) == 1, docker_users
@@ -152,10 +150,10 @@ def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
 
 @_log_start_end
 def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
-                             cluster_metadata: common.ClusterMetadata,
+                             cluster_info: common.ClusterInfo,
                              ssh_credentials: Dict[str, Any]) -> None:
     """Setup internal dependencies."""
-    _hint_worker_log_path(cluster_name, cluster_metadata,
+    _hint_worker_log_path(cluster_name, cluster_info,
                           'setup_runtime_on_cluster')
     # compute the digest
     digests = []
@@ -168,7 +166,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
 
     @_auto_retry
     def _setup_node(runner: command_runner.SSHCommandRunner,
-                    metadata: common.InstanceMetadata, log_path: str):
+                    metadata: common.InstanceInfo, log_path: str):
         del metadata
         for cmd in setup_commands:
             returncode, stdout, stderr = runner.run(cmd,
@@ -186,24 +184,24 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                              cluster_name,
                              stage_name='setup_runtime_on_cluster',
                              digest=digest,
-                             cluster_metadata=cluster_metadata,
+                             cluster_info=cluster_info,
                              ssh_credentials=ssh_credentials)
 
 
 @_log_start_end
 @_auto_retry
 def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
-                           cluster_metadata: common.ClusterMetadata,
+                           cluster_info: common.ClusterInfo,
                            ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the head node."""
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_info.get_feasible_ips()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                  port=22,
                                                  **ssh_credentials)
-    assert cluster_metadata.head_instance_id is not None, (cluster_name,
-                                                           cluster_metadata)
+    assert cluster_info.head_instance_id is not None, (cluster_name,
+                                                       cluster_info)
     # Log the head node's output to the provision.log
-    log_path_abs = str(provision_config.config.provision_log)
+    log_path_abs = str(provision_logging.get_log_path())
     ray_options = (
         # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
         f'--disable-usage-stats '
@@ -242,21 +240,21 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
 @_auto_retry
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str],
-                              cluster_metadata: common.ClusterMetadata,
+                              cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the worker nodes."""
-    if len(cluster_metadata.instances) <= 1:
+    if len(cluster_info.instances) <= 1:
         return
-    _hint_worker_log_path(cluster_name, cluster_metadata, 'ray_cluster')
-    ip_list = cluster_metadata.get_feasible_ips()
+    _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
+    ip_list = cluster_info.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list[1:], port_list=None, **ssh_credentials)
     worker_ids = [
-        instance_id for instance_id in cluster_metadata.instances
-        if instance_id != cluster_metadata.head_instance_id
+        instance_id for instance_id in cluster_info.instances
+        if instance_id != cluster_info.head_instance_id
     ]
-    head_instance = cluster_metadata.get_head_instance()
-    assert head_instance is not None, cluster_metadata
+    head_instance = cluster_info.get_head_instance()
+    assert head_instance is not None, cluster_info
     head_private_ip = head_instance.internal_ip
 
     ray_options = (
@@ -313,16 +311,16 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
 @_log_start_end
 @_auto_retry
 def start_skylet_on_head_node(cluster_name: str,
-                              cluster_metadata: common.ClusterMetadata,
+                              cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start skylet on the head node."""
     del cluster_name
-    ip_list = cluster_metadata.get_feasible_ips()
+    ip_list = cluster_info.get_feasible_ips()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
                                                  port=22,
                                                  **ssh_credentials)
-    assert cluster_metadata.head_instance_id is not None, cluster_metadata
-    log_path_abs = str(provision_config.config.provision_log)
+    assert cluster_info.head_instance_id is not None, cluster_info
+    log_path_abs = str(provision_logging.get_log_path())
     logger.info(f'Running command on head node: {_MAYBE_SKYLET_RESTART_CMD}')
     returncode, stdout, stderr = ssh_runner.run(_MAYBE_SKYLET_RESTART_CMD,
                                                 stream_logs=False,
@@ -373,15 +371,14 @@ def _internal_file_mounts(file_mounts: Dict,
 
 @_log_start_end
 def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
-                         cluster_metadata: common.ClusterMetadata,
+                         cluster_info: common.ClusterInfo,
                          ssh_credentials: Dict[str,
                                                str], wheel_hash: str) -> None:
     """Executes file mounts - rsyncing internal local files"""
-    _hint_worker_log_path(cluster_name, cluster_metadata,
-                          'internal_file_mounts')
+    _hint_worker_log_path(cluster_name, cluster_info, 'internal_file_mounts')
 
     def _setup_node(runner: command_runner.SSHCommandRunner,
-                    metadata: common.InstanceMetadata, log_path: str):
+                    metadata: common.InstanceInfo, log_path: str):
         del metadata
         _internal_file_mounts(common_file_mounts, runner, log_path)
 
@@ -389,5 +386,5 @@ def internal_file_mounts(cluster_name: str, common_file_mounts: Dict,
                              cluster_name,
                              stage_name='internal_file_mounts',
                              digest=wheel_hash,
-                             cluster_metadata=cluster_metadata,
+                             cluster_info=cluster_info,
                              ssh_credentials=ssh_credentials)

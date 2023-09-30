@@ -214,7 +214,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 
 
 def run_instances(region: str, cluster_name: str,
-                  config: common.InstanceConfig) -> common.ProvisionMetadata:
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
 
@@ -381,13 +381,13 @@ def run_instances(region: str, cluster_name: str,
                 _create_node_tag(inst, is_head=False)
 
     assert head_instance_id is not None
-    return common.ProvisionMetadata(provider_name='aws',
-                                    region=region,
-                                    zone=zone,
-                                    cluster_name=cluster_name,
-                                    head_instance_id=head_instance_id,
-                                    resumed_instance_ids=resumed_instance_ids,
-                                    created_instance_ids=created_instance_ids)
+    return common.ProvisionRecord(provider_name='aws',
+                                  region=region,
+                                  zone=zone,
+                                  cluster_name=cluster_name,
+                                  head_instance_id=head_instance_id,
+                                  resumed_instance_ids=resumed_instance_ids,
+                                  created_instance_ids=created_instance_ids)
 
 
 def _filter_instances(ec2, filters: List[Dict[str, Any]],
@@ -725,8 +725,7 @@ def wait_instances(region: str, cluster_name: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_metadata(region: str,
-                         cluster_name: str) -> common.ClusterMetadata:
+def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
     filters = [
@@ -747,14 +746,14 @@ def get_cluster_metadata(region: str,
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
-        instances[inst.id] = common.InstanceMetadata(
+        instances[inst.id] = common.InstanceInfo(
             instance_id=inst.id,
             internal_ip=inst.private_ip_address,
             external_ip=inst.public_ip_address,
             tags=dict(tags),
         )
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
-    return common.ClusterMetadata(
+    return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
     )
