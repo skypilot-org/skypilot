@@ -112,13 +112,6 @@ local_ray = [  # Lower version of ray will cause dependency conflict for
     'pydantic <2.0, >=1.10.8',
 ]
 
-local_ray = [  # Lower version of ray will cause dependency conflict for
-    # click/grpcio/protobuf.
-    # Excluded 2.6.0 as it has a bug in the cluster launcher:
-    # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
-    'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
-]
-
 # NOTE: Change the templates/spot-controller.yaml.j2 file if any of the
 # following packages dependencies are changed.
 aws_dependencies = [
@@ -136,7 +129,7 @@ aws_dependencies = [
 extras_require: Dict[str, List[str]] = {
     # TODO(zwhu): remove the local_ray requirement once we resolve the
     # non-critical dependency issues in #2625
-    'aws': aws_dependencies + local_ray,
+    'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     # azure-identity is needed in node_provider.
