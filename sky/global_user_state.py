@@ -177,7 +177,8 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata, owner, cluster_hash) '
+        'autostop, to_down, metadata, owner, cluster_hash, '
+        'storage_mounts_metadata) '
         'VALUES ('
         # name
         '?, '
@@ -209,7 +210,10 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT owner FROM clusters WHERE name=?), null),'
         # cluster_hash
-        '?'
+        '?,'
+        # storage_mounts_metadata
+        'COALESCE('
+        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null)'
         ')',
         (
             # name
@@ -236,6 +240,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             # cluster_hash
             cluster_hash,
+            # storage_mounts_metadata
+            cluster_name,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)

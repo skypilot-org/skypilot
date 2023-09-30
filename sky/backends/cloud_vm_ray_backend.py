@@ -4622,14 +4622,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         with filelock.FileLock(lock_path):
             storage_mounts_metadata = (
                 global_user_state.get_cluster_storage_mounts_metadata(
-                cluster_name))
+                    cluster_name))
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_mounts[dst] = (
-                storage_lib.Storage.from_metadata(storage_metadata,
-                                                  sync_on_reconstruction=False))
+            storage_mounts[dst] = (storage_lib.Storage.from_metadata(
+                storage_metadata, sync_on_reconstruction=False))
         return storage_mounts
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
