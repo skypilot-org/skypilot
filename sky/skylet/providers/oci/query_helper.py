@@ -17,8 +17,8 @@ from typing import Optional
 import pandas as pd
 
 from sky.adaptors import oci as oci_adaptor
-from sky.skylet.providers.oci import utils
 from sky.clouds.utils.oci_utils import oci_conf
+from sky.skylet.providers.oci import utils
 
 logger = logging.getLogger(__name__)
 
