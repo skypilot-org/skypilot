@@ -13,7 +13,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.scp import scp_utils
+from sky.clouds.utils import scp_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

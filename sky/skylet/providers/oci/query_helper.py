@@ -18,7 +18,7 @@ import pandas as pd
 
 from sky.adaptors import oci as oci_adaptor
 from sky.skylet.providers.oci import utils
-from sky.skylet.providers.oci.config import oci_conf
+from sky.clouds.utils.oci_utils import oci_conf
 
 logger = logging.getLogger(__name__)
 

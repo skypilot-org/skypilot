@@ -1,4 +1,4 @@
-"""OCI Offerings Catalog.
+x"""OCI Offerings Catalog.
 
 This module loads the service catalog file and can be used to query
 instance types and pricing information for OCI.
@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.service_catalog import common
-from sky.skylet.providers.oci.config import oci_conf
+from sky.clouds.utils.oci_utils import oci_conf
 
 if typing.TYPE_CHECKING:
     import pandas as pd

@@ -40,7 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.clouds.utils import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import subprocess_utils
@@ -262,6 +262,7 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+
     get_or_generate_keys()
 
     # Ensure ssh key is registered with Lambda Cloud

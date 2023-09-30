@@ -16,7 +16,7 @@ from sky import exceptions
 from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
-from sky.skylet.providers.oci.config import oci_conf
+from sky.clouds.utils.oci_utils import oci_conf
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
