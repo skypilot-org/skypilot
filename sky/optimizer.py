@@ -772,7 +772,7 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
-            task_str = (f'for task_lib.Task {repr(task)!r}'
+            task_str = (f'for task {repr(task)!r} '
                         if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
             logger.info(
