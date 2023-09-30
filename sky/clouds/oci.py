@@ -1,5 +1,4 @@
-"""
-Oracle Cloud Infrastructure (OCI)
+"""Oracle Cloud Infrastructure (OCI)
 
 History:
  - Hysun He (hysun.he@oracle.com) @ Apr, 2023: Initial implementation
@@ -32,7 +31,7 @@ _tenancy_prefix = None
 
 @clouds.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
-    """ OCI: Oracle Cloud Infrastructure """
+    """OCI: Oracle Cloud Infrastructure """
 
     _REPR = 'OCI'
 
@@ -57,7 +56,7 @@ class OCI(clouds.Cloud):
         }
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -128,8 +127,9 @@ class OCI(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        """
-        https://www.oracle.com/cis/cloud/networking/pricing/
+        """Get the egress cost for the given number of gigabytes.
+
+        Reference: https://www.oracle.com/cis/cloud/networking/pricing/
         """
         # Free for first 10T (per month)
         if num_gigabytes <= 10 * 1024:
@@ -180,8 +180,9 @@ class OCI(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert region is not None, resources
 
         acc_dict = self.get_accelerators_from_instance_type(
@@ -282,7 +283,8 @@ class OCI(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -442,7 +444,8 @@ class OCI(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'oci')
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # We ignore checking the image size because most of situations the
         # boot volume size is larger than the image size. For specific rare
         # situations, the configuration/setup commands should make sure the

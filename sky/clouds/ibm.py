@@ -50,7 +50,7 @@ class IBM(clouds.Cloud):
         }
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -136,10 +136,10 @@ class IBM(clouds.Cloud):
         # Currently Isn't implemented in the same manner by aws and azure.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost. Currently true for us-south, i.e. Dallas.
         based on https://cloud.ibm.com/objectstorage/create#pricing. """
-        cost = 0
+        cost = 0.
         price_thresholds = [{
             'threshold': 150,
             'price_per_gb': 0.05
@@ -163,6 +163,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -177,6 +178,7 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
+        del cluster_name_on_cloud  # Unused.
 
         def _get_profile_resources(instance_profile):
             """returns a dict representing the
@@ -256,16 +258,9 @@ class IBM(clouds.Cloud):
                                                          clouds='ibm')
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
-        """Returns a list of feasible and launchable resources.
-
-        Feasible resources refer to an offering respecting the resource
-        requirements.  Currently, this function implements "filtering" the
-        cloud's offerings only w.r.t. accelerators constraints.
-
-        Launchable resources require a cloud and an instance type be assigned.
-        """
-        fuzzy_candidate_list: Optional[List[str]] = []
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -315,8 +310,8 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_image(cls, region) -> str:
-        """
-        Returns default image id, currently stock ubuntu 22-04.
+        """Returns default image id, currently stock ubuntu 22-04.
+
         if user specified 'image_id' in ~/.ibm/credentials.yaml
             matching this 'region', returns it instead.
         """
@@ -350,7 +345,8 @@ class IBM(clouds.Cloud):
             and img['operating_system']['architecture'].startswith(
                 'amd')))['id']
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         assert region is not None, (image_id, region)
         client = ibm.client(region=region)
         try:
@@ -359,8 +355,16 @@ class IBM(clouds.Cloud):
         except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
             logger.error(e.message)
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} not found in '
-                                 f'IBM region "{region}"') from None
+                raise ValueError(
+                    f'Image {image_id!r} not found in IBM region "{region}".\n'
+                    '\nTo use image id in IBM, create a private VPC image and '
+                    'paste its ID in the image_id section.\n'
+                    '\nTo create an image manually:\n'
+                    'https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume\n'  # pylint: disable=line-too-long
+                    '\nTo use an official VPC image creation tool:\n'
+                    'https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure\n'  # pylint: disable=line-too-long
+                    '\nTo use a more limited but easier to manage tool:\n'
+                    'https://github.com/IBM/vpc-img-inst') from None
         try:
             # image_size['file']['size'] is not relevant, since
             # the minimum size of a volume onto which this image

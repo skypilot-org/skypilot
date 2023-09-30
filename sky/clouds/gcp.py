@@ -8,9 +8,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
+import colorama
 
 from sky import clouds
 from sky import exceptions
@@ -83,6 +84,22 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+# Firewall rule name for user opened ports.
+USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
+
+# UX message when image not found in GCP.
+# pylint: disable=line-too-long
+_IMAGE_NOT_FOUND_UX_MESSAGE = (
+    'Image {image_id!r} not found in GCP.\n'
+    '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/images/<image-name>{colorama.Style.RESET_ALL}\n'
+    'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n'
+    '\nTo find machine images: https://cloud.google.com/compute/docs/machine-images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/machineImages/<machine-image-name>{colorama.Style.RESET_ALL}\n'
+    f'\nYou can query image id using: {colorama.Style.BRIGHT}gcloud compute images list --project <project-id> --no-standard-images{colorama.Style.RESET_ALL}'
+    f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
+)
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -114,9 +131,7 @@ class SpecificReservation:
 
 
 class GCPReservation:
-    """
-    GCP Reservation object that contains the reservation information.
-    """
+    """GCP Reservation object that contains the reservation information."""
 
     def __init__(self, self_link: str, zone: str,
                  specific_reservation: SpecificReservation,
@@ -138,9 +153,7 @@ class GCPReservation:
 
     @property
     def available_resources(self) -> int:
-        """
-        Count the resources available that can be used in this reservation.
-        """
+        """Count resources available that can be used in this reservation."""
         return (self.specific_reservation.count -
                 self.specific_reservation.in_use_count)
 
@@ -148,7 +161,8 @@ class GCPReservation:
         self,
         specific_reservations: Set[str],
     ) -> bool:
-        """
+        """Check if the reservation is consumable.
+
         Check if the reservation is consumable with the provided specific
         reservation names. This is defined by the Consumption type.
         For more details:
@@ -159,7 +173,8 @@ class GCPReservation:
 
     @property
     def name(self) -> str:
-        """Name is derived from reservation self link.
+        """Name derived from reservation self link.
+
         The naming convention can be found here:
         https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
         """
@@ -221,7 +236,7 @@ class GCP(clouds.Cloud):
         return {}
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
@@ -330,7 +345,7 @@ class GCP(clouds.Cloud):
                                                            zone=zone,
                                                            clouds='gcp')
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://cloud.google.com/storage/pricing#network-pricing
         # NOTE: egress to worldwide (excl. China, Australia).
@@ -349,8 +364,9 @@ class GCP(clouds.Cloud):
         find_machine = re.match(r'projects/.*/.*/machineImages/.*', image_id)
         return find_machine is not None
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
-        del region  # Unused.
+    @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         try:
@@ -358,19 +374,21 @@ class GCP(clouds.Cloud):
                                 'v1',
                                 credentials=None,
                                 cache_discovery=False)
-        except gcp.credential_error_exception() as e:
+        except gcp.credential_error_exception():
             return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
-                raise ValueError(f'Image {image_id!r} not found in GCP.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(image_id=image_id))
             project = image_attrs[1]
             image_name = image_attrs[-1]
             # We support both GCP's Machine Images and Custom Images, both
             # of which are specified with the image_id field. We will
             # distinguish them by checking if the image_id contains
             # 'machineImages'.
-            if self._is_machine_image(image_id):
+            if cls._is_machine_image(image_id):
                 image_infos = compute.machineImages().get(
                     project=project, machineImage=image_name).execute()
                 # The VM launching in a different region than the machine
@@ -379,8 +397,10 @@ class GCP(clouds.Cloud):
                 return float(
                     image_infos['instanceProperties']['disks'][0]['diskSizeGb'])
             else:
+                start = time.time()
                 image_infos = compute.images().get(project=project,
                                                    image=image_name).execute()
+                logger.debug(f'GCP image get took {time.time() - start:.2f}s')
                 return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 403:
@@ -389,9 +409,15 @@ class GCP(clouds.Cloud):
                                      f'{image_id!r}') from None
             if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id!r} not found in '
-                                     'GCP.') from None
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(
+                            image_id=image_id)) from None
             raise
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        del region  # Unused.
+        return cls._get_image_size(image_id)
 
     @classmethod
     def get_default_instance_type(
@@ -405,7 +431,8 @@ class GCP(clouds.Cloud):
                                                          clouds='gcp')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources.Resources', region: 'clouds.Region',
+            self, resources: 'resources.Resources', cluster_name_on_cloud: str,
+            region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -487,9 +514,17 @@ class GCP(clouds.Cloud):
 
         resources_vars['disk_tier'] = GCP._get_disk_type(r.disk_tier)
 
+        firewall_rule = None
+        if resources.ports is not None:
+            firewall_rule = (
+                USER_PORTS_FIREWALL_RULE_NAME.format(cluster_name_on_cloud))
+        resources_vars['firewall_rule'] = firewall_rule
+
         return resources_vars
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources.Resources'
+    ) -> Tuple[List['resources.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], [])
@@ -644,8 +679,8 @@ class GCP(clouds.Cloud):
         self,
         instance_type: str,
     ) -> List[GCPReservation]:
-        """
-        List all reservations for the given instance type.
+        """List all reservations for the given instance type.
+
         TODO: We need to incorporate accelerators because the reserved instance
         can be consumed only when the instance_type + GPU type matches, and in
         GCP GPUs except for A100 and L4 do not have their own instance type.
@@ -1099,11 +1134,16 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         del region  # unused
         assert zone is not None
+        # TODO(zhwu): This assumes the cluster is created with the
+        # `ray-cluster-name` tag, which is guaranteed by the current `ray`
+        # backend. Once the `provision.query_instances` is implemented for GCP,
+        # we should be able to get rid of this assumption.
+        tag_filters = {'ray-cluster-name': cluster_name_on_cloud}
         label_filter_str = cls._label_filter_str(tag_filters)
         instance_name_cmd = ('gcloud compute instances list '
                              f'--filter="({label_filter_str})" '
@@ -1184,3 +1224,10 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = self.__dict__.copy()
+        # We should avoid saving third-party object to the state, as it may
+        # cause unpickling error when the third-party API is updated.
+        state.pop('_list_reservations_cache', None)
+        return state

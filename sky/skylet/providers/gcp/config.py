@@ -803,35 +803,6 @@ def get_usable_vpc(config):
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
 
-    # Configure user specified rules
-    ports = config["provider"].get("ports", [])
-    user_rules = []
-    for port in ports:
-        cluster_name_hash = common_utils.truncate_and_hash_cluster_name(
-            config["cluster_name"]
-        )
-        name = f"user-ports-{cluster_name_hash}-{port}"
-        user_rules.append(
-            {
-                "name": name,
-                "description": f"Allow user-specified port {port} for cluster {config['cluster_name']}",
-                "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-                "selfLink": "projects/{PROJ_ID}/global/firewalls/" + name,
-                "direction": "INGRESS",
-                "priority": 65534,
-                "allowed": [
-                    {
-                        "IPProtocol": "tcp",
-                        "ports": [str(port)],
-                    },
-                ],
-                "sourceRanges": ["0.0.0.0/0"],
-                "targetTags": [config["cluster_name"]],
-            }
-        )
-
-    _create_rules(config, compute, user_rules, usable_vpc_name, proj_id)
-
     return usable_vpc_name
 
 
@@ -1075,8 +1046,8 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
         ssh_user=ssh_user, key_value=key_parts[1]
     )
 
-    common_instance_metadata = project["commonInstanceMetadata"]
-    items = common_instance_metadata.get("items", [])
+    common_instance_info = project["commonInstanceMetadata"]
+    items = common_instance_info.get("items", [])
 
     ssh_keys_i = next(
         (i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None
@@ -1089,13 +1060,11 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
         ssh_keys["value"] += "\n" + new_ssh_meta
         items[ssh_keys_i] = ssh_keys
 
-    common_instance_metadata["items"] = items
+    common_instance_info["items"] = items
 
     operation = (
         compute.projects()
-        .setCommonInstanceMetadata(
-            project=project["name"], body=common_instance_metadata
-        )
+        .setCommonInstanceMetadata(project=project["name"], body=common_instance_info)
         .execute()
     )
 

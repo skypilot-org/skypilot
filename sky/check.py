@@ -24,7 +24,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         if not isinstance(cloud, clouds.Local):
             echo('  ' + click.style(
                 f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-                 ' ' * 10)
+                 ' ' * 30)
         if ok:
             enabled_clouds.append(str(cloud))
             if verbose:
@@ -48,7 +48,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     status_color = 'green' if r2_is_enabled else 'red'
     echo('  ' +
          click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-         ' ' * 10)
+         ' ' * 30)
     if not r2_is_enabled:
         echo(f'    Reason: {reason}')
 

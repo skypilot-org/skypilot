@@ -127,7 +127,8 @@ class AutostopEvent(SkyletEvent):
             config = common_utils.read_yaml(self._ray_yaml_path)
 
             provider_module = config['provider']['module']
-            provider_search = re.search(r'providers\.(.*)\.', provider_module)
+            provider_search = re.search(r'(?:providers|provision)\.(.*)(\.)?',
+                                        provider_module)
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
 
@@ -203,7 +204,7 @@ class AutostopEvent(SkyletEvent):
         from sky import provision as provision_lib
         autostop_lib.set_autostopping_started()
 
-        cluster_name = cluster_config['cluster_name']
+        cluster_name_on_cloud = cluster_config['cluster_name']
         is_cluster_multinode = cluster_config['max_workers'] > 0
 
         os.environ.pop('AWS_ACCESS_KEY_ID', None)
@@ -219,11 +220,11 @@ class AutostopEvent(SkyletEvent):
 
         if is_cluster_multinode:
             operation_fn(provider_name=provider_name,
-                         cluster_name=cluster_name,
+                         cluster_name_on_cloud=cluster_name_on_cloud,
                          provider_config=cluster_config['provider'],
                          worker_only=True)
         operation_fn(provider_name=provider_name,
-                     cluster_name=cluster_name,
+                     cluster_name_on_cloud=cluster_name_on_cloud,
                      provider_config=cluster_config['provider'])
 
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):

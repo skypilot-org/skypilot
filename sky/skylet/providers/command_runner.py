@@ -8,6 +8,7 @@ from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 
+from sky.provision import docker_utils
 from sky.skylet import constants
 
 
@@ -23,8 +24,11 @@ def docker_start_cmds(
 ):
     """Generating docker start command without --rm.
     
-    The code is borrowed from `ray.autoscaler._private.docker`. The only
-    difference is that we don't use `--rm` flag here.
+    The code is borrowed from `ray.autoscaler._private.docker`.
+
+    Changes we made:
+        1. Remove --rm flag to keep the container after `ray stop` is executed;
+        2. Add options to enable fuse.
     """
     del user  # unused
 
@@ -55,6 +59,10 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
+        # SkyPilot: Add following options to enable fuse.
+        '--cap-add=SYS_ADMIN',
+        '--device=/dev/fuse',
+        '--security-opt=apparmor:unconfined',
         image,
         'bash',
     ]
@@ -65,7 +73,9 @@ class SkyDockerCommandRunner(DockerCommandRunner):
     """A DockerCommandRunner that
         1. Run some custom setup commands;
         2. Reimplement docker stop to save the container after the host VM
-           is shut down.
+           is shut down;
+        3. Allow docker login before running the container, to enable pulling
+           from private docker registry.
 
     The code is borrowed from
     `ray.autoscaler._private.command_runner.DockerCommandRunner`.
@@ -106,6 +116,18 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             self.run('sudo service ssh start')
             return True
 
+        # SkyPilot: Docker login if user specified a private docker registry.
+        if "docker_login_config" in self.docker_config:
+            # TODO(tian): Maybe support a command to get the login password?
+            docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
+                "docker_login_config"]
+            self.run('{} login --username {} --password {} {}'.format(
+                self.docker_cmd,
+                docker_login_config.username,
+                docker_login_config.password,
+                docker_login_config.server,
+            ))
+
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
                                     'pull_before_run is specified')
@@ -133,7 +155,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             if requires_re_init:
                 self.run(f'{self.docker_cmd} stop {self.container_name}',
                          run_env='host')
-                # Manualy rm here since --rm is not specified
+                # Manually rm here since --rm is not specified
                 self.run(f'{self.docker_cmd} rm {self.container_name}',
                          run_env='host')
 
@@ -191,14 +213,28 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget '
-                 'patch openssh-server python3-pip;')
+        self.run(
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # We need to install fuse package first to enable storage mount.
+            # The dpkg option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install '
+            '-y rsync curl wget patch openssh-server python3-pip fuse;')
 
         # Copy local authorized_keys to docker container.
+        # Stop and disable jupyter service. This is to avoid port conflict on
+        # 8080 if we use default deep learning image in GCP, and 8888 if we use
+        # default deep learning image in Azure.
+        # Azure also has a jupyterhub service running on 8081, so we stop and
+        # disable that too.
         container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
         self.run(
             'rsync -e "docker exec -i" -avz ~/.ssh/authorized_keys '
-            f'{container_name}:/tmp/host_ssh_authorized_keys',
+            f'{container_name}:/tmp/host_ssh_authorized_keys;'
+            'sudo systemctl stop jupyter > /dev/null 2>&1 || true;'
+            'sudo systemctl disable jupyter > /dev/null 2>&1 || true;'
+            'sudo systemctl stop jupyterhub > /dev/null 2>&1 || true;'
+            'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
             run_env='host')
 
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.

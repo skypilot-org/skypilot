@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -74,7 +75,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
         This method is used by check_cluster_name_is_valid() to check if the
@@ -190,7 +191,7 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost.
 
         TODO: takes into account "per month" accumulation per account.
@@ -203,6 +204,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -269,16 +271,22 @@ class Cloud:
                                                   clouds=cls._REPR.lower())
 
     def get_feasible_launchable_resources(
-            self,
-            resources: 'resources_lib.Resources',
-            num_nodes: int = 1) -> 'resources_lib.Resources':
-        """Returns a list of feasible and launchable resources.
+        self,
+        resources: 'resources_lib.Resources',
+        num_nodes: int = 1
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """Returns ([feasible and launchable resources], [fuzzy candidates]).
 
         Feasible resources refer to an offering respecting the resource
         requirements.  Currently, this function implements "filtering" the
         cloud's offerings only w.r.t. accelerators constraints.
 
         Launchable resources require a cloud and an instance type be assigned.
+
+        Fuzzy candidates example: when the requested GPU is A100:1 but is not
+        available in a cloud/region, the fuzzy candidates are results of a fuzzy
+        search in the catalog that are offered in the location. E.g.,
+          ['A100-80GB:1', 'A100-80GB:2', 'A100-80GB:4', 'A100:8']
         """
         if resources.is_launchable():
             self._check_instance_type_accelerators_combination(resources)
@@ -295,7 +303,10 @@ class Cloud:
             return ([], [])
         return self._get_feasible_launchable_resources(resources)
 
-    def _get_feasible_launchable_resources(self, resources):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        """See get_feasible_launchable_resources()."""
         raise NotImplementedError
 
     def get_reservations_available_resources(
@@ -386,7 +397,8 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.
@@ -477,8 +489,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_length()
-        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        valid_regex = constants.CLUSTER_NAME_VALID_REGEX
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
@@ -486,14 +497,6 @@ class Cloud:
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
-        if (max_cluster_name_len_limit is not None and
-                len(cluster_name) > max_cluster_name_len_limit):
-            cloud_name = '' if cls is Cloud else f' on {cls._REPR}'
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars{cloud_name}.')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
@@ -635,8 +638,8 @@ class Cloud:
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
-                                  tag_filters: Dict[str,
-                                                    str], region: Optional[str],
+                                  cluster_name_on_cloud: str,
+                                  region: Optional[str],
                                   zone: Optional[str]) -> str:
         """Creates an image from the cluster.
 
@@ -645,7 +648,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def maybe_move_image(cls, image_name: str, source_region: str,
+    def maybe_move_image(cls, image_id: str, source_region: str,
                          target_region: str, source_zone: Optional[str],
                          target_zone: Optional[str]) -> str:
         """Move an image if required.

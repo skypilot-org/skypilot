@@ -1,20 +1,18 @@
-"""
-Cloud need to be registered in the CLOUD_REGISTRY so that they can be discovered
-"""
+"""Clouds need to be registered in CLOUD_REGISTRY to be discovered"""
+
 import typing
 from typing import Optional, Type
 
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import sky
+    from sky.clouds import cloud
 
 
 class _CloudRegistry(dict):
     """Registry of clouds."""
 
-    def from_str(self,
-                 name: Optional[str]) -> Optional['sky.clouds.cloud.Cloud']:
+    def from_str(self, name: Optional[str]) -> Optional['cloud.Cloud']:
         if name is None:
             return None
         if name.lower() not in self:
@@ -23,9 +21,7 @@ class _CloudRegistry(dict):
                                  f'{list(self.keys())}')
         return self.get(name.lower())
 
-    def register(
-        self, cloud_cls: Type['sky.clouds.cloud.Cloud']
-    ) -> Type['sky.clouds.cloud.Cloud']:
+    def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
         name = cloud_cls.__name__.lower()
         assert name not in self, f'{name} already registered'
         self[name] = cloud_cls()

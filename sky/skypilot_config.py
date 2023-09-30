@@ -43,6 +43,7 @@ then:
 """
 import copy
 import os
+import pprint
 from typing import Any, Dict, Iterable
 
 import yaml
@@ -156,7 +157,7 @@ def _try_load_config() -> None:
         logger.debug(f'Using config path: {config_path}')
         try:
             _dict = common_utils.read_yaml(config_path)
-            logger.debug(f'Config loaded: {_dict}')
+            logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
 
