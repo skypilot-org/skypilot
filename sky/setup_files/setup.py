@@ -84,6 +84,8 @@ install_requires = [
     'packaging',
     'psutil',
     'pulp',
+    # Cython 3.0 release breaks PyYAML 5.4.* (https://github.com/yaml/pyyaml/issues/601)
+    # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
 ]
