@@ -120,4 +120,5 @@ class OCIConfig:
         return skypilot_config.get_nested(
             ('oci', 'default', 'oci_config_profile'), 'DEFAULT')
 
+
 oci_config = OCIConfig()

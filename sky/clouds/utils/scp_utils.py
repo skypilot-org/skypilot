@@ -108,7 +108,7 @@ def raise_scp_error(response: requests.Response) -> None:
         message = resp_json['message']
     except (KeyError, json.decoder.JSONDecodeError) as e:
         raise SCPClientError('Unexpected error. Status code: '
-        f'{status_code}') from e
+                             f'{status_code}') from e
 
     if status_code == 404:
         raise SCPCreationFailError(f'{status_code}: {message}')
@@ -361,7 +361,7 @@ class SCPClient:
 
     def list_nic_details(self, virtual_server_id) -> List[dict]:
         """List existing instances."""
-        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{virtual_server_id}/nics' # pylint: disable=line-too-long
+        url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{virtual_server_id}/nics'  # pylint: disable=line-too-long
         return self._get(url)
 
     def get_external_ip(self, virtual_server_id, ip):
@@ -369,7 +369,7 @@ class SCPClient:
             virtual_server_id=virtual_server_id)
         for nic_details in nic_details_list:
             if (nic_details['ip'] == ip and
-                nic_details['subnetType'] == 'PUBLIC'):
+                    nic_details['subnetType'] == 'PUBLIC'):
                 return nic_details['natIp']
         return None
 
@@ -382,7 +382,7 @@ class SCPClient:
         return self._get(url)
 
     def list_product_groups(self, service_zone_id) -> List[dict]:
-        url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/product-groups' # pylint: disable=line-too-long
+        url = f'{API_ENDPOINT}/product/v2/zones/{service_zone_id}/product-groups'  # pylint: disable=line-too-long
         return self._get(url)
 
     def list_vpcs(self, service_zone_id) -> List[dict]:
@@ -422,7 +422,7 @@ class SCPClient:
         return self._get(url, contents_key=None)
 
     def get_firewal_rule_info(self, firewall_id, rule_id):
-        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}' # pylint: disable=line-too-long
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'  # pylint: disable=line-too-long
         return self._get(url, contents_key=None)
 
     def list_firwalls(self):
