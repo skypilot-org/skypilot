@@ -174,6 +174,7 @@ def validate_region_zone_impl(
     Raises:
         ValueError: If region or zone is invalid or not supported.
     """
+
     def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
