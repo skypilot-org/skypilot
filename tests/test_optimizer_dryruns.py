@@ -47,18 +47,18 @@ def _test_parse_accelerators(spec, expected_accelerators):
 
 
 # Monkey-patching is required because in the test environment, no cloud is
-# enabled. The optimizer checks the environment to find enabled clouds, and
-# only generates plans within these clouds. The tests assume that all three
-# clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-# to return all three clouds. We also monkeypatch `sky.check.check` so that
-# when the optimizer tries calling it to update enabled_clouds, it does not
-# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds
-# in tests/conftest.py
-# raise exceptions.
+# enabled. The optimizer checks the environment to find enabled clouds, and only
+# generates plans within these clouds. The tests assume that all clouds in
+# registry are enabled, so we monkeypatch the `sky.global_user_state` module to
+# return all clouds. We also monkeypatch `sky.check.check` so that when the
+# optimizer tries calling it to update enabled_clouds, it does not
+#
+# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds in
+# tests/conftest.py raise exceptions.
 def _make_resources(
     monkeypatch,
     *resources_args,
-    enabled_clouds: List[str] = None,
+    enabled_clouds: Optional[List[str]] = None,
     **resources_kwargs,
 ):
     if enabled_clouds is None:
@@ -691,3 +691,64 @@ def test_optimize_speed(enable_all_clouds, monkeypatch):
         sky.Resources(cpus='4+', memory='4+', accelerators='A100-80GB:8'))
     _test_optimize_speed(
         sky.Resources(cpus='4+', memory='4+', accelerators='tpu-v3-32'))
+
+
+def test_infer_cloud_from_region_or_zone(monkeypatch):
+    # Maps to GCP.
+    _test_resources_launch(monkeypatch, region='us-east1')
+    _test_resources_launch(monkeypatch, zone='us-west2-a')
+
+    # Maps to AWS.
+    _test_resources_launch(monkeypatch, region='us-east-2')
+    _test_resources_launch(monkeypatch, zone='us-west-2a')
+
+    # `sky launch`
+    _test_resources_launch(monkeypatch)
+
+    # Same-named regions need `cloud`.
+    _test_resources_launch(monkeypatch, region='us-east-1', cloud=sky.AWS())
+    _test_resources_launch(monkeypatch, region='us-east-1', cloud=sky.Lambda())
+
+    # Cases below: cannot infer cloud.
+
+    # Same-named region: AWS and Lambda.
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(monkeypatch, region='us-east-1')
+    assert ('Multiple enabled clouds have region/zone of the same names'
+            in str(e))
+
+    # Typo, fuzzy hint.
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(monkeypatch, zone='us-west-2-a', cloud=sky.AWS())
+    assert ('Did you mean one of these: \'us-west-2a\'?' in str(e))
+
+    # Detailed hints.
+    # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
+    # [AWS, Azure, GCP, IBM, Lambda, Local, OCI, SCP]. Details:
+    # Cloud   Hint
+    # -----   ----
+    # AWS     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west-2a'?
+    # Azure   Azure does not support zones.
+    # GCP     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west2-a'?
+    # IBM     Invalid zone 'us-west-2-a'
+    # Lambda  Lambda Cloud does not support zones.
+    # Local   Local cloud does not support zones.
+    # OCI     Invalid zone 'us-west-2-a'
+    # SCP     SCP Cloud does not support zones.
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(monkeypatch, zone='us-west-2-a')
+    assert ('Invalid (region None, zone \'us-west-2-a\') for any cloud among'
+            in str(e))
+
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(monkeypatch, zone='us-west-2z')
+    assert ('Invalid (region None, zone \'us-west-2z\') for any cloud among'
+            in str(e))
+
+    with pytest.raises(ValueError) as e:
+        _test_resources_launch(monkeypatch,
+                               region='us-east1',
+                               zone='us-west2-a')
+    assert (
+        'Invalid (region \'us-east1\', zone \'us-west2-a\') for any cloud among'
+        in str(e))
