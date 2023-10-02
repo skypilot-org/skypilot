@@ -71,7 +71,7 @@ def list_accelerators(
                                     memory=None,
                                     price=0.0,
                                     spot_price=0.0,
-                                    region=''))
+                                    region='kubernetes'))
 
     df = pd.DataFrame(result,
                       columns=[
