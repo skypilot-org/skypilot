@@ -76,6 +76,15 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> Optional[str]:
+        raise NotImplementedError
+
+    @classmethod
     def delete_firewall_rule(
         cls,
         project_id: str,
@@ -88,8 +97,7 @@ class GCPInstance:
         cls,
         firewall_rule_name: str,
         project_id: str,
-        zone: str,
-        instances: List[str],
+        vpc_name: str,
         cluster_name_on_cloud: str,
         ports: List[str],
     ) -> Optional[dict]:
@@ -230,6 +238,60 @@ class GCPComputeInstance(GCPInstance):
         return False
 
     @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> Optional[str]:
+        try:
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+            ).execute()
+            # Format: projects/PROJECT_ID/global/networks/VPC_NAME
+            vpc_link = response['networkInterfaces'][0]['network']
+            return vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            logger.warning(f'Failed to get VPC name for instance {instance}: '
+                           f'{e.reason}. Skip opening ports for it.')
+            return None
+
+    @classmethod
+    def add_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        try:
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick one.
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+            ).execute()
+            existing_tags = response['tags'].get('items', [])
+            if tag in existing_tags:
+                return
+            existing_tags.append(tag)
+            update_body = response['tags']
+            update_body['items'] = existing_tags
+            cls.load_resource().instances().setTags(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+                body=update_body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            logger.warning(f'Failed to add tags for instance {instance}: '
+                           f'{e.reason}. Skip adding tags for it.')
+            return None
+
+    @classmethod
     def delete_firewall_rule(
         cls,
         project_id: str,
@@ -253,27 +315,10 @@ class GCPComputeInstance(GCPInstance):
         cls,
         firewall_rule_name: str,
         project_id: str,
-        zone: str,
-        instances: List[str],
+        vpc_name: str,
         cluster_name_on_cloud: str,
         ports: List[str],
     ) -> Optional[dict]:
-        try:
-            # If we have multiple instances, they are in the same cluster,
-            # i.e. the same VPC. So we can just pick one.
-            response = cls.load_resource().instances().get(
-                project=project_id,
-                zone=zone,
-                instance=instances[0],
-            ).execute()
-            # Format: projects/PROJECT_ID/global/networks/VPC_NAME
-            vpc_link = response['networkInterfaces'][0]['network']
-            vpc_name = vpc_link.split('/')[-1]
-        except gcp.http_error_exception() as e:
-            logger.warning(
-                f'Failed to get VPC name for instance {instances[0]}: '
-                f'{e.reason}. Skip opening ports for it.')
-            return None
         try:
             body = cls.load_resource().firewalls().get(
                 project=project_id, firewall=firewall_rule_name).execute()
@@ -309,38 +354,6 @@ class GCPComputeInstance(GCPInstance):
                 body=body,
             ).execute()
         return operation
-
-    @classmethod
-    def add_tag_if_not_exist(
-        cls,
-        project_id: str,
-        zone: str,
-        instance: str,
-        tag: str,
-    ) -> None:
-        try:
-            # If we have multiple instances, they are in the same cluster,
-            # i.e. the same VPC. So we can just pick one.
-            response = cls.load_resource().instances().get(
-                project=project_id,
-                zone=zone,
-                instance=instance,
-            ).execute()
-            existing_tags = response['tags'].get('items', [])
-            if tag in existing_tags:
-                return
-            existing_tags.append(tag)
-            update_body = response['tags']
-            update_body['items'] = existing_tags
-            cls.load_resource().instances().setTags(
-                project=project_id,
-                zone=zone,
-                instance=instance,
-                body=update_body,
-            ).execute()
-        except gcp.http_error_exception() as e:
-            logger.warning(f'Failed to add tags for instance {instance}: '
-                           f'{e.reason}. Skip adding tags for it.')
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -448,3 +461,51 @@ class GCPTPUVMInstance(GCPInstance):
         operation = cls.load_resource().projects().locations().nodes().delete(
             name=instance).execute()
         return operation
+
+    @classmethod
+    def add_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # pylint: disable=line-too-long
+        del project_id, zone  # unused
+        try:
+            response = cls.load_resource().projects().locations().nodes().get(
+                name=instance).execute()
+            existing_tags = response.get('tags', [])
+            if tag in existing_tags:
+                return
+            existing_tags.append(tag)
+            update_body = response
+            update_body['tags'] = existing_tags
+            cls.load_resource().projects().locations().nodes().patch(
+                name=instance,
+                body=update_body,
+                updateMask='tags',
+            ).execute()
+        except gcp.http_error_exception() as e:
+            logger.warning(f'Failed to add tags for instance {instance}: '
+                           f'{e.reason}. Skip adding tags for it.')
+            return
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> Optional[str]:
+        del project_id, zone  # unused
+        try:
+            response = cls.load_resource().projects().locations().nodes().get(
+                name=instance).execute()
+            vpc_link = response['networkConfig']['network']
+            return vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            logger.warning(f'Failed to get VPC name for instance {instance}: '
+                           f'{e.reason}. Skip opening ports for it.')
+            return None
