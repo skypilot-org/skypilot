@@ -475,7 +475,7 @@ def post_provision_runtime_setup(
     2. Mount the cloud credentials, skypilot wheel,
        and other necessary files to the VM.
     3. Run setup commands to install dependencies.
-    4. Starting ray cluster and skylet.
+    4. Start ray cluster and skylet.
     """
     with provision_logging.setup_provision_logging(log_dir):
         try:
