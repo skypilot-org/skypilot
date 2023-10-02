@@ -24,6 +24,10 @@ from sky.skylet.providers.aws.utils import (
     resource_cache,
     client_cache,
 )
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.provision import docker_utils
+
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger, cf
 from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
 from ray.autoscaler._private.log_timer import LogTimer
@@ -713,6 +717,34 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = docker_utils.DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
+                )
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)
 
 
 class AWSNodeProviderV2(AWSNodeProvider):

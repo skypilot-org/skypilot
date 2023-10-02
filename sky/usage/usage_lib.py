@@ -1,9 +1,8 @@
 """Logging events to Grafana Loki."""
 
-import enum
-import click
 import contextlib
 import datetime
+import enum
 import inspect
 import json
 import os
@@ -12,6 +11,7 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import click
 import requests
 
 import sky
@@ -21,8 +21,8 @@ from sky.utils import common_utils
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
     from sky import resources as resources_lib
+    from sky import status_lib
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -30,12 +30,6 @@ logger = sky_logging.init_logger(__name__)
 
 def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
-
-
-def _get_user_hash():
-    """Returns a unique user-machine specific hash as a user id for logging."""
-    user_id = os.getenv(constants.USAGE_USER_ENV)
-    return common_utils.get_user_hash(default_value=user_id)
 
 
 class MessageType(enum.Enum):
@@ -74,7 +68,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = _get_user_hash()
+        self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
 

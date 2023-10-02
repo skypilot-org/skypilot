@@ -5,24 +5,24 @@ from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
+from sky import backends
 from sky import clouds
 from sky import dag
-from sky import task
-from sky import backends
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
+from sky import task
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import log_utils
+from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -536,6 +536,9 @@ def cancel(
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
+
+    When `all` is False and `job_ids` is None, cancel the latest running job.
+
     Additional arguments:
         _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
@@ -552,13 +555,12 @@ def cancel(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    if not job_ids and not all:
-        raise ValueError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster_name} -s`) or the --all flag.')
-
     backend_utils.check_cluster_name_not_reserved(
         cluster_name, operation_str='Cancelling jobs')
+
+    if all and job_ids:
+        raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
+                         'all jobs, set `job_ids` to None.')
 
     # Check the status of the cluster.
     handle = None
@@ -589,16 +591,24 @@ def cancel(
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
-        job_ids = None
-    else:
-        assert job_ids is not None, 'job_ids should not be None'
+    elif job_ids is None:
+        # all = False, job_ids is None => cancel the latest running job.
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
+    elif len(job_ids):
+        # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
+    else:
+        # all = False, len(job_ids) == 0 => no jobs to cancel.
+        return
 
-    backend.cancel_jobs(handle, job_ids)
+    backend.cancel_jobs(handle, job_ids, all)
 
 
 @usage_lib.entrypoint
@@ -788,12 +798,11 @@ def spot_queue(refresh: bool,
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        log_utils.force_update_rich_status(
-            '[cyan] Checking spot jobs - restarting '
-            'controller[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+                                       'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
         controller_status = status_lib.ClusterStatus.UP
-        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as

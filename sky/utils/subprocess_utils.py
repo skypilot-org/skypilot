@@ -1,12 +1,12 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
-import psutil
 import random
 import subprocess
 import time
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import colorama
+import psutil
 
 from sky import exceptions
 from sky import sky_logging

@@ -1,24 +1,14 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum
 import getpass
-import tempfile
 import os
+import tempfile
+from typing import Any, List, Optional, Union
 import uuid
-from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -28,21 +18,22 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
-from sky import skypilot_config
 from sky import sky_logging
+from sky import skypilot_config
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.usage import usage_lib
 from sky.skylet import constants
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
-from sky.utils import log_utils
-from sky.utils import env_options, timeline
+from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -119,15 +110,15 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     assert original_cloud is not None, handle.launched_resources
     task_resources = list(task.resources)[0]
 
-    with log_utils.safe_rich_status('Creating image from source cluster '
-                                    f'{clone_disk_from!r}'):
+    with rich_utils.safe_status('Creating image from source cluster '
+                                f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
             clone_disk_from,
-            backend_utils.tag_filter_for_cluster(clone_disk_from),
+            handle.cluster_name_on_cloud,
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )
-        log_utils.force_update_rich_status(
+        rich_utils.force_update_status(
             f'Migrating image {image_id} to target region '
             f'{task_resources.region}...')
         source_region = handle.launched_resources.region
@@ -627,19 +618,10 @@ def spot_launch(
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
         task_names.add(task_.name)
+
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+
     for task_ in dag.tasks:
-        assert len(task_.resources) == 1, task_
-        resources = list(task_.resources)[0]
-
-        change_default_value: Dict[str, Any] = {}
-        if not resources.use_spot_specified:
-            change_default_value['use_spot'] = True
-        if resources.spot_recovery is None:
-            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
-
-        new_resources = resources.copy(**change_default_value)
-        task_.set_resources({new_resources})
-
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
@@ -760,7 +742,7 @@ def spot_launch(
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {dag.name} from spot controller...'
+              f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(

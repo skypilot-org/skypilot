@@ -13,6 +13,8 @@ SIGTSTP_CODE = 146
 RSYNC_FILE_NOT_FOUND_CODE = 23
 # Arbitrarily chosen value. Used in SkyPilot's storage mounting scripts
 MOUNT_PATH_NON_EMPTY_CODE = 42
+# Return code when git command is ran in a dir that is not git repo
+GIT_FATAL_EXIT_CODE = 128
 
 
 class ResourcesUnavailableError(Exception):
@@ -213,3 +215,35 @@ class ClusterOwnerIdentityMismatchError(Exception):
 class NoCloudAccessError(Exception):
     """Raised when all clouds are disabled."""
     pass
+
+
+class AWSAzFetchingError(Exception):
+    """Raised when fetching the AWS availability zone fails."""
+
+    class Reason(enum.Enum):
+        """Reason for fetching availability zone failure."""
+
+        AUTH_FAILURE = 'AUTH_FAILURE'
+        AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
+
+        @property
+        def message(self) -> str:
+            if self == self.AUTH_FAILURE:
+                return ('Failed to access AWS services. Please check your AWS '
+                        'credentials.')
+            elif self == self.AZ_PERMISSION_DENIED:
+                return (
+                    'Failed to retrieve availability zones. '
+                    'Please ensure that the `ec2:DescribeAvailabilityZones` '
+                    'action is enabled for your AWS account in IAM. '
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
+                )
+            else:
+                raise ValueError(f'Unknown reason {self}')
+
+    def __init__(self, region: str,
+                 reason: 'AWSAzFetchingError.Reason') -> None:
+        self.region = region
+        self.reason = reason
+
+        super().__init__(reason.message)

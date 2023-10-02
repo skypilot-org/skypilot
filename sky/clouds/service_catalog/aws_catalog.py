@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-import colorama
 import glob
 import hashlib
 import os
@@ -11,6 +10,7 @@ import threading
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import pandas as pd
 
 from sky import exceptions
@@ -19,6 +19,7 @@ from sky.clouds import aws
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import config
 from sky.clouds.service_catalog.data_fetchers import fetch_aws
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -64,7 +65,8 @@ _apply_az_mapping_lock = threading.Lock()
 _image_df = common.read_catalog('aws/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
-_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv')
+_quotas_df = common.read_catalog('aws/instance_quota_mapping.csv',
+                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
@@ -74,8 +76,10 @@ def _get_az_mappings(aws_user_hash: str) -> Optional[pd.DataFrame]:
         az_mappings = None
         if aws_user_hash != 'default':
             # Fetch az mapping from AWS.
-            logger.info(f'{colorama.Style.DIM}Fetching availability zones '
-                        f'mapping for AWS...{colorama.Style.RESET_ALL}')
+            print(
+                f'\r{colorama.Style.DIM}AWS: Fetching availability zones '
+                f'mapping...{colorama.Style.RESET_ALL}',
+                end='')
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         else:
             return None
@@ -147,14 +151,19 @@ def _fetch_and_apply_az_mapping(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_df() -> pd.DataFrame:
-    if config.get_use_default_catalog():
-        return _default_df
-    else:
-        global _user_df
-        with _apply_az_mapping_lock:
-            if _user_df is None:
+    global _user_df
+    with _apply_az_mapping_lock:
+        if _user_df is None:
+            try:
                 _user_df = _fetch_and_apply_az_mapping(_default_df)
-        return _user_df
+            except RuntimeError as e:
+                if config.get_use_default_catalog_if_failed():
+                    logger.warning('Failed to fetch availability zone mapping. '
+                                   f'{common_utils.format_exception(e)}')
+                    return _default_df
+                else:
+                    raise
+    return _user_df
 
 
 def get_quota_code(instance_type: str, use_spot: bool) -> Optional[str]:
@@ -244,9 +253,11 @@ def get_instance_type_for_accelerator(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
-    """
+    """Filter the instance types based on resource requirements.
+
     Returns a list of instance types satisfying the required count of
-    accelerators with sorted prices and a list of candidates with fuzzy search.
+    accelerators/cpus/memory with sorted prices and a list of candidates with
+    fuzzy search.
     """
     return common.get_instance_type_for_accelerator_impl(df=_get_df(),
                                                          acc_name=acc_name,

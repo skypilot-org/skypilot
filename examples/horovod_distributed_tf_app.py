@@ -2,8 +2,9 @@
 import json
 from typing import Dict, List
 
-import sky
 import time_estimators
+
+import sky
 
 IPAddr = str
 

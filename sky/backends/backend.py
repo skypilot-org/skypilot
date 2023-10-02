@@ -3,8 +3,8 @@ import typing
 from typing import Dict, Generic, Optional
 
 import sky
-from sky.utils import timeline
 from sky.usage import usage_lib
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources

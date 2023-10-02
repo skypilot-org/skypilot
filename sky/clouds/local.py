@@ -34,6 +34,12 @@ class Local(clouds.Cloud):
             ('Local cloud does not support stopping instances.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Migrating disk is not supported for Local.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker image is not supported in Local. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not supported for Local.'),
     }
 
     @classmethod
@@ -42,7 +48,7 @@ class Local(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return None
 
     @classmethod
@@ -130,12 +136,13 @@ class Local(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.disk_tier is not None:
             return ([], [])
         # The entire local cluster's resources is considered launchable, as the

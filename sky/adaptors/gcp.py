@@ -14,8 +14,8 @@ def import_package(func):
         global googleapiclient, google
         if googleapiclient is None or google is None:
             try:
-                import googleapiclient as _googleapiclient
                 import google as _google
+                import googleapiclient as _googleapiclient
                 googleapiclient = _googleapiclient
                 google = _google
             except ImportError:

@@ -8,9 +8,9 @@ from typing import Dict, Optional, Tuple
 
 import colorama
 
-from sky.adaptors import docker
 from sky import sky_logging
 from sky import task as task_mod
+from sky.adaptors import docker
 
 logger = sky_logging.init_logger(__name__)
 
@@ -120,8 +120,8 @@ def create_dockerfile(
 
 
 def _execute_build(tag, context_path):
-    """
-    Executes a dockerfile build with the given context.
+    """Executes a dockerfile build with the given context.
+
     The context path must contain the dockerfile and all dependencies.
     """
     assert tag is not None, 'Image tag cannot be None - have you specified a ' \
@@ -146,8 +146,7 @@ def _execute_build(tag, context_path):
 
 def build_dockerimage(task: task_mod.Task,
                       tag: str) -> Tuple[str, Dict[str, str]]:
-    """
-    Builds a docker image for the given task.
+    """Builds a docker image for the given task.
 
     This method is responsible for:
     1. Create a temp directory to set the build context.
@@ -199,8 +198,8 @@ def push_dockerimage(local_tag, remote_name):
 
 
 def make_bash_from_multiline(codegen: str) -> str:
-    """
-    Makes a bash script from a multi-line string of commands.
+    """Makes a bash script from a multi-line string of commands.
+
     Automatically includes conda setup prefixes.
     Args:
         codegen: str: multiline commands to be converted to a shell script

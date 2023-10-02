@@ -80,6 +80,27 @@ Available fields:
       #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
       disk_tier: 'medium'
 
+      # Ports to expose (optional).
+      # All ports specified here will be exposed to the public Internet. Under the hood,
+      # a firewall rule / inbound rule is automatically added to allow inbound traffic to 
+      # these ports. Applies to all VMs of a cluster created with this field set. 
+      # Currently only TCP protocol is supported.
+      # Could be an integer or a range.
+      # Ports Lifecycle:
+      # A cluster's ports will be updated whenever `sky launch` is executed. When launch an
+      # existing cluster, any new ports specified will be opened for the cluster, and the firewall 
+      # rules for old ports will never be removed until the cluster is terminated.
+      # The following three ways are valid for specifying ports for a cluster:
+      #   To specify a single port:
+      #     ports: 8081
+      #   To specify a port range:
+      #     ports: 10052-10100
+      #   To specify multiple ports / port ranges:
+      #     ports:
+      #       - 8080
+      #       - 10022-10040
+      ports: 8081
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
@@ -96,14 +117,24 @@ Available fields:
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.5.0
+        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.12.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
-      # will use the default debian-based image suitable for machine learning tasks.
+      # instances. Only supported for AWS and GCP (for non-docker image). If not
+      # specified, SkyPilot will use the default debian-based image suitable for
+      # machine learning tasks.
+      #
+      # Docker support
+      # You can specify docker image to use by setting the image_id to
+      # `docker:<image name>` for Azure, AWS and GCP. For example,
+      #   image_id: docker:ubuntu:latest
+      # Currently, only debian and ubuntu images are supported.
+      # If you want to use a docker image in a private registry, you can specify your
+      # username, password, and registry server as task environment variable. For
+      # details, please refer to the `envs` section below.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
@@ -120,7 +151,7 @@ Available fields:
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
-      # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
       # Or machine image: https://cloud.google.com/compute/docs/machine-images
       # image_id: projects/my-project/global/machineImages/my-machine-image
       #
@@ -139,6 +170,19 @@ Available fields:
     #
     # Values set here can be overridden by a CLI flag:
     # `sky launch/exec --env ENV=val` (if ENV is present).
+    #
+    # If you want to use a docker image in a private registry, you can specify your
+    # username, password, and registry server as task environment variable. For example:
+    #   envs:
+    #     SKYPILOT_DOCKER_USERNAME: <username>
+    #     SKYPILOT_DOCKER_PASSWORD: <password>
+    #     SKYPILOT_DOCKER_SERVER: <registry server>
+    # SkyPilot will execute `docker login --username <username> --password <password> <registry server>`
+    # before pulling the docker image. For `docker login`, see https://docs.docker.com/engine/reference/commandline/login/
+    # You could also specify any of them through the CLI flag if you don't want to store them in
+    # your yaml file or if you want to generate them for constantly changing password. For example:
+    #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+    # For more information about docker support in SkyPilot, please refer to the `image_id` section above.
     envs:
       MY_BUCKET: skypilot-temp-gcs-test
       MY_LOCAL_PATH: tmp-workdir
