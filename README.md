@@ -138,7 +138,7 @@ Runnable examples:
   - [Mistral 7B](https://docs.mistral.ai/cloud-deployment/skypilot/) (from official Mistral team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
-  - [Train Your Own Vicuna on Llama-2](./llm/vicuna-llama-2/)
+  - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)
   - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
   - [QLoRA](https://github.com/artidoro/qlora/pull/132)
   - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)
