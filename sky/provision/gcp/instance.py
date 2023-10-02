@@ -201,9 +201,8 @@ def open_ports(
             continue
         else:
             for instance in instances:
-                # Add tags for cluster created before 0.4.0.
-                # This is for the firewall rule to correctly apply to
-                # all instance in the cluster.
+                # Add tags for all nodes in the cluster, so the firewall rule
+                # could correctly apply to all instance in the cluster.
                 handler.add_tag_if_not_exist(
                     project_id,
                     zone,
@@ -211,10 +210,11 @@ def open_ports(
                     tag=cluster_name_on_cloud,
                 )
             # If we have multiple instances, they are in the same cluster,
-            # i.e. the same VPC. So we can just pick one.
+            # i.e. the same VPC. So we can just pick any one of them.
             vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
             if vpc_name is None:
-                # This is the case if encountered error when getting vpc name.
+                # This is the case if we encountered error when getting
+                # the vpc name.
                 continue
             # Use compute handler here for both Compute VM and TPU VM,
             # as firewall rules is a compute resource.
