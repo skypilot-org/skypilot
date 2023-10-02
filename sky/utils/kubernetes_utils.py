@@ -79,6 +79,11 @@ class GPULabelFormatter:
         """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        """Given a label value, returns the GPU type"""
+        raise NotImplementedError
+
 
 def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
@@ -112,6 +117,10 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         # See sky.utils.kubernetes.gpu_labeler.
         return accelerator.lower()
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.upper()
+
 
 class CoreWeaveLabelFormatter(GPULabelFormatter):
     """CoreWeave label formatter
@@ -130,6 +139,10 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
     def get_label_value(cls, accelerator: str) -> str:
         return accelerator.upper()
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value
+
 
 class GKELabelFormatter(GPULabelFormatter):
     """GKE label formatter
@@ -147,6 +160,10 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
         return get_gke_accelerator_name(accelerator)
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.split('-')[-1].upper()
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
