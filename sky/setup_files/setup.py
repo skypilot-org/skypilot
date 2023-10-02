@@ -129,8 +129,6 @@ aws_dependencies = [
     'boto3>=1.26.1',
 ]
 extras_require: Dict[str, List[str]] = {
-    # TODO(zwhu): remove the local_ray requirement once we resolve the
-    # non-critical dependency issues in #2625
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387

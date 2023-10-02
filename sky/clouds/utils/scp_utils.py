@@ -239,7 +239,7 @@ class SCPClient:
                 'serviceValue': '22'
             }],
             'sourceIpAddresses': ['0.0.0.0/0'],
-            'ruleDescription': 'skypilot ssh rue'
+            'ruleDescription': 'skypilot ssh rule'
         }
         return self._post(url, request_body)
 
@@ -261,7 +261,7 @@ class SCPClient:
                 'serviceValue': '443'
             }],
             'destinationIpAddresses': ['0.0.0.0/0'],
-            'ruleDescription': 'skypilot out rue'
+            'ruleDescription': 'skypilot out rule'
         }
         return self._post(url, request_body)
 
