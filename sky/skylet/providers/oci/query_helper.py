@@ -17,8 +17,8 @@ from typing import Optional
 import pandas as pd
 
 from sky.adaptors import oci as oci_adaptor
+from sky.clouds.utils import oci_utils
 from sky.skylet.providers.oci import utils
-from sky.skylet.providers.oci.config import oci_conf
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class oci_query_helper:
         )
 
         list_instances_response = oci_adaptor.get_search_client(
-            region, oci_conf.get_profile()).search_resources(qv)
+            region, oci_utils.oci_config.get_profile()).search_resources(qv)
         result_set = list_instances_response.data.items
 
         return result_set
@@ -68,7 +68,9 @@ class oci_query_helper:
 
             try:
                 oci_adaptor.get_core_client(
-                    region, oci_conf.get_profile()).terminate_instance(inst_id)
+                    region,
+                    oci_utils.oci_config.get_profile()).terminate_instance(
+                        inst_id)
             except Exception as e:
                 fail_count += 1
                 logger.error(f"Terminate instance failed: {str(e)}\n: {inst}")
@@ -89,8 +91,8 @@ class oci_query_helper:
                 listing_id.strip() == "nan"):
             return
 
-        core_client = oci_adaptor.get_core_client(region,
-                                                  oci_conf.get_profile())
+        core_client = oci_adaptor.get_core_client(
+            region, oci_utils.oci_config.get_profile())
         try:
             agreements_response = core_client.get_app_catalog_listing_agreements(
                 listing_id=listing_id, resource_version=resource_version)
@@ -128,21 +130,21 @@ class oci_query_helper:
     def find_compartment(cls, region) -> str:
         """ If compartment is not configured, we use root compartment """
         # Try to use the configured one first
-        skypilot_compartment = oci_conf.get_compartment(region)
+        skypilot_compartment = oci_utils.oci_config.get_compartment(region)
         if skypilot_compartment is not None:
             return skypilot_compartment
 
         # If not specified, we try to find the one skypilot-compartment
         # Pass-in a profile parameter so that multiple profile in oci
         # config file is supported (2023/06/09).
-        root = oci_adaptor.get_oci_config(region,
-                                          oci_conf.get_profile())['tenancy']
+        root = oci_adaptor.get_oci_config(
+            region, oci_utils.oci_config.get_profile())['tenancy']
         list_compartments_response = oci_adaptor.get_identity_client(
-            region,
-            oci_conf.get_profile()).list_compartments(compartment_id=root,
-                                                      name=oci_conf.COMPARTMENT,
-                                                      lifecycle_state='ACTIVE',
-                                                      limit=1)
+            region, oci_utils.oci_config.get_profile()).list_compartments(
+                compartment_id=root,
+                name=oci_utils.oci_config.COMPARTMENT,
+                lifecycle_state='ACTIVE',
+                limit=1)
         compartments = list_compartments_response.data
         if len(compartments) > 0:
             skypilot_compartment = compartments[0].id
@@ -156,17 +158,18 @@ class oci_query_helper:
     @utils.debug_enabled(logger=logger)
     def find_create_vcn_subnet(cls, region) -> Optional[str]:
         """ If sub is not configured, we find/create VCN skypilot_vcn """
-        subnet = oci_conf.get_vcn_subnet(region)
+        subnet = oci_utils.oci_config.get_vcn_subnet(region)
         if subnet is not None:
             # User explicitly specified the subnet in sky config.
             return subnet
 
         # Try to reuse the skypilot_vcn.
-        net_client = oci_adaptor.get_net_client(region, oci_conf.get_profile())
+        net_client = oci_adaptor.get_net_client(
+            region, oci_utils.oci_config.get_profile())
         skypilot_compartment = cls.find_compartment(region)
         list_vcns_response = net_client.list_vcns(
             compartment_id=skypilot_compartment,
-            display_name=oci_conf.VCN_NAME,
+            display_name=oci_utils.oci_config.VCN_NAME,
             lifecycle_state="AVAILABLE")
         vcns = list_vcns_response.data
         if len(vcns) > 0:
@@ -176,15 +179,17 @@ class oci_query_helper:
                 compartment_id=skypilot_compartment,
                 limit=1,
                 vcn_id=skypilot_vcn,
-                display_name=oci_conf.VCN_SUBNET_NAME,
+                display_name=oci_utils.oci_config.VCN_SUBNET_NAME,
                 lifecycle_state="AVAILABLE")
             logger.debug(f'Got VCN subnet \n{list_subnets_response.data}')
             if len(list_subnets_response.data) < 1:
-                logger.error(f'No subnet {oci_conf.VCN_SUBNET_NAME} '
-                             f'found in the VCN {oci_conf.VCN_NAME}')
-                raise RuntimeError(f'VcnSubnetNotFound Error: No subnet '
-                                   f'{oci_conf.VCN_SUBNET_NAME} found in '
-                                   f'the VCN {oci_conf.VCN_NAME}')
+                logger.error(
+                    f'No subnet {oci_utils.oci_config.VCN_SUBNET_NAME} '
+                    f'found in the VCN {oci_utils.oci_config.VCN_NAME}')
+                raise RuntimeError(
+                    f'VcnSubnetNotFound Error: No subnet '
+                    f'{oci_utils.oci_config.VCN_SUBNET_NAME} found in '
+                    f'the VCN {oci_utils.oci_config.VCN_NAME}')
             subnet = list_subnets_response.data[0].id
             return subnet
         else:
@@ -199,10 +204,10 @@ class oci_query_helper:
             create_vcn_response = net_client.create_vcn(
                 create_vcn_details=oci_adaptor.get_oci().core.models.
                 CreateVcnDetails(compartment_id=skypilot_compartment,
-                                 cidr_blocks=[oci_conf.VCN_CIDR],
-                                 display_name=oci_conf.VCN_NAME,
+                                 cidr_blocks=[oci_utils.oci_config.VCN_CIDR],
+                                 display_name=oci_utils.oci_config.VCN_NAME,
                                  is_ipv6_enabled=False,
-                                 dns_label=oci_conf.VCN_DNS_LABEL))
+                                 dns_label=oci_utils.oci_config.VCN_DNS_LABEL))
             vcn_data = create_vcn_response.data
             logger.debug(f'Created VCN \n{vcn_data}')
             skypilot_vcn = vcn_data.id
@@ -217,23 +222,25 @@ class oci_query_helper:
                     compartment_id=skypilot_compartment,
                     is_enabled=True,
                     vcn_id=skypilot_vcn,
-                    display_name=oci_conf.VCN_INTERNET_GATEWAY_NAME))
+                    display_name=oci_utils.oci_config.VCN_INTERNET_GATEWAY_NAME)
+            )
             logger.debug(
                 f'Created internet gateway \n{create_ig_response.data}')
             ig = create_ig_response.data.id
 
             # Create a public subnet.
             create_subnet_response = net_client.create_subnet(
-                create_subnet_details=oci_adaptor.get_oci().core.models.
-                CreateSubnetDetails(cidr_block=oci_conf.VCN_SUBNET_CIDR,
-                                    compartment_id=skypilot_compartment,
-                                    vcn_id=skypilot_vcn,
-                                    dhcp_options_id=dhcp_options_id,
-                                    display_name=oci_conf.VCN_SUBNET_NAME,
-                                    prohibit_internet_ingress=False,
-                                    prohibit_public_ip_on_vnic=False,
-                                    route_table_id=route_table,
-                                    security_list_ids=[security_list]))
+                create_subnet_details=oci_adaptor.get_oci(
+                ).core.models.CreateSubnetDetails(
+                    cidr_block=oci_utils.oci_config.VCN_SUBNET_CIDR,
+                    compartment_id=skypilot_compartment,
+                    vcn_id=skypilot_vcn,
+                    dhcp_options_id=dhcp_options_id,
+                    display_name=oci_utils.oci_config.VCN_SUBNET_NAME,
+                    prohibit_internet_ingress=False,
+                    prohibit_public_ip_on_vnic=False,
+                    route_table_id=route_table,
+                    security_list_ids=[security_list]))
             logger.debug(f'Created subnet \n{create_subnet_response.data}')
             subnet = create_subnet_response.data.id
 
@@ -264,7 +271,7 @@ class oci_query_helper:
                 ).core.models.UpdateSecurityListDetails(ingress_security_rules=[
                     oci_adaptor.get_oci().core.models.IngressSecurityRule(
                         protocol="6",
-                        source=oci_conf.VCN_CIDR_INTERNET,
+                        source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
                         tcp_options=oci_adaptor.get_oci().core.models.
@@ -275,13 +282,13 @@ class oci_query_helper:
                         description="Allow SSH port."),
                     oci_adaptor.get_oci().core.models.IngressSecurityRule(
                         protocol="all",
-                        source=oci_conf.VCN_SUBNET_CIDR,
+                        source=oci_utils.oci_config.VCN_SUBNET_CIDR,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
                         description="Allow all traffic from/to same subnet."),
                     oci_adaptor.get_oci().core.models.IngressSecurityRule(
                         protocol="1",
-                        source=oci_conf.VCN_CIDR_INTERNET,
+                        source=oci_utils.oci_config.VCN_CIDR_INTERNET,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
                         icmp_options=oci_adaptor.get_oci(
@@ -289,7 +296,7 @@ class oci_query_helper:
                         description="ICMP traffic."),
                     oci_adaptor.get_oci().core.models.IngressSecurityRule(
                         protocol="1",
-                        source=oci_conf.VCN_CIDR,
+                        source=oci_utils.oci_config.VCN_CIDR,
                         is_stateless=False,
                         source_type="CIDR_BLOCK",
                         icmp_options=oci_adaptor.get_oci(
@@ -316,7 +323,7 @@ class oci_query_helper:
 
         except oci_adaptor.service_exception() as e:
             logger.error(f'Create VCN Error: Create new VCN '
-                         f'{oci_conf.VCN_NAME} failed: {str(e)}')
+                         f'{oci_utils.oci_config.VCN_NAME} failed: {str(e)}')
             # In case of partial success while creating vcn
             cls.delete_vcn(net_client, skypilot_vcn, subnet, ig, sg)
             subnet = None
@@ -350,7 +357,7 @@ class oci_query_helper:
                              f'-{delete_subnet_response.data}')
             # Delete vcn
             retry_count = 0
-            while retry_count < oci_conf.MAX_RETRY_COUNT:
+            while retry_count < oci_utils.oci_config.MAX_RETRY_COUNT:
                 try:
                     delete_vcn_response = net_client.delete_vcn(
                         vcn_id=skypilot_vcn)
@@ -361,10 +368,12 @@ class oci_query_helper:
                 except oci_adaptor.service_exception() as e:
                     logger.info(f'Waiting del SG/IG/Subnet finish: {str(e)}')
                     retry_count = retry_count + 1
-                    if retry_count == oci_conf.MAX_RETRY_COUNT:
+                    if retry_count == oci_utils.oci_config.MAX_RETRY_COUNT:
                         raise e
                     else:
-                        time.sleep(oci_conf.RETRY_INTERVAL_BASE_SECONDS)
+                        time.sleep(
+                            oci_utils.oci_config.RETRY_INTERVAL_BASE_SECONDS)
 
         except oci_adaptor.service_exception() as e:
-            logger.error(f'Delete VCN {oci_conf.VCN_NAME} Error: {str(e)}')
+            logger.error(
+                f'Delete VCN {oci_utils.oci_config.VCN_NAME} Error: {str(e)}')
