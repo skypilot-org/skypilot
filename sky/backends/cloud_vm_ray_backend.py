@@ -3123,8 +3123,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def _sync_file_mounts(
         self,
         handle: CloudVmRayResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, storage_lib.Storage],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """Mounts all user files to the remote nodes."""
         self._execute_file_mounts(handle, all_file_mounts)
@@ -4514,12 +4514,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'File mount sync took {end - start} seconds.')
 
     def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Dict[Path,
-                                                     storage_lib.Storage]):
+                                storage_mounts: Optional[Dict[Path,
+                                                     storage_lib.Storage]]):
         """Executes storage mounts: installing mounting tools and mounting."""
+        # Handle cases where `storage_mounts` is None. This occurs when users 
+        # initiate a 'sky start' command from a Skypilot version that predates 
+        # the introduction of the `storage_mounts_metadata` feature.
+        if not storage_mounts:
+            return        
+
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
-        # in the '__execute_file_mounts' method.
+        # in the '__execute_file_mounts' method.        
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
