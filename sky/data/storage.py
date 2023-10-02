@@ -694,7 +694,11 @@ class Storage(object):
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
     def _add_store_from_metadata(self, sky_stores) -> None:
-        """Reconstructs Store obj from metadata and adds to Storage obj"""
+        """Reconstructs Storage.stores from sky_stores.
+
+        Reconstruct AbstractStore objects from sky_store's metadata and
+        adds them into Storage.stores
+        """
         for s_type, s_metadata in sky_stores.items():
             # When initializing from global_user_state, we override the
             # source from the YAML
@@ -728,7 +732,8 @@ class Storage(object):
     def from_metadata(cls, metadata: StorageMetadata,
                       **override_args) -> 'Storage':
         """Create Storage from a StorageMetadata object.
-        Used when reconstructing Storage and Store objects from
+
+        Used when reconstructing Storage object and AbstractStore objects from
         global_user_state.
         """
         storage_obj = cls(name=override_args.get('name', metadata.storage_name),
