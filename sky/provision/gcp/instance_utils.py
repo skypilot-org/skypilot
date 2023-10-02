@@ -95,6 +95,16 @@ class GCPInstance:
     ) -> Optional[dict]:
         raise NotImplementedError
 
+    @classmethod
+    def add_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        raise NotImplementedError
+
 
 class GCPComputeInstance(GCPInstance):
     """Instance handler for GCP compute instances."""
@@ -299,6 +309,38 @@ class GCPComputeInstance(GCPInstance):
                 body=body,
             ).execute()
         return operation
+
+    @classmethod
+    def add_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        try:
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick one.
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+            ).execute()
+            existing_tags = response['tags'].get('items', [])
+            if tag in existing_tags:
+                return
+            existing_tags.append(tag)
+            update_body = response['tags']
+            update_body['items'] = existing_tags
+            cls.load_resource().instances().setTags(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+                body=update_body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            logger.warning(f'Failed to add tags for instance {instance}: '
+                           f'{e.reason}. Skip adding tags for it.')
 
 
 class GCPTPUVMInstance(GCPInstance):

@@ -197,6 +197,17 @@ def open_ports(
                            f'{cluster_name_on_cloud}.')
             continue
         else:
+            for instance in instances:
+                # Add tags for cluster created before 0.4.0.
+                # This is for the firewall rule to correctly apply to
+                # all instance in the cluster.
+                # TODO(tian): Remove this after 2 minor releases, 0.6.0.
+                handler.add_tag_if_not_exist(
+                    project_id,
+                    zone,
+                    instance,
+                    tag=cluster_name_on_cloud,
+                )
             op = handler.create_or_update_firewall_rule(
                 firewall_rule_name,
                 project_id,
