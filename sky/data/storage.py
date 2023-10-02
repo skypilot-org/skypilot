@@ -731,7 +731,7 @@ class Storage(object):
     @classmethod
     def from_metadata(cls, metadata: StorageMetadata,
                       **override_args) -> 'Storage':
-        """Create Storage from a StorageMetadata object.
+        """Create Storage from StorageMetadata object.
 
         Used when reconstructing Storage object and AbstractStore objects from
         global_user_state.
