@@ -4380,7 +4380,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
-                             file_mounts: Dict[Path, Path]):
+                             file_mounts: Optional[Dict[Path, Path]]):
         """Executes file mounts.
 
         Rsyncing local files and copying from remote stores.
@@ -4513,25 +4513,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-    def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Optional[Dict[Path,
-                                                     storage_lib.Storage]]):
+    def _execute_storage_mounts(
+            self, handle: CloudVmRayResourceHandle,
+            storage_mounts: Optional[Dict[Path, storage_lib.Storage]]):
         """Executes storage mounts: installing mounting tools and mounting."""
-        # Handle cases where `storage_mounts` is None. This occurs when users 
-        # initiate a 'sky start' command from a Skypilot version that predates 
+        # Handle cases where `storage_mounts` is None. This occurs when users
+        # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
         if not storage_mounts:
-            return        
+            return
 
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
-        # in the '__execute_file_mounts' method.        
+        # in the '__execute_file_mounts' method.
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
             if storage_mount.mode == storage_lib.StorageMode.MOUNT
         }
 
+        # Handle cases when there aren't any Storages with MOUNT mode.
         if not storage_mounts:
             return
 
@@ -4600,7 +4601,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _set_storage_mounts_metadata(
             self, cluster_name: str,
-            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
+            storage_mounts: Optional[Dict[Path, storage_lib.Storage]]) -> None:
         """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
         After converting Storage objects in 'storage_mounts' to metadata,
         it stores {PATH: StorageMetadata} into the table.
