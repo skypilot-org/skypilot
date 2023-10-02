@@ -2597,6 +2597,7 @@ def test_gcp_zero_quota_failover():
 
 
 # ------- Testing user ray cluster --------
+@pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
