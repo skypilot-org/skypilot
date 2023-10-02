@@ -24,7 +24,6 @@ from packaging import version
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-import rich.progress as rich_progress
 from typing_extensions import Literal
 import yaml
 
@@ -2558,7 +2557,7 @@ def get_clusters(
         return records
 
     plural = 's' if len(records) > 1 else ''
-    progress = rich_progress.Progress(transient=True,
+    progress = rich_utils.safe_progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
