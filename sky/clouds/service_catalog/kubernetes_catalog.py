@@ -57,7 +57,8 @@ def list_accelerators(
                 node.status.allocatable.get('nvidia.com/gpu', 0))
 
             if accelerator_name and accelerator_count > 0:
-                accelerators.add((accelerator_name, accelerator_count))
+                for count in range(1, accelerator_count + 1):
+                    accelerators.add((accelerator_name, count))
 
     result = []
     for accelerator_name, accelerator_count in accelerators:
