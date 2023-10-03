@@ -741,12 +741,6 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_service_names_start_with(starts_with: str) -> List[str]:
-    rows = _DB.cursor.execute('SELECT name FROM services WHERE name LIKE (?)',
-                              (f'{starts_with}%',))
-    return [row[0] for row in rows]
-
-
 def get_enabled_clouds() -> List[clouds.Cloud]:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))

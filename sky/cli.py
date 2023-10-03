@@ -503,7 +503,7 @@ def _complete_service_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for service names."""
     del ctx, param  # Unused.
-    return global_user_state.get_service_names_start_with(incomplete)
+    return global_user_state.get_glob_service_names(f'{incomplete}*')
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
