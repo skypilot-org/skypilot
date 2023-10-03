@@ -368,10 +368,16 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    statuses = common_utils.decode_payload(statuses_payload)
-    for job_id, status in statuses.items():
-        if status is not None:
-            statuses[job_id] = JobStatus(status)
+    original_statuses = common_utils.decode_payload(statuses_payload)
+    statuses = dict()
+    for job_id, status in original_statuses.items():
+        # json.dumps will convert all keys to strings. Integers will
+        # become string representations of integers, e.g. "1" instead of 1;
+        # `None` will become "null" instead of None. Here we use
+        # json.loads to convert them back to their original values.
+        # See docstr of core::job_status for the meaning of `statuses`.
+        statuses[json.loads(job_id)] = (JobStatus(status)
+                                        if status is not None else None)
     return statuses
 
 
