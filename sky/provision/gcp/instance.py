@@ -203,7 +203,7 @@ def open_ports(
             for instance in instances:
                 # Add tags for all nodes in the cluster, so the firewall rule
                 # could correctly apply to all instance in the cluster.
-                handler.add_tag_if_not_exist(
+                handler.add_network_tag_if_not_exist(
                     project_id,
                     zone,
                     instance,

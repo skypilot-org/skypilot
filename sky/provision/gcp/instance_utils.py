@@ -104,7 +104,7 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def add_tag_if_not_exist(
+    def add_network_tag_if_not_exist(
         cls,
         project_id: str,
         zone: str,
@@ -259,7 +259,7 @@ class GCPComputeInstance(GCPInstance):
             return None
 
     @classmethod
-    def add_tag_if_not_exist(
+    def add_network_tag_if_not_exist(
         cls,
         project_id: str,
         zone: str,
@@ -463,7 +463,7 @@ class GCPTPUVMInstance(GCPInstance):
         return operation
 
     @classmethod
-    def add_tag_if_not_exist(
+    def add_network_tag_if_not_exist(
         cls,
         project_id: str,
         zone: str,
