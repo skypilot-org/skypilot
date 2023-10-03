@@ -1,9 +1,9 @@
 resources:
   cloud: aws
   instance_type: g4dn.xlarge
-  image_id: 
+  image_id:
     us-west-2: skypilot:gpu-ubuntu-1804
-    us-east-2: ami-0406ab83559331633 # AWS Deep Learning AMI GPU CUDA 11.4.3 (Ubuntu 20.04) 20220210 without conda installed
+    us-east-2: skypilot:gpu-ubuntu-2004
 
 
 setup: |

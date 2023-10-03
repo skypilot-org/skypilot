@@ -54,9 +54,7 @@ sky launch -c vllm-llama2 serve-openai-api.yaml --gpus V100:1
 ```
 2. Check the IP for the cluster with:
 ```
-sky status -a
-# Or get the IP with Python API:
-IP=$(python -c "import sky; print(sky.status('vllm-llama2')[0]['handle'].head_ip)")
+IP=$(sky status --ip vllm-llama2)
 ```
 3. You can now use the OpenAI API to interact with the model.
   - Query the models hosted on the cluster:
