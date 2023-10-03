@@ -316,10 +316,10 @@ class RayCodeGen:
         # by default.
         bundles = [{'CPU': task_cpu_demand} for _ in range(num_nodes)]
 
-        if len(resources_dict) > 0:
-            assert len(resources_dict) == 1, \
-                ('There can only be one type of accelerator per instance.'
-                 f' Found: {resources_dict}.')
+        if resources_dict:
+            assert len(resources_dict) == 1, (
+                'There can only be one type of accelerator per instance. '
+                f'Found: {resources_dict}.')
             acc_name = list(resources_dict.keys())[0]
             acc_count = list(resources_dict.values())[0]
             gpu_dict = {'GPU': acc_count}
@@ -481,10 +481,10 @@ class RayCodeGen:
         options.append(f'num_cpus={task_cpu_demand}')
 
         num_gpus = 0.0
-        if len(ray_resources_dict) > 0:
-            assert len(ray_resources_dict) == 1, \
-                ('There can only be one type of accelerator per instance.'
-                 f' Found: {ray_resources_dict}.')
+        if ray_resources_dict:
+            assert len(ray_resources_dict) == 1, (
+                'There can only be one type of accelerator per instance. '
+                f'Found: {ray_resources_dict}.')
             num_gpus = list(ray_resources_dict.values())[0]
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
