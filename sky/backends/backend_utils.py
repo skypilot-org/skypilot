@@ -152,7 +152,7 @@ class ReservedClusterGroup(enum.Enum):
     @classmethod
     def get_group(cls, name: str) -> Optional['ReservedClusterGroup']:
         """Get the reserved group of a cluster with its name
-        
+
         Returns the group name if the cluster name is reserved. Otherwise,
         returns None.
         """

@@ -4108,7 +4108,7 @@ def serve_up(
         else:
             prompt = (f'Service {service_name!r} already exists. '
                       'Updating a service will be supported in the future. '
-                      f'For now, clean up the service and restart: '
+                      'For now, clean up the service and restart: '
                       f'sky serve down {service_name}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
@@ -4268,7 +4268,8 @@ def serve_status(all: bool, service_names: List[str]):
         plural = '' if num_failed == 1 else 's'
         click.echo(
             f'\n* {num_failed} service{plural} with failed controller found. '
-            'Please manually check if there is any leaked resources for services: {", ".join(failed_controllers)}.')
+            'Please manually check if there is any leaked resources for '
+            f'services: {", ".join(failed_controllers)}.')
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
