@@ -12,6 +12,7 @@ from sky.provision import common
 from sky.provision.aws import utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -598,14 +599,15 @@ def open_ports(
                                   excluded_instances=None)
     instance_list = list(instances)
     if not instance_list:
-        logger.warning(
-            f'Instance with cluster name {cluster_name_on_cloud} not found. '
-            f'Skip creating security group.')
-        return None
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Instance with cluster name '
+                             f'{cluster_name_on_cloud} not found.')
     sg = _get_sg_from_name(ec2, sg_name)
     if sg is None:
-        logger.warning('Find new security group failed. Skip open ports.')
-        return
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot find new security group '
+                             f'{sg_name}. Please check the log '
+                             'above and try again.')
     # For multinode cases, we need to change the SG for all instances.
     for instance in instance_list:
         _maybe_move_to_new_sg(instance, sg)
