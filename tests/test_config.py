@@ -58,6 +58,40 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_invalid_field_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file contains unknown field."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        aws:
+            vpc_name: {VPC_NAME}
+            not_a_field: 123
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    _reload_config()
+    _check_empty_config()
+
+
+def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file is incorrectly indented."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        spot:
+            controller:
+                resources:
+                cloud: gcp
+                instance_type: n2-standard-4
+                cpus: 4
+                disk_size: 50
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    _reload_config()
+    _check_empty_config()
+
+
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     """Test that set_nested(), get_nested() works."""
 
