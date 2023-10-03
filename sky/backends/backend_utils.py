@@ -2914,7 +2914,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
     if resources is not None and resources.accelerators is not None:
-        resources_dict.update(resources.accelerators)
+        # If any accelerator is requested, use GPU resource instead.
+        resources_dict = resources.accelerators
     return resources_dict
 
 
