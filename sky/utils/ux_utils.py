@@ -46,7 +46,7 @@ def print_exception_no_traceback():
 @contextlib.contextmanager
 def enable_traceback():
     """Revert the effect of print_exception_no_traceback().
-    
+
     This is used for usage_lib to collect the full traceback.
     """
     original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
