@@ -269,7 +269,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  task: 'task_lib.Task',
                  detach_run: bool,
                  dryrun: bool = False) -> Optional[int]:
-        """ Launches the container.
+        """Launches the container.
 
         Returns:
             The job id if the job is submitted successfully. LocalDockerBackend
