@@ -702,7 +702,7 @@ def download_logs(
 def job_status(cluster_name: str,
                job_ids: Optional[List[int]],
                stream_logs: bool = False
-              ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
+              ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 

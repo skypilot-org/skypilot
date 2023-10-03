@@ -341,7 +341,7 @@ class SkyPilotInfraProvider(InfraProvider):
             # Only fetch job 1, which stands for user task job
             job_statuses = backend.get_job_status(handle, [1],
                                                   stream_logs=False)
-            job_status = job_statuses['1']
+            job_status = job_statuses[1]
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:

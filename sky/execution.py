@@ -1160,7 +1160,7 @@ def serve_up(
             for _ in range(serve.SERVE_STARTUP_TIMEOUT):
                 job_statuses = backend.get_job_status(handle, [job_id],
                                                       stream_logs=False)
-                job_status = job_statuses.get(str(job_id), None)
+                job_status = job_statuses.get(job_id, None)
                 if job_status == job_lib.JobStatus.RUNNING:
                     return True
                 time.sleep(1)
