@@ -3,13 +3,13 @@
 # Usage:
 #   ..
 
-resources:
-  accelerators: V100:1
-
 service:
   port: 7860
   readiness_probe: /
   replicas: 2
+
+resources:
+  accelerators: V100:1
 
 file_mounts:
   /stable_diffusion: examples/stable_diffusion

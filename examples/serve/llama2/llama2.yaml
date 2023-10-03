@@ -1,13 +1,13 @@
+service:
+  port: 8087
+  readiness_probe: /v1/models
+  replicas: 2
+
 resources:
   memory: 32+
   accelerators: T4:1
   disk_size: 1024
   disk_tier: high
-
-service:
-  port: 8087
-  readiness_probe: /v1/models
-  replicas: 2
 
 envs:
   MODEL_SIZE: 7

@@ -1,6 +1,3 @@
-resources:
-  accelerators: A100:1
-
 service:
   port: 8081
   readiness_probe:
@@ -8,6 +5,9 @@ service:
     # vllm takes 5-10 minutes to install
     initial_delay_seconds: 1200
   replicas: 2
+
+resources:
+  accelerators: A100:1
 
 setup: |
   conda activate chatbot

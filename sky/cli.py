@@ -113,6 +113,10 @@ _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify an existing '
     'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
+_DAG_NOT_SUPPORT_MESSAGE = ('YAML specifies a DAG which is only supported by '
+                            '`sky spot launch`. `{command}` supports a '
+                            'single task only.')
+
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -499,7 +503,7 @@ def _complete_service_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for service names."""
     del ctx, param  # Unused.
-    return global_user_state.get_service_names_start_with(incomplete)
+    return global_user_state.get_glob_service_names(f'{incomplete}*')
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
@@ -1062,8 +1066,6 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
-    yaml_only: bool = False,
-    task_only: bool = False,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     cluster: Optional[str] = None,
@@ -1101,9 +1103,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     nl=False)
         click.secho(entrypoint, bold=True)
     else:
-        if yaml_only:
-            raise click.UsageError(
-                f'Expected a yaml file, but got {entrypoint}.')
         if not entrypoint:
             entrypoint = None
         else:
@@ -1134,9 +1133,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
-            if task_only:
-                raise click.UsageError(
-                    f'Expected a single task, but got {len(dag.tasks)} tasks.')
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.
@@ -1150,7 +1146,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task = sky.Task(name=sky.Task.CLI_CMD_TASK_NAME, run=entrypoint)
         task.set_resources({sky.Resources()})
 
     # Override.
@@ -1454,9 +1450,7 @@ def launch(
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
-            'YAML specifies a DAG which is only supported by '
-            '`sky spot launch`. `sky launch` supports a '
-            'single task only.')
+            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky launch'))
     task = task_or_dag
 
     backend: backends.Backend
@@ -1778,6 +1772,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     """
     # Using a pool with 1 worker to run the spot job query in parallel to speed
     # up. The pool provides a AsyncResult object that can be used as a future.
+    # TODO(tian): Show service as well.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip.
@@ -2076,12 +2071,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.argument('job_ids', type=str, nargs=-1)
+@click.argument('job_ids', type=int, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
     cluster: str,
-    job_ids: Tuple[str],
+    job_ids: Tuple[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2108,8 +2103,9 @@ def logs(
             '(ambiguous). To fix: specify at most one of them.')
 
     if len(job_ids) > 1 and not sync_down:
+        job_ids_str = ', '.join([str(id) for id in job_ids])
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
+            f'Cannot stream logs of multiple jobs (IDs: {job_ids_str}).'
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
@@ -2122,12 +2118,14 @@ def logs(
     job_id = None
     if job_ids:
         job_id = job_ids[0]
-        if not job_id.isdigit():
-            raise click.UsageError(f'Invalid job ID {job_id}. '
-                                   'Job ID must be integers.')
     if status:
         job_statuses = core.job_status(cluster, job_ids)
         job_id = list(job_statuses.keys())[0]
+        # If job_ids is None and no job has been submitted to the cluster,
+        # it will return {None: None}.
+        if job_id is None:
+            click.secho(f'No job found on cluster {cluster!r}.', fg='red')
+            sys.exit(1)
         job_status = list(job_statuses.values())[0]
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
@@ -2210,7 +2208,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
         group = backend_utils.ReservedClusterGroup.get_group(cluster)
-        assert group is not None
+        assert group is not None, cluster
         click.echo(group.value.decline_cancel_hint)
         sys.exit(1)
     except ValueError as e:
@@ -2836,7 +2834,7 @@ def _down_or_stop_clusters(
             ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
-        if len(reserved_clusters) > 0:
+        if reserved_clusters:
             name2group: Dict[str, backend_utils.ReservedClusterGroup] = dict()
             for name in reserved_clusters:
                 group = backend_utils.ReservedClusterGroup.get_group(name)
@@ -2854,16 +2852,21 @@ def _down_or_stop_clusters(
                     f'{reserved_clusters_str} with other cluster(s) '
                     f'{names_str} is currently not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
+            if len(reserved_clusters) > 1:
+                raise click.UsageError(
+                    f'{operation} multiple reserved clusters '
+                    f'{reserved_clusters_str} is currently not supported.\n'
+                    f'Please specify only one reserved cluster.')
+            reserved_cluster = reserved_clusters[0]
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
                     f'{reserved_clusters_str} is currently not supported. '
                     f'{decline_stop_hints}')
             else:
-                for reserved_cluster in reserved_clusters:
-                    hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
-                        name2group[reserved_cluster]]
-                    hint_or_raise(reserved_cluster)
+                hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
+                    name2group[reserved_cluster]]
+                hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(
                     f'To proceed, please check the information above and type '
@@ -3769,7 +3772,7 @@ def spot_launch(
         dag.name = name
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-    dag_utils.fill_default_spot_config_in_dag(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     click.secho(
         f'Managed spot job {dag.name!r} will be launched on (estimated):',
@@ -4101,7 +4104,8 @@ def serve_up(
                 status_lib.ServiceStatus.FAILED
         ]:
             prompt = (f'Service {service_name!r} has failed. '
-                      'Please clean up the service and try again.')
+                      'Please clean up the service and restart: '
+                      f'sky serve down {service_name}')
         else:
             prompt = (f'Service {service_name!r} already exists. '
                       'To update a service , use `sky serve update`.')
@@ -4109,8 +4113,13 @@ def serve_up(
             raise RuntimeError(prompt)
 
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
-    assert isinstance(task, sky.Task)
+        entrypoint, entrypoint_name='Service')
+    if isinstance(task, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky serve up'))
+    if task.name == sky.Task.CLI_CMD_TASK_NAME:
+        raise click.UsageError(
+            'For `sky serve up`, the entrypoint must be a YAML file.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
@@ -4263,7 +4272,8 @@ def serve_status(all: bool, service_names: List[str]):
         plural = '' if num_failed == 1 else 's'
         click.echo(
             f'\n* {num_failed} service{plural} with failed controller found. '
-            'Please manually check if there is any leaked resources.')
+            'Please manually check if there is any leaked resources for '
+            f'services: {", ".join(failed_controllers)}.')
 
 
 @serve.command('update', cls=_DocumentedCodeCommand)

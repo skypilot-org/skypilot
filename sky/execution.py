@@ -1,16 +1,6 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum
@@ -661,7 +651,7 @@ def spot_launch(
                 'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     for task_ in dag.tasks:
         _maybe_translate_local_file_mounts_and_sync_up(task_)
@@ -981,7 +971,7 @@ def _wait_until_job_reaching_status_on_controller(
         job_statuses = backend.get_job_status(controller_cluster_handle,
                                               [job_id],
                                               stream_logs=False)
-        job_status = job_statuses.get(str(job_id), None)
+        job_status = job_statuses.get(job_id, None)
         if job_status == expected_status:
             return True
         if job_status is not None and job_status.is_terminal():
@@ -1054,14 +1044,6 @@ def serve_up(
     task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
 
     version = serve.INITIAL_VERSION
-    service_handle = serve.ServiceHandle(
-        service_name=service_name,
-        policy=task.service.policy_str(),
-        requested_resources=requested_resources,
-        requested_controller_resources=controller_resources,
-        auto_restart=task.service.auto_restart,
-        version=version,
-    )
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller
@@ -1077,18 +1059,25 @@ def serve_up(
                 serve.CONTROLLER_FILE_LOCK_TIMEOUT):
             controller_name, _ = serve.get_available_controller_name(
                 controller_resources)
+            controller_port, load_balancer_port = (
+                serve.gen_ports_for_serve_process(controller_name))
+
+            service_handle = serve.ServiceHandle(
+                service_name=service_name,
+                policy=task.service.policy_str(),
+                requested_resources=requested_resources,
+                requested_controller_resources=controller_resources,
+                auto_restart=task.service.auto_restart,
+                version=version,
+                controller_port=controller_port,
+                load_balancer_port=load_balancer_port)
+
             global_user_state.add_or_update_service(
                 service_name,
                 launched_at=int(time.time()),
                 controller_name=controller_name,
                 handle=service_handle,
                 status=status_lib.ServiceStatus.CONTROLLER_INIT)
-
-            controller_port, load_balancer_port = (
-                serve.gen_ports_for_serve_process(controller_name))
-            service_handle.controller_port = controller_port
-            service_handle.load_balancer_port = load_balancer_port
-            global_user_state.set_service_handle(service_name, service_handle)
             controller_resources = controller_resources.copy(
                 ports=[load_balancer_port])
     except filelock.Timeout as e:

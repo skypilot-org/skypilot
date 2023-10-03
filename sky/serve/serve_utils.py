@@ -178,14 +178,11 @@ def get_replica_id_from_cluster_name(cluster_name: str) -> int:
 def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
     services = global_user_state.get_services_from_controller_name(
         controller_name)
-    # Use `is None` to filter out self and all services with initialize status
     existing_controller_ports, existing_load_balancer_ports = set(), set()
     for service in services:
         service_handle: ServiceHandle = service['handle']
-        if service_handle.controller_port is not None:
-            existing_controller_ports.add(service_handle.controller_port)
-        if service_handle.load_balancer_port is not None:
-            existing_load_balancer_ports.add(service_handle.load_balancer_port)
+        existing_controller_ports.add(service_handle.controller_port)
+        existing_load_balancer_ports.add(service_handle.load_balancer_port)
     controller_port = constants.CONTROLLER_PORT_START
     while controller_port in existing_controller_ports:
         controller_port += 1
@@ -323,10 +320,10 @@ class ServiceHandle(object):
     - (required) Service requested controller resources.
     - (required) Whether the service have auto restart enabled.
     - (required) Service version.
+    - (required) Controller port.
+    - (required) LoadBalancer port.
     - (optional) Service uptime.
     - (optional) Service endpoint IP.
-    - (optional) Controller port.
-    - (optional) LoadBalancer port.
     - (optional) Controller and LoadBalancer job id.
     - (optional) Ephemeral storage generated for the service.
 
@@ -343,40 +340,40 @@ class ServiceHandle(object):
         requested_controller_resources: 'sky.Resources',
         auto_restart: bool,
         version: int,
+        controller_port: int,
+        load_balancer_port: int,
         uptime: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
-        controller_port: Optional[int] = None,
-        load_balancer_port: Optional[int] = None,
         job_id: Optional[int] = None,
         ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self._version = self._VERSION
         self.service_name = service_name
-        self.version = version
-        self.uptime = uptime
-        self.endpoint_ip = endpoint_ip
         self.policy = policy
         self.requested_resources = requested_resources
         self.requested_controller_resources = requested_controller_resources
         self.auto_restart = auto_restart
+        self.version = version
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
+        self.uptime = uptime
+        self.endpoint_ip = endpoint_ip
         self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
     def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
-                f'\n\tversion={self.version},'
-                f'\n\tuptime={self.uptime},'
-                f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tpolicy={self.policy},'
                 f'\n\trequested_resources={self.requested_resources},'
                 '\n\trequested_controller_resources='
                 f'{self.requested_controller_resources},'
                 f'\n\tauto_restart={self.auto_restart},'
+                f'\n\tversion={self.version},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
+                f'\n\tuptime={self.uptime},'
+                f'\n\tendpoint_ip={self.endpoint_ip},'
                 f'\n\tjob_id={self.job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 

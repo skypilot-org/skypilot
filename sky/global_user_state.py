@@ -443,7 +443,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     return None
 
 
-def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
@@ -453,7 +453,7 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
         cluster_name,
@@ -737,12 +737,6 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
 
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
-                              (f'{starts_with}%',))
-    return [row[0] for row in rows]
-
-
-def get_service_names_start_with(starts_with: str) -> List[str]:
-    rows = _DB.cursor.execute('SELECT name FROM services WHERE name LIKE (?)',
                               (f'{starts_with}%',))
     return [row[0] for row in rows]
 

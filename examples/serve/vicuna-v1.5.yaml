@@ -1,12 +1,12 @@
-resources:
-  accelerators: A100:1
-  disk_size: 1024
-  disk_tier: high
-
 service:
   port: 8087
   readiness_probe: /v1/models
   replicas: 2
+
+resources:
+  accelerators: A100:1
+  disk_size: 1024
+  disk_tier: high
 
 envs:
   MODEL_SIZE: 13

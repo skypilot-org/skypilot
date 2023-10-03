@@ -702,7 +702,7 @@ def download_logs(
 def job_status(cluster_name: str,
                job_ids: Optional[List[int]],
                stream_logs: bool = False
-              ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
+              ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
@@ -1131,12 +1131,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            if service_handle.controller_port is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Controller job of service {service_name!r} '
-                        'not found.')
-
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
 

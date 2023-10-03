@@ -20,8 +20,8 @@ from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -133,7 +133,7 @@ def _with_docker_login_config(
 ) -> Set['resources_lib.Resources']:
     if not _check_docker_login_config(task_envs):
         return resources_set
-    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -161,6 +161,8 @@ def _with_docker_login_config(
 
 class Task:
     """Task: a computation to be run on the cloud."""
+
+    CLI_CMD_TASK_NAME = 'sky-cmd'
 
     def __init__(
         self,
@@ -1029,7 +1031,7 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
+        if self.name and self.name != self.CLI_CMD_TASK_NAME:
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')

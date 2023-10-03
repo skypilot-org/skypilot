@@ -385,7 +385,7 @@ class SkyPilotInfraProvider(InfraProvider):
             # Only fetch job 1, which stands for user task job
             job_statuses = backend.get_job_status(handle, [1],
                                                   stream_logs=False)
-            job_status = job_statuses['1']
+            job_status = job_statuses[1]
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
@@ -477,6 +477,8 @@ class SkyPilotInfraProvider(InfraProvider):
                            'already exists. Skipping.')
             return
         logger.info(f'Creating SkyPilot cluster {cluster_name}')
+        # TODO(tian): We should do usage_lib.messages.usage.set_internal()
+        # after we change to python API.
         cmd = [
             'sky', 'launch',
             self._get_task_yaml_path(), '-c', cluster_name, '-y'

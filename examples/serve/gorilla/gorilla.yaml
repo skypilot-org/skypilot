@@ -1,14 +1,14 @@
-resources:
-  accelerators: A100:1
-  disk_size: 1024
-  disk_tier: high
-
 service:
   port: 8087
   readiness_probe:
     path: /v1/models
     initial_delay_seconds: 1800
   replicas: 2
+
+resources:
+  accelerators: A100:1
+  disk_size: 1024
+  disk_tier: high
 
 setup: |
   conda activate chatbot

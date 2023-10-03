@@ -1,10 +1,10 @@
-resources:
-  accelerators: A100:1
-
 service:
   port: 8082
   readiness_probe: /health
   replicas: 2
+
+resources:
+  accelerators: A100:1
 
 # TODO(tian): Maybe use some small model like 3b.
 run: |

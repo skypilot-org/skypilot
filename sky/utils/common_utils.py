@@ -392,7 +392,7 @@ def decode_payload(payload_str: str) -> Any:
     return payload
 
 
-def class_fullname(cls):
+def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
@@ -406,6 +406,9 @@ def class_fullname(cls):
     Returns:
         The full name of the class.
     """
+    module_name = getattr(cls, '__module__', '')
+    if not module_name or (module_name == 'builtins' and skip_builtins):
+        return cls.__name__
     return f'{cls.__module__}.{cls.__name__}'
 
 
