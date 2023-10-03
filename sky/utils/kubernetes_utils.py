@@ -128,8 +128,8 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
-        return accelerator.upper() 
-    
+        return accelerator.upper()
+
 
 class GKELabelFormatter(GPULabelFormatter):
     """GKE label formatter
@@ -152,7 +152,9 @@ class GKELabelFormatter(GPULabelFormatter):
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
-LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter]
+LABEL_FORMATTER_REGISTRY = [
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+]
 
 
 def detect_gpu_label_formatter(
@@ -178,6 +180,9 @@ def detect_gpu_label_formatter(
             if label.startswith(label_key):
                 label_formatter = lf()
                 break
+
+        if label_formatter is not None:
+            break
 
     return label_formatter, node_labels
 
@@ -322,6 +327,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
             detect_gpu_label_formatter()
+
         if label_formatter is None:
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
@@ -345,6 +351,7 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                 return '', ''
             k8s_acc_label_key = label_formatter.get_label_key()
             k8s_acc_label_value = label_formatter.get_label_value(acc_type)
+
             # Search in node_labels to see if any node has the requested
             # GPU type.
             # Note - this only checks if the label is available on a
