@@ -162,6 +162,8 @@ def _with_docker_login_config(
 class Task:
     """Task: a computation to be run on the cloud."""
 
+    CLI_CMD_TASK_NAME = 'sky-cmd'
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -1029,7 +1031,7 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
+        if self.name and self.name != self.CLI_CMD_TASK_NAME:
             return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')

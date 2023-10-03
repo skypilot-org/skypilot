@@ -113,6 +113,10 @@ _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify an existing '
     'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
+_DAG_NOT_SUPPORT_MESSAGE = ('YAML specifies a DAG which is only supported by '
+                            '`sky spot launch`. `{command}` supports a '
+                            'single task only.')
+
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -1062,8 +1066,6 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
-    yaml_only: bool = False,
-    task_only: bool = False,
     entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     cluster: Optional[str] = None,
@@ -1101,9 +1103,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     nl=False)
         click.secho(entrypoint, bold=True)
     else:
-        if yaml_only:
-            raise click.UsageError(
-                f'Expected a yaml file, but got {entrypoint}.')
         if not entrypoint:
             entrypoint = None
         else:
@@ -1134,9 +1133,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
         if len(dag.tasks) > 1:
-            if task_only:
-                raise click.UsageError(
-                    f'Expected a single task, but got {len(dag.tasks)} tasks.')
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.
@@ -1150,7 +1146,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task = sky.Task(name=sky.Task.CLI_CMD_TASK_NAME, run=entrypoint)
         task.set_resources({sky.Resources()})
 
     # Override.
@@ -1454,9 +1450,7 @@ def launch(
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
-            'YAML specifies a DAG which is only supported by '
-            '`sky spot launch`. `sky launch` supports a '
-            'single task only.')
+            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky launch'))
     task = task_or_dag
 
     backend: backends.Backend
@@ -4114,8 +4108,13 @@ def serve_up(
             raise RuntimeError(prompt)
 
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
-    assert isinstance(task, sky.Task)
+        entrypoint, entrypoint_name='Service')
+    if isinstance(task, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky serve up'))
+    if task.name == sky.Task.CLI_CMD_TASK_NAME:
+        raise click.UsageError(
+            'For `sky serve up`, the entrypoint must be a YAML file.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
