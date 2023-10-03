@@ -1660,7 +1660,6 @@ class GcsStore(AbstractStore):
                         'Attempted to connect to a non-existent bucket: '
                         f'{self.source}') from e
             else:
-
                 # If bucket cannot be found (i.e., does not exist), it is to be
                 # created by Sky. However, creation is skipped if Store object
                 # is being reconstructed for deletion.

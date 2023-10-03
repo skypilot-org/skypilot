@@ -4564,12 +4564,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
-            src_print = (storage_obj.source
-                         if storage_obj.source else storage_obj.name)
-            if isinstance(src_print, list):
-                src_print = ', '.join(src_print)
             try:
+                mount_cmd = store.mount_command(dst)
+                src_print = (storage_obj.source
+                             if storage_obj.source else storage_obj.name)
+                if isinstance(src_print, list):
+                    src_print = ', '.join(src_print)
                 backend_utils.parallel_data_transfer_to_nodes(
                     runners,
                     source=src_print,
@@ -4595,6 +4595,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise exceptions.CommandError(
                         e.returncode, command='to mount',
                         error_msg=e.error_msg) from None
+            except AttributeError as e:
+                # This catches the error raised from mount_command when
+                # store.bucket is set to None
+                if 'has no attribute \'name\'' in str(e):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageError(
+                            f'The bucket, {store.name!r}, could not be mounted '
+                            f'on cluster {handle.cluster_name!r}. Please '
+                            'verify that the bucket exists.')
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
