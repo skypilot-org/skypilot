@@ -2213,7 +2213,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
         group = backend_utils.ReservedClusterGroup.get_group(cluster)
-        assert group is not None
+        assert group is not None, cluster
         click.echo(group.value.decline_cancel_hint)
         sys.exit(1)
     except ValueError as e:
@@ -4108,7 +4108,8 @@ def serve_up(
         else:
             prompt = (f'Service {service_name!r} already exists. '
                       'Updating a service will be supported in the future. '
-                      'For now, `sky serve down` first and try again.')
+                      f'For now, clean up the service and restart: '
+                      f'sky serve down {service_name}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
@@ -4267,7 +4268,7 @@ def serve_status(all: bool, service_names: List[str]):
         plural = '' if num_failed == 1 else 's'
         click.echo(
             f'\n* {num_failed} service{plural} with failed controller found. '
-            'Please manually check if there is any leaked resources.')
+            'Please manually check if there is any leaked resources for services: {", ".join(failed_controllers)}.')
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

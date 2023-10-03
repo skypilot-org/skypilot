@@ -151,6 +151,11 @@ class ReservedClusterGroup(enum.Enum):
 
     @classmethod
     def get_group(cls, name: str) -> Optional['ReservedClusterGroup']:
+        """Get the reserved group of a cluster with its name
+        
+        Returns the group name if the cluster name is reserved. Otherwise,
+        returns None.
+        """
         for group in cls:
             if group.value.check(name):
                 return group
@@ -2743,7 +2748,7 @@ def _refresh_service_record_no_lock(
     cluster_record = global_user_state.get_cluster_from_name(controller_name)
 
     # We don't check controller status here since it might be in INIT status
-    # when other services is starting up and launching the controller.
+    # when other services is starting and launching the controller.
     if cluster_record is None:
         global_user_state.set_service_status(
             service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
