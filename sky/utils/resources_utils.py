@@ -29,6 +29,10 @@ class DiskTier(enum.Enum):
             f'. if {cls.BEST.value} is specified, use the best possible disk '
             f'tier. Default: {cls.MEDIUM.value}')
 
+    def __le__(self, other: 'DiskTier') -> bool:
+        types = list(DiskTier)
+        return types.index(self) <= types.index(other)
+
 
 def check_port_str(port: str) -> None:
     if not port.isdigit():

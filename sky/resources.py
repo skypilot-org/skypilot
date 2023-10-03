@@ -942,10 +942,7 @@ class Resources:
             # cluster's tier.
             if self.disk_tier == resources_utils.DiskTier.BEST:
                 return True
-            # resources_utils.DiskTier is listed in the order of increasing
-            # disk performance
-            types = list(resources_utils.DiskTier)
-            return types.index(self.disk_tier) < types.index(other.disk_tier)
+            return self.disk_tier <= other.disk_tier
 
         if check_ports:
             if self.ports is not None:
