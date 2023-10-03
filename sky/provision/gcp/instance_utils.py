@@ -287,8 +287,9 @@ class GCPComputeInstance(GCPInstance):
                 body=update_body,
             ).execute()
         except gcp.http_error_exception() as e:
-            logger.warning(f'Failed to add tags for instance {instance}: '
-                           f'{e.reason}. Skip adding tags for it.')
+            logger.warning(
+                f'Failed to add network tags for instance {instance}: '
+                f'{e.reason}. Skip adding network tags for it.')
             return None
 
     @classmethod
@@ -488,8 +489,9 @@ class GCPTPUVMInstance(GCPInstance):
                 updateMask='tags',
             ).execute()
         except gcp.http_error_exception() as e:
-            logger.warning(f'Failed to add tags for instance {instance}: '
-                           f'{e.reason}. Skip adding tags for it.')
+            logger.warning(
+                f'Failed to add network tags for instance {instance}: '
+                f'{e.reason}. Skip adding network tags for it.')
             return
 
     @classmethod

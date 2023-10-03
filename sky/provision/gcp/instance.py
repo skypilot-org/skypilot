@@ -213,8 +213,11 @@ def open_ports(
             # i.e. the same VPC. So we can just pick any one of them.
             vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
             if vpc_name is None:
-                # This is the case if we encountered error when getting
-                # the vpc name.
+                # Failed to get the VPC name for the instance. It won't happen
+                # except for some extremely rare cases, like the user manually
+                # terminates the instance after provision, and before executing
+                # this function; or cloud provider API changes. We skip the port
+                # opening if such failure happens.
                 continue
             # Use compute handler here for both Compute VM and TPU VM,
             # as firewall rules is a compute resource.
