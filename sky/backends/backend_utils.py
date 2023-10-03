@@ -2749,19 +2749,11 @@ def _refresh_service_record_no_lock(
 
     # We don't check controller status here since it might be in INIT status
     # when other services is starting and launching the controller.
-    if cluster_record is None:
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, None
+    assert cluster_record is not None
 
     handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-
-    if service_handle.controller_port is None:
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, None
 
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)

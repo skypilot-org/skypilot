@@ -1016,12 +1016,6 @@ def serve_up(
 
     task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
 
-    service_handle = serve.ServiceHandle(
-        service_name=service_name,
-        policy=task.service.policy_str(),
-        requested_resources=requested_resources,
-        requested_controller_resources=controller_resources,
-        auto_restart=task.service.auto_restart)
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
     # make sure even in race condition, we can still get the correct controller
@@ -1037,18 +1031,24 @@ def serve_up(
                 serve.CONTROLLER_FILE_LOCK_TIMEOUT):
             controller_name, _ = serve.get_available_controller_name(
                 controller_resources)
+            controller_port, load_balancer_port = (
+                serve.gen_ports_for_serve_process(controller_name))
+
+            service_handle = serve.ServiceHandle(
+                service_name=service_name,
+                policy=task.service.policy_str(),
+                requested_resources=requested_resources,
+                requested_controller_resources=controller_resources,
+                auto_restart=task.service.auto_restart,
+                controller_port=controller_port,
+                load_balancer_port=load_balancer_port)
+
             global_user_state.add_or_update_service(
                 service_name,
                 launched_at=int(time.time()),
                 controller_name=controller_name,
                 handle=service_handle,
                 status=status_lib.ServiceStatus.CONTROLLER_INIT)
-
-            controller_port, load_balancer_port = (
-                serve.gen_ports_for_serve_process(controller_name))
-            service_handle.controller_port = controller_port
-            service_handle.load_balancer_port = load_balancer_port
-            global_user_state.set_service_handle(service_name, service_handle)
             controller_resources = controller_resources.copy(
                 ports=[load_balancer_port])
     except filelock.Timeout as e:

@@ -1131,12 +1131,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            if service_handle.controller_port is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Controller job of service {service_name!r} '
-                        'not found.')
-
             code = serve.ServeCodeGen.terminate_service(
                 service_handle.controller_port)
 

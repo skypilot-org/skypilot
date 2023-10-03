@@ -3800,11 +3800,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_controller=controller,
                 follow=follow)
         else:
-            if service_handle.controller_port is None:
-                logger.warning('Controller task is not successfully launched '
-                               f'for service {service_handle.service_name!r}. '
-                               'Cannot stream logs.')
-                return
             assert replica_id is not None, service_handle
             code = serve_lib.ServeCodeGen.stream_replica_logs(
                 service_handle.service_name, service_handle.controller_port,
