@@ -28,11 +28,11 @@
 ----
 :fire: *News* :fire:
 - [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a high-quality open LLM, was released! Deploy via SkyPilot on any cloud: [**Mistral docs**](https://docs.mistral.ai/cloud-deployment/skypilot/)
-- [Aug, 2023] New cookbook: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/), [**blog post**](https://blog.skypilot.co/finetuning-llama2-operational-guide/)
+- [Sep, 2023] Case study: [**Covariant**](https://covariant.ai/) transformed AI development on the cloud using SkyPilot, delivering models 4x faster cost-effectively: [**read the case study**](https://blog.skypilot.co/covariant/)
+- [Aug, 2023] Cookbook: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/), [**blog post**](https://blog.skypilot.co/finetuning-llama2-operational-guide/)
 - [July, 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
-- [June, 2023] Serving LLM 24x Faster On the Cloud **with vLLM and SkyPilot**: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
-- [April, 2023] **[**SkyPilot YAMLs released**](./llm/vicuna/) for finetuning & serving the Vicuna model with a single command**!
-- [March, 2023] **[Vicuna LLM chatbot](https://lmsys.org/blog/2023-03-30-vicuna/) trained** [**using SkyPilot**](./llm/vicuna/) **for $300 on spot instances!**
+- [June, 2023] Serving LLM 24x Faster On the Cloud [**with vLLM**](https://vllm.ai/) and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
+- [April, 2023] [SkyPilot YAMLs](./llm/vicuna/) for finetuning & serving the [Vicuna LLM](https://lmsys.org/blog/2023-03-30-vicuna/) with a single command!
 ----
 
 SkyPilot is a framework for running LLMs, AI, and batch jobs on any cloud, offering maximum cost savings, highest GPU availability, and managed execution.
@@ -135,10 +135,11 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 
 Runnable examples:
 - LLMs on SkyPilot
-  - [Train Your Own Vicuna on Llama-2](./llm/vicuna-llama-2/)
-  - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
-  - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
+  - [Mistral 7B](https://docs.mistral.ai/cloud-deployment/skypilot/) (from official Mistral team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
+  - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
+  - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)
+  - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
   - [QLoRA](https://github.com/artidoro/qlora/pull/132)
   - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)
   - [Tabby: Self-hosted AI coding assistant](https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml)
