@@ -1772,6 +1772,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     """
     # Using a pool with 1 worker to run the spot job query in parallel to speed
     # up. The pool provides a AsyncResult object that can be used as a future.
+    # TODO(tian): Show service as well.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip.
@@ -2833,7 +2834,7 @@ def _down_or_stop_clusters(
             ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
-        if len(reserved_clusters) > 0:
+        if reserved_clusters:
             name2group: Dict[str, backend_utils.ReservedClusterGroup] = dict()
             for name in reserved_clusters:
                 group = backend_utils.ReservedClusterGroup.get_group(name)
@@ -2851,16 +2852,21 @@ def _down_or_stop_clusters(
                     f'{reserved_clusters_str} with other cluster(s) '
                     f'{names_str} is currently not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
+            if len(reserved_clusters) > 1:
+                raise click.UsageError(
+                    f'{operation} multiple reserved clusters '
+                    f'{reserved_clusters_str} is currently not supported.\n'
+                    f'Please specify only one reserved cluster.')
+            reserved_cluster = reserved_clusters[0]
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
                     f'{reserved_clusters_str} is currently not supported. '
                     f'{decline_stop_hints}')
             else:
-                for reserved_cluster in reserved_clusters:
-                    hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
-                        name2group[reserved_cluster]]
-                    hint_or_raise(reserved_cluster)
+                hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
+                    name2group[reserved_cluster]]
+                hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(
                     f'To proceed, please check the information above and type '
@@ -4098,7 +4104,8 @@ def serve_up(
                 status_lib.ServiceStatus.FAILED
         ]:
             prompt = (f'Service {service_name!r} has failed. '
-                      'Please clean up the service and try again.')
+                      'Please clean up the service and restart: '
+                      f'sky serve down {service_name}')
         else:
             prompt = (f'Service {service_name!r} already exists. '
                       'Updating a service will be supported in the future. '
