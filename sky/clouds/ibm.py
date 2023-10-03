@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 import colorama
 
 from sky import clouds
-from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import ibm
@@ -423,15 +422,6 @@ class IBM(clouds.Cloud):
         # pylint: disable=W0703
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: resources_utils.DiskTier) -> None:
-        del instance_type  # unused
-        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
-            return
-        raise exceptions.NotSupportedError(
-            f'IBM does not support disk tier {disk_tier.value}.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping

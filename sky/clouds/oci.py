@@ -42,6 +42,8 @@ class OCI(clouds.Cloud):
 
     _INDENT_PREFIX = '    '
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
@@ -517,12 +519,6 @@ class OCI(clouds.Cloud):
         raise exceptions.ResourcesUnavailableError(
             'ERR: No image found in catalog for region '
             f'{region_name}. Try update your default image_id settings.')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: resources_utils.DiskTier) -> None:
-        # All the disk_tier are supported for any instance_type
-        del instance_type, disk_tier  # unused
 
     def get_vpu_from_disktier(
             self, cpus: Optional[float],

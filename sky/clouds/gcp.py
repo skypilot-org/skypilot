@@ -226,6 +226,8 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
+
     def __init__(self):
         super().__init__()
 
@@ -978,11 +980,6 @@ class GCP(clouds.Cloud):
         service_catalog.check_accelerator_attachable_to_host(
             resources.instance_type, resources.accelerators, resources.zone,
             'gcp')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: resources_utils.DiskTier) -> None:
-        del instance_type, disk_tier  # unused
 
     @classmethod
     def _get_disk_type(cls,

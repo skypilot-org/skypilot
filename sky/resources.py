@@ -789,8 +789,6 @@ class Resources:
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
             return
-        if self.instance_type is None:
-            return
         if self.cloud is not None:
             self.cloud.check_disk_tier_enabled(self.instance_type,
                                                self.disk_tier)

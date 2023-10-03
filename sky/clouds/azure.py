@@ -556,12 +556,12 @@ class Azure(clouds.Cloud):
         return True, ''
 
     @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
+    def check_disk_tier_enabled(cls, instance_type: Optional[str],
                                 disk_tier: resources_utils.DiskTier) -> None:
         ok, msg = cls.check_disk_tier(instance_type, disk_tier)
         if not ok:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(msg)
+                raise exceptions.NotSupportedError(msg)
 
     @classmethod
     def _get_disk_type(cls,

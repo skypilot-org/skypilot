@@ -6,7 +6,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
@@ -275,15 +274,6 @@ class Lambda(clouds.Cloud):
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='lambda')
-
-    @classmethod
-    def check_disk_tier_enabled(cls, instance_type: str,
-                                disk_tier: resources_utils.DiskTier) -> None:
-        del instance_type  # unused
-        if disk_tier is None or disk_tier == resources_utils.DiskTier.BEST:
-            return
-        raise exceptions.NotSupportedError(
-            f'Lambda does not support disk tier {disk_tier.value}.')
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
