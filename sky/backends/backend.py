@@ -66,8 +66,8 @@ class Backend(Generic[_ResourceHandleType]):
     def sync_file_mounts(
         self,
         handle: _ResourceHandleType,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
         return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
 
@@ -130,8 +130,8 @@ class Backend(Generic[_ResourceHandleType]):
     def _sync_file_mounts(
         self,
         handle: _ResourceHandleType,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, 'storage_lib.Storage']],
     ) -> None:
         raise NotImplementedError
 

@@ -185,8 +185,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     def _sync_file_mounts(
         self,
         handle: LocalDockerResourceHandle,
-        all_file_mounts: Dict[Path, Path],
-        storage_mounts: Dict[Path, storage_lib.Storage],
+        all_file_mounts: Optional[Dict[Path, Path]],
+        storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """File mounts in Docker are implemented with volume mounts (-v)."""
         assert not storage_mounts, \

@@ -119,7 +119,6 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-    CSYNC = 'CSYNC'
 
 
 def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
@@ -382,7 +381,6 @@ class Storage(object):
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
                     f'\n\tmode={self.mode},'
-                    f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
@@ -436,7 +434,7 @@ class Storage(object):
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
             there. This is set to false when the Storage object is created not
-            for direct use, e.g. for sky storage delete.
+            for direct use, e.g. for sky storage delete or sky start.
         """
         self.name: str
         self.source = source
@@ -693,7 +691,9 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
-    def _add_store_from_metadata(self, sky_stores) -> None:
+    def _add_store_from_metadata(
+            self, sky_stores: Dict[StoreType,
+                                   AbstractStore.StoreMetadata]) -> None:
         """Reconstructs Storage.stores from sky_stores.
 
         Reconstruct AbstractStore objects from sky_store's metadata and

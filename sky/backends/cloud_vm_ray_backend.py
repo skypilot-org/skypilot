@@ -4525,7 +4525,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
-        # in the '__execute_file_mounts' method.
+        # in the '_execute_file_mounts' method.
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
@@ -4614,9 +4614,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             storage_mounts_metadata[dst] = storage_obj.handle
         lock_path = (
             backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
-        with filelock.FileLock(lock_path):
-            global_user_state.set_cluster_storage_mounts_metadata(
-                cluster_name, storage_mounts_metadata)
+        lock_timeout = backend_utils.CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS
+        try:
+            with filelock.FileLock(lock_path, lock_timeout):
+                global_user_state.set_cluster_storage_mounts_metadata(
+                    cluster_name, storage_mounts_metadata)
+        except filelock.Timeout as e:
+            raise RuntimeError(
+                f'Failed to store metadata for cluster {cluster_name!r} due to '
+                'a timeout when trying to access local database. Please '
+                f'try again or manually remove the lock at {lock_path}. '
+                f'{common_utils.format_exception(e)}') from None
 
     def get_storage_mounts_metadata(
             self,
@@ -4624,20 +4632,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """Gets 'storage_mounts' object from cluster's storage_mounts_metadata.
 
         After retrieving storage_mounts_metadata, it converts back the
-        StorageMetadata to Storage object and restores 'storage_mounts'
+        StorageMetadata to Storage object and restores 'storage_mounts.'
         """
         lock_path = (
             backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
-        with filelock.FileLock(lock_path):
-            storage_mounts_metadata = (
-                global_user_state.get_cluster_storage_mounts_metadata(
-                    cluster_name))
+        lock_timeout = backend_utils.CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS
+        try:
+            with filelock.FileLock(lock_path, lock_timeout):
+                storage_mounts_metadata = (
+                    global_user_state.get_cluster_storage_mounts_metadata(
+                        cluster_name))
+        except filelock.Timeout as e:
+            raise RuntimeError(
+                f'Failed to retrieve metadata for cluster {cluster_name!r} '
+                'due to a timeout when trying to access local database. '
+                f'Please try again or manually remove the lock at {lock_path}.'
+                f' {common_utils.format_exception(e)}') from None
+
         if storage_mounts_metadata is None:
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_mounts[dst] = (storage_lib.Storage.from_metadata(
-                storage_metadata, sync_on_reconstruction=False))
+            # Setting 'sync_on_reconstruction' to False prevents from Storage
+            # object creation to sync local source syncing to the bucket. Local
+            # source specified in Storage object is synced to the bucket only
+            # when it is created with 'sky launch'.
+            storage_mounts[dst] = storage_lib.Storage.from_metadata(
+                storage_metadata, sync_on_reconstruction=False)
         return storage_mounts
 
     def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
