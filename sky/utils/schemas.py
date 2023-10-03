@@ -266,7 +266,7 @@ def get_cluster_schema():
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
-    from sky.utils import kubernetes_utils
+    from sky.utils import kubernetes_enums
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -349,7 +349,7 @@ def get_config_schema():
                         'type': 'string',
                         'case_insensitive_enum': [
                             type.value for type in
-                            kubernetes_utils.KubernetesNetworkingMode
+                            kubernetes_enums.KubernetesNetworkingMode
                         ]
                     },
                 }
