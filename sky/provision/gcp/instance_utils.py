@@ -277,9 +277,9 @@ class GCPComputeInstance(GCPInstance):
             existing_tags = response['tags'].get('items', [])
             if tag in existing_tags:
                 return
-            existing_tags.append(tag)
             update_body = response['tags']
             update_body['items'] = existing_tags
+            update_body['items'].append(tag)
             cls.load_resource().instances().setTags(
                 project=project_id,
                 zone=zone,
