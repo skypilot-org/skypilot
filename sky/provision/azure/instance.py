@@ -67,7 +67,7 @@ def open_ports(
             update_network_security_groups(resource_group, nsg.name, nsg)
         except azure.http_error_exception() as e:
             raise ValueError(
-                f'Failed to open ports {ports} in NSG {nsg.name}: {e}')
+                f'Failed to open ports {ports} in NSG {nsg.name}.') from e
 
 
 def cleanup_ports(
