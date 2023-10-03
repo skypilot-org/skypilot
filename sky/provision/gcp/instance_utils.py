@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -81,7 +82,7 @@ class GCPInstance:
         project_id: str,
         zone: str,
         instance: str,
-    ) -> Optional[str]:
+    ) -> str:
         raise NotImplementedError
 
     @classmethod
@@ -100,7 +101,7 @@ class GCPInstance:
         vpc_name: str,
         cluster_name_on_cloud: str,
         ports: List[str],
-    ) -> Optional[dict]:
+    ) -> dict:
         raise NotImplementedError
 
     @classmethod
@@ -243,7 +244,7 @@ class GCPComputeInstance(GCPInstance):
         project_id: str,
         zone: str,
         instance: str,
-    ) -> Optional[str]:
+    ) -> str:
         try:
             response = cls.load_resource().instances().get(
                 project=project_id,
@@ -254,9 +255,9 @@ class GCPComputeInstance(GCPInstance):
             vpc_link = response['networkInterfaces'][0]['network']
             return vpc_link.split('/')[-1]
         except gcp.http_error_exception() as e:
-            logger.warning(f'Failed to get VPC name for instance {instance}: '
-                           f'{e.reason}. Skip opening ports for it.')
-            return None
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to get VPC name for instance {instance}') from e
 
     @classmethod
     def add_network_tag_if_not_exist(
@@ -287,9 +288,10 @@ class GCPComputeInstance(GCPInstance):
                 body=update_body,
             ).execute()
         except gcp.http_error_exception() as e:
-            logger.warning(
-                f'Failed to add network tags for instance {instance}: '
-                f'{e.reason}. Skip adding network tags for it.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to add network tags for instance {instance}'
+                ) from e
 
     @classmethod
     def delete_firewall_rule(
@@ -318,7 +320,7 @@ class GCPComputeInstance(GCPInstance):
         vpc_name: str,
         cluster_name_on_cloud: str,
         ports: List[str],
-    ) -> Optional[dict]:
+    ) -> dict:
         try:
             body = cls.load_resource().firewalls().get(
                 project=project_id, firewall=firewall_rule_name).execute()
@@ -330,10 +332,10 @@ class GCPComputeInstance(GCPInstance):
             ).execute()
         except gcp.http_error_exception() as e:
             if _FIREWALL_RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
-                logger.warning(
-                    f'Failed to update firewall rule {firewall_rule_name}: '
-                    f'{e.reason}')
-                return None
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Failed to update firewall rule {firewall_rule_name}'
+                    ) from e
             body = {
                 'name': firewall_rule_name,
                 'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
@@ -488,9 +490,10 @@ class GCPTPUVMInstance(GCPInstance):
                 updateMask='tags',
             ).execute()
         except gcp.http_error_exception() as e:
-            logger.warning(
-                f'Failed to add network tags for instance {instance}: '
-                f'{e.reason}. Skip adding network tags for it.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to add network tags for instance {instance}'
+                ) from e
 
     @classmethod
     def get_vpc_name(
@@ -498,7 +501,7 @@ class GCPTPUVMInstance(GCPInstance):
         project_id: str,
         zone: str,
         instance: str,
-    ) -> Optional[str]:
+    ) -> str:
         del project_id, zone  # unused
         try:
             response = cls.load_resource().projects().locations().nodes().get(
@@ -506,6 +509,6 @@ class GCPTPUVMInstance(GCPInstance):
             vpc_link = response['networkConfig']['network']
             return vpc_link.split('/')[-1]
         except gcp.http_error_exception() as e:
-            logger.warning(f'Failed to get VPC name for instance {instance}: '
-                           f'{e.reason}. Skip opening ports for it.')
-            return None
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to get VPC name for instance {instance}') from e
