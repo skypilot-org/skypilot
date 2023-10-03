@@ -371,12 +371,11 @@ def load_statuses_payload(
     original_statuses = common_utils.decode_payload(statuses_payload)
     statuses = dict()
     for job_id, status in original_statuses.items():
-        # json.dumps will convert all keys to strings. For integers, they will
+        # json.dumps will convert all keys to strings. Integers will
         # become string representations of integers, e.g. "1" instead of 1;
-        # For None, it will become "null" instead of None. Here we use
+        # `None` will become "null" instead of None. Here we use
         # json.loads to convert them back to their original values.
-        # For possible case for original_statuses, see doc string of
-        # core.py::job_status.
+        # See docstr of core::job_status for the meaning of `statuses`.
         statuses[json.loads(job_id)] = (JobStatus(status)
                                         if status is not None else None)
     return statuses

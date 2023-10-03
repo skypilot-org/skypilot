@@ -414,11 +414,11 @@ def tail_logs(job_owner: str,
         follow: Whether to follow the logs or print the logs so far and exit.
     """
     if job_id is None:
-        # This is only happened when job_lib.get_latest_job_id() returns None,
-        # which means no job has been submitted on this cluster. See
+        # This only happens when job_lib.get_latest_job_id() returns None,
+        # which means no job has been submitted to this cluster. See
         # sky.skylet.job_lib.JobLibCodeGen.tail_logs for more details.
         logger.info(
-            'Skip streaming logs as no job has been submitted on this cluster.')
+            'Skip streaming logs as no job has been submitted.')
         return
     job_str = f'job {job_id}'
     if spot_job_id is not None:
