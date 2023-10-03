@@ -4342,9 +4342,15 @@ def serve_update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
+    # TODO(tian): Maybe pack the following logic into a function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint, yaml_only=True, task_only=True, entrypoint_name='Service')
-    assert isinstance(task, sky.Task)
+        entrypoint, entrypoint_name='Service')
+    if isinstance(task, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky serve up'))
+    if task.name == sky.Task.CLI_CMD_TASK_NAME:
+        raise click.UsageError(
+            'For `sky serve update`, the entrypoint must be a YAML file.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
