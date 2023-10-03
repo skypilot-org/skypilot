@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -418,9 +419,12 @@ def entrypoint_context(name: str, fallback: bool = False):
     # Should be the outermost entrypoint or the fallback entrypoint.
     try:
         yield
-    except (Exception, SystemExit, KeyboardInterrupt):
-        trace = traceback.format_exc()
-        messages.usage.stacktrace = trace
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
+        with ux_utils.enable_traceback():
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+            if hasattr(e, 'detailed_reason'):
+                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
         raise
     finally:
         if fallback:
