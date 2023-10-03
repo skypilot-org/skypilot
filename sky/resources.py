@@ -930,6 +930,15 @@ class Resources:
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
 
+        if check_ports:
+            if self.ports is not None:
+                if other.ports is None:
+                    return False
+                self_ports = resources_utils.port_ranges_to_set(self.ports)
+                other_ports = resources_utils.port_ranges_to_set(other.ports)
+                if not self_ports <= other_ports:
+                    return False
+
         if self.disk_tier is not None:
             if other.disk_tier is None:
                 return False
@@ -941,15 +950,6 @@ class Resources:
             if self.disk_tier == resources_utils.DiskTier.BEST:
                 return True
             return self.disk_tier <= other.disk_tier
-
-        if check_ports:
-            if self.ports is not None:
-                if other.ports is None:
-                    return False
-                self_ports = resources_utils.port_ranges_to_set(self.ports)
-                other_ports = resources_utils.port_ranges_to_set(other.ports)
-                if not self_ports <= other_ports:
-                    return False
 
         # self <= other
         return True
