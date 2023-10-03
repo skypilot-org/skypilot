@@ -975,6 +975,3 @@ def check_port_forward_mode_dependencies() -> None:
                     f'  $ sudo apt install {name}\n'
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {name}') from None
-
-
-a = CoreWeaveLabelFormatter
