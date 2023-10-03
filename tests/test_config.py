@@ -6,12 +6,12 @@ import pytest
 
 from sky import skypilot_config
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
+from sky.utils import kubernetes_enums
 
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
-NODEPORT_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.NODEPORT.value
-PORT_FORWARD_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD.value
+NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
+PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value
 
 
 def _reload_config() -> None:
@@ -69,8 +69,9 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
         """))
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
-    _reload_config()
-    _check_empty_config()
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
 
 
 def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
@@ -88,8 +89,9 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
         """))
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
-    _reload_config()
-    _check_empty_config()
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
