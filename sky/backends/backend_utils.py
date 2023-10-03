@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
-import difflib
 import enum
 import getpass
 import json
@@ -19,7 +18,6 @@ import uuid
 import colorama
 import filelock
 import jinja2
-import jsonschema
 from packaging import version
 import requests
 from requests import adapters
@@ -53,7 +51,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -2756,60 +2753,6 @@ def stop_handler(signum, frame):
           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
-    """Validates an object against a given JSON schema.
-
-    Args:
-        obj: The object to validate.
-        schema: The JSON schema against which to validate the object.
-        err_msg_prefix: The string to prepend to the error message if
-          validation fails.
-        skip_none: If True, removes fields with value None from the object
-          before validation. This is useful for objects that will never contain
-          None because yaml.safe_load() loads empty fields as None.
-
-    Raises:
-        ValueError: if the object does not match the schema.
-    """
-    if skip_none:
-        obj = {k: v for k, v in obj.items() if v is not None}
-    err_msg = None
-    try:
-        validator.SchemaValidator(schema).validate(obj)
-    except jsonschema.ValidationError as e:
-        if e.validator == 'additionalProperties':
-            if tuple(e.schema_path) == ('properties', 'envs',
-                                        'additionalProperties'):
-                # Hack. Here the error is Task.envs having some invalid keys. So
-                # we should not print "unsupported field".
-                #
-                # This will print something like:
-                # 'hello world' does not match any of the regexes: <regex>
-                err_msg = (err_msg_prefix +
-                           'The `envs` field contains invalid keys:\n' +
-                           e.message)
-            else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
-                known_fields = set(e.schema.get('properties', {}).keys())
-                for field in e.instance:
-                    if field not in known_fields:
-                        most_similar_field = difflib.get_close_matches(
-                            field, known_fields, 1)
-                        if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
-                        else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
-        else:
-            # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
-                       f'. Check problematic field(s): {e.json_path}')
-
-    if err_msg:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(err_msg)
 
 
 def check_public_cloud_enabled():

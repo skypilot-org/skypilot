@@ -350,8 +350,8 @@ class Task:
         if envs is not None and isinstance(envs, dict):
             config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).

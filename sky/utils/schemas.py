@@ -4,11 +4,11 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
-from sky.clouds import cloud_registry
-from sky.data import storage
-
 
 def get_resources_schema():
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.clouds import cloud_registry
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -112,6 +112,8 @@ def get_resources_schema():
 
 
 def get_storage_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.data import storage
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -257,6 +259,124 @@ def get_cluster_schema():
             },
             'python': {
                 'type': 'string',
+            },
+        }
+    }
+
+
+def get_config_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import kubernetes_utils
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'spot': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'controller': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'resources': get_resources_schema(),
+                        }
+                    },
+                }
+            },
+            'aws': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'instance_tags': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': {
+                            'type': 'string',
+                        },
+                    },
+                    'vpc_name': {
+                        'oneOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'null',
+                        }],
+                    },
+                    'use_internal_ips': {
+                        'type': 'boolean',
+                    },
+                    'ssh_proxy_command': {
+                        'oneOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'null',
+                        }, {
+                            'type': 'object',
+                            'required': [],
+                            'additionalProperties': {
+                                'type': 'string',
+                            }
+                        }]
+                    },
+                }
+            },
+            'gcp': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'specific_reservations': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                            'minItems': 1,
+                            'maxItems': 1,
+                        }
+                    },
+                }
+            },
+            'kubernetes': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'networking': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value for type in
+                            kubernetes_utils.KubernetesNetworkingMode
+                        ]
+                    },
+                }
+            },
+            'oci': {
+                'type': 'object',
+                'required': [],
+                # Properties are either 'default' or a region name.
+                'additionalProperties': {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'compartment_ocid': {
+                            'type': 'string',
+                        },
+                        'image_tag_general': {
+                            'type': 'string',
+                        },
+                        'image_tag_gpu': {
+                            'type': 'string',
+                        },
+                        'vcn_subnet': {
+                            'type': 'string',
+                        },
+                    }
+                },
             },
         }
     }
