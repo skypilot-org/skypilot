@@ -290,7 +290,6 @@ class GCPComputeInstance(GCPInstance):
             logger.warning(
                 f'Failed to add network tags for instance {instance}: '
                 f'{e.reason}. Skip adding network tags for it.')
-            return None
 
     @classmethod
     def delete_firewall_rule(
@@ -492,7 +491,6 @@ class GCPTPUVMInstance(GCPInstance):
             logger.warning(
                 f'Failed to add network tags for instance {instance}: '
                 f'{e.reason}. Skip adding network tags for it.')
-            return
 
     @classmethod
     def get_vpc_name(

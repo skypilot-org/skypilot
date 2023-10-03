@@ -213,12 +213,10 @@ def open_ports(
             # i.e. the same VPC. So we can just pick any one of them.
             vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
             if vpc_name is None:
-                # Failed to get the VPC name for the instance. It won't happen
-                # except for some extremely rare cases, like the user manually
-                # terminates the instance after provision, and before executing
-                # this function; or cloud provider API changes. We skip the port
-                # opening if such failure happens.
-                continue
+                raise ValueError(
+                    f'Cannot find VPC for cluster {cluster_name_on_cloud}. '
+                    'The VPC name is required for open ports on your cluster. '
+                    'Please check the logs above and try again.')
             # Use compute handler here for both Compute VM and TPU VM,
             # as firewall rules is a compute resource.
             op = compute_handler.create_or_update_firewall_rule(
@@ -229,8 +227,12 @@ def open_ports(
                 ports,
             )
             # op is None if any error occurs.
-            if op is not None:
-                operations[compute_handler].append(op)
+            if op is None:
+                raise ValueError(
+                    'Failed to create or update firewall rule for cluster '
+                    f'{cluster_name_on_cloud}. Please check the logs above '
+                    'and try again.')
+            operations[compute_handler].append(op)
     # Use zone = None to indicate wait for global operations
     _wait_for_operations(operations, project_id, None)
 
