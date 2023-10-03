@@ -852,20 +852,6 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
             node_config["networkConfig"].pop("accessConfigs")
 
-        if get_node_type(node_config) == GCPNodeType.COMPUTE:
-            if "tags" not in node_config:
-                node_config["tags"] = {"items": []}
-            # Add cluster name to the tags so that firewall rules will apply to
-            # the created VM.
-            node_config["tags"]["items"].append(config["cluster_name"])
-        else:
-            assert get_node_type(node_config) == GCPNodeType.TPU, node_config
-            # TPU VM has a different api for tags. See
-            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
-            if "tags" not in node_config:
-                node_config["tags"] = []
-            node_config["tags"].append(config["cluster_name"])
-
     return config
 
 
