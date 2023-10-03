@@ -186,28 +186,42 @@ def open_ports(
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
     handlers: List[Type[instance_utils.GCPInstance]] = [
-        instance_utils.GCPComputeInstance
+        instance_utils.GCPComputeInstance,
+        instance_utils.GCPTPUVMInstance,
     ]
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)
+    compute_handler: Type[instance_utils.GCPInstance] = (
+        instance_utils.GCPComputeInstance)
     for handler, instances in handler_to_instances.items():
         if not instances:
             logger.warning(f'No instance found for cluster '
                            f'{cluster_name_on_cloud}.')
             continue
         else:
-            op = handler.create_or_update_firewall_rule(
+            for instance in instances:
+                # Add tags for all nodes in the cluster, so the firewall rule
+                # could correctly apply to all instance in the cluster.
+                handler.add_network_tag_if_not_exist(
+                    project_id,
+                    zone,
+                    instance,
+                    tag=cluster_name_on_cloud,
+                )
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick any one of them.
+            vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
+            # Use compute handler here for both Compute VM and TPU VM,
+            # as firewall rules is a compute resource.
+            op = compute_handler.create_or_update_firewall_rule(
                 firewall_rule_name,
                 project_id,
-                zone,
-                instances,
+                vpc_name,
                 cluster_name_on_cloud,
                 ports,
             )
-            # op is None if any error occurs.
-            if op is not None:
-                operations[handler].append(op)
+            operations[compute_handler].append(op)
     # Use zone = None to indicate wait for global operations
     _wait_for_operations(operations, project_id, None)
 
