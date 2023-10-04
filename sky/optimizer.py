@@ -1000,8 +1000,8 @@ def _fill_in_launchable_resources(
                                                      False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    f'task_lib.Task {task} requires {resources.cloud} which is '
-                    'not enabled. To enable access, run '
+                    f'Task requires {resources.cloud} which is '
+                    f'not enabled: {task}.\nTo enable access, run '
                     f'{colorama.Style.BRIGHT}'
                     f'sky check {colorama.Style.RESET_ALL}, or change the '
                     'cloud requirement')

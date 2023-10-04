@@ -299,8 +299,8 @@ class Resources:
         zone_str = ''
         if self.zone is not None:
             zone_str = f', zone={self.zone}'
-        repr_str = repr(self)
-        assert repr_str.endswith(')')
+        repr_str = str(self)
+        assert repr_str.endswith(')'), repr_str
 
         repr_str = repr_str[:-1] + f'{region_str}{zone_str})'
         return repr_str
