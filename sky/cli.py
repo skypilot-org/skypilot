@@ -2027,12 +2027,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.argument('job_ids', type=int, nargs=-1)
+@click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
     cluster: str,
-    job_ids: Tuple[int],
+    job_ids: Tuple[str],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2059,9 +2059,8 @@ def logs(
             '(ambiguous). To fix: specify at most one of them.')
 
     if len(job_ids) > 1 and not sync_down:
-        job_ids_str = ', '.join([str(id) for id in job_ids])
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs (IDs: {job_ids_str}).'
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
@@ -2074,6 +2073,10 @@ def logs(
     job_id = None
     if job_ids:
         job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
+                                   'Job ID must be integers.')
+        job_ids = [int(job_id)]
     if status:
         job_statuses = core.job_status(cluster, job_ids)
         job_id = list(job_statuses.keys())[0]
