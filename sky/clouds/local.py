@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register
+# TODO(skypilot): remove Local now that we're using Kubernetes.
 class Local(clouds.Cloud):
     """Local/on-premise cloud.
 
