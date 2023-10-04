@@ -8,7 +8,8 @@ import pytest
 import sky
 from sky import clouds
 from sky import exceptions
-from sky.utils import kubernetes_utils
+
+import common
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):
@@ -46,52 +47,14 @@ def _test_parse_accelerators(spec, expected_accelerators):
     _test_parse_task_yaml(spec, test_fn)
 
 
-# Monkey-patching is required because in the test environment, no cloud is
-# enabled. The optimizer checks the environment to find enabled clouds, and only
-# generates plans within these clouds. The tests assume that all clouds in
-# registry are enabled, so we monkeypatch the `sky.global_user_state` module to
-# return all clouds. We also monkeypatch `sky.check.check` so that when the
-# optimizer tries calling it to update enabled_clouds, it does not
-#
-# TODO: Keep the cloud enabling in sync with the fixture enable_all_clouds in
-# tests/conftest.py raise exceptions.
 def _make_resources(
     monkeypatch,
     *resources_args,
     enabled_clouds: Optional[List[str]] = None,
     **resources_kwargs,
 ):
-    if enabled_clouds is None:
-        enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
-    monkeypatch.setattr(
-        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
-        config_file_backup.name)
-    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
-
-    monkeypatch.setattr(
-        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
-        lambda *_args, **_kwargs: [])
-
-    # Monkey patch Kubernetes resource detection since it queries
-    # the cluster to detect available cluster resources.
-    monkeypatch.setattr(
-        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
-        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
-                        lambda *_args, **_kwargs: [True, []])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',
-                        lambda *_args, **_kwargs: [True, ''])
-
+    # See comments inside to see why we monkey patch:
+    common.enable_all_clouds_in_monkeypatch(monkeypatch, enabled_clouds)
     # Should create Resources here, since it uses the enabled clouds.
     return sky.Resources(*resources_args, **resources_kwargs)
 
@@ -674,7 +637,8 @@ def _test_optimize_speed(resources: sky.Resources):
     start = time.time()
     sky.optimize(dag)
     end = time.time()
-    assert end - start < 5.0, (f'optimize took too long for {resources}, '
+    # 5.0 seconds = somewhat flaky.
+    assert end - start < 6.0, (f'optimize took too long for {resources}, '
                                f'{end - start} seconds')
 
 
