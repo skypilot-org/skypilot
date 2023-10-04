@@ -319,9 +319,12 @@ class Optimizer:
                 # in the error message.
                 enabled_clouds = global_user_state.get_enabled_clouds()
                 if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
-                    if any(orig_resources.cloud is None for orig_resources in node.get_resources()):
+                    if any(orig_resources.cloud is None
+                           for orig_resources in node.get_resources()):
                         source_hint = 'catalog and kubernetes cluster'
-                    elif all(isinstance(orig_resources.cloud, clouds.Kubernetes) for orig_resources in node.get_resources()):
+                    elif all(
+                            isinstance(orig_resources.cloud, clouds.Kubernetes)
+                            for orig_resources in node.get_resources()):
                         source_hint = 'kubernetes cluster'
 
                 # TODO(romilb): When `sky show-gpus` supports Kubernetes,
@@ -1028,8 +1031,6 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
-                logger.debug(f'Original resources: {resources}')
-                logger.debug(f'get_feasible_launchable_resources: {resources.cloud.get_feasible_launchable_resources(resources, num_nodes=task.num_nodes)}')
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
                 logger.info(f'No resource satisfying {resources} '

@@ -1005,6 +1005,7 @@ class Task:
                 run_msg = f'run=\'{run_msg[:20]}...\''
             else:
                 run_msg = f'run=\'{run_msg}\''
+
         elif self.run is None:
             run_msg = 'run=<empty>'
         else:
@@ -1018,11 +1019,14 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            resources_str_set = {r.repr_with_region_zone for r in self.resources}
+            resources_str_set = {
+                r.repr_with_region_zone for r in self.resources
+            }
             s += f'\n  resources: {resources_str_set}'
         elif len(
                 self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0].repr_with_region_zone}'
+            s += (f'\n  resources: '
+            f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s

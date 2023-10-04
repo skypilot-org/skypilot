@@ -290,7 +290,7 @@ class Resources:
             cloud_str = f'{self.cloud}'
 
         return f'{cloud_str}({hardware_str})'
-    
+
     @property
     def repr_with_region_zone(self) -> str:
         region_str = ''
@@ -302,7 +302,6 @@ class Resources:
         repr_str = repr(self)
         repr_str = repr_str.replace(')', f'{region_str}{zone_str})')
         return repr_str
-
 
     @property
     def cloud(self):
