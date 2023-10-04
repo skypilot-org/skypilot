@@ -390,6 +390,9 @@ def _get_tpu_for_zone(zone: str) -> pd.DataFrame:
     new_tpus = []
     for tpu in tpus:
         tpu_name = tpu['type']
+        # skip tpu v5 as we currently don't support it
+        if 'v5' in tpu_name:
+            continue
         new_tpus.append({
             'AcceleratorName': f'tpu-{tpu_name}',
             'AcceleratorCount': 1,
