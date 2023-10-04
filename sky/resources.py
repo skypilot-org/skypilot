@@ -300,7 +300,9 @@ class Resources:
         if self.zone is not None:
             zone_str = f', zone={self.zone}'
         repr_str = repr(self)
-        repr_str = repr_str.replace(')', f'{region_str}{zone_str})')
+        assert repr_str.endswith(')')
+
+        repr_str = repr_str[:-1] + f'{region_str}{zone_str})'
         return repr_str
 
     @property

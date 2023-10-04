@@ -1005,7 +1005,6 @@ class Task:
                 run_msg = f'run=\'{run_msg[:20]}...\''
             else:
                 run_msg = f'run=\'{run_msg}\''
-
         elif self.run is None:
             run_msg = 'run=<empty>'
         else:
