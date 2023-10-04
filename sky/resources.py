@@ -553,14 +553,19 @@ class Resources:
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
                 with ux_utils.print_exception_no_traceback():
-                    table = log_utils.create_table(['Cloud', 'Hint'])
-                    table.add_row(['-----', '----'])
-                    for cloud, error in cloud_to_errors.items():
-                        reason_str = '\n'.join(textwrap.wrap(str(error), 80))
-                        table.add_row([str(cloud), reason_str])
+                    if len(cloud_to_errors) == 1:
+                        # UX: if 1 cloud, don't print a table.
+                        hint = list(cloud_to_errors.items())[0][-1]
+                    else:
+                        table = log_utils.create_table(['Cloud', 'Hint'])
+                        table.add_row(['-----', '----'])
+                        for cloud, error in cloud_to_errors.items():
+                            reason_str = '\n'.join(textwrap.wrap(str(error), 80))
+                            table.add_row([str(cloud), reason_str])
+                        hint = table.get_string()
                     raise ValueError(
                         f'Invalid (region {region!r}, zone {zone!r}) '
-                        f'{cloud_str}. Details:\n{table.get_string()}')
+                        f'{cloud_str}. Details:\n{hint}')
             elif len(valid_clouds) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
