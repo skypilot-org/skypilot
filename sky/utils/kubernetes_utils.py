@@ -93,24 +93,6 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
 
 
-class GKELabelFormatter(GPULabelFormatter):
-    """GKE label formatter
-
-    GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
-    label, which is used to identify the GPU type.
-    """
-
-    LABEL_KEY = 'cloud.google.com/gke-accelerator'
-
-    @classmethod
-    def get_label_key(cls) -> str:
-        return cls.LABEL_KEY
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_accelerator_name(accelerator)
-
-
 class SkyPilotLabelFormatter(GPULabelFormatter):
     """Custom label formatter for SkyPilot
 
@@ -131,10 +113,48 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return accelerator.lower()
 
 
+class CoreWeaveLabelFormatter(GPULabelFormatter):
+    """CoreWeave label formatter
+
+    Uses gpu.nvidia.com/class as the key, and the uppercase SkyPilot
+    accelerator str as the value.
+    """
+
+    LABEL_KEY = 'gpu.nvidia.com/class'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return accelerator.upper()
+
+
+class GKELabelFormatter(GPULabelFormatter):
+    """GKE label formatter
+
+    GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
+    label, which is used to identify the GPU type.
+    """
+
+    LABEL_KEY = 'cloud.google.com/gke-accelerator'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_gke_accelerator_name(accelerator)
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
-LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter]
+LABEL_FORMATTER_REGISTRY = [
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+]
 
 
 def detect_gpu_label_formatter(
@@ -160,6 +180,9 @@ def detect_gpu_label_formatter(
             if label.startswith(label_key):
                 label_formatter = lf()
                 break
+
+        if label_formatter is not None:
+            break
 
     return label_formatter, node_labels
 
