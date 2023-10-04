@@ -2075,7 +2075,7 @@ def logs(
         if not all(job_id.isdigit() for job_id in job_ids):
             raise click.UsageError(f'Invalid job ID {", ".join(job_ids)}. '
                                    'Job ID must be integers.')
-        int_job_ids = [int(job_id)]
+        int_job_ids = [int(job_id) for job_id in job_ids]
     else:
         int_job_ids = job_ids
     if status:
