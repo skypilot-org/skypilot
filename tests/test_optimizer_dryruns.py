@@ -3,13 +3,12 @@ import textwrap
 import time
 from typing import Callable, List, Optional
 
+import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
 
 import sky
 from sky import clouds
 from sky import exceptions
-
-import common
 
 
 def _test_parse_task_yaml(spec: str, test_fn: Optional[Callable] = None):

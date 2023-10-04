@@ -1,8 +1,7 @@
 from typing import List
 
+import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
-
-import common
 
 # Usage: use
 #   @pytest.mark.slow
@@ -19,7 +18,8 @@ import common
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, --azure, or --lambda.
 #
-# To only run tests for managed spot (without generic tests), use --managed-spot.
+# To only run tests for managed spot (without generic tests), use
+# --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
     'kubernetes'
