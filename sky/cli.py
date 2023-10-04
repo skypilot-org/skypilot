@@ -2027,12 +2027,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.argument('job_ids', type=int, nargs=-1)
+@click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
     cluster: str,
-    job_ids: Tuple[int],
+    job_ids: Tuple[str],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2059,9 +2059,8 @@ def logs(
             '(ambiguous). To fix: specify at most one of them.')
 
     if len(job_ids) > 1 and not sync_down:
-        job_ids_str = ', '.join([str(id) for id in job_ids])
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs (IDs: {job_ids_str}).'
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
@@ -2073,9 +2072,14 @@ def logs(
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
-        job_id = job_ids[0]
+        if not all(job_id.isdigit() for job_id in job_ids):
+            raise click.UsageError(f'Invalid job ID {", ".join(job_ids)}. '
+                                   'Job ID must be integers.')
+        job_ids_to_query = [int(job_id) for job_id in job_ids]
+    else:
+        job_ids_to_query = job_ids
     if status:
-        job_statuses = core.job_status(cluster, job_ids)
+        job_statuses = core.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
