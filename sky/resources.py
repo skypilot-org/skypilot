@@ -254,7 +254,7 @@ class Resources:
             if None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
-                image_id = f', image_id={self.image_id!r}'
+                image_id = f', image_id={self.image_id}'
 
         disk_tier = ''
         if self.disk_tier is not None:
