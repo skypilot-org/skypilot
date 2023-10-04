@@ -1735,6 +1735,11 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    with ux_utils.print_exception_no_traceback():
+        raise exceptions.CommandError(returncode=1,
+                                      command='my command',
+                                      error_msg='dev test failure',
+                                      detailed_reason='I am the stderr')
     # Using a pool with 1 worker to run the spot job query in parallel to speed
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
