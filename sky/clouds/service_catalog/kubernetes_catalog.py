@@ -6,7 +6,9 @@ mapping SkyPilot image tags to corresponding container image tags.
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+from sky import global_user_state
 
+from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.utils import kubernetes_utils
@@ -38,6 +40,9 @@ def list_accelerators(
         quantity_filter: Optional[int],
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
+    if Kubernetes not in global_user_state.get_enabled_clouds() or not kubernetes_utils.check_credentials()[0]:
+        return {}
+
     has_gpu = kubernetes_utils.detect_gpu_resource()
     if not has_gpu:
         return {}
@@ -63,7 +68,7 @@ def list_accelerators(
     result = []
     for accelerator_name, accelerator_count in accelerators:
         result.append(
-            common.InstanceTypeInfo(cloud="Kubernetes",
+            common.InstanceTypeInfo(cloud='Kubernetes',
                                     instance_type=None,
                                     accelerator_name=accelerator_name,
                                     accelerator_count=accelerator_count,
