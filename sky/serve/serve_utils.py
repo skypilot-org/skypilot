@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import enum
 import os
 import pickle
 import re
@@ -33,6 +34,13 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+
+
+class ServiceComponent(enum.Enum):
+    CONTROLLER = 'CONTROLLER'
+    LOAD_BALANCER = 'LOAD_BALANCER'
+    REPLICA = 'REPLICA'
+
 
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')

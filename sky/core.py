@@ -1044,31 +1044,42 @@ def serve_status(
 def serve_tail_logs(
     service_name: str,
     *,
-    controller: bool = False,
-    load_balancer: bool = False,
+    target: serve.ServiceComponent,
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
     """Tail logs for a service.
 
     Usage:
-        core.serve_tail_logs(service_name, <target>=<value>, follow=True/False)
+        core.serve_tail_logs(
+            service_name, target=<component>, follow=True/False)
 
-    One and only one of <target> must be specified: controller, load_balancer,
-    or replica_id.
+    `target` is a enum of sky.serve.ServiceComponent, which can be one of:
+        - CONTROLLER
+        - LOAD_BALANCER
+        - REPLICA
+    To use REPLICA, you must specify `replica_id`.
 
     To tail controller logs:
         # follow default to True
-        core.serve_tail_logs(service_name, controller=True)
+        core.serve_tail_logs(
+            service_name, target=sky.serve.ServiceComponent.CONTROLLER)
 
     To print replica 3 logs:
-        core.serve_tail_logs(service_name, replica_id=3, follow=False)
+        core.serve_tail_logs(
+            service_name, target=sky.serve.ServiceComponent.REPLICA,
+            replica_id=3, follow=False)
     """
-    have_replica_id = replica_id is not None
-    if (controller + load_balancer + have_replica_id) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('One and only one of controller, load_balancer, '
-                             'or replica_id must be specified.')
+    if target == serve.ServiceComponent.REPLICA:
+        if replica_id is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`replica_id` must be specified when using target=REPLICA.')
+    else:
+        if replica_id is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('`replica_id` must be None when using '
+                                 'target=CONTROLLER/LOAD_BALANCER.')
     service_record = global_user_state.get_service_from_name(service_name)
     if service_record is None:
         with ux_utils.print_exception_no_traceback():
@@ -1095,8 +1106,7 @@ def serve_tail_logs(
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,
                             service_handle,
-                            controller,
-                            load_balancer,
+                            target,
                             replica_id,
                             follow=follow)
 

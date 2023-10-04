@@ -4443,9 +4443,14 @@ def serve_logs(
         raise click.UsageError(
             'One and only one of --controller, --load-balancer, '
             '[REPLICA_ID] can be specified.')
+    if controller:
+        target = serve_lib.ServiceComponent.CONTROLLER
+    elif load_balancer:
+        target = serve_lib.ServiceComponent.LOAD_BALANCER
+    else:
+        target = serve_lib.ServiceComponent.REPLICA
     core.serve_tail_logs(service_name,
-                         controller=controller,
-                         load_balancer=load_balancer,
+                         target=target,
                          replica_id=replica_id,
                          follow=follow)
 
