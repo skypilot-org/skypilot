@@ -2922,6 +2922,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_dict = get_task_demands_dict(task)
+    if len(resources_dict) > 1:
+        resources_dict.pop('CPU')
     resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
