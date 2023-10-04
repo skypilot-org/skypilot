@@ -940,8 +940,8 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'lsof' is installed"""
-    for name, option in [('socat', '-V'), ('lsof', '-v')]:
+    """Checks if 'socat' is installed"""
+    for name, option in [('socat', '-V')]:
         try:
             subprocess.run([name, option],
                            stdout=subprocess.DEVNULL,

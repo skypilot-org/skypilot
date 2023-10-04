@@ -7,12 +7,6 @@ if ! command -v socat > /dev/null; then
   exit
 fi
 
-# Checks if lsof is installed
-if ! command -v lsof > /dev/null; then
-  echo "Checking port availability for 'port-forward' mode requires 'lsof' to be installed. Please install 'lsof'" >&2
-  exit 1
-fi
-
 # Establishes connection between local port and the ssh jump pod using kube port-forward
 # Instead of specifying a port, we let kubectl select a random port.
 # This is preferred because of socket re-use issues in kubectl port-forward,
@@ -35,7 +29,6 @@ local_port=$(awk -F: '/Forwarding from 127.0.0.1/{print $2}' "${KUBECTL_OUTPUT}"
 rm -f "${KUBECTL_OUTPUT}"
 
 # Add handler to terminate the port-forward process when this script exits.
-K8S_PORT_FWD_PID=$!
 trap "[[ -e /proc/$K8S_PORT_FWD_PID ]] && kill $K8S_PORT_FWD_PID" EXIT
 
 # Checks if a connection to local_port of 127.0.0.1:[local_port] is established
