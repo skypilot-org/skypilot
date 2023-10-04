@@ -20,7 +20,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
-LOCAL_PORT_FOR_PORT_FORWARD = 23100
 
 MEMORY_SIZE_UNITS = {
     'B': 1,
@@ -660,14 +659,16 @@ class KubernetesInstanceType:
 
 
 def construct_ssh_jump_command(private_key_path: str,
-                               ssh_jump_port: int,
                                ssh_jump_ip: str,
+                               ssh_jump_port: Optional[int] = None,
                                proxy_cmd_path: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
-                              f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
+                              f'-o IdentitiesOnly=yes '
                               f'-W %h:%p sky@{ssh_jump_ip}')
+    if ssh_jump_port is not None:
+        ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
@@ -730,21 +731,20 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     if network_mode == KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_port, ssh_jump_ip)
+            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
-        ssh_jump_port = LOCAL_PORT_FOR_PORT_FORWARD
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
-            'local_port': ssh_jump_port,
         }
         backend_utils.fill_template(port_fwd_proxy_cmd_template,
                                     vars_to_fill,
                                     output_path=port_fwd_proxy_cmd_path)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_port, ssh_jump_ip,
-            port_fwd_proxy_cmd_path)
+            private_key_path,
+            ssh_jump_ip,
+            proxy_cmd_path=port_fwd_proxy_cmd_path)
     return ssh_jump_proxy_command
 
 
@@ -963,8 +963,8 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'lsof' is installed"""
-    for name, option in [('socat', '-V'), ('lsof', '-v')]:
+    """Checks if 'socat' is installed"""
+    for name, option in [('socat', '-V')]:
         try:
             subprocess.run([name, option],
                            stdout=subprocess.DEVNULL,

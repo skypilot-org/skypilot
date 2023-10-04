@@ -55,10 +55,6 @@ class Kubernetes(clouds.Cloud):
                                                  'support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
                                                      'support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported by the '
-                                                       'Kubernetes '
-                                                       'implementation yet.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
