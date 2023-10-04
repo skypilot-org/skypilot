@@ -90,7 +90,8 @@ install_requires = [
     'requests',
 ]
 
-local_ray = [  # Lower version of ray will cause dependency conflict for
+local_ray = [  
+    # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
