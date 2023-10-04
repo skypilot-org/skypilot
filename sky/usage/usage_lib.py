@@ -426,7 +426,8 @@ def entrypoint_context(name: str, fallback: bool = False):
             messages.usage.stacktrace = trace
             if hasattr(e, 'detailed_reason'):
                 messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
-            messages.usage.exception = common_utils.format_exception(e)
+            messages.usage.exception = common_utils.remove_color(
+                common_utils.format_exception(e))
         raise
     finally:
         if fallback:
