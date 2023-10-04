@@ -90,6 +90,7 @@ class GPULabelFormatter:
             bool: True if the label value is valid, False otherwise.
             str: Error message if the label value is invalid, None otherwise.
         """
+        del value
         return True, ''
 
 
@@ -126,7 +127,7 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         return accelerator.lower()
 
     @classmethod
-    def validate_label_value(cls, value: str) -> bool:
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
         """Values must be all lowercase for the SkyPilot formatter."""
         is_valid = value == value.lower()
         return is_valid, (f'Label value "{value}" must be lowercase if using '
@@ -375,8 +376,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
-                                f'Node {node_name} in Kubernetes cluster has invalid GPU label: '
-                                f'{label}={value}. {reason}')
+                                f'Node {node_name} in Kubernetes cluster has '
+                                f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
@@ -391,7 +392,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # during scheduling.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if label == k8s_acc_label_key and value == k8s_acc_label_value:
+                    if (label == k8s_acc_label_key and
+                            value == k8s_acc_label_value):
                         # If a node is found, we can break out of the loop
                         # and proceed to deploy.
                         return k8s_acc_label_key, k8s_acc_label_value
