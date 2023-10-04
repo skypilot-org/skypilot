@@ -83,7 +83,7 @@ class CommandError(Exception):
         returncode: The returncode of the command.
         command: The command that was run.
         error_message: The error message to print.
-        stderr: The stderr of the command.
+        detailed_reason: The stderr of the command.
     """
 
     def __init__(self, returncode: int, command: str, error_msg: str,
