@@ -560,7 +560,8 @@ class Resources:
                         table = log_utils.create_table(['Cloud', 'Hint'])
                         table.add_row(['-----', '----'])
                         for cloud, error in cloud_to_errors.items():
-                            reason_str = '\n'.join(textwrap.wrap(str(error), 80))
+                            reason_str = '\n'.join(textwrap.wrap(
+                                str(error), 80))
                             table.add_row([str(cloud), reason_str])
                         hint = table.get_string()
                     raise ValueError(
