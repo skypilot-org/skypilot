@@ -254,7 +254,7 @@ class Resources:
             if None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
-                image_id = f', image_id={self.image_id!r}'
+                image_id = f', image_id={self.image_id}'
 
         disk_tier = ''
         if self.disk_tier is not None:
@@ -290,6 +290,21 @@ class Resources:
             cloud_str = f'{self.cloud}'
 
         return f'{cloud_str}({hardware_str})'
+
+    @property
+    def repr_with_region_zone(self) -> str:
+        region_str = ''
+        if self.region is not None:
+            region_str = f', region={self.region}'
+        zone_str = ''
+        if self.zone is not None:
+            zone_str = f', zone={self.zone}'
+        repr_str = str(self)
+        if repr_str.endswith(')'):
+            repr_str = repr_str[:-1] + f'{region_str}{zone_str})'
+        else:
+            repr_str += f'{region_str}{zone_str}'
+        return repr_str
 
     @property
     def cloud(self):
