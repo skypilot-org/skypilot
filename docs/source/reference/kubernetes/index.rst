@@ -151,7 +151,9 @@ Kubernetes support is under active development. Some features are in progress an
 * CPU and GPU Tasks - ✅ Available
 * Auto-down - ✅ Available
 * Storage mounting - ✅ Available on x86_64 clusters
-* Multi-node tasks - 🚧 In progress
+* Multi-node tasks - ✅ Available
+* Opening ports and exposing services - 🚧 In progress
+* Custom images - 🚧 In progress
 * Multiple Kubernetes Clusters - 🚧 In progress
 
 
