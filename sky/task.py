@@ -1026,7 +1026,7 @@ class Task:
         elif len(
                 self.resources) == 1 and not list(self.resources)[0].is_empty():
             s += (f'\n  resources: '
-            f'{list(self.resources)[0].repr_with_region_zone}')
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s
