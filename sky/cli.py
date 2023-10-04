@@ -2072,9 +2072,8 @@ def logs(
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
-        job_id = job_ids[0]
-        if not job_id.isdigit():
-            raise click.UsageError(f'Invalid job ID {job_id}. '
+        if not all(job_id.isdigit() for job_id in job_ids):
+            raise click.UsageError(f'Invalid job ID {", ".join(job_ids)}. '
                                    'Job ID must be integers.')
         int_job_ids = [int(job_id)]
     else:
