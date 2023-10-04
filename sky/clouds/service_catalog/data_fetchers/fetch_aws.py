@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import traceback
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -265,7 +266,12 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         def get_vcpus(row) -> float:
             if not np.isnan(row['vCPU']):
                 return float(row['vCPU'])
-            return float(row['VCpuInfo']['DefaultVCpus'])
+            try:
+                return float(row['VCpuInfo']['DefaultVCpus'])
+            except Exception as e:  # pylint: disable=broad-except
+                print('Error occured for row:', row)
+                print('Error:', e)
+                raise
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
@@ -303,7 +309,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         df = df.merge(spot_pricing_df,
                       left_on=['InstanceType', 'AvailabilityZoneName'],
                       right_index=True,
-                      how='outer')
+                      how='left')
 
         # Extract vCPUs, memory, and accelerator info from the columns.
         df = pd.concat(
@@ -316,6 +322,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             df['GpuInfo'] = np.nan
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
+        print(traceback.format_exc())
         print(f'{region} failed with {e}', file=sys.stderr)
         return region
     return df

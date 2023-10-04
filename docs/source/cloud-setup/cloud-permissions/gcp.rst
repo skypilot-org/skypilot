@@ -130,6 +130,7 @@ User
 
 .. code-block:: text
 
+    compute.instances.setTags
     compute.firewalls.list
     compute.firewalls.update
 

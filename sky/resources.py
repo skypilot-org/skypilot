@@ -12,8 +12,8 @@ from sky import skypilot_config
 from sky import spot
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -61,7 +61,7 @@ class Resources:
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
-        _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
+        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.
@@ -254,7 +254,7 @@ class Resources:
             if None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
-                image_id = f', image_id={self.image_id!r}'
+                image_id = f', image_id={self.image_id}'
 
         disk_tier = ''
         if self.disk_tier is not None:
@@ -290,6 +290,21 @@ class Resources:
             cloud_str = f'{self.cloud}'
 
         return f'{cloud_str}({hardware_str})'
+
+    @property
+    def repr_with_region_zone(self) -> str:
+        region_str = ''
+        if self.region is not None:
+            region_str = f', region={self.region}'
+        zone_str = ''
+        if self.zone is not None:
+            zone_str = f', zone={self.zone}'
+        repr_str = str(self)
+        if repr_str.endswith(')'):
+            repr_str = repr_str[:-1] + f'{region_str}{zone_str})'
+        else:
+            repr_str += f'{region_str}{zone_str}'
+        return repr_str
 
     @property
     def cloud(self):
@@ -510,7 +525,7 @@ class Resources:
                     if use_tpu_vm:
                         accelerator_args['runtime_version'] = 'tpu-vm-base'
                     else:
-                        accelerator_args['runtime_version'] = '2.5.0'
+                        accelerator_args['runtime_version'] = '2.12.0'
                     logger.info(
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
