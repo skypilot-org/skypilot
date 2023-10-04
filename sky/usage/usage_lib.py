@@ -147,6 +147,7 @@ class UsageMessageToReport(MessageToReport):
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
         self.runtimes: Dict[str, float] = {}  # update_runtime
+        self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
@@ -425,6 +426,7 @@ def entrypoint_context(name: str, fallback: bool = False):
             messages.usage.stacktrace = trace
             if hasattr(e, 'detailed_reason'):
                 messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            messages.usage.exception = common_utils.format_exception(e)
         raise
     finally:
         if fallback:
