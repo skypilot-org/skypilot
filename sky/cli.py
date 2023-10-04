@@ -2075,11 +2075,11 @@ def logs(
         if not all(job_id.isdigit() for job_id in job_ids):
             raise click.UsageError(f'Invalid job ID {", ".join(job_ids)}. '
                                    'Job ID must be integers.')
-        job_ids_ = [int(job_id) for job_id in job_ids]
+        job_ids_to_query = [int(job_id) for job_id in job_ids]
     else:
-        job_ids_ = job_ids
+        job_ids_to_query = job_ids
     if status:
-        job_statuses = core.job_status(cluster, job_ids_)
+        job_statuses = core.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
