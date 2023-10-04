@@ -1033,7 +1033,10 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
-                logger.info(f'No resource satisfying {resources} '
+                num_node_str = ''
+                if task.num_nodes > 1:
+                    num_node_str = f'{task.num_nodes}x'
+                logger.info(f'No resource satisfying {num_node_str}{resources} '
                             f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
