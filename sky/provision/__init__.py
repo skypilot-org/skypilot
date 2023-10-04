@@ -64,7 +64,7 @@ def bootstrap_instances(
 
     This function sets up auxiliary resources for a specified cluster
     with the provided configuration,
-    and returns an InstanceConfig object with updated configuration.
+    and returns a ProvisionConfig object with updated configuration.
     These auxiliary resources could include security policies, network
     configurations etc. These resources tend to be free or very cheap,
     but it takes time to set them up from scratch. So we generally
@@ -120,6 +120,7 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+    raise NotImplementedError
 
 
 @_route_to_cloud_impl

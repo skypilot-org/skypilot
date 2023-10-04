@@ -25,9 +25,9 @@ from ray.autoscaler.tags import TAG_RAY_NODE_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_STATUS
 from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
 
-from sky.skylet.providers.scp import scp_utils
+from sky.clouds.utils import scp_utils
+from sky.clouds.utils.scp_utils import SCPCreationFailError
 from sky.skylet.providers.scp.config import ZoneConfig
-from sky.skylet.providers.scp.scp_utils import SCPCreationFailError
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/scp/metadata'
