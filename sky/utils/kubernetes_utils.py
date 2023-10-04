@@ -129,7 +129,7 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     def validate_label_value(cls, value: str) -> bool:
         """Values must be all lowercase for the SkyPilot formatter."""
         is_valid = value == value.lower()
-        return is_valid, (f'Label value "{value}" must be lowercase if using ' 
+        return is_valid, (f'Label value "{value}" must be lowercase if using '
                           f'the {cls.get_label_key()} label.'
                           if not is_valid else '')
 
@@ -204,10 +204,7 @@ def detect_gpu_label_formatter(
             for label, _ in label_list:
                 if label.startswith(label_key):
                     label_formatter = lf()
-                    break
-
-        if label_formatter is not None:
-            break
+                    return label_formatter, node_labels
 
     return label_formatter, node_labels
 
@@ -374,7 +371,8 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if label == label_formatter.get_label_key():
-                        is_valid, reason = label_formatter.validate_label_value(value)
+                        is_valid, reason = label_formatter.validate_label_value(
+                            value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
                                 f'Node {node_name} in Kubernetes cluster has invalid GPU label: '
