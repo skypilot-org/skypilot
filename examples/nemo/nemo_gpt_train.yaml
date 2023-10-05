@@ -1,31 +1,38 @@
-# Single node training a GPT style model with Nvidia NeMo
+# Distributed training a GPT style model with Nvidia NeMo on multiple nodes.
 #
-# This script downloads data from read-only bucket at gs://sky-wiki-data.
-# If you want to preprocess the data yourself, see nemo_gpt3_preprocessing.yaml.
+# Inspired from https://github.com/NVIDIA/NeMo/blob/main/docs/source/nlp/nemo_megatron/gpt/gpt_training.rst
 #
-# The specific model used here should fit on GPU with 16GB memory.
+# Note that we provide a read-only bucket at gs://sky-wiki-data that is used to
+# download preprocessed data to your bucket. If you want to preprocess the data
+# yourself, see nemo_gpt_preprocessing.yaml.
 #
 # After the script completes, the model checkpoints will be saved in
 # ~/sky_workdir/nemo_experiments/megatron_gpt/checkpoints on the head node.
 #
 # Usage:
-#   sky launch -s -c nemo_gpt3 nemo_gpt3_singlenode.yaml
-#
-#   # Or try on spot A100 GPUs:
-#   sky launch -c nemo_gpt3 nemo_gpt3_singlenode.yaml --use-spot --gpus A100:1
+#   sky launch -s -c nemo_gpt_train nemo_gpt_train.yaml
+#   # The setup will take some time, feel free to ctrl-c once the setup script starts
+#   # You can reconnect
 #
 #   # Terminate cluster after you're done
-#   sky down nemo_gpt3
+#   sky down nemo_gpt_train
 
 resources:
   accelerators: A100:1
 
-num_nodes: 1
+num_nodes: 2
 
 envs:
-  DATASET_ROOT: $HOME/wiki/
+  DATASET_ROOT: /wiki
+  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
 
-setup: |
+file_mounts:
+  ${DATASET_ROOT}:
+    name: ${BUCKET_NAME}
+    mode: MOUNT
+    
+
+setup: |  
   # ============== Dependency Setup ==============
   conda activate nemo
   if [ $? -eq 0 ]; then
@@ -71,7 +78,7 @@ setup: |
       git checkout 52e18c894223800cb611682dce27d88050edf1de
       pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
       cd ..
-        
+
       # Install gsutil if it doesn't exist
       if ! command -v gsutil &> /dev/null
       then
@@ -85,22 +92,42 @@ run: |
   conda activate nemo
   # ============= Data Download =============
   # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
-  # For more on how to pre-process data, see nemo_gpt3_preprocessing.yaml
+  # to our shared bucket at gs://${BUCKET_NAME}. 
+  # 
+  # This bucket acts as a network filesystem (NFS) between the head node and 
+  # worker nodes. In our training script, the head node writes a index 
+  # file to this shared filesystem that is read by workers.
   
-  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
-      echo "Data already downloaded"
+  if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
+      if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
+          echo "Data already downloaded"
+      else
+          echo "Head node downloading data to shared bucket."
+          gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
+      fi
   else
-      echo "Head node downloading data to shared bucket."
-      mkdir -p $DATASET_ROOT
-      gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
+      while [ ! -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; do
+          echo "Worker ${SKYPILOT_NODE_RANK} - waiting for data to be downloaded to shared bucket."
+          sleep 1
+      done
   fi 
   
-  # ============= Training =============    
-  python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
+  # ============= Training =============  
+  # Get the number of nodes and master address from SkyPilot envvars
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  
+  python -m torch.distributed.run \
+    --nproc_per_node=${SKYPILOT_NUM_GPUS_PER_NODE} \
+    --nnodes=${num_nodes} \
+    --node_rank=${SKYPILOT_NODE_RANK} \
+    --master_addr=${master_addr} \
+    --master_port=12375 \
+    NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
     --config-path=conf \
     --config-name=megatron_gpt_config \
     trainer.devices=${SKYPILOT_NUM_GPUS_PER_NODE} \
-    trainer.num_nodes=1 \
+    trainer.num_nodes=${num_nodes} \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \
     trainer.val_check_interval=300 \
@@ -142,4 +169,10 @@ run: |
     exp_manager.checkpoint_callback_params.monitor=val_loss \
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \
-    exp_manager.checkpoint_callback_params.always_save_nemo=False
+    exp_manager.checkpoint_callback_params.always_save_nemo=True
+  
+  # Optional - copy checkpoints to the mounted dataset bucket (~6 GB)
+  # if [ ${SKYPILOT_NODE_RANK} -eq 0 ]; then
+  #     mkdir -p ${DATASET_ROOT}/results
+  #     cp -R ~/sky_workdir/nemo_experiments 
+  # fi

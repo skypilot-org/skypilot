@@ -3,15 +3,15 @@
 # bucket can then be used for training.
 #
 # This YAML is for demonstration purposes and is not a necessary step before
-# running nemo_gpt3_train.yaml. Since this preprocessing can take
+# running nemo_gpt_train.yaml. Since this preprocessing can take
 # upto 6 hours, we provide a read-only bucket with the preprocessed data (gs://sky-wiki-data)
-# that can be downloaded to your bucket (see nemo_gpt3_train.yaml).
+# that can be downloaded to your bucket (see nemo_gpt_train.yaml).
 #
 # Usage:
-#   sky launch -s -c nemo_gpt3_preprocessing nemo_gpt3_preprocessing.yaml
+#   sky launch -s -c nemo_gpt_preprocessing nemo_gpt_preprocessing.yaml
 #
 #   # Terminate cluster after you're done
-#   sky down nemo_gpt3_preprocessing
+#   sky down nemo_gpt_preprocessing
 
 num_nodes: 1
 
