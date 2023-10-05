@@ -2110,10 +2110,13 @@ def logs(
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
-        if not all(job_id.isdigit() for job_id in job_ids):
-            raise click.UsageError(f'Invalid job ID {", ".join(job_ids)}. '
+        # Already check that len(job_ids) <= 1. This variable is used later
+        # in core.tail_logs.
+        job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
                                    'Job ID must be integers.')
-        job_ids_to_query = [int(job_id) for job_id in job_ids]
+        job_ids_to_query = [int(job_id)]
     else:
         job_ids_to_query = job_ids
     if status:
