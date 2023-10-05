@@ -2643,69 +2643,48 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if record is not None:
             usage_lib.messages.usage.update_cluster_status(record['status'])
                 
-        if len(task.resources) > 1:
-            valid_resource = None
-            requested_resource_list = []
-            for resource in task.resources:
-                if (task.num_nodes <= handle.launched_nodes and
-                        resource.less_demanding_than(
-                            launched_resources,
-                            requested_num_nodes=task.num_nodes,
-                            check_ports=check_ports)):
-                    valid_resource = resource
-                    break
-                else:
-                    requested_resource_list.append(
-                        f'{task.num_nodes}x {resource}')
-            requested_resource_str = ', '.join(requested_resource_list)
-            if valid_resource is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing '
-                        'cluster.\n'
-                        f'  Requested:\t{requested_resource_str}\n'
-                        f'  Existing:\t{handle.launched_nodes}x '
-                        f'{handle.launched_resources}\n'
-                        f'{mismatch_str}')
-        else:
-            task_resources = list(task.resources)[0]
-            assert task_resources is not None, task.to_yaml_config()
-            # If only one reasource is specified
-            # Requested_resources <= actual_resources.
-            # Special handling for local cloud case, which assumes a cluster can
-            # be heterogeneous. Here, launched_resources is a list of custom
-            # accelerators per node, and
-            # Resources.less_demanding_than determines
-            # how many nodes satisfy task resource requirements.
-            if not (task.num_nodes <= handle.launched_nodes and
-                    task_resources.less_demanding_than(
+        valid_resource = None
+        requested_resource_list = []
+        for resource in task.resources:
+            if (task.num_nodes <= handle.launched_nodes and
+                    resource.less_demanding_than(
                         launched_resources,
                         requested_num_nodes=task.num_nodes,
                         check_ports=check_ports)):
-                if (task_resources.region is not None and
-                        task_resources.region != launched_resources.region):
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in region '  # pylint: disable=line-too-long
-                            f'{task_resources.region!r}, but the existing cluster '  # pylint: disable=line-too-long
-                            f'is in region {launched_resources.region!r}.')
-                if (task_resources.zone is not None and
-                        task_resources.zone != launched_resources.zone):
-                    zone_str = (f'is in zone {launched_resources.zone!r}.'
-                                if launched_resources.zone is not None else
-                                'does not have zone specified.')
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in zone '  # pylint: disable=line-too-long
-                            f'{task_resources.zone!r}, but the existing cluster '  # pylint: disable=line-too-long
-                            f'{zone_str}')
+                valid_resource = resource
+                break
+            else:
+                requested_resource_list.append(
+                    f'{task.num_nodes}x {resource}')
+        requested_resource_str = ', '.join(requested_resource_list)
+        if valid_resource is None:
+            # Since we assume all resources are in the same zone/region.
+            example_resource = task.resources[0]
+            if (example_resource.region is not None and
+                    example_resource.region != launched_resources.region):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing cluster.\n'  # pylint: disable=line-too-long
-                        f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                        f'  Existing:\t{handle.launched_nodes}x '
-                        f'{handle.launched_resources}\n'
-                        f'{mismatch_str}')
+                        'Task requested resources in region '  # pylint: disable=line-too-long
+                        f'{example_resource.region!r}, but the existing cluster '  # pylint: disable=line-too-long
+                        f'is in region {launched_resources.region!r}.')
+            if (example_resource.zone is not None and
+                    example_resource.zone != launched_resources.zone):
+                zone_str = (f'is in zone {launched_resources.zone!r}.'
+                            if launched_resources.zone is not None else
+                            'does not have zone specified.')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested resources in zone '  # pylint: disable=line-too-long
+                        f'{example_resource.zone!r}, but the existing cluster '  # pylint: disable=line-too-long
+                        f'{zone_str}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Requested resources do not match the existing '
+                    'cluster.\n'
+                    f'  Requested:\t{requested_resource_str}\n'
+                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'{handle.launched_resources}\n'
+                    f'{mismatch_str}')
 
     def _provision(
             self,
