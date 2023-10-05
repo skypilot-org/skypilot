@@ -270,6 +270,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  detach_run: bool,
                  dryrun: bool = False) -> None:
         """ Launches the container."""
+
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
                                       'LocalDockerBackend.')
