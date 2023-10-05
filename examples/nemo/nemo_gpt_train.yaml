@@ -29,6 +29,7 @@ envs:
 file_mounts:
   ${DATASET_ROOT}:
     name: ${BUCKET_NAME}
+    store: gcs
     mode: MOUNT
     
 
