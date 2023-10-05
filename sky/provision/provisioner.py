@@ -138,13 +138,14 @@ def bulk_provision(
 ) -> Optional[provision_common.ProvisionRecord]:
     """Provisions a cluster and wait until fully provisioned."""
     original_config = common_utils.read_yaml(cluster_yaml)
+    head_node_type = original_config['head_node_type']
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         docker_config=original_config.get('docker', {}),
         # NOTE: (might be a legacy issue) we call it
         # 'ray_head_default' in 'gcp-ray.yaml'
-        node_config=original_config['available_node_types']['ray.head.default']
+        node_config=original_config['available_node_types'][head_node_type]
         ['node_config'],
         count=num_nodes,
         tags={},
