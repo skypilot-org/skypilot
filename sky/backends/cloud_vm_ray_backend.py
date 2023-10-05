@@ -3241,6 +3241,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         executable: str,
         detach_run: bool = False,
         spot_dag: Optional['dag.Dag'] = None,
+        service_handle: Optional['serve_lib.ServiceHandle'] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3311,6 +3312,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # the controller process job, as it will stay in the job pending
                 # table and not be executed until there is an empty slot.
                 job_submit_cmd = job_submit_cmd + ' && ' + spot_code
+            if service_handle is not None:
+                # Add the service to service table on controller VM.
+                serve_code = serve_lib.ServeCodeGen.add_service(
+                    job_id, service_handle)
+                job_submit_cmd = job_submit_cmd + ' && ' + serve_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3446,15 +3452,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task: task_lib.Task,
         detach_run: bool,
         dryrun: bool = False,
-    ) -> Optional[int]:
-        """Execute a job on the cluster.
-
-        Returns:
-            The job id if the job is submitted successfully, None otherwise.
-        """
+    ) -> None:
         if task.run is None:
             logger.info('Run commands not specified or empty.')
-            return None
+            return
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
@@ -3464,7 +3465,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if dryrun:
             logger.info(f'Dryrun complete. Would have run:\n{task}')
-            return None
+            return
 
         job_id = self._add_job(handle, task.name, resources_str)
 
@@ -3475,7 +3476,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task, job_id, detach_run)
-        return job_id
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
@@ -4692,7 +4692,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag)
+                                spot_dag=task.spot_dag,
+                                service_handle=task.service_handle)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -4766,4 +4767,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag)
+                                spot_dag=task.spot_dag,
+                                service_handle=task.service_handle)

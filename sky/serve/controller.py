@@ -19,8 +19,10 @@ import uvicorn
 from sky import authentication
 from sky import serve
 from sky import sky_logging
+from sky import status_lib
 from sky.serve import autoscalers
 from sky.serve import infra_providers
+from sky.serve import serve_state
 from sky.utils import env_options
 
 # Use the explicit logger name so that the logger is under the
@@ -90,14 +92,24 @@ class SkyServeController:
 
         @self.app.get('/controller/is_terminating')
         def is_terminating():
+            if self.terminating:
+                self.load_balancer_received_terminal_signal = True
             return {'is_terminating': self.terminating}
 
         @self.app.get('/controller/get_latest_info')
         def get_latest_info():
+            # NOTE(dev): Keep this align with
+            # sky.backends.backend_utils._add_default_value_to_local_record
+            record = serve_state.get_service_from_name(
+                self.infra_provider.service_name)
+            if record is None:
+                record = {}
             latest_info = {
                 'replica_info':
                     self.infra_provider.get_replica_info(verbose=True),
-                'uptime': self.infra_provider.get_uptime(),
+                'uptime': record.get('uptime', None),
+                'status': record.get('status',
+                                     status_lib.ServiceStatus.UNKNOWN),
             }
             latest_info = {
                 k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
@@ -109,6 +121,8 @@ class SkyServeController:
         def terminate(request: fastapi.Request):
             del request
             logger.info('Terminating service...')
+            serve_state.set_status(self.infra_provider.service_name,
+                                   status_lib.ServiceStatus.SHUTTING_DOWN)
             if self.autoscaler is not None:
                 logger.info('Terminate autoscaler...')
                 self.autoscaler.terminate()

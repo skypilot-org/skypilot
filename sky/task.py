@@ -266,8 +266,8 @@ class Task:
         # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
 
-        # Only set to True when 'self' is a sky serve controller task.
-        self.is_sky_serve_controller_task = False
+        # Only set when 'self' is a sky serve controller task.
+        self.service_handle: Optional['serve_lib.ServiceHandle'] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None

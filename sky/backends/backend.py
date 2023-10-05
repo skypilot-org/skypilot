@@ -86,14 +86,7 @@ class Backend(Generic[_ResourceHandleType]):
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
                 detach_run: bool,
-                dryrun: bool = False) -> Optional[int]:
-        """Execute a job on the cluster.
-
-        Returns:
-            The job id if the job is submitted successfully, None otherwise.
-            Job id is a CloudVMRayBackend-specific concept, so all other
-            backends should return None.
-        """
+                dryrun: bool = False) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
@@ -150,7 +143,7 @@ class Backend(Generic[_ResourceHandleType]):
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False) -> Optional[int]:
+                 dryrun: bool = False) -> None:
         raise NotImplementedError
 
     def _post_execute(self, handle: _ResourceHandleType, down: bool) -> None:

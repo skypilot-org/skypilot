@@ -13,6 +13,7 @@ import yaml
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -68,6 +69,14 @@ class SpotJobUpdateEvent(SkyletEvent):
 
     def _run(self):
         spot_utils.update_spot_job_status()
+
+
+class RefreshServiceStatusEvent(SkyletEvent):
+    """Skylet event for monitoring sky serve controller jobs."""
+    EVENT_INTERVAL_SECONDS = 5
+
+    def _run(self):
+        serve_utils.refresh_service_status()
 
 
 class AutostopEvent(SkyletEvent):

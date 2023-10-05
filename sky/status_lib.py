@@ -70,6 +70,9 @@ class ServiceStatus(enum.Enum):
     # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
+    # Cannot connect to controller
+    UNKNOWN = 'UNKNOWN'
+
     # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
@@ -84,6 +87,7 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
+    ServiceStatus.UNKNOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
 }
 

@@ -21,6 +21,8 @@ from sky import global_user_state
 from sky import status_lib
 from sky.data import storage as storage_lib
 from sky.serve import constants
+from sky.serve import serve_state
+from sky.skylet import job_lib
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -312,7 +314,6 @@ class ServiceHandle(object):
     - (required) Whether the service have auto restart enabled.
     - (required) Controller port.
     - (required) LoadBalancer port.
-    - (optional) Service uptime.
     - (optional) Service endpoint IP.
     - (optional) Controller and LoadBalancer job id.
     - (optional) Ephemeral storage generated for the service.
@@ -331,9 +332,7 @@ class ServiceHandle(object):
         auto_restart: bool,
         controller_port: int,
         load_balancer_port: int,
-        uptime: Optional[int] = None,
         endpoint_ip: Optional[str] = None,
-        job_id: Optional[int] = None,
         ephemeral_storage: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self._version = self._VERSION
@@ -344,9 +343,7 @@ class ServiceHandle(object):
         self.auto_restart = auto_restart
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
-        self.uptime = uptime
         self.endpoint_ip = endpoint_ip
-        self.job_id = job_id
         self.ephemeral_storage = ephemeral_storage
 
     def __repr__(self) -> str:
@@ -359,9 +356,7 @@ class ServiceHandle(object):
                 f'\n\tauto_restart={self.auto_restart},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
-                f'\n\tuptime={self.uptime},'
                 f'\n\tendpoint_ip={self.endpoint_ip},'
-                f'\n\tjob_id={self.job_id},'
                 f'\n\tephemeral_storage={self.ephemeral_storage})')
 
     def cleanup_ephemeral_storage(self) -> None:
@@ -405,6 +400,19 @@ def load_terminate_service_result(payload: str) -> Any:
     terminate_resp = common_utils.decode_payload(payload)
     terminate_resp = pickle.loads(base64.b64decode(terminate_resp))
     return terminate_resp
+
+
+def check_service_status_healthy(service_name: str) -> Optional[str]:
+    service_record = serve_state.get_service_from_name(service_name)
+    if service_record is None:
+        return f'Service {service_name!r} does not exist.'
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+        return (f'Service {service_name!r} is still initializing its '
+                'controller. Please try again later.')
+    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
+        return (f'Service {service_name!r}\'s controller failed. '
+                'Cannot tail logs.')
+    return None
 
 
 def _follow_replica_logs(
@@ -475,6 +483,9 @@ def stream_replica_logs(service_name: str,
                         replica_id: int,
                         follow: bool,
                         skip_local_log_file_check: bool = False) -> str:
+    msg = check_service_status_healthy(service_name)
+    if msg is not None:
+        return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
     local_log_file_name = generate_replica_local_log_file_name(
@@ -565,7 +576,10 @@ def _follow_logs(file: TextIO, exit_if_stream_end: bool) -> Iterator[str]:
 
 
 def stream_serve_process_logs(service_name: str, stream_controller: bool,
-                              follow: bool) -> None:
+                              follow: bool) -> str:
+    msg = check_service_status_healthy(service_name)
+    if msg is not None:
+        return msg
     if stream_controller:
         log_file = generate_remote_controller_log_file_name(service_name)
     else:
@@ -573,14 +587,41 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     with open(os.path.expanduser(log_file), 'r', newline='') as f:
         for line in _follow_logs(f, exit_if_stream_end=not follow):
             print(line, end='', flush=True)
+    return ''
 
 
-def cleanup_service_files(service_name: str) -> None:
+def cleanup_service_utility_files(service_name: str) -> None:
     """Cleanup utility files for a service."""
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
     if os.path.exists(dir_name):
         shutil.rmtree(dir_name)
+
+
+def refresh_service_status() -> None:
+    services = serve_state.get_services()
+    for record in services:
+        controller_status = job_lib.get_status(record['controller_job_id'])
+        if controller_status is None or controller_status.is_terminal():
+            # If controller job is not running, set it as controller failed.
+            serve_state.set_status(record['name'],
+                                   status_lib.ServiceStatus.CONTROLLER_FAILED)
+        elif record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+            if controller_status == job_lib.JobStatus.RUNNING:
+                # If controller job is running, update the status to
+                # REPLICA_INIT.
+                serve_state.set_status(record['name'],
+                                       status_lib.ServiceStatus.REPLICA_INIT)
+        # When the service is shutting down, there is a period of time which the
+        # controller still responds to the request, and the replica is not
+        # terminated, so the return value for _service_status_from_replica_info
+        # will still be READY, but we don't want change service status to READY.
+        elif record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
+            latest_info = load_latest_info(
+                get_latest_info(record['controller_port']))
+            serve_state.set_status(
+                record['name'],
+                replica_info_to_service_status(latest_info['replica_info']))
 
 
 class ServeCodeGen:
@@ -590,8 +631,18 @@ class ServeCodeGen:
       >> code = ServeCodeGen.get_latest_info(controller_port)
     """
     _PREFIX = [
+        'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
     ]
+
+    @classmethod
+    def add_service(cls, job_id: int, service_handle: ServiceHandle) -> str:
+        code = [
+            f'serve_state.add_service({job_id}, '
+            f'{service_handle.service_name!r}, '
+            f'{service_handle.controller_port})',
+        ]
+        return cls._build(code)
 
     @classmethod
     def get_latest_info(cls, controller_port: int) -> str:
@@ -628,15 +679,16 @@ class ServeCodeGen:
     def stream_serve_process_logs(cls, service_name: str,
                                   stream_controller: bool, follow: bool) -> str:
         code = [
-            f'serve_utils.stream_serve_process_logs({service_name!r}, '
-            f'{stream_controller}, follow={follow})',
+            f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
+            f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def cleanup_service_files(cls, service_name: str) -> str:
+    def cleanup_service(cls, service_name: str) -> str:
         code = [
-            f'serve_utils.cleanup_service_files({service_name!r})',
+            f'serve_utils.cleanup_service_utility_files({service_name!r})',
+            f'serve_state.remove_service({service_name!r})',
         ]
         return cls._build(code)
 

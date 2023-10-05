@@ -16,6 +16,7 @@ from sky import backends
 from sky import global_user_state
 from sky import status_lib
 from sky.serve import constants
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import job_lib
 from sky.utils import env_options
@@ -194,17 +195,19 @@ class InfraProvider:
 
     def __init__(
             self,
+            service_name: str,
             controller_port: int,
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
-        self.replica_info: serve_utils.ThreadSafeDict[
-            str, ReplicaInfo] = serve_utils.ThreadSafeDict()
+        self.service_name: str = service_name
         self.controller_port = controller_port
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
         self.uptime: Optional[float] = None
+        self.replica_info: serve_utils.ThreadSafeDict[
+            str, ReplicaInfo] = serve_utils.ThreadSafeDict()
         logger.info(f'Readiness probe suffix: {self.readiness_suffix}')
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
@@ -212,9 +215,6 @@ class InfraProvider:
     def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
         # Get replica info for all replicas
         raise NotImplementedError
-
-    def get_uptime(self) -> Optional[float]:
-        return self.uptime
 
     def total_replica_num(self, count_failed_replica: bool) -> int:
         # Returns the total number of replicas
@@ -244,11 +244,9 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, service_name: str, *args,
-                 **kwargs) -> None:
+    def __init__(self, task_yaml_path: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
-        self.service_name: str = service_name
         self.next_replica_id: int = 1
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             str, subprocess.Popen] = serve_utils.ThreadSafeDict()
@@ -602,6 +600,8 @@ class SkyPilotInfraProvider(InfraProvider):
                         logger.info(f'Replica {replica_ip} is the first '
                                     'ready replica. Setting uptime to '
                                     f'{self.uptime}.')
+                        serve_state.set_uptime(self.service_name,
+                                               int(self.uptime))
                     return info.cluster_name, True
             except requests.exceptions.RequestException as e:
                 logger.info(e)

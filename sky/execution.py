@@ -25,14 +25,12 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
-from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -174,7 +172,7 @@ def _execute(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
-) -> Optional[int]:
+) -> None:
     """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
@@ -212,10 +210,6 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
-
-    Returns:
-      A job id (int) if the job is submitted successfully and backend is
-      CloudVmRayBackend, otherwise None.
     """
     dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -321,7 +315,6 @@ def _execute(
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
-    job_id = None
     try:
         if Stage.PROVISION in stages:
             if handle is None:
@@ -334,7 +327,7 @@ def _execute(
 
         if dryrun and handle is None:
             logger.info('Dryrun finished.')
-            return None
+            return
 
         if Stage.SYNC_WORKDIR in stages and not dryrun:
             if task.workdir is not None:
@@ -359,10 +352,7 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                backend.execute(handle, task, detach_run, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -387,7 +377,6 @@ def _execute(
             subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
-    return job_id
 
 
 @timeline.event
@@ -1047,8 +1036,7 @@ def serve_up(
                 service_name,
                 launched_at=int(time.time()),
                 controller_name=controller_name,
-                handle=service_handle,
-                status=status_lib.ServiceStatus.CONTROLLER_INIT)
+                handle=service_handle)
             controller_resources = controller_resources.copy(
                 ports=[load_balancer_port])
     except filelock.Timeout as e:
@@ -1103,10 +1091,10 @@ def serve_up(
         controller_task = task_lib.Task.from_yaml(controller_yaml_path)
         controller_task.set_resources(controller_resources)
 
-        # Set this flag to modify default ray task CPU usage to custom value
+        # Set this to modify default ray task CPU usage to custom value
         # instead of default 0.5 vCPU. We need to set it to a smaller value
         # to support a larger number of services.
-        controller_task.is_sky_serve_controller_task = True
+        controller_task.service_handle = service_handle
 
         controller_task.update_envs(_shared_controller_env_vars())
 
@@ -1114,7 +1102,7 @@ def serve_up(
         style = colorama.Style
         print(f'\n{fore.YELLOW}Launching controller for {service_name!r}...'
               f'{style.RESET_ALL}')
-        job_id = _execute(
+        _execute(
             entrypoint=controller_task,
             stream_logs=False,
             cluster_name=controller_name,
@@ -1129,52 +1117,14 @@ def serve_up(
 
         controller_record = global_user_state.get_cluster_from_name(
             controller_name)
-        if controller_record is None:
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Controller failed to launch. Please check the logs above.')
+        assert controller_record is not None
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend), backend
-        backend.register_info(minimize_logging=True)
         service_handle.endpoint_ip = handle.head_ip
         global_user_state.set_service_handle(service_name, service_handle)
 
-        def _wait_until_job_is_running_on_controller(
-                job_id: Optional[int]) -> bool:
-            if job_id is None:
-                return False
-            for _ in range(serve.SERVE_STARTUP_TIMEOUT):
-                job_statuses = backend.get_job_status(handle, [job_id],
-                                                      stream_logs=False)
-                job_status = job_statuses.get(job_id, None)
-                if job_status == job_lib.JobStatus.RUNNING:
-                    return True
-                time.sleep(1)
-            # Cancel any jobs that are still pending after timeout.
-            if job_status == job_lib.JobStatus.PENDING:
-                backend.cancel_jobs(handle, jobs=[job_id])
-            return False
-
-        if not _wait_until_job_is_running_on_controller(job_id):
-            global_user_state.set_service_status(
-                service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Controller failed to launch. Please check '
-                    f'the logs with sky serve logs {service_name} '
-                    '--controller')
-
-        service_handle.job_id = job_id
-        global_user_state.set_service_handle(service_name, service_handle)
         print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
               f'{style.RESET_ALL}')
-
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.REPLICA_INIT)
 
         print(f'\n{fore.CYAN}Service name: '
               f'{style.BRIGHT}{service_name}{style.RESET_ALL}'

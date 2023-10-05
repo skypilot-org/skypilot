@@ -99,8 +99,7 @@ def create_table(cursor, conn):
         name TEXT PRIMARY KEY,
         launched_at INTEGER,
         controller_name TEXT,
-        handle BLOB,
-        status TEXT)""")
+        handle BLOB)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -282,11 +281,10 @@ def add_or_update_cluster(cluster_name: str,
 
 
 def add_or_update_service(name: str, launched_at: int, controller_name: str,
-                          handle: 'serve.ServiceHandle',
-                          status: status_lib.ServiceStatus) -> None:
+                          handle: 'serve.ServiceHandle') -> None:
     _DB.cursor.execute(
         'INSERT or REPLACE INTO services'
-        '(name, launched_at, controller_name, handle, status) '
+        '(name, launched_at, controller_name, handle) '
         'VALUES ('
         # name
         '?, '
@@ -295,8 +293,6 @@ def add_or_update_service(name: str, launched_at: int, controller_name: str,
         # controller_name
         '?, '
         # handle
-        '?, '
-        # status
         '?'
         ')',
         (
@@ -308,8 +304,6 @@ def add_or_update_service(name: str, launched_at: int, controller_name: str,
             controller_name,
             # handle
             pickle.dumps(handle),
-            # status
-            status.value,
         ))
 
     _DB.conn.commit()
@@ -359,16 +353,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 def remove_service(service_name: str):
     _DB.cursor.execute('DELETE FROM services WHERE name=(?)', (service_name,))
     _DB.conn.commit()
-
-
-def set_service_status(service_name: str, status: status_lib.ServiceStatus):
-    _DB.cursor.execute('UPDATE services SET status=(?) '
-                       'WHERE name=(?)', (status.value, service_name))
-    count = _DB.cursor.rowcount
-    _DB.conn.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Service {service_name} not found.')
 
 
 def set_service_handle(service_name: str, handle: 'serve.ServiceHandle'):
@@ -613,14 +597,13 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     # Explicitly specify the number of fields to unpack, so that
     # we can add new fields to the database in the future without
     # breaking the previous code.
-    name, launched_at, controller_name, handle, status = row[:5]
+    name, launched_at, controller_name, handle = row[:4]
     # TODO: use namedtuple instead of dict
     return {
         'name': name,
         'launched_at': launched_at,
         'controller_name': controller_name,
         'handle': pickle.loads(handle),
-        'status': status_lib.ServiceStatus[status],
     }
 
 

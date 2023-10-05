@@ -413,8 +413,7 @@ def _get_requested_resources(service_record: _ServiceRecord) -> 'sky.Resources':
 
 
 def _get_uptime(service_record: _ServiceRecord) -> str:
-    handle = _get_service_handle(service_record)
-    uptime = handle.uptime
+    uptime = service_record['uptime']
     if uptime is None:
         return '-'
     return log_utils.readable_time_duration(uptime, absolute=True)

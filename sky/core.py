@@ -1074,15 +1074,6 @@ def serve_tail_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist. '
                              'Cannot stream logs.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Service {service_name!r} is still initializing its '
-                'controller. Please try again later.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r}\'s controller failed. '
-                             'Cannot tail logs.')
     service_handle: serve.ServiceHandle = service_record['handle']
     controller_name = service_record['controller_name']
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
@@ -1119,8 +1110,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
 
     service_handle: serve.ServiceHandle = service_record['handle']
     controller_name = service_record['controller_name']
-    global_user_state.set_service_status(service_name,
-                                         status_lib.ServiceStatus.SHUTTING_DOWN)
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
     controller_fetch_ip_error_message = (
@@ -1194,7 +1183,8 @@ def serve_down(service_name: str, purge: bool = False) -> None:
             # We have a 10-min grace period for the controller to autostop,
             # so it should be fine if this is the last service on the
             # controller and its job is the only one running.
-            code = serve.ServeCodeGen.cleanup_service_files(service_name)
+            # Also, Cleanup the service record in controller VM
+            code = serve.ServeCodeGen.cleanup_service(service_name)
             returncode, _, stderr = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True,
@@ -1202,8 +1192,7 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                                                         separate_stderr=True)
             subprocess_utils.handle_returncode(
                 returncode,
-                code, ('Failed when cleaning up service files on controller '
-                       f'of service {service_name!r}'),
+                code, ('Failed when cleaning up service {service_name!r}'),
                 stderr,
                 stream_logs=False)
 

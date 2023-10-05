@@ -39,7 +39,7 @@ TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
-SKYLET_VERSION = '2'
+SKYLET_VERSION = '3'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related

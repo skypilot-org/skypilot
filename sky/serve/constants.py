@@ -37,9 +37,6 @@ CONTROLLER_SYNC_INTERVAL = 20
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT = 15
 
-# The time to wait for a service to start up when we start a service.
-SERVE_STARTUP_TIMEOUT = 60
-
 # The default controller resources.
 # We need 200 GB disk space to enable using Azure as controller, since its image
 # size is 150 GB. Also, we need 32 GB memory to run our controller and load

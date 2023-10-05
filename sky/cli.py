@@ -4103,18 +4103,10 @@ def serve_up(
     previous_service_record = global_user_state.get_service_from_name(
         service_name)
     if previous_service_record is not None:
-        if previous_service_record['status'] in [
-                status_lib.ServiceStatus.CONTROLLER_FAILED,
-                status_lib.ServiceStatus.FAILED
-        ]:
-            prompt = (f'Service {service_name!r} has failed. '
-                      'Please clean up the service and restart: '
-                      f'sky serve down {service_name}')
-        else:
-            prompt = (f'Service {service_name!r} already exists. '
-                      'Updating a service will be supported in the future. '
-                      'For now, clean up the service and restart: '
-                      f'sky serve down {service_name}')
+        prompt = (f'Service {service_name!r} already exists. '
+                  'Updating a service will be supported in the future. '
+                  'For now, clean up the service and restart: '
+                  f'sky serve down {service_name}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
@@ -4245,12 +4237,12 @@ def serve_status(all: bool, service_names: List[str]):
       # Only show status of my-service
       sky serve status my-service
     """
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
-               f'{colorama.Style.RESET_ALL}')
     query_services: Optional[List[str]] = None
     if service_names:
         query_services = _get_glob_services(service_names)
     service_records = core.serve_status(query_services)
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
+               f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)
     click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Replicas{colorama.Style.RESET_ALL}')
@@ -4267,19 +4259,6 @@ def serve_status(all: bool, service_names: List[str]):
                 replica_record['service_name'] = service_record['name']
                 replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
-
-    failed_controllers = [
-        record['name']
-        for record in service_records
-        if record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED
-    ]
-    if failed_controllers:
-        num_failed = len(failed_controllers)
-        plural = '' if num_failed == 1 else 's'
-        click.echo(
-            f'\n* {num_failed} service{plural} with failed controller found. '
-            'Please manually check if there is any leaked resources for '
-            f'services: {", ".join(failed_controllers)}.')
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)

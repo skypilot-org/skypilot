@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import copy
 import dataclasses
 from datetime import datetime
 import difflib
@@ -2716,6 +2715,17 @@ def get_clusters(
     return kept_records
 
 
+def _add_default_value_to_local_record(
+        record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    # NOTE(dev): Keep this align with sky.serve.controller.get_latest_info
+    if record is None:
+        return record
+    record['status'] = status_lib.ServiceStatus.UNKNOWN
+    record['uptime'] = None
+    record['replica_info'] = []
+    return record
+
+
 def _refresh_service_record_no_lock(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Refresh the service, and return the possibly updated record.
@@ -2727,30 +2737,24 @@ def _refresh_service_record_no_lock(
         A tuple of a possibly updated record and an error message if any error
         occurred when refreshing the service.
     """
-    local_record = global_user_state.get_service_from_name(service_name)
-    if local_record is None:
+    record = global_user_state.get_service_from_name(service_name)
+    if record is None:
         return None, None
-
-    # We use a copy of the record with default value of replica_info to return
-    # when there is an error.
-    record = copy.deepcopy(local_record)
-    record['replica_info'] = []
-    service_handle: serve_lib.ServiceHandle = local_record['handle']
+    _add_default_value_to_local_record(record)
 
     try:
         check_network_connection()
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
+    service_handle: serve_lib.ServiceHandle = record['handle']
     if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
+        record['status'] = status_lib.ServiceStatus.CONTROLLER_INIT
         return record, None
 
-    controller_name = local_record['controller_name']
+    controller_name = record['controller_name']
     cluster_record = global_user_state.get_cluster_from_name(controller_name)
-
-    # We don't check controller status here since it might be in INIT status
-    # when other services is starting and launching the controller.
     assert cluster_record is not None
 
     handle = cluster_record['handle']
@@ -2759,37 +2763,18 @@ def _refresh_service_record_no_lock(
 
     code = serve_lib.ServeCodeGen.get_latest_info(
         service_handle.controller_port)
-    returncode, latest_info_payload, _ = backend.run_on_head(
+    returncode, latest_info_payload, stderr = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
     if returncode != 0:
-        global_user_state.set_service_status(
-            service_name, status_lib.ServiceStatus.CONTROLLER_FAILED)
-        return record, None
+        return record, stderr
 
     latest_info = serve_lib.load_latest_info(latest_info_payload)
-    service_handle.uptime = latest_info['uptime']
-
-    # When the service is shutting down, there is a period of time which the
-    # controller still responds to the request, and the replica is not
-    # terminated, so the return value for _service_status_from_replica_info
-    # will still be READY, but we don't want change service status to READY.
-    # For controller init, there is a small chance that the controller is
-    # running but the load balancer is not. In this case, the service status
-    # shouldn't be refreshed too.
-    if local_record['status'] not in [
-            status_lib.ServiceStatus.SHUTTING_DOWN,
-            status_lib.ServiceStatus.CONTROLLER_INIT,
-    ]:
-        local_record['status'] = serve_lib.replica_info_to_service_status(
-            latest_info['replica_info'])
-
-    global_user_state.add_or_update_service(**local_record)
-    local_record['replica_info'] = latest_info['replica_info']
-    return local_record, None
+    record.update(latest_info)
+    return record, None
 
 
 def _refresh_service_record(
@@ -2804,7 +2789,8 @@ def _refresh_service_record(
     except filelock.Timeout:
         msg = ('Failed get the lock for service '
                f'{service_name!r}. Using the cached record.')
-        return global_user_state.get_service_from_name(service_name), msg
+        return _add_default_value_to_local_record(
+            global_user_state.get_service_from_name(service_name)), msg
 
 
 # TODO(tian): Maybe aggregate services using same controller to reduce SSH
@@ -2905,8 +2891,8 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
     resources_dict = {
         # We set CPU resource for sky serve controller to a smaller value
         # to support a larger number of services.
-        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND if
-                task.is_sky_serve_controller_task else DEFAULT_TASK_CPU_DEMAND)
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
+                if task.service_handle is not None else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
         resources = task.best_resources
