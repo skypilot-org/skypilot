@@ -2611,8 +2611,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
-        If multiple resources are specified, this will pass when
-        at least one resource is less demanding than the cluster.
+        If multiple resources are specified, this checking will pass when
+        at least one resource fits the cluster.
         """
 
         launched_resources = handle.launched_resources
