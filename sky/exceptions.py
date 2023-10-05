@@ -80,15 +80,18 @@ class CommandError(Exception):
     """Raised when a command fails.
 
     Args:
-    returncode: The returncode of the command.
-    command: The command that was run.
-    error_message: The error message to print.
+        returncode: The returncode of the command.
+        command: The command that was run.
+        error_message: The error message to print.
+        detailed_reason: The stderr of the command.
     """
 
-    def __init__(self, returncode: int, command: str, error_msg: str) -> None:
+    def __init__(self, returncode: int, command: str, error_msg: str,
+                 detailed_reason: Optional[str]) -> None:
         self.returncode = returncode
         self.command = command
         self.error_msg = error_msg
+        self.detailed_reason = detailed_reason
         message = (f'Command {command} failed with return code {returncode}.'
                    f'\n{error_msg}')
         super().__init__(message)
@@ -215,3 +218,35 @@ class ClusterOwnerIdentityMismatchError(Exception):
 class NoCloudAccessError(Exception):
     """Raised when all clouds are disabled."""
     pass
+
+
+class AWSAzFetchingError(Exception):
+    """Raised when fetching the AWS availability zone fails."""
+
+    class Reason(enum.Enum):
+        """Reason for fetching availability zone failure."""
+
+        AUTH_FAILURE = 'AUTH_FAILURE'
+        AZ_PERMISSION_DENIED = 'AZ_PERMISSION_DENIED'
+
+        @property
+        def message(self) -> str:
+            if self == self.AUTH_FAILURE:
+                return ('Failed to access AWS services. Please check your AWS '
+                        'credentials.')
+            elif self == self.AZ_PERMISSION_DENIED:
+                return (
+                    'Failed to retrieve availability zones. '
+                    'Please ensure that the `ec2:DescribeAvailabilityZones` '
+                    'action is enabled for your AWS account in IAM. '
+                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
+                )
+            else:
+                raise ValueError(f'Unknown reason {self}')
+
+    def __init__(self, region: str,
+                 reason: 'AWSAzFetchingError.Reason') -> None:
+        self.region = region
+        self.reason = reason
+
+        super().__init__(reason.message)

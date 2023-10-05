@@ -7,28 +7,34 @@ import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
+import colorama
 import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
+import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
+logger = sky_logging.init_logger(__name__)
+
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
 CommandOrCommandGen = Union[str, CommandGen]
 
 _VALID_NAME_REGEX = '[a-z0-9]+(?:[._-]{1,2}[a-z0-9]+)*'
-_VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 _VALID_NAME_DESCR = ('ASCII characters and may contain lowercase and'
                      ' uppercase letters, digits, underscores, periods,'
                      ' and dashes. Must start and end with alphanumeric'
@@ -39,7 +45,7 @@ _RUN_FN_CHECK_FAIL_MSG = (
     'a list of node ip addresses (List[str]). Got {run_sig}')
 
 
-def _is_valid_name(name: str) -> bool:
+def _is_valid_name(name: Optional[str]) -> bool:
     """Checks if the task name is valid.
 
     Valid is defined as either NoneType or str with ASCII characters which may
@@ -63,11 +69,6 @@ def _is_valid_name(name: str) -> bool:
     if name is None:
         return True
     return bool(re.fullmatch(_VALID_NAME_REGEX, name))
-
-
-def _is_valid_env_var(name: str) -> bool:
-    """Checks if the task environment variable name is valid."""
-    return bool(re.fullmatch(_VALID_ENV_VAR_REGEX, name))
 
 
 def _fill_in_env_vars_in_file_mounts(
@@ -102,6 +103,59 @@ def _fill_in_env_vars_in_file_mounts(
     pattern = r'\$\{?\b([a-zA-Z_][a-zA-Z0-9_]*)\b\}?'
     file_mounts_str = re.sub(pattern, replace_var, file_mounts_str)
     return json.loads(file_mounts_str)
+
+
+def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
+    """Checks if there is a valid docker login config in task_envs.
+
+    If any of the docker login env vars is set, all of them must be set.
+
+    Raises:
+        ValueError: if any of the docker login env vars is set, but not all of
+            them are set.
+    """
+    all_keys = constants.DOCKER_LOGIN_ENV_VARS
+    existing_keys = all_keys & set(task_envs.keys())
+    if not existing_keys:
+        return False
+    if len(existing_keys) != len(all_keys):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'If any of {", ".join(all_keys)} is set, all of them must '
+                f'be set. Missing envs: {all_keys - existing_keys}')
+    return True
+
+
+def _with_docker_login_config(
+    resources_set: Set['resources_lib.Resources'],
+    task_envs: Dict[str, str],
+) -> Set['resources_lib.Resources']:
+    if not _check_docker_login_config(task_envs):
+        return resources_set
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
+        task_envs)
+
+    def _add_docker_login_config(resources: 'resources_lib.Resources'):
+        docker_image = resources.extract_docker_image()
+        if docker_image is None:
+            logger.warning(f'{colorama.Fore.YELLOW}Docker login configs '
+                           f'{", ".join(constants.DOCKER_LOGIN_ENV_VARS)} '
+                           'are provided, but no docker image is specified '
+                           'in `image_id`. The login configs will be '
+                           f'ignored.{colorama.Style.RESET_ALL}')
+            return resources
+        # Already checked in extract_docker_image
+        assert len(resources.image_id) == 1, resources.image_id
+        region = list(resources.image_id.keys())[0]
+        # We automatically add the server prefix to the image name if
+        # the user did not add it.
+        server_prefix = f'{docker_login_config.server}/'
+        if not docker_image.startswith(server_prefix):
+            docker_image = f'{server_prefix}{docker_image}'
+        return resources.copy(image_id={region: 'docker:' + docker_image},
+                              _docker_login_config=docker_login_config)
+
+    return {_add_docker_login_config(resources) for resources in resources_set}
 
 
 class Task:
@@ -191,10 +245,10 @@ class Task:
         # https://github.com/python/mypy/issues/3004
         self.num_nodes = num_nodes  # type: ignore
 
-        self.inputs = None
-        self.outputs = None
-        self.estimated_inputs_size_gigabytes = None
-        self.estimated_outputs_size_gigabytes = None
+        self.inputs: Optional[str] = None
+        self.outputs: Optional[str] = None
+        self.estimated_inputs_size_gigabytes: Optional[float] = None
+        self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
         # Resources that this task cannot run on.
@@ -391,7 +445,7 @@ class Task:
           ValueError: if the path gets loaded into a str instead of a dict; or
             if there are any other parsing errors.
         """
-        with open(os.path.expanduser(yaml_path), 'r') as f:
+        with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
             # to raise errors on duplicate keys.
@@ -452,7 +506,7 @@ class Task:
                 if not isinstance(key, str):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Env keys must be strings.')
-                if not _is_valid_env_var(key):
+                if not common_utils.is_valid_env_var(key):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Invalid env key: {key}')
         else:
@@ -461,6 +515,12 @@ class Task:
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs.update(envs)
+        # If the update_envs() is called after set_resources(), we need to
+        # manually update docker login config in task resources, in case the
+        # docker login envs are newly added.
+        if _check_docker_login_config(self._envs):
+            self.resources = _with_docker_login_config(self.resources,
+                                                       self._envs)
         return self
 
     @property
@@ -471,16 +531,17 @@ class Task:
     def use_spot(self) -> bool:
         return any(r.use_spot for r in self.resources)
 
-    def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
+    def set_inputs(self, inputs: str,
+                   estimated_size_gigabytes: float) -> 'Task':
         # E.g., 's3://bucket', 'gs://bucket', or None.
         self.inputs = inputs
         self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_inputs(self):
+    def get_inputs(self) -> Optional[str]:
         return self.inputs
 
-    def get_estimated_inputs_size_gigabytes(self):
+    def get_estimated_inputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_inputs_size_gigabytes
 
     def get_inputs_cloud(self):
@@ -496,15 +557,16 @@ class Task:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'cloud path not supported: {self.inputs}')
 
-    def set_outputs(self, outputs, estimated_size_gigabytes) -> 'Task':
+    def set_outputs(self, outputs: str,
+                    estimated_size_gigabytes: float) -> 'Task':
         self.outputs = outputs
         self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
         return self
 
-    def get_outputs(self):
+    def get_outputs(self) -> Optional[str]:
         return self.outputs
 
-    def get_estimated_outputs_size_gigabytes(self):
+    def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
     def set_resources(
@@ -527,7 +589,7 @@ class Task:
         if isinstance(resources, sky.Resources):
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
-        self.resources = resources
+        self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
     def get_resources(self):
@@ -772,6 +834,7 @@ class Task:
         if storage_cloud is None:
             storage_cloud = clouds.CLOUD_REGISTRY.from_str(
                 enabled_storage_clouds[0])
+            assert storage_cloud is not None, enabled_storage_clouds[0]
 
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
         return store_type
@@ -934,8 +997,6 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
-            return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
@@ -947,7 +1008,10 @@ class Task:
         else:
             run_msg = 'run=<fn>'
 
-        s = f'Task({run_msg})'
+        name_str = ''
+        if self.name is not None:
+            name_str = f'<name={self.name}>'
+        s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
@@ -955,10 +1019,13 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+            resources_str = ('{' + ', '.join(
+                r.repr_with_region_zone for r in self.resources) + '}')
+            s += f'\n  resources: {resources_str}'
+        elif (len(self.resources) == 1 and
+              not list(self.resources)[0].is_empty()):
+            s += (f'\n  resources: '
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s

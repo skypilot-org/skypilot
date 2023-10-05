@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -30,12 +31,6 @@ logger = sky_logging.init_logger(__name__)
 
 def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
-
-
-def _get_user_hash():
-    """Returns a unique user-machine specific hash as a user id for logging."""
-    user_id = os.getenv(constants.USAGE_USER_ENV)
-    return common_utils.get_user_hash(default_value=user_id)
 
 
 class MessageType(enum.Enum):
@@ -74,7 +69,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = _get_user_hash()
+        self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
 
@@ -152,6 +147,7 @@ class UsageMessageToReport(MessageToReport):
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
         self.runtimes: Dict[str, float] = {}  # update_runtime
+        self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
@@ -424,9 +420,14 @@ def entrypoint_context(name: str, fallback: bool = False):
     # Should be the outermost entrypoint or the fallback entrypoint.
     try:
         yield
-    except (Exception, SystemExit, KeyboardInterrupt):
-        trace = traceback.format_exc()
-        messages.usage.stacktrace = trace
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
+        with ux_utils.enable_traceback():
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+            if hasattr(e, 'detailed_reason'):
+                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            messages.usage.exception = common_utils.remove_color(
+                common_utils.format_exception(e))
         raise
     finally:
         if fallback:

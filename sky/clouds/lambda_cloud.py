@@ -9,7 +9,7 @@ from sky import clouds
 from sky import exceptions
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.clouds.utils import lambda_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -53,7 +53,7 @@ class Lambda(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
@@ -154,8 +154,10 @@ class Lambda(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert zones is None, 'Lambda does not support zones.'
 
         r = resources
@@ -172,7 +174,8 @@ class Lambda(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud

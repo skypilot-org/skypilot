@@ -16,7 +16,6 @@ import uuid
 
 import colorama
 import prettytable
-from rich import console as rich_console
 from rich import progress as rich_progress
 
 import sky
@@ -32,6 +31,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -39,7 +39,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
@@ -224,7 +223,7 @@ def _launch_with_log_suppress_exception(
             log_path=os.path.join(log_dir, f'{cluster}.log'),
             stream_logs=True,
             streaming_prefix=prefix,
-            start_streaming_at='Creating a new cluster: "',
+            start_streaming_at='Creating a new cluster: ',
             skip_lines=[
                 'Tip: to reuse an existing cluster, specify --cluster (-c).',
             ],
@@ -318,8 +317,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
             # NOTE: The id of the benchmarking job must be 1.
             # TODO(woosuk): Handle exceptions.
             job_status = backend.get_job_status(handle,
-                                                job_ids=['1'],
-                                                stream_logs=False)['1']
+                                                job_ids=[1],
+                                                stream_logs=False)[1]
 
     # Update the benchmark status.
     if (cluster_status == status_lib.ClusterStatus.INIT or
@@ -569,7 +568,7 @@ def update_benchmark_state(benchmark: str) -> None:
     remote_dir = os.path.join(bucket_name, benchmark)
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     os.makedirs(local_dir, exist_ok=True)
-    with console.status('[bold cyan]Downloading benchmark logs[/]'):
+    with rich_utils.safe_status('[bold cyan]Downloading benchmark logs[/]'):
         _download_remote_dir(remote_dir, local_dir, bucket_type)
 
     # Update the benchmark results in parallel.
