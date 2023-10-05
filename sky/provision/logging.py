@@ -23,7 +23,7 @@ config = _LoggingConfig()
 def setup_provision_logging(log_dir: str):
     try:
         # Redirect underlying provision logs to file.
-        log_path = os.path.join(log_dir, 'provision.log')
+        log_path = os.path.expanduser(os.path.join(log_dir, 'provision.log'))
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         log_abs_path = pathlib.Path(log_path).expanduser().absolute()
         fh = logging.FileHandler(log_abs_path)
