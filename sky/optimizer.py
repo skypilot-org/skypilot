@@ -270,7 +270,7 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                node_to_cost_map[node][list(node.get_resources())[0]] = 0
+                node_to_cost_map[node][node.get_resources()[0]] = 0
                 continue
 
             # Don't print for the last node, Sink.
@@ -301,7 +301,7 @@ class Optimizer:
             else:
                 # Dummy sink node.
                 launchable_resources = {
-                    list(node.get_resources())[0]: node.get_resources()
+                    node.get_resources()[0]: node.get_resources()
                 }
 
             for orig_resources, launchable_list in launchable_resources.items():
@@ -309,7 +309,7 @@ class Optimizer:
                     location_hint = ''
                     source_hint = 'catalog'
                     if node.get_resources():
-                        specified_resources = list(node.get_resources())[0]
+                        specified_resources = node.get_resources()[0]
                         if specified_resources.zone is not None:
                             location_hint = (
                                 f' Zone: {specified_resources.zone}.')
@@ -421,7 +421,7 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                dp_best_objective[node][list(node.get_resources())[0]] = 0
+                dp_best_objective[node][node.get_resources()[0]] = 0
                 continue
 
             parent = topo_order[node_i - 1]
@@ -884,7 +884,7 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            accelerator = list(node.get_resources())[0].accelerators
+            accelerator = node.get_resources()[0].accelerators
             is_multi_instances = False
             if accelerator:
                 acc_name, acc_count = list(accelerator.items())[0]
