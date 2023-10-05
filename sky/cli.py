@@ -1845,14 +1845,8 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            nonreserved_cluster_records, all)
+            nonreserved_cluster_records + reserved_clusters, all)
         status_utils.show_local_status_table(local_clusters)
-
-        if reserved_clusters:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}\n'
-                       f'Controllers{colorama.Style.RESET_ALL}')
-            num_pending_autostop += status_utils.show_status_table(
-                reserved_clusters, all)
 
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
