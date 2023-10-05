@@ -2639,8 +2639,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
 
+        # Usage Collection:
+        usage_lib.messages.usage.update_cluster_resources(
+            handle.launched_nodes, launched_resources)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is not None:
+            usage_lib.messages.usage.update_cluster_status(record['status'])
+                
         if len(task.resources) > 1:
-
             valid_resource = None
             requested_resource_list = []
             for resource in task.resources:
@@ -2667,12 +2673,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             task_resources = list(task.resources)[0]
             assert task_resources is not None, task.to_yaml_config()
-            usage_lib.messages.usage.update_cluster_resources(
-                handle.launched_nodes, launched_resources)
-            record = global_user_state.get_cluster_from_name(cluster_name)
-            if record is not None:
-                usage_lib.messages.usage.update_cluster_status(record['status'])
-
             # If only one reasource is specified
             # Requested_resources <= actual_resources.
             # Special handling for local cloud case, which assumes a cluster can
