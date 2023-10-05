@@ -1031,8 +1031,6 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != self.CLI_CMD_TASK_NAME:
-            return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
@@ -1044,7 +1042,10 @@ class Task:
         else:
             run_msg = 'run=<fn>'
 
-        s = f'Task({run_msg})'
+        name_str = ''
+        if self.name is not None and self.name != self.CLI_CMD_TASK_NAME:
+            name_str = f'<name={self.name}>'
+        s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
@@ -1052,10 +1053,13 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+            resources_str = ('{' + ', '.join(
+                r.repr_with_region_zone for r in self.resources) + '}')
+            s += f'\n  resources: {resources_str}'
+        elif (len(self.resources) == 1 and
+              not list(self.resources)[0].is_empty()):
+            s += (f'\n  resources: '
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s

@@ -82,6 +82,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.Local: 90,
     clouds.OCI: 300,
+    clouds.Kubernetes: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -4630,8 +4631,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     # Strip the command (a big heredoc) from the exception
                     raise exceptions.CommandError(
-                        e.returncode, command='to mount',
-                        error_msg=e.error_msg) from None
+                        e.returncode,
+                        command='to mount',
+                        error_msg=e.error_msg,
+                        detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')

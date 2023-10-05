@@ -267,52 +267,6 @@ class Optimizer:
             num_resources = len(node.get_resources())
 
             for orig_resources, launchable_list in launchable_resources.items():
-                if not launchable_list:
-                    location_hint = ''
-                    source_hint = 'catalog'
-                    if node.get_resources():
-                        specified_resources = list(node.get_resources())[0]
-                        if specified_resources.zone is not None:
-                            location_hint = (
-                                f' Zone: {specified_resources.zone}.')
-                        elif specified_resources.region:
-                            location_hint = (
-                                f' Region: {specified_resources.region}.')
-
-                        # If Kubernetes was included in the search space, then
-                        # mention "kubernetes cluster" and/instead of "catalog"
-                        # in the error message.
-                        enabled_clouds = global_user_state.get_enabled_clouds()
-                        if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
-                            if specified_resources.cloud is None:
-                                source_hint = 'catalog and kubernetes cluster'
-                            elif specified_resources.cloud.is_same_cloud(
-                                    clouds.Kubernetes()):
-                                source_hint = 'kubernetes cluster'
-
-                    # TODO(romilb): When `sky show-gpus` supports Kubernetes,
-                    #  add a hint to run `sky show-gpus --kubernetes` to list
-                    #  available accelerators on Kubernetes.
-
-                    bold = colorama.Style.BRIGHT
-                    cyan = colorama.Fore.CYAN
-                    reset = colorama.Style.RESET_ALL
-                    fuzzy_candidates_str = ''
-                    if fuzzy_candidates:
-                        fuzzy_candidates_str = (
-                            f'\nTry one of these offered accelerators: {cyan}'
-                            f'{fuzzy_candidates}{reset}')
-                    error_msg = (
-                        f'{source_hint.capitalize()} does not contain any '
-                        f'instances satisfying the request:\n{node}.'
-                        f'{location_hint}\n\nTo fix: relax or change the '
-                        f'resource requirements.{fuzzy_candidates_str}\n\n'
-                        f'Hint: {bold}sky show-gpus{reset} '
-                        'to list available accelerators.\n'
-                        f'      {bold}sky check{reset} to check the enabled '
-                        'clouds.')
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -358,6 +312,44 @@ class Optimizer:
                                 '  estimated_cost (not incl. egress): ${:.1f}'.
                                 format(estimated_cost_or_time))
                     node_to_cost_map[node][resources] = estimated_cost_or_time
+            if not node_to_cost_map[node]:
+                source_hint = 'catalog'
+                # If Kubernetes was included in the search space, then
+                # mention "kubernetes cluster" and/instead of "catalog"
+                # in the error message.
+                enabled_clouds = global_user_state.get_enabled_clouds()
+                if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                    if any(orig_resources.cloud is None
+                           for orig_resources in node.get_resources()):
+                        source_hint = 'catalog and kubernetes cluster'
+                    elif all(
+                            isinstance(orig_resources.cloud, clouds.Kubernetes)
+                            for orig_resources in node.get_resources()):
+                        source_hint = 'kubernetes cluster'
+
+                # TODO(romilb): When `sky show-gpus` supports Kubernetes,
+                #  add a hint to run `sky show-gpus --kubernetes` to list
+                #  available accelerators on Kubernetes.
+
+                bold = colorama.Style.BRIGHT
+                cyan = colorama.Fore.CYAN
+                reset = colorama.Style.RESET_ALL
+                fuzzy_candidates_str = ''
+                if fuzzy_candidates:
+                    fuzzy_candidates_str = (
+                        f'\nTry one of these offered accelerators: {cyan}'
+                        f'{fuzzy_candidates}{reset}')
+                error_msg = (
+                    f'{source_hint.capitalize()} does not contain any '
+                    f'instances satisfying the request:\n{node}.'
+                    f'\n\nTo fix: relax or change the '
+                    f'resource requirements.{fuzzy_candidates_str}\n\n'
+                    f'Hint: {bold}sky show-gpus{reset} '
+                    'to list available accelerators.\n'
+                    f'      {bold}sky check{reset} to check the enabled '
+                    'clouds.')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(error_msg)
         return node_to_cost_map, node_to_candidate_map
 
     @staticmethod
@@ -1008,8 +1000,8 @@ def _fill_in_launchable_resources(
                                                      False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
-                    f'task_lib.Task {task} requires {resources.cloud} which is '
-                    'not enabled. To enable access, run '
+                    f'Task requires {resources.cloud} which is '
+                    f'not enabled: {task}.\nTo enable access, run '
                     f'{colorama.Style.BRIGHT}'
                     f'sky check {colorama.Style.RESET_ALL}, or change the '
                     'cloud requirement')
@@ -1041,7 +1033,10 @@ def _fill_in_launchable_resources(
             if len(launchable[resources]) == 0:
                 clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                     clouds_list[0])
-                logger.info(f'No resource satisfying {resources} '
+                num_node_str = ''
+                if task.num_nodes > 1:
+                    num_node_str = f'{task.num_nodes}x '
+                logger.info(f'No resource satisfying {num_node_str}{resources} '
                             f'on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
