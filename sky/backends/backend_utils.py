@@ -158,6 +158,7 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
 # network issues.
 MAX_DATA_TRANSFER_RETRY = 3
 
+
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
     return len(re.findall(IP_ADDR_REGEX, s)) == 1
