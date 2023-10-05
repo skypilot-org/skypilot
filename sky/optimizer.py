@@ -56,7 +56,7 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     return log_utils.create_table(field_names, **table_kwargs)
 
 
-def _is_dag_with_res_list(dag: 'dag_lib.Dag') -> bool:
+def _is_dag_resources_ordered(dag: 'dag_lib.Dag') -> bool:
     import networkx as nx  # pylint: disable=import-outside-toplevel
     graph = dag.get_graph()
     topo_order = list(nx.topological_sort(graph))
@@ -124,7 +124,7 @@ class Optimizer:
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
         try:
-            if _is_dag_with_res_list(dag):
+            if _is_dag_resources_ordered(dag):
                 # Honor the user's choice.
                 # Take dag.tasks[0], the actual task
                 # dag can store dummy tasks.
