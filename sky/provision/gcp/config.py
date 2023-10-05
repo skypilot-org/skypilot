@@ -14,7 +14,6 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery
 from googleapiclient import errors
-from ray.autoscaler._private.util import check_legacy_fields
 
 from sky.skylet.providers.gcp.constants import FIREWALL_RULES_REQUIRED
 from sky.skylet.providers.gcp.constants import FIREWALL_RULES_TEMPLATE
@@ -36,7 +35,7 @@ RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
 SERVICE_ACCOUNT_EMAIL_TEMPLATE = '{account_id}@{project_id}.iam.gserviceaccount.com'
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
-    'displayName': 'Ray Autoscaler Service Account ({})'.format(VERSION),
+    'displayName': f'Ray Autoscaler Service Account ({VERSION})',
 }
 
 SKYPILOT = 'skypilot'
@@ -45,7 +44,7 @@ SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
     '{account_id}@{project_id}.iam.gserviceaccount.com'
 )
 SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
-    'displayName': 'SkyPilot Service Account ({})'.format(VERSION),
+    'displayName': f'SkyPilot Service Account ({VERSION})',
 }
 
 # Those roles will be always added.
@@ -291,7 +290,6 @@ def construct_clients_from_provider_config(provider_config):
 
 def bootstrap_gcp(config):
     config = copy.deepcopy(config)
-    check_legacy_fields(config)
     # Used internally to store head IAM role.
     config['head_node'] = {}
 
