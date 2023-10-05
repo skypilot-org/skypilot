@@ -25,6 +25,14 @@ jobs:
       - name: Create foo package
         run: |
           mkdir foo
+          MASTER_REPO_URL=${{ github.server_url }}/${{ github.repository }}
+          REPO_URL=${{ github.event.pull_request.head.repo.html_url }}
+          if [ -z "$REPO_URL" ]; then
+            # This is a push, not a PR, so use the repo URL
+            REPO_URL=$MASTER_REPO_URL
+          fi
+          echo Master repo URL: $MASTER_REPO_URL
+          echo Using repo URL: $REPO_URL
           cat <<EOF > foo/pyproject.toml
           [tool.poetry]
           name = "foo"
@@ -36,7 +44,7 @@ jobs:
           python = "3.10.x"
 
           [tool.poetry.group.dev.dependencies]
-          skypilot = {git = "${{ github.event.pull_request.head.repo.html_url }}.git", branch = "${{ github.head_ref }}"}
+          skypilot = {git = "${REPO_URL}.git", branch = "${{ github.head_ref }}"}
 
           [build-system]
           requires = ["poetry-core"]

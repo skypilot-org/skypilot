@@ -52,14 +52,18 @@ def _filter_instances(
 def _wait_for_operations(
     handlers_to_operations: Dict[Type[instance_utils.GCPInstance], List[dict]],
     project_id: str,
-    zone: str,
+    zone: Optional[str],
 ) -> None:
-    """Poll for compute zone operation until finished."""
+    """Poll for compute zone / global operation until finished.
+
+    If zone is None, then the operation is global.
+    """
+    op_type = 'global' if zone is None else 'zone'
     total_polls = 0
     for handler, operations in handlers_to_operations.items():
         for operation in operations:
             logger.debug(
-                'wait_for_compute_zone_operation: '
+                f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
             while total_polls < MAX_POLLS:
                 if handler.wait_for_operation(operation, project_id, zone):
@@ -169,17 +173,74 @@ def terminate_instances(
     # time (same as what we did in ray's node_provider).
 
 
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, cluster_name_on_cloud
+    zone = provider_config['availability_zone']
+    project_id = provider_config['project_id']
+    firewall_rule_name = provider_config['firewall_rule']
+
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+    handlers: List[Type[instance_utils.GCPInstance]] = [
+        instance_utils.GCPComputeInstance,
+        instance_utils.GCPTPUVMInstance,
+    ]
+    handler_to_instances = _filter_instances(handlers, project_id, zone,
+                                             label_filters, lambda _: None)
+    operations = collections.defaultdict(list)
+    compute_handler: Type[instance_utils.GCPInstance] = (
+        instance_utils.GCPComputeInstance)
+    for handler, instances in handler_to_instances.items():
+        if not instances:
+            logger.warning(f'No instance found for cluster '
+                           f'{cluster_name_on_cloud}.')
+            continue
+        else:
+            for instance in instances:
+                # Add tags for all nodes in the cluster, so the firewall rule
+                # could correctly apply to all instance in the cluster.
+                handler.add_network_tag_if_not_exist(
+                    project_id,
+                    zone,
+                    instance,
+                    tag=cluster_name_on_cloud,
+                )
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick any one of them.
+            vpc_name = handler.get_vpc_name(project_id, zone, instances[0])
+            # Use compute handler here for both Compute VM and TPU VM,
+            # as firewall rules is a compute resource.
+            op = compute_handler.create_or_update_firewall_rule(
+                firewall_rule_name,
+                project_id,
+                vpc_name,
+                cluster_name_on_cloud,
+                ports,
+            )
+            operations[compute_handler].append(op)
+    # Use zone = None to indicate wait for global operations
+    _wait_for_operations(operations, project_id, None)
+
+
 def cleanup_ports(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
-    if 'ports' not in provider_config:
-        # No new ports were opened, so there is nothing to clean up.
-        return
     project_id = provider_config['project_id']
-    for port in provider_config['ports']:
-        rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
+    if 'ports' in provider_config:
+        # Backward compatibility for old provider config.
+        # TODO(tian): remove this after 2 minor releases, 0.6.0.
+        for port in provider_config['ports']:
+            firewall_rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
+            instance_utils.GCPComputeInstance.delete_firewall_rule(
+                project_id, firewall_rule_name)
+    if 'firewall_rule' in provider_config:
+        firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(
-            project_id, rule_name)
+            project_id, firewall_rule_name)

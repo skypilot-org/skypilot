@@ -9,6 +9,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import kubernetes
+from sky.clouds import service_catalog
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
@@ -19,7 +20,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_CREDENTIAL_PATH = '~/.kube/config'
+CREDENTIAL_PATH = '~/.kube/config'
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -27,7 +28,10 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
-
+    SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
+    PORT_FORWARD_PROXY_CMD_TEMPLATE = \
+        'kubernetes-port-forward-proxy-command.sh.j2'
+    PORT_FORWARD_PROXY_CMD_PATH = '~/.sky/port-forward-proxy-cmd.sh'
     # Timeout for resource provisioning. This timeout determines how long to
     # wait for pod to be in pending status before giving up.
     # Larger timeout may be required for autoscaling clusters, since autoscaler
@@ -42,7 +46,8 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
-    _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
+    _SINGLETON_REGION = 'kubernetes'
+    _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -51,10 +56,6 @@ class Kubernetes(clouds.Cloud):
                                                  'support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
                                                      'support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported by the '
-                                                       'Kubernetes '
-                                                       'implementation yet.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
@@ -62,14 +63,16 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            ('Docker image is not supported in Kubernetes. ')
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
+                                                         'supported in '
+                                                         'Kubernetes.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
+                                                       'supported in '
+                                                       'Kubernetes.'
     }
 
-    IMAGE_CPU = ('us-central1-docker.pkg.dev/'
-                 'skypilot-375900/skypilotk8s/skypilot:latest')
-    IMAGE_GPU = ('us-central1-docker.pkg.dev/skypilot-375900/'
-                 'skypilotk8s/skypilot-gpu:latest')
+    IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
+    IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
     def _cloud_unsupported_features(
@@ -178,9 +181,9 @@ class Kubernetes(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
+        del cluster_name_on_cloud, zones  # Unused.
         if region is None:
             region = self._regions[0]
 
@@ -202,7 +205,17 @@ class Kubernetes(clouds.Cloud):
         acc_type = k.accelerator_type if k.accelerator_type else None
 
         # Select image based on whether we are using GPUs or not.
-        image = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+        # Get the container image ID from the service catalog.
+        # TODO(romilb): Note that currently we do not support custom images,
+        #  so the image_id should start with 'skypilot:'.
+        #  In the future we may want to get image_id from the resources object.
+        assert image_id.startswith('skypilot:')
+        image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
+        # TODO(romilb): Create a lightweight image for SSH jump host
+        ssh_jump_image = service_catalog.get_image_id_from_tag(
+            self.IMAGE_CPU, clouds='kubernetes')
 
         k8s_acc_label_key = None
         k8s_acc_label_value = None
@@ -223,8 +236,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
+            'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
+            'k8s_ssh_jump_image': ssh_jump_image,
             # TODO(romilb): Allow user to specify custom images
-            'image_id': image,
+            'image_id': image_id,
         }
         return deploy_vars
 
@@ -292,7 +307,7 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(_CREDENTIAL_PATH)):
+        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
             # Test using python API
             try:
                 return kubernetes_utils.check_credentials()
@@ -301,17 +316,23 @@ class Kubernetes(clouds.Cloud):
                         f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '
-                    f'check if {_CREDENTIAL_PATH} exists.')
+                    f'check if {CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {_CREDENTIAL_PATH: _CREDENTIAL_PATH}
+        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        # Kubernetes doesn't have regions or zones, so we don't need to validate
+        if region != self._SINGLETON_REGION:
+            raise ValueError(
+                'Kubernetes support does not support setting region.'
+                ' Cluster used is determined by the kubeconfig.')
+        if zone is not None:
+            raise ValueError('Kubernetes support does not support setting zone.'
+                             ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
     def accelerator_in_region_or_zone(self,
@@ -363,34 +384,17 @@ class Kubernetes(clouds.Cloud):
         return cluster_status
 
     @classmethod
-    def query_env_vars(cls, name: str) -> Dict[str, str]:
-        namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-        pod = kubernetes.core_api().list_namespaced_pod(
-            namespace,
-            label_selector=f'skypilot-cluster={name},ray-node-type=head'
-        ).items[0]
-        response = kubernetes.stream()(
-            kubernetes.core_api().connect_get_namespaced_pod_exec,
-            pod.metadata.name,
-            namespace,
-            command=['env'],
-            stderr=True,
-            stdin=False,
-            stdout=True,
-            tty=False,
-            _request_timeout=kubernetes.API_TIMEOUT)
-        # Split response by newline and filter lines containing '='
-        raw_lines = response.split('\n')
-        filtered_lines = [line for line in raw_lines if '=' in line]
+    def get_current_user_identity(cls) -> Optional[List[str]]:
+        k8s = kubernetes.get_kubernetes()
+        try:
+            _, current_context = k8s.config.list_kube_config_contexts()
+            if 'namespace' in current_context['context']:
+                namespace = current_context['context']['namespace']
+            else:
+                namespace = kubernetes_utils.DEFAULT_NAMESPACE
 
-        # Split each line at the first '=' occurrence
-        lines = [line.split('=', 1) for line in filtered_lines]
-
-        # Construct the dictionary using only valid environment variable names
-        env_vars = {}
-        for line in lines:
-            key = line[0]
-            if common_utils.is_valid_env_var(key):
-                env_vars[key] = line[1]
-
-        return env_vars
+            user = current_context['context']['user']
+            cluster = current_context['context']['cluster']
+            return [f'{cluster}_{user}_{namespace}']
+        except k8s.config.config_exception.ConfigException:
+            return None

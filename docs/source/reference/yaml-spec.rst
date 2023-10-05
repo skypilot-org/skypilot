@@ -86,9 +86,20 @@ Available fields:
       # these ports. Applies to all VMs of a cluster created with this field set. 
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
-      ports:
-        - 8080
-        - 10022-10040
+      # Ports Lifecycle:
+      # A cluster's ports will be updated whenever `sky launch` is executed. When launch an
+      # existing cluster, any new ports specified will be opened for the cluster, and the firewall 
+      # rules for old ports will never be removed until the cluster is terminated.
+      # The following three ways are valid for specifying ports for a cluster:
+      #   To specify a single port:
+      #     ports: 8081
+      #   To specify a port range:
+      #     ports: 10052-10100
+      #   To specify multiple ports / port ranges:
+      #     ports:
+      #       - 8080
+      #       - 10022-10040
+      ports: 8081
 
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
@@ -106,8 +117,8 @@ Available fields:
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.5.0
+        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.12.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 

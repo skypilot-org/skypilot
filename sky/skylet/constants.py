@@ -53,6 +53,11 @@ DEFAULT_DOCKER_PORT = 10022
 DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_DOCKER_USERNAME'
 DOCKER_PASSWORD_ENV_VAR = 'SKYPILOT_DOCKER_PASSWORD'
 DOCKER_SERVER_ENV_VAR = 'SKYPILOT_DOCKER_SERVER'
+DOCKER_LOGIN_ENV_VARS = {
+    DOCKER_USERNAME_ENV_VAR,
+    DOCKER_PASSWORD_ENV_VAR,
+    DOCKER_SERVER_ENV_VAR,
+}
 
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not

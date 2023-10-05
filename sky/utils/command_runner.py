@@ -42,13 +42,16 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     ssh_proxy_command: Optional[str] = None,
-                     docker_ssh_proxy_command: Optional[str] = None,
-                     timeout: int = 30,
-                     port: int = 22) -> List[str]:
+def ssh_options_list(
+    ssh_private_key: Optional[str],
+    ssh_control_name: Optional[str],
+    *,
+    ssh_proxy_command: Optional[str] = None,
+    docker_ssh_proxy_command: Optional[str] = None,
+    timeout: int = 30,
+    port: int = 22,
+    disable_control_master: Optional[bool] = False,
+) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -79,7 +82,13 @@ def ssh_options_list(ssh_private_key: Optional[str],
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
-    if ssh_control_name is not None and docker_ssh_proxy_command is None:
+    # We also do not use ControlMaster when we use `kubectl port-forward`
+    # to access Kubernetes pods over SSH+Proxycommand. This is because the
+    # process running ProxyCommand is kept running as long as the ssh session
+    # is running and the ControlMaster keeps the session, which results in
+    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    if (ssh_control_name is not None and docker_ssh_proxy_command is None and
+            not disable_control_master):
         arg_dict.update({
             # Control path: important optimization as we do multiple ssh in one
             # sky.launch().
@@ -136,6 +145,7 @@ class SSHCommandRunner:
         ssh_proxy_command: Optional[str] = None,
         port: int = 22,
         docker_user: Optional[str] = None,
+        disable_control_master: Optional[bool] = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -158,13 +168,17 @@ class SSHCommandRunner:
             port: The port to use for ssh.
             docker_user: The docker user to use for ssh. If specified, the
                 command will be run inside a docker container which have a ssh
-                server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT.
+                server running at port sky.skylet.constants.DEFAULT_DOCKER_PORT
+            disable_control_master: bool; specifies either or not the ssh
+                command will utilize ControlMaster. We currently disable
+                it for k8s instance.
         """
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = (
             None if ssh_control_name is None else hashlib.md5(
                 ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
         self._ssh_proxy_command = ssh_proxy_command
+        self.disable_control_master = disable_control_master
         if docker_user is not None:
             assert port is None or port == 22, (
                 f'port must be None or 22 for docker_user, got {port}.')
@@ -190,6 +204,7 @@ class SSHCommandRunner:
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None,
+        disable_control_master: Optional[bool] = False,
         port_list: Optional[List[int]] = None,
         docker_user: Optional[str] = None,
     ) -> List['SSHCommandRunner']:
@@ -198,7 +213,8 @@ class SSHCommandRunner:
             port_list = [22] * len(ip_list)
         return [
             SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name,
-                             ssh_proxy_command, port, docker_user)
+                             ssh_proxy_command, port, docker_user,
+                             disable_control_master)
             for ip, port in zip(ip_list, port_list)
         ]
 
@@ -228,7 +244,9 @@ class SSHCommandRunner:
             ssh_proxy_command=self._ssh_proxy_command,
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
-        ) + [f'{self.ssh_user}@{self.ip}']
+            disable_control_master=self.disable_control_master) + [
+                f'{self.ssh_user}@{self.ip}'
+            ]
 
     def run(
             self,
@@ -389,7 +407,7 @@ class SSHCommandRunner:
                 ssh_proxy_command=self._ssh_proxy_command,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
-            ))
+                disable_control_master=self.disable_control_master))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
         # rsync doesn't support '~' in a quoted local path, but it is ok to

@@ -80,15 +80,18 @@ class CommandError(Exception):
     """Raised when a command fails.
 
     Args:
-    returncode: The returncode of the command.
-    command: The command that was run.
-    error_message: The error message to print.
+        returncode: The returncode of the command.
+        command: The command that was run.
+        error_message: The error message to print.
+        detailed_reason: The stderr of the command.
     """
 
-    def __init__(self, returncode: int, command: str, error_msg: str) -> None:
+    def __init__(self, returncode: int, command: str, error_msg: str,
+                 detailed_reason: Optional[str]) -> None:
         self.returncode = returncode
         self.command = command
         self.error_msg = error_msg
+        self.detailed_reason = detailed_reason
         message = (f'Command {command} failed with return code {returncode}.'
                    f'\n{error_msg}')
         super().__init__(message)

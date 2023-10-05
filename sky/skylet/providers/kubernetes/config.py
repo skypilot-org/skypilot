@@ -55,6 +55,8 @@ def bootstrap_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
 
     _configure_services(namespace, config['provider'])
 
+    config = _configure_ssh_jump(namespace, config)
+
     if not config['provider'].get('_operator'):
         # These steps are unecessary when using the Operator.
         _configure_autoscaler_service_account(namespace, config['provider'])
@@ -255,6 +257,40 @@ def _configure_autoscaler_role_binding(namespace: str,
     logger.info(log_prefix + not_found_msg(binding_field, name))
     kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
     logger.info(log_prefix + created_msg(binding_field, name))
+
+
+def _configure_ssh_jump(namespace, config):
+    """Creates a SSH jump pod to connect to the cluster.
+
+    Also updates config['auth']['ssh_proxy_command'] to use the newly created
+    jump pod.
+    """
+    pod_cfg = config['available_node_types']['ray_head_default']['node_config']
+
+    ssh_jump_name = pod_cfg['metadata']['labels']['skypilot-ssh-jump']
+    ssh_jump_image = config['provider']['ssh_jump_image']
+
+    volumes = pod_cfg['spec']['volumes']
+    # find 'secret-volume' and get the secret name
+    secret_volume = next(filter(lambda x: x['name'] == 'secret-volume',
+                                volumes))
+    ssh_key_secret_name = secret_volume['secret']['secretName']
+
+    # TODO(romilb): We currently split SSH jump pod and svc creation. Service
+    #  is first created in authentication.py::setup_kubernetes_authentication
+    #  and then SSH jump pod creation happens here. This is because we need to
+    #  set the ssh_proxy_command in the ray YAML before we pass it to the
+    #  autoscaler. If in the future if we can write the ssh_proxy_command to the
+    #  cluster yaml through this method, then we should move the service
+    #  creation here.
+
+    # TODO(romilb): We should add a check here to make sure the service is up
+    #  and available before we create the SSH jump pod. If for any reason the
+    #  service is missing, we should raise an error.
+
+    kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
+                                        ssh_key_secret_name, namespace)
+    return config
 
 
 def _configure_services(namespace: str, provider_config: Dict[str,
