@@ -30,6 +30,7 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
+NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs (e.g., skypilot.co/accelerators) are setup correctly. To further debug, run: sky check.'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -163,7 +164,13 @@ class GKELabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
-        return value.split('-')[-1].upper()
+        if value.startswith('nvidia-tesla-'):
+            return value.replace('nvidia-tesla-', '').upper()
+        elif value.startswith('nvidia-'):
+            return value.replace('nvidia-', '').upper()
+        else:
+            raise ValueError(
+                f'Invalid accelerator name in GKE cluster: {value}')
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to

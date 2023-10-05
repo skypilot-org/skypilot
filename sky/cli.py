@@ -3261,6 +3261,11 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
+
+            if len(result) == 0 and cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -3317,6 +3322,10 @@ def show_gpus(
                                                    case_sensitive=False)
 
         if len(result) == 0:
+            if cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             yield f'Resources \'{name}\'{quantity_str} not found. '
