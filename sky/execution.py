@@ -1,23 +1,13 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum
 import getpass
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 import uuid
 
 import colorama
@@ -628,19 +618,10 @@ def spot_launch(
                 'and comment out the task names (so that they will be auto-'
                 'generated) .')
         task_names.add(task_.name)
+
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
+
     for task_ in dag.tasks:
-        assert len(task_.resources) == 1, task_
-        resources = list(task_.resources)[0]
-
-        change_default_value: Dict[str, Any] = {}
-        if not resources.use_spot_specified:
-            change_default_value['use_spot'] = True
-        if resources.spot_recovery is None:
-            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
-
-        new_resources = resources.copy(**change_default_value)
-        task_.set_resources({new_resources})
-
         _maybe_translate_local_file_mounts_and_sync_up(task_)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
@@ -761,7 +742,7 @@ def spot_launch(
         assert len(controller_task.resources) == 1
 
         print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {dag.name} from spot controller...'
+              f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(

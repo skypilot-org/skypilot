@@ -103,12 +103,26 @@ By default, SkyPilot supports most global regions on AWS and only supports the U
   version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
-  # Fetch all regions for GCP
+  # GCP
   pip install lxml
+  # Fetch U.S. regions for GCP
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp
+  # Fetch all regions for GCP
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
-  
+  # Run in single-threaded mode. This is useful when multiple processes don't work well with the GCP client due to SSL issues.
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --single-threaded
+
+  # Azure
+  # Fetch U.S. regions for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure
   # Fetch all regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+  # Run in single-threaded mode. This is useful when multiple processes don't work well with the Azure client due to SSL issues.
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --single-threaded
+  # Fetch the specified regions for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --regions japaneast australiaeast uksouth
+  # Fetch U.S. regions for Azure, excluding the specified regions
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --exclude centralus eastus
 
 To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>`` 
 (the full name can be found in ``sky status``), and run the commands above.

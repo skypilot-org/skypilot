@@ -53,6 +53,9 @@ RUN cd /skypilot/ && \
     sudo mv -v sky/setup_files/* . && \
     pip install ".[aws]"
 
+# Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
+ENV PYTHONUNBUFFERED=1
+
 # Set WORKDIR and initialize conda for sky user
 WORKDIR /home/sky
 RUN conda init
