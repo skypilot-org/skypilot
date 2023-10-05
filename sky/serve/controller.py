@@ -6,7 +6,11 @@ import argparse
 import asyncio
 import base64
 import logging
+import os
 import pickle
+import signal
+import threading
+import time
 from typing import Optional
 
 import fastapi
@@ -47,7 +51,19 @@ class SkyServeController:
         self.port = port
         self.infra_provider = infra_provider
         self.autoscaler = autoscaler
+        self.terminating = False
+        self.load_balancer_received_terminal_signal = False
         self.app = fastapi.FastAPI()
+
+    def _check_terminate(self):
+        while True:
+            if self.terminating and self.load_balancer_received_terminal_signal:
+                # 1s grace period for the rare case that terminate is set but
+                # return of /terminate request is not ready yet.
+                time.sleep(1)
+                logger.info('Terminate controller...')
+                os.kill(os.getpid(), signal.SIGINT)
+            time.sleep(10)
 
     def run(self) -> None:
 
@@ -72,6 +88,10 @@ class SkyServeController:
         def get_ready_replicas():
             return {'ready_replicas': self.infra_provider.get_ready_replicas()}
 
+        @self.app.get('/controller/is_terminating')
+        def is_terminating():
+            return {'is_terminating': self.terminating}
+
         @self.app.get('/controller/get_latest_info')
         def get_latest_info():
             latest_info = {
@@ -93,6 +113,10 @@ class SkyServeController:
                 logger.info('Terminate autoscaler...')
                 self.autoscaler.terminate()
             msg = self.infra_provider.terminate()
+            if msg is None:
+                # We cannot terminate the controller now because we still
+                # need the output of this request to be sent back.
+                self.terminating = True
             return {'message': msg}
 
         # Run replica_prober and autoscaler (if autoscaler is defined)
@@ -101,6 +125,13 @@ class SkyServeController:
         self.infra_provider.start_replica_prober()
         if self.autoscaler is not None:
             self.autoscaler.start()
+
+        # Start a daemon to check if the controller is terminating, and if so,
+        # shutdown the controller so the skypilot jobs will finish, thus enable
+        # the controller VM to autostop.
+        terminate_checking_daemon = threading.Thread(
+            target=self._check_terminate, daemon=True)
+        terminate_checking_daemon.start()
 
         # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflowing
         # the controller logs.

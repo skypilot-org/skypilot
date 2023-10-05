@@ -1190,17 +1190,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
             backend = backends.CloudVmRayBackend()
             backend.register_info(minimize_logging=True)
 
-            # Cancel the controller and load balancer jobs.
-            # For the case when controller / load_balancer job failed to submit.
-            jobs = []
-            if service_handle.job_id is not None:
-                jobs.append(service_handle.job_id)
-
-            try:
-                backend.cancel_jobs(handle, jobs=jobs)
-            except exceptions.FetchIPError as e:
-                raise RuntimeError(controller_fetch_ip_error_message) from e
-
             # Cleanup all files on controller related to this service.
             # We have a 10-min grace period for the controller to autostop,
             # so it should be fine if this is the last service on the

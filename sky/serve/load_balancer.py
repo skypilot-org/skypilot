@@ -1,5 +1,7 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
 import argparse
+import os
+import signal
 import threading
 import time
 
@@ -60,6 +62,17 @@ class SkyServeLoadBalancer:
         while True:
             with requests.Session() as session:
                 try:
+                    # TODO(tian): Maybe merge all of them into one request?
+                    # check if the controller is terminating. If so, shut down
+                    # the load balancer so the skypilot jobs will finish, thus
+                    # enable the controller VM to autostop.
+                    response = session.get(self.controller_url +
+                                           '/controller/is_terminating')
+                    response.raise_for_status()
+                    if bool(response.json()['is_terminating']):
+                        logger.info('Controller is terminating. '
+                                    'Shutting down load balancer.')
+                        os.kill(os.getpid(), signal.SIGINT)
                     # send request num in last query interval
                     response = session.post(
                         self.controller_url + '/controller/update_num_requests',
