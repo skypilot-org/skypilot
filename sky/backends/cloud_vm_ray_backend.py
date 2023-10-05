@@ -2872,7 +2872,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     wheel_hash=wheel_hash,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
-                    log_dir=self.log_dir)
+                    log_dir=os.path.expanduser(self.log_dir))
                 # We must query the IPs from the cloud provider, when the
                 # provisioning is done, to make sure the cluster IPs are
                 # up-to-date.
