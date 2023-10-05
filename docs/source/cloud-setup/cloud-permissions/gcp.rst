@@ -66,6 +66,7 @@ User
     compute.firewalls.create
     compute.firewalls.delete
     compute.firewalls.get
+    compute.images.get
     compute.instances.create 
     compute.instances.delete
     compute.instances.get
@@ -75,6 +76,7 @@ User
     compute.instances.setServiceAccount
     compute.instances.start
     compute.instances.stop
+    compute.machineImages.get
     compute.networks.get
     compute.networks.list
     compute.networks.getEffectiveFirewalls
@@ -123,7 +125,6 @@ User
 
     compute.disks.useReadOnly
     compute.images.create
-    compute.images.get
     compute.images.delete
 
 7. **Optional**: To enable opening ports on GCP cluster, you need to have the following permissions for the role as well:
