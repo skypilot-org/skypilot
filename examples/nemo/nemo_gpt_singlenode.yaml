@@ -14,10 +14,14 @@
 #   # Or try on spot A100 GPUs:
 #   sky launch -c nemo_gpt nemo_gpt_singlenode.yaml --use-spot --gpus A100:1
 #
+#   # The setup will take some time (~1 hr), feel free to ctrl-c once the setup script starts
+#   # You can reconnect to log stream using `sky logs nemo_gpt_train`
+#
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt
 
 resources:
+  cpus: 6+
   accelerators: A100:1
 
 num_nodes: 1

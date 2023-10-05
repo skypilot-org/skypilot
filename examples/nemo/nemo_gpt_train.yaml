@@ -11,13 +11,15 @@
 #
 # Usage:
 #   sky launch -s -c nemo_gpt_train nemo_gpt_train.yaml
-#   # The setup will take some time, feel free to ctrl-c once the setup script starts
-#   # You can reconnect
+#
+#   # The setup will take some time (~1 hr), feel free to ctrl-c once the setup script starts
+#   # You can reconnect to log stream using `sky logs nemo_gpt_train`
 #
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt_train
 
 resources:
+  cpus: 6+
   accelerators: A100:1
 
 num_nodes: 2
