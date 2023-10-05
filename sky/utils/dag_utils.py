@@ -93,7 +93,7 @@ def fill_default_spot_config_in_dag(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
-        for resources in task_.get_resources_list():
+        for resources in task_.get_resources():
 
             change_default_value: Dict[str, Any] = {}
             if not resources.use_spot_specified:

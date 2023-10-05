@@ -640,24 +640,21 @@ class Task:
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
-    def get_resources_list(self) -> List['resources_lib.Resources']:
-        if self.is_resources_ordered:
-            return self.resources_pref_list.copy()
-        else:
-            return list(self.resources)
-
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
         new_resources_list = []
-        for res in self.get_resources_list():
+        for res in self.get_resources():
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
         self.set_resources(new_resources_list, self.is_resources_ordered)
         return self
 
-    def get_resources(self):
-        return self.resources
+    def get_resources(self) -> List['resources_lib.Resources']:
+        if self.is_resources_ordered:
+            return self.resources_pref_list.copy()
+        else:
+            return list(self.resources)
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -892,7 +889,7 @@ class Task:
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
-            resources = self.get_resources_list()[0]
+            resources = self.get_resources()[0]
             storage_cloud = resources.cloud
         if storage_cloud is not None:
             if str(storage_cloud) not in enabled_storage_clouds:
