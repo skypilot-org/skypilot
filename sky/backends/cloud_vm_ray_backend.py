@@ -2642,7 +2642,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         record = global_user_state.get_cluster_from_name(cluster_name)
         if record is not None:
             usage_lib.messages.usage.update_cluster_status(record['status'])
-                
+
         valid_resource = None
         requested_resource_list = []
         for resource in task.resources:
@@ -2654,12 +2654,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 valid_resource = resource
                 break
             else:
-                requested_resource_list.append(
-                    f'{task.num_nodes}x {resource}')
+                requested_resource_list.append(f'{task.num_nodes}x {resource}')
         requested_resource_str = ', '.join(requested_resource_list)
         if valid_resource is None:
             # Since we assume all resources are in the same zone/region.
-            example_resource = task.resources[0]
+            example_resource = list(task.resources)[0]
             if (example_resource.region is not None and
                     example_resource.region != launched_resources.region):
                 with ux_utils.print_exception_no_traceback():

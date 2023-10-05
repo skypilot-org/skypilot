@@ -311,6 +311,10 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    if cluster_exists:
+        backend.check_resources_fit_cluster(handle, task)
+        task.set_resources(handle.launched_resources)
+
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
                           requested_features=requested_features)
@@ -573,10 +577,6 @@ def exec(  # pylint: disable=redefined-builtin
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-
-    if isinstance(entrypoint, sky.Task):
-        backend.check_resources_fit_cluster(handle, task, check_ports=True)
-        task.set_resources(handle.launched_resources)
 
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
