@@ -5,7 +5,7 @@ import os
 import json
 from typing import Dict
 
-import runpod
+from sky.adaptors import runpod
 
 
 GPU_NAME_MAP = {
@@ -47,7 +47,7 @@ def list_instances():
     '''
     Lists instances associated with API key.
     '''
-    instances = runpod.get_pods()
+    instances = runpod.rp_wrapper().get_pods()
 
     instance_list = {}
     for instance in instances:
@@ -79,9 +79,9 @@ def launch(name: str, instance_type: str, region: str):
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
     cloud_type = instance_type.split('_')[2]
 
-    gpu_specs = runpod.get_gpu(gpu_type)
+    gpu_specs = runpod.rp_wrapper().get_gpu(gpu_type)
 
-    new_instance = runpod.create_pod(
+    new_instance = runpod.rp_wrapper().create_pod(
         name=name,
         image_name='runpod/base:0.0.0',
         gpu_type_id=gpu_type,
@@ -113,4 +113,4 @@ def remove(instance_id: str):
     '''
     Terminates the given instance.
     '''
-    runpod.terminate_pod(instance_id)
+    runpod.rp_wrapper().terminate_pod(instance_id)

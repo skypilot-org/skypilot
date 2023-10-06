@@ -59,10 +59,12 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(cpus: Optional[str] = None,
+                              memory: Optional[str] = None,
+                              disk_tier: Optional[str] = None) -> Optional[str]:
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
-    return common.get_instance_type_for_cpus_impl(_df, cpus)
+    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
 
 
 def get_accelerators_from_instance_type(
