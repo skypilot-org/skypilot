@@ -40,7 +40,10 @@ def list_accelerators(
         quantity_filter: Optional[int],
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    if Kubernetes not in global_user_state.get_enabled_clouds(
+    k8s_cloud = Kubernetes()
+    if not any(
+            map(lambda cloud: k8s_cloud.is_same_cloud(cloud),
+                global_user_state.get_enabled_clouds())
     ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 
