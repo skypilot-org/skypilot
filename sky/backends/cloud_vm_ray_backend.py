@@ -1947,7 +1947,8 @@ class RetryingVmProvisioner(object):
                     # Retry. Unlikely will succeed if it's due to no capacity.
                     logger.info(
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
-                        f'error: {stderr}')
+                        'error.')
+                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
                 # "The resource 'projects/skypilot-375900/regions/us-central1/subnetworks/default' is not ready". Details: "[{'message': "The resource 'projects/xxx/regions/us-central1/subnetworks/default' is not ready", 'domain': 'global', 'reason': 'resourceNotReady'}]"> # pylint: disable=line-too-long
@@ -1957,7 +1958,8 @@ class RetryingVmProvisioner(object):
                     # Retry. Unlikely will succeed if it's due to no capacity.
                     logger.info(
                         'Retrying due to the possibly flaky resourceNotReady '
-                        f'error: {stderr}')
+                        f'error.')
+                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
             if isinstance(to_provision_cloud, clouds.Lambda):
