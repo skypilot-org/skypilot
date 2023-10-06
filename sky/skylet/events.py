@@ -65,22 +65,12 @@ class JobSchedulerEvent(SkyletEvent):
 class SpotJobUpdateEvent(SkyletEvent):
     """Skylet event for updating spot job status."""
     EVENT_INTERVAL_SECONDS = 300  # 5 minutes
-    CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
-    CLEANUP_INTERVAL_CNT = CLEANUP_INTERVAL_SECONDS // EVENT_INTERVAL_SECONDS
-
-    def __init__(self):
-        super().__init__()
-        self._cnt = 0
 
     def _run(self):
-        self._cnt = (self._cnt + 1) % self.CLEANUP_INTERVAL_CNT
-        if self._cnt == 0:
-            # Update spot job status and cleanup abnormal spot jobs every
-            # CLEANUP_INTERVAL_SECONDS.
-            spot_utils.cleanup_zombie_spot_jobs()
-        else:
-            # Update spot job status every EVENT_INTERVAL_SECONDS.
-            spot_utils.update_spot_job_status()
+        # Update spot job status and cleanup abnormal spot jobs every
+        # CLEANUP_INTERVAL_SECONDS.
+        spot_utils.update_spot_job_status()
+        spot_utils.cleanup_zombie_spot_jobs()
 
 
 class AutostopEvent(SkyletEvent):

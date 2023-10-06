@@ -171,9 +171,6 @@ def cleanup_zombie_spot_jobs():
 
     Reference: https://github.com/skypilot-org/skypilot/issues/2668
     """
-    # Update the spot job status to find FAILED_CONTROLLER jobs.
-    update_spot_job_status()
-
     # Get all the FAILED_CONTROLLER jobs.
     spot_jobs = spot_state.get_spot_jobs()
     terminal_controller_jobs = []
