@@ -787,7 +787,7 @@ class RetryingVmProvisioner(object):
             if 'Head node fetch timed out' in stderr:
                 # Example: click.exceptions.ClickException: Head node fetch
                 # timed out. Failed to create head node.
-                # This is a transient error, but we have retried in `need_ray_up`
+                # This is a transient error, but we have retried in need_ray_up
                 # and failed.  So we skip this zone.
                 logger.info('Got \'Head node fetch timed out\' in '
                             f'{zone.name}.')
@@ -903,7 +903,7 @@ class RetryingVmProvisioner(object):
             if 'Head node fetch timed out' in stderr:
                 # Example: click.exceptions.ClickException: Head node fetch
                 # timed out. Failed to create head node.
-                # This is a transient error, but we have retried in `need_ray_up`
+                # This is a transient error, but we have retried in need_ray_up
                 # and failed.  So we skip this region.
                 logger.info('Got \'Head node fetch timed out\' in '
                             f'{region.name}.')
