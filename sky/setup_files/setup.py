@@ -146,7 +146,7 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.19.1 to enable 'reason' attribute
     # of googleapiclient.errors.HttpError, which is widely used in our system.
     'gcp': ['google-api-python-client>=2.19.1', 'google-cloud-storage'] +
-           local_ray,
+    local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
@@ -156,7 +156,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [] + local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
-    'runpod': ['runpod>=1.2.4'],
+    'runpod': ['runpod>=1.2.5'],
     'remote': remote,
 }
 

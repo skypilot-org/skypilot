@@ -136,7 +136,7 @@ class RunPod(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         del zones
         if region is None:
