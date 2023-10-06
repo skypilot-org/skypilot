@@ -16,12 +16,12 @@ from googleapiclient import discovery
 from googleapiclient import errors
 
 from sky.provision import common
-from sky.skylet.providers.gcp.constants import FIREWALL_RULES_REQUIRED
-from sky.skylet.providers.gcp.constants import FIREWALL_RULES_TEMPLATE
-from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME
-from sky.skylet.providers.gcp.constants import TPU_MINIMAL_PERMISSIONS
-from sky.skylet.providers.gcp.constants import VM_MINIMAL_PERMISSIONS
-from sky.skylet.providers.gcp.constants import VPC_TEMPLATE
+from sky.provision.gcp.constants import FIREWALL_RULES_REQUIRED
+from sky.provision.gcp.constants import FIREWALL_RULES_TEMPLATE
+from sky.provision.gcp.constants import SKYPILOT_VPC_NAME
+from sky.provision.gcp.constants import TPU_MINIMAL_PERMISSIONS
+from sky.provision.gcp.constants import VM_MINIMAL_PERMISSIONS
+from sky.provision.gcp.constants import VPC_TEMPLATE
 from sky.skylet.providers.gcp.node import GCPCompute
 from sky.skylet.providers.gcp.node import GCPNodeType
 from sky.skylet.providers.gcp.node import MAX_POLLS
@@ -163,16 +163,6 @@ def generate_rsa_key_pair():
     ).decode('utf-8')
 
     return public_key, pem
-
-
-def _is_head_node_a_tpu(config: dict) -> bool:
-    """Check if the head node is a TPU."""
-    node_configs = {
-        node_id: node_type['node_config']
-        for node_id, node_type in config['available_node_types'].items()
-    }
-    return get_node_type(
-        node_configs[config['head_node_type']]) == GCPNodeType.TPU
 
 
 def _create_crm(gcp_credentials=None):
@@ -605,13 +595,13 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
                                           compute)
 
 
-def get_usable_vpc(config):
+def get_usable_vpc(config: common.ProvisionConfig):
     """Return a usable VPC.
 
     If not found, create a new one with sufficient firewall rules.
     """
     _, _, compute, _ = construct_clients_from_provider_config(
-        config['provider'])
+        config.provider_config)
 
     # For backward compatibility, reuse the VPC if the VM is launched.
     resource = GCPCompute(
@@ -627,7 +617,7 @@ def get_usable_vpc(config):
             vpc_name = netInterfaces[0]['network'].split('/')[-1]
             return vpc_name
 
-    vpcnets_all = _list_vpcnets(config, compute)
+    vpcnets_all = _list_vpcnets(config.provider_config, compute)
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
@@ -640,7 +630,7 @@ def get_usable_vpc(config):
         logger.info(f'Creating a default VPC network, {SKYPILOT_VPC_NAME}...')
 
         # Create a SkyPilot VPC network if it doesn't exist
-        vpc_list = _list_vpcnets(config,
+        vpc_list = _list_vpcnets(config.provider_config,
                                  compute,
                                  filter=f'name={SKYPILOT_VPC_NAME}')
         if len(vpc_list) == 0:
@@ -659,25 +649,19 @@ def get_usable_vpc(config):
     return usable_vpc_name
 
 
-def _configure_subnet(config, compute):
+def _configure_subnet(config: common.ProvisionConfig, compute):
     """Pick a reasonable subnet if not specified by the config."""
-    config = copy.deepcopy(config)
-
-    node_configs = [
-        node_type['node_config']
-        for node_type in config['available_node_types'].values()
-    ]
+    node_config = config.node_config
     # Rationale: avoid subnet lookup if the network is already
     # completely manually configured
 
     # networkInterfaces is compute, networkConfig is TPU
-    if all('networkInterfaces' in node_config or 'networkConfig' in node_config
-           for node_config in node_configs):
+    if 'networkInterfaces' in node_config or 'networkConfig' in node_config:
         return config
 
     # SkyPilot: make sure there's a usable VPC
     usable_vpc_name = get_usable_vpc(config)
-    subnets = _list_subnets(config,
+    subnets = _list_subnets(config.provider_config,
                             compute,
                             filter=f'(name="{usable_vpc_name}")')
     default_subnet = subnets[0]
@@ -690,16 +674,15 @@ def _configure_subnet(config, compute):
         }],
     }]
 
-    for node_config in node_configs:
-        # The not applicable key will be removed during node creation
+    # The not applicable key will be removed during node creation
 
-        # compute
-        if 'networkInterfaces' not in node_config:
-            node_config['networkInterfaces'] = copy.deepcopy(default_interfaces)
-        # TPU
-        if 'networkConfig' not in node_config:
-            node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
-            node_config['networkConfig'].pop('accessConfigs')
+    # compute
+    if 'networkInterfaces' not in node_config:
+        node_config['networkInterfaces'] = copy.deepcopy(default_interfaces)
+    # TPU
+    if 'networkConfig' not in node_config:
+        node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
+        node_config['networkConfig'].pop('accessConfigs')
 
     return config
 
@@ -734,19 +717,19 @@ def _create_vpcnet(config, compute, body):
     return response
 
 
-def _list_vpcnets(config, compute, filter=None):
+def _list_vpcnets(provider_config, compute, filter=None):
     response = (compute.networks().list(
-        project=config['provider']['project_id'],
+        project=provider_config['project_id'],
         filter=filter,
     ).execute())
 
     return response['items'] if 'items' in response else []
 
 
-def _list_subnets(config, compute, filter=None):
+def _list_subnets(provider_config, compute, filter=None):
     response = (compute.subnetworks().list(
-        project=config['provider']['project_id'],
-        region=config['provider']['region'],
+        project=provider_config['project_id'],
+        region=provider_config['region'],
         filter=filter,
     ).execute())
 
