@@ -1,6 +1,6 @@
 resources:
   # you could change this section to any resources you want, like a CPU VM
-  accelerators: V100:1
+  accelerators: T4:1
   ports: 8080
 
 # tabby base dir
