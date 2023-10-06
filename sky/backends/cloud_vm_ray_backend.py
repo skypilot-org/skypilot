@@ -1911,6 +1911,14 @@ class RetryingVmProvisioner(object):
                     logger.info(
                         'Retrying due to list request rate limit exceeded.')
                     return True
+                
+                # https://github.com/skypilot-org/skypilot/issues/2666
+                if ('Head node fetch timed out. Failed to create head node.'
+                        in stderr):
+                    logger.info(
+                        'Retrying head node provisioning due to head fetching '
+                        'timeout.')
+                    return True
 
                 # https://github.com/skypilot-org/skypilot/issues/1797
                 # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
@@ -1921,8 +1929,20 @@ class RetryingVmProvisioner(object):
                     # Retry. Unlikely will succeed if it's due to no capacity.
                     logger.info(
                         'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
-                        'error.')
+                        f'error: {stderr}')
                     return True
+
+                # "The resource 'projects/skypilot-375900/regions/us-central1/subnetworks/default' is not ready". Details: "[{'message': "The resource 'projects/xxx/regions/us-central1/subnetworks/default' is not ready", 'domain': 'global', 'reason': 'resourceNotReady'}]"> # pylint: disable=line-too-long
+                pattern = (r'is not ready(.*)\'reason\': \'resourceNotReady\'')
+                result = re.search(pattern, stderr)
+                if result is not None:
+                    # Retry. Unlikely will succeed if it's due to no capacity.
+                    logger.info(
+                        'Retrying due to the possibly flaky resourceNotReady '
+                        f'error: {stderr}')
+                    return True
+                
+
 
             if isinstance(to_provision_cloud, clouds.Lambda):
                 if 'Your API requests are being rate limited.' in stderr:
