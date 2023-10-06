@@ -452,6 +452,10 @@ def _cleanup(job_id: int, dag_yaml: str):
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         cluster_name = spot_utils.generate_spot_cluster_name(task.name, job_id)
+        # TODO(zhwu): We need to handle the case where the cluster is not
+        # correctly terminated, after the retries in terminate_cluster, e.g.,
+        # we should avoid calling `set_controller_pid` when exitting the
+        # this program, if there is leaked resources.
         recovery_strategy.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
@@ -461,7 +465,6 @@ def _cleanup(job_id: int, dag_yaml: str):
 
 def start(job_id, dag_yaml, retry_until_up):
     """Start the controller."""
-    spot_state.set_controller_pid(job_id, os.getpid())
     controller_process = None
     cancelling = False
     try:
@@ -551,4 +554,9 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
+    spot_state.set_controller_pid(args.job_id, os.getpid())
     start(args.job_id, args.dag_yaml, args.retry_until_up)
+    # Clear the controller pid after the controller exits, which indicates
+    # the controller process is normally exited and the resources are cleaned
+    # up.
+    spot_state.set_controller_pid(args.job_id, 0)

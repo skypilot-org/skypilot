@@ -226,6 +226,8 @@ def cleanup_zombie_spot_jobs():
                     f'No controller process found for abnormal spot job '
                     f'{job_id}.')
 
+        # controller_pid == 0 means the process is already killed, and the
+        # resources is already cleaned up.
         if controller_pid:
             logger.info(f'Found zombie controller process {controller_pid} '
                         f'for spot job {job_id} in status: {status}')
