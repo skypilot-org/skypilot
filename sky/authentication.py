@@ -419,13 +419,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     return config
 
+
 # ---------------------------------- RunPod ---------------------------------- #
 def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Sets up SSH authentication for RunPod.
     Verifies that the user has the public SSH key stored in their RunPod account settings.
     """
-    _, public_key_path = get_or_generate_keys()
-    with open(public_key_path, 'r') as f:
-        public_key = f.read()
-    return _replace_ssh_info_in_config(config, public_key)
+    return configure_ssh_info(config)
