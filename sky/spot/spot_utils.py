@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
+import psutil
 from typing_extensions import Literal
 
 from sky import backends
@@ -93,6 +94,37 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     return status
 
 
+def _cleanup_cluster_for_job_id(job_id: int) -> bool:
+    # Tear down the abnormal spot cluster to avoid resource leakage.
+    tasks = spot_state.get_spot_jobs(job_id)
+    for task in tasks:
+        task_name = task['job_name']
+        # Tear down the abnormal spot cluster to avoid resource leakage.
+        cluster_name = generate_spot_cluster_name(task_name, job_id)
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+
+        max_retry = 3
+        retry_cnt = 0
+        while handle is not None:
+            retry_cnt += 1
+            if retry_cnt > max_retry:
+                logger.error('Failed to tear down the spot cluster '
+                             f'{cluster_name!r}.')
+                return False
+
+            backend = backend_utils.get_backend_from_handle(handle)
+            try:
+                backend.teardown(handle, terminate=True)
+                break
+            except RuntimeError:
+                logger.error('Failed to tear down the spot cluster '
+                             f'{cluster_name!r}. Retrying '
+                             f'[{retry_cnt}/{max_retry}].')
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+    return True
+
+
 def update_spot_job_status(job_id: Optional[int] = None):
     """Update spot job status if the controller job failed abnormally.
 
@@ -111,24 +143,10 @@ def update_spot_job_status(job_id: Optional[int] = None):
         if controller_status is None or controller_status.is_terminal():
             logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            tasks = spot_state.get_spot_jobs(job_id_)
-            for task in tasks:
-                task_name = task['job_name']
-                # Tear down the abnormal spot cluster to avoid resource leakage.
-                cluster_name = generate_spot_cluster_name(task_name, job_id_)
-                handle = global_user_state.get_handle_from_cluster_name(
-                    cluster_name)
-                if handle is not None:
-                    backend = backend_utils.get_backend_from_handle(handle)
-                    max_retry = 3
-                    for retry_cnt in range(max_retry):
-                        try:
-                            backend.teardown(handle, terminate=True)
-                            break
-                        except RuntimeError:
-                            logger.error('Failed to tear down the spot cluster '
-                                         f'{cluster_name!r}. Retrying '
-                                         f'[{retry_cnt}/{max_retry}].')
+            if _cleanup_cluster_for_job_id(job_id_):
+                # Set the controller_pid to 0 to indicate the process is
+                # already killed, and the cluster is already cleaned up.
+                spot_state.set_controller_pid(job_id_, 0)
 
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
@@ -142,6 +160,99 @@ def update_spot_job_status(job_id: Optional[int] = None):
                 failure_reason=
                 'Controller process has exited abnormally. For more details,'
                 f' run: sky spot logs --controller {job_id_}')
+
+
+def cleanup_zombie_spot_jobs():
+    """Cleanup zombie spot jobs.
+
+    This is to avoid leakage of controller processes, where the ray job is
+    finished but the process is still running. It could happen when an OOM error
+    happens on the controller VM.
+
+    Reference: https://github.com/skypilot-org/skypilot/issues/2668
+    """
+    # Update the spot job status to find FAILED_CONTROLLER jobs.
+    update_spot_job_status()
+
+    # Get all the FAILED_CONTROLLER jobs.
+    spot_jobs = spot_state.get_spot_jobs()
+    terminal_controller_jobs = []
+    for spot_job in spot_jobs:
+        if spot_job['status'].is_terminal():
+            terminal_controller_jobs.append(spot_job)
+
+    # Get controller processes by cmdline if the controller_pid is None. This is
+    # for backward compatibility, as the controller_pid is not set for old
+    # spot jobs before #TODO.
+    # TODO(zhwu): remove in 0.6.0.
+    controller_processes = []
+    if any(spot_job['controller_pid'] is None
+           for spot_job in terminal_controller_jobs):
+        cmd_filter = 'python -u -m sky.spot.controller'
+        for proc in psutil.process_iter(attrs=['pid', 'cmdline']):
+            try:
+                cmdline = ' '.join(proc.cmdline())
+                if cmd_filter in cmdline:
+                    controller_processes.append(proc)
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+    # Cleanup the controller processes and clusters for the FAILED_CONTROLLER
+    # spot jobs.
+    for spot_job in terminal_controller_jobs:
+        job_id = spot_job['spot_job_id']
+        controller_pid = spot_job['controller_pid']
+        status = spot_job['status']
+
+        # TODO(zhwu): remove in 0.6.0.
+        if controller_pid is None:
+            logger.info(f'No controller process found for spot job {job_id}. '
+                        'Fallback to filter by cmdline.')
+            # Get the controller process by cmdline. Sync with
+            # templates/spot-controller.yaml.j2.
+            job_id_filter = f'--job-id {job_id}'
+            for proc in controller_processes:
+                cmdline = ' '.join(proc.cmdline())
+                # Avoid matching --job-id 1234 with --job-id 12345.
+                if (cmdline.endswith(job_id_filter) or
+                        f'{job_id_filter} ' in cmdline):
+                    controller_pid = proc.pid
+                    break
+            else:
+                controller_pid = 0
+                # Clean up the clusters.
+                if _cleanup_cluster_for_job_id(job_id):
+                    # Set the controller_pid to 0 to indicate the process is
+                    # already killed, and the cluster is cleaned up.
+                    spot_state.set_controller_pid(job_id, 0)
+                logger.info(
+                    f'No controller process found for abnormal spot job '
+                    f'{job_id}.')
+
+        if controller_pid:
+            logger.info(f'Found zombie controller process {controller_pid} '
+                        f'for spot job {job_id} in status: {status}')
+            process_killed = True
+            # Kill the controller process if it is still running.
+            try:
+                psutil.Process(controller_pid).kill()
+            except psutil.NoSuchProcess:
+                # The process is already killed.
+                pass
+            except Exception as e:  # pylint: disable=broad-except
+                logger.info(f'Failed to kill abnormal controller process '
+                            f'{controller_pid} for spot job {job_id}: '
+                            f'{common_utils.format_exception(e)}')
+                process_killed = False
+            else:
+                logger.info('Killed abnormal controller process '
+                            f'{controller_pid} for spot job {job_id}')
+
+            # Clean up the clusters.
+            if _cleanup_cluster_for_job_id(job_id) and process_killed:
+                # Set the controller_pid to 0 to indicate the process is
+                # already killed, and the cluster is cleaned up.
+                spot_state.set_controller_pid(job_id, 0)
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,

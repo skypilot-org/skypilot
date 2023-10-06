@@ -55,7 +55,8 @@ _CURSOR.execute("""\
     failure_reason TEXT,
     spot_job_id INTEGER,
     task_id INTEGER DEFAULT 0,
-    task_name TEXT)""")
+    task_name TEXT,
+    controller_pid INTEGER)""")
 _CONN.commit()
 
 db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
@@ -81,6 +82,8 @@ db_utils.add_column_to_table(_CURSOR,
                              'task_name',
                              'TEXT',
                              copy_from='job_name')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'controller_pid',
+                             'INTEGER')
 
 # `job_info` contains the mapping from job_id to the job_name.
 # In the future, it may contain more information about each job.
@@ -269,6 +272,16 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
             VALUES (?, ?, ?, ?, ?)""",
             (job_id, task_id, task_name, resources_str,
              SpotStatus.PENDING.value))
+
+
+def set_controller_pid(job_id: int, controller_pid: int):
+    """Set the controller_pid of the task."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE spot SET
+            controller_pid=(?)
+            WHERE spot_job_id=(?)""", (controller_pid, job_id))
 
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,

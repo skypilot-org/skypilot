@@ -461,6 +461,7 @@ def _cleanup(job_id: int, dag_yaml: str):
 
 def start(job_id, dag_yaml, retry_until_up):
     """Start the controller."""
+    spot_state.set_controller_pid(job_id, os.getpid())
     controller_process = None
     cancelling = False
     try:
