@@ -228,7 +228,7 @@ def bootstrap_gcp(region: str, cluster_name: str,
     # aws ec2 where everything is global.
 
     _configure_project(config.provider_config, crm)
-    config, iam_role = _configure_iam_role(config, crm, iam)
+    iam_role = _configure_iam_role(config, crm, iam)
     config.provider_config['iam_role'] = iam_role
     config = _configure_subnet(region, cluster_name, config, compute)
 
@@ -339,11 +339,12 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
 
     TODO: Allow the name/id of the service account to be configured
     """
+    project_id = config.provider_config['project_id']
     email = SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
         account_id=SKYPILOT_SERVICE_ACCOUNT_ID,
-        project_id=config.provider_config['project_id'],
+        project_id=project_id,
     )
-    service_account = _get_service_account(email, config.provider_config, iam)
+    service_account = _get_service_account(email, project_id, iam)
 
     permissions = VM_MINIMAL_PERMISSIONS
     roles = DEFAULT_SERVICE_ACCOUNT_ROLES
@@ -363,12 +364,11 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         # account is still usable.
         email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
             account_id=DEFAULT_SERVICE_ACCOUNT_ID,
-            project_id=config.provider_config['project_id'],
+            project_id=project_id,
         )
         logger.info(f'_configure_iam_role: Fallback to service account {email}')
 
-        ray_service_account = _get_service_account(email,
-                                                   config.provider_config, iam)
+        ray_service_account = _get_service_account(email, project_id, iam)
         ray_satisfied, _ = _is_permission_satisfied(ray_service_account, crm,
                                                     iam, permissions, roles)
         logger.info(
@@ -387,7 +387,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
             service_account = _create_service_account(
                 SKYPILOT_SERVICE_ACCOUNT_ID,
                 SKYPILOT_SERVICE_ACCOUNT_CONFIG,
-                config.provider_config,
+                project_id,
                 iam,
             )
             satisfied, policy = _is_permission_satisfied(
@@ -417,7 +417,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
     else:
         iam_role = {'serviceAccounts': [account_dict]}
 
-    return config, iam_role
+    return iam_role
 
 
 def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
@@ -716,8 +716,7 @@ def _create_project(project_id: str, crm):
     return result
 
 
-def _get_service_account(account, provider_config, iam):
-    project_id = provider_config['project_id']
+def _get_service_account(account: str, project_id: str, iam):
     full_name = 'projects/{project_id}/serviceAccounts/{account}'.format(
         project_id=project_id, account=account)
     try:
@@ -734,9 +733,8 @@ def _get_service_account(account, provider_config, iam):
     return service_account
 
 
-def _create_service_account(account_id, account_config, provider_config, iam):
-    project_id = provider_config['project_id']
-
+def _create_service_account(account_id: str, account_config, project_id: str,
+                            iam):
     service_account = (iam.projects().serviceAccounts().create(
         name='projects/{project_id}'.format(project_id=project_id),
         body={
@@ -760,39 +758,3 @@ def _add_iam_policy_binding(service_account, policy, crm, iam):
     ).execute())
 
     return result
-
-
-def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
-    """Inserts an ssh-key into project commonInstanceMetadata"""
-
-    key_parts = public_key.split(' ')
-
-    # Sanity checks to make sure that the generated key matches expectation
-    assert len(key_parts) == 2, key_parts
-    assert key_parts[0] == 'ssh-rsa', key_parts
-
-    new_ssh_meta = '{ssh_user}:ssh-rsa {key_value} {ssh_user}'.format(
-        ssh_user=ssh_user, key_value=key_parts[1])
-
-    common_instance_info = project['commonInstanceMetadata']
-    items = common_instance_info.get('items', [])
-
-    ssh_keys_i = next(
-        (i for i, item in enumerate(items) if item['key'] == 'ssh-keys'), None)
-
-    if ssh_keys_i is None:
-        items.append({'key': 'ssh-keys', 'value': new_ssh_meta})
-    else:
-        ssh_keys = items[ssh_keys_i]
-        ssh_keys['value'] += '\n' + new_ssh_meta
-        items[ssh_keys_i] = ssh_keys
-
-    common_instance_info['items'] = items
-
-    operation = (compute.projects().setCommonInstanceMetadata(
-        project=project['name'], body=common_instance_info).execute())
-
-    response = wait_for_compute_global_operation(project['name'], operation,
-                                                 compute)
-
-    return response
