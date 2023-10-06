@@ -1,15 +1,10 @@
 """GCP config module."""
 import copy
-from functools import partial
 import json
 import logging
-import os
 import time
 from typing import Dict, List, Set, Tuple
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery
@@ -18,14 +13,14 @@ from googleapiclient import errors
 from sky.provision import common
 from sky.provision.gcp.constants import FIREWALL_RULES_REQUIRED
 from sky.provision.gcp.constants import FIREWALL_RULES_TEMPLATE
+from sky.provision.gcp.constants import MAX_POLLS
+from sky.provision.gcp.constants import POLL_INTERVAL
 from sky.provision.gcp.constants import SKYPILOT_VPC_NAME
 from sky.provision.gcp.constants import TPU_MINIMAL_PERMISSIONS
 from sky.provision.gcp.constants import VM_MINIMAL_PERMISSIONS
 from sky.provision.gcp.constants import VPC_TEMPLATE
 from sky.skylet.providers.gcp.node import GCPCompute
 from sky.skylet.providers.gcp.node import GCPNodeType
-from sky.skylet.providers.gcp.node import MAX_POLLS
-from sky.skylet.providers.gcp.node import POLL_INTERVAL
 
 logger = logging.getLogger(__name__)
 
@@ -133,38 +128,6 @@ def wait_for_compute_global_operation(project_name, operation, compute):
     return result
 
 
-def key_pair_name(i, region, project_id, ssh_user):
-    """Returns the ith default gcp_key_pair_name."""
-    return f'{SKYPILOT}_gcp_{region}_{project_id}_{ssh_user}_{i}'
-
-
-def key_pair_paths(key_name):
-    """Returns public and private key paths for a given key_name."""
-    public_key_path = os.path.expanduser(f'~/.ssh/{key_name}.pub')
-    private_key_path = os.path.expanduser(f'~/.ssh/{key_name}.pem')
-    return public_key_path, private_key_path
-
-
-def generate_rsa_key_pair():
-    """Create public and private ssh-keys."""
-
-    key = rsa.generate_private_key(backend=default_backend(),
-                                   public_exponent=65537,
-                                   key_size=2048)
-
-    public_key = (key.public_key().public_bytes(
-        serialization.Encoding.OpenSSH,
-        serialization.PublicFormat.OpenSSH).decode('utf-8'))
-
-    pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode('utf-8')
-
-    return public_key, pem
-
-
 def _create_crm(gcp_credentials=None):
     return discovery.build('cloudresourcemanager',
                            'v1',
@@ -267,7 +230,7 @@ def bootstrap_gcp(region: str, cluster_name: str,
     _configure_project(config.provider_config, crm)
     config, iam_role = _configure_iam_role(config, crm, iam)
     config.provider_config['iam_role'] = iam_role
-    config = _configure_subnet(config, compute)
+    config = _configure_subnet(region, cluster_name, config, compute)
 
     return config
 
@@ -457,12 +420,13 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
     return config, iam_role
 
 
-def _check_firewall_rules(vpc_name, config, compute):
+def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
+                          compute):
     """Check if the firewall rules in the VPC are sufficient."""
     required_rules = FIREWALL_RULES_REQUIRED.copy()
 
-    operation = compute.networks().getEffectiveFirewalls(
-        project=config['provider']['project_id'], network=vpc_name)
+    operation = compute.networks().getEffectiveFirewalls(project=project_id,
+                                                         network=vpc_name)
     response = operation.execute()
     if len(response) == 0:
         return False
@@ -514,7 +478,7 @@ def _check_firewall_rules(vpc_name, config, compute):
             if tags is not None:
                 if len(tags) != 1:
                     continue
-                if tags[0] != config['cluster_name']:
+                if tags[0] != cluster_name:
                     continue
             direction = rule.get('direction', '')
             sources = rule.get('sourceRanges', [])
@@ -570,45 +534,45 @@ def _check_firewall_rules(vpc_name, config, compute):
     return True
 
 
-def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
+def _create_rules(project_id: str, compute, rules, VPC_NAME):
     opertaions = []
     for rule in rules:
         # Query firewall rule by its name (unique in a project).
         # If the rule already exists, delete it first.
         rule_name = rule['name'].format(VPC_NAME=VPC_NAME)
-        rule_list = _list_firewall_rules(config,
+        rule_list = _list_firewall_rules(project_id,
                                          compute,
                                          filter=f'(name={rule_name})')
         if len(rule_list) > 0:
-            _delete_firewall_rule(config, compute, rule_name)
+            _delete_firewall_rule(project_id, compute, rule_name)
 
         body = rule.copy()
         body['name'] = body['name'].format(VPC_NAME=VPC_NAME)
-        body['network'] = body['network'].format(PROJ_ID=PROJ_ID,
+        body['network'] = body['network'].format(PROJ_ID=project_id,
                                                  VPC_NAME=VPC_NAME)
-        body['selfLink'] = body['selfLink'].format(PROJ_ID=PROJ_ID,
+        body['selfLink'] = body['selfLink'].format(PROJ_ID=project_id,
                                                    VPC_NAME=VPC_NAME)
-        op = _create_firewall_rule_submit(config, compute, body)
+        op = compute.firewalls().insert(project=project_id, body=body).execute()
         opertaions.append(op)
     for op in opertaions:
-        wait_for_compute_global_operation(config['provider']['project_id'], op,
-                                          compute)
+        wait_for_compute_global_operation(project_id, op, compute)
 
 
-def get_usable_vpc(config: common.ProvisionConfig):
+def get_usable_vpc(cluster_name: str, config: common.ProvisionConfig):
     """Return a usable VPC.
 
     If not found, create a new one with sufficient firewall rules.
     """
+    project_id = config.provider_config['project_id']
     _, _, compute, _ = construct_clients_from_provider_config(
         config.provider_config)
 
     # For backward compatibility, reuse the VPC if the VM is launched.
     resource = GCPCompute(
         compute,
-        config['provider']['project_id'],
-        config['provider']['availability_zone'],
-        config['cluster_name'],
+        project_id,
+        config.provider_config['availability_zone'],
+        cluster_name,
     )
     node = resource._list_instances(label_filters=None, status_filter=None)
     if len(node) > 0:
@@ -617,31 +581,31 @@ def get_usable_vpc(config: common.ProvisionConfig):
             vpc_name = netInterfaces[0]['network'].split('/')[-1]
             return vpc_name
 
-    vpcnets_all = _list_vpcnets(config.provider_config, compute)
+    vpcnets_all = _list_vpcnets(project_id, compute)
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
-        if _check_firewall_rules(vpc['name'], config, compute):
+        if _check_firewall_rules(cluster_name, vpc['name'], project_id,
+                                 compute):
             usable_vpc_name = vpc['name']
             break
 
-    proj_id = config['provider']['project_id']
     if usable_vpc_name is None:
         logger.info(f'Creating a default VPC network, {SKYPILOT_VPC_NAME}...')
 
         # Create a SkyPilot VPC network if it doesn't exist
-        vpc_list = _list_vpcnets(config.provider_config,
+        vpc_list = _list_vpcnets(project_id,
                                  compute,
                                  filter=f'name={SKYPILOT_VPC_NAME}')
         if len(vpc_list) == 0:
             body = VPC_TEMPLATE.copy()
             body['name'] = body['name'].format(VPC_NAME=SKYPILOT_VPC_NAME)
             body['selfLink'] = body['selfLink'].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
-            _create_vpcnet(config, compute, body)
+                PROJ_ID=project_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            _create_vpcnet(project_id, compute, body)
 
-        _create_rules(config, compute, FIREWALL_RULES_TEMPLATE,
-                      SKYPILOT_VPC_NAME, proj_id)
+        _create_rules(project_id, compute, FIREWALL_RULES_TEMPLATE,
+                      SKYPILOT_VPC_NAME)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
         logger.info(f'A VPC network {SKYPILOT_VPC_NAME} created.')
@@ -649,7 +613,8 @@ def get_usable_vpc(config: common.ProvisionConfig):
     return usable_vpc_name
 
 
-def _configure_subnet(config: common.ProvisionConfig, compute):
+def _configure_subnet(region: str, cluster_name: str,
+                      config: common.ProvisionConfig, compute):
     """Pick a reasonable subnet if not specified by the config."""
     node_config = config.node_config
     # Rationale: avoid subnet lookup if the network is already
@@ -660,8 +625,9 @@ def _configure_subnet(config: common.ProvisionConfig, compute):
         return config
 
     # SkyPilot: make sure there's a usable VPC
-    usable_vpc_name = get_usable_vpc(config)
-    subnets = _list_subnets(config.provider_config,
+    usable_vpc_name = get_usable_vpc(cluster_name, config)
+    subnets = _list_subnets(config.provider_config['project_id'],
+                            region,
                             compute,
                             filter=f'(name="{usable_vpc_name}")')
     default_subnet = subnets[0]
@@ -687,56 +653,48 @@ def _configure_subnet(config: common.ProvisionConfig, compute):
     return config
 
 
-def _create_firewall_rule_submit(config, compute, body):
-    operation = (compute.firewalls().insert(
-        project=config['provider']['project_id'], body=body).execute())
-    return operation
-
-
-def _delete_firewall_rule(config, compute, name):
-    operation = (compute.firewalls().delete(
-        project=config['provider']['project_id'], firewall=name).execute())
-    response = wait_for_compute_global_operation(
-        config['provider']['project_id'], operation, compute)
+def _delete_firewall_rule(project_id: str, compute, name):
+    operation = (compute.firewalls().delete(project=project_id,
+                                            firewall=name).execute())
+    response = wait_for_compute_global_operation(project_id, operation, compute)
     return response
 
 
-def _list_firewall_rules(config, compute, filter=None):
+def _list_firewall_rules(project_id, compute, filter=None):
     response = (compute.firewalls().list(
-        project=config['provider']['project_id'],
+        project=project_id,
         filter=filter,
     ).execute())
     return response['items'] if 'items' in response else []
 
 
-def _create_vpcnet(config, compute, body):
-    operation = (compute.networks().insert(
-        project=config['provider']['project_id'], body=body).execute())
-    response = wait_for_compute_global_operation(
-        config['provider']['project_id'], operation, compute)
+def _create_vpcnet(project_id: str, compute, body):
+    operation = (compute.networks().insert(project=project_id,
+                                           body=body).execute())
+    response = wait_for_compute_global_operation(project_id, operation, compute)
     return response
 
 
-def _list_vpcnets(provider_config, compute, filter=None):
+def _list_vpcnets(project_id: str, compute, filter=None):
     response = (compute.networks().list(
-        project=provider_config['project_id'],
+        project=project_id,
         filter=filter,
     ).execute())
 
     return response['items'] if 'items' in response else []
 
 
-def _list_subnets(provider_config, compute, filter=None):
+def _list_subnets(project_id: str, region: str, compute, filter=None):
     response = (compute.subnetworks().list(
-        project=provider_config['project_id'],
-        region=provider_config['region'],
+        project=project_id,
+        region=region,
         filter=filter,
     ).execute())
 
     return response['items'] if 'items' in response else []
 
 
-def _get_project(project_id, crm):
+def _get_project(project_id: str, crm):
     try:
         project = crm.projects().get(projectId=project_id).execute()
     except errors.HttpError as e:
@@ -747,7 +705,7 @@ def _get_project(project_id, crm):
     return project
 
 
-def _create_project(project_id, crm):
+def _create_project(project_id: str, crm):
     operation = (crm.projects().create(body={
         'projectId': project_id,
         'name': project_id
