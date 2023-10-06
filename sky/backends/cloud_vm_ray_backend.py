@@ -1945,9 +1945,8 @@ class RetryingVmProvisioner(object):
                 result = re.search(pattern, stderr)
                 if result is not None:
                     # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info(
-                        'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
-                        'error.')
+                    logger.info('Retrying due to the possibly transient '
+                                'RESOURCE_NOT_FOUND error.')
                     logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
@@ -1956,9 +1955,8 @@ class RetryingVmProvisioner(object):
                 result = re.search(pattern, stderr)
                 if result is not None:
                     # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info(
-                        'Retrying due to the possibly flaky resourceNotReady '
-                        f'error.')
+                    logger.info('Retrying due to the possibly transient '
+                                'resourceNotReady error.')
                     logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
