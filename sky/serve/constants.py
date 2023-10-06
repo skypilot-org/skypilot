@@ -37,6 +37,9 @@ CONTROLLER_SYNC_INTERVAL = 20
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT = 15
 
+# Wait for 1 minutes for controller / load balancer to terminate.
+SERVE_TERMINATE_WAIT_TIMEOUT = 60
+
 # The default controller resources.
 # We need 200 GB disk space to enable using Azure as controller, since its image
 # size is 150 GB. Also, we need 32 GB memory to run our controller and load

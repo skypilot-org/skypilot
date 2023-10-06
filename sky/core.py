@@ -1120,8 +1120,7 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
-            code = serve.ServeCodeGen.terminate_service(
-                service_handle.controller_port)
+            code = serve.ServeCodeGen.terminate_service(service_name)
 
             try:
                 (returncode, terminate_service_payload,

@@ -196,12 +196,10 @@ class InfraProvider:
     def __init__(
             self,
             service_name: str,
-            controller_port: int,
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
         self.service_name: str = service_name
-        self.controller_port = controller_port
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
@@ -449,7 +447,6 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.info(f'Syncing down logs for cluster {cluster_name}...')
             code = serve_utils.ServeCodeGen.stream_replica_logs(
                 self.service_name,
-                self.controller_port,
                 replica_id,
                 follow=False,
                 skip_local_log_file_check=True)
@@ -553,6 +550,8 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.info('Running replica prober.')
             try:
                 self._probe_all_replicas()
+                serve_utils.set_service_status_from_replica_info(
+                    self.service_name, self.get_replica_info(verbose=True))
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # replica prober running.

@@ -3803,8 +3803,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             assert replica_id is not None, service_handle
             code = serve_lib.ServeCodeGen.stream_replica_logs(
-                service_handle.service_name, service_handle.controller_port,
-                replica_id, follow)
+                service_handle.service_name, replica_id, follow)
 
         signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
         signal.signal(signal.SIGTSTP, backend_utils.stop_handler)

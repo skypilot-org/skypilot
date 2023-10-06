@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import copy
 import os
 import pickle
 import re
@@ -35,6 +36,13 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+# The log information when a FastAPI APP terminates.
+_FASTAPI_APP_TERMINATE_MSGS = [
+    'Shutting down',
+    'Waiting for application shutdown.',
+    'Application shutdown complete.',
+    'Finished server process',
+]
 
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')
@@ -292,16 +300,38 @@ def get_available_controller_name(
                key=lambda k: available_controller_to_service_num[k]), False
 
 
-def replica_info_to_service_status(
-        replica_info: List[Dict[str, Any]]) -> status_lib.ServiceStatus:
+def set_service_status_from_replica_info(
+        service_name: str, replica_info: List[Dict[str, Any]]) -> None:
+    record = serve_state.get_service_from_name(service_name)
+    if record is None:
+        raise ValueError(f'Service {service_name!r} does not exist. '
+                         'Cannot refresh service status.')
+    if record['status'] == status_lib.ServiceStatus.SHUTTING_DOWN:
+        # When the service is shutting down, there is a period of time which the
+        # controller still responds to the request, and the replica is not
+        # terminated, the service status will still be READY, but we don't want
+        # change service status to READY.
+        return
     status2num = collections.Counter([i['status'] for i in replica_info])
     # If one replica is READY, the service is READY.
     if status2num[status_lib.ReplicaStatus.READY] > 0:
-        return status_lib.ServiceStatus.READY
-    if sum(status2num[status]
-           for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
-        return status_lib.ServiceStatus.FAILED
-    return status_lib.ServiceStatus.REPLICA_INIT
+        status = status_lib.ServiceStatus.READY
+    elif sum(status2num[status]
+             for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
+        status = status_lib.ServiceStatus.FAILED
+    else:
+        status = status_lib.ServiceStatus.REPLICA_INIT
+    serve_state.set_status(service_name, status)
+
+
+def monitor_service_controller_job_status() -> None:
+    services = serve_state.get_services()
+    for record in services:
+        controller_status = job_lib.get_status(record['controller_job_id'])
+        if controller_status is None or controller_status.is_terminal():
+            # If controller job is not running, set it as controller failed.
+            serve_state.set_status(record['name'],
+                                   status_lib.ServiceStatus.CONTROLLER_FAILED)
 
 
 class ServiceHandle(object):
@@ -371,13 +401,29 @@ class ServiceHandle(object):
         self.__dict__.update(state)
 
 
-def get_latest_info(controller_port: int) -> str:
+def _get_controller_port_from_service_name(service_name: str) -> int:
+    record = serve_state.get_service_from_name(service_name)
+    if record is None:
+        raise ValueError(f'Service {service_name!r} does not exist.')
+    return record['controller_port']
+
+
+def _get_latest_info(service_name: str, decode: bool = True) -> Dict[str, Any]:
+    controller_port = _get_controller_port_from_service_name(service_name)
     resp = requests.get(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/get_latest_info')
-    if resp.status_code != 200:
-        raise ValueError(f'Failed to get replica info: {resp.text}')
-    return common_utils.encode_payload(resp.json())
+    resp.raise_for_status()
+    if not decode:
+        return resp.json()
+    return {
+        k: pickle.loads(base64.b64decode(v)) for k, v in resp.json().items()
+    }
+
+
+def get_latest_info(service_name: str) -> str:
+    return common_utils.encode_payload(
+        _get_latest_info(service_name, decode=False))
 
 
 def load_latest_info(payload: str) -> Dict[str, Any]:
@@ -388,7 +434,8 @@ def load_latest_info(payload: str) -> Dict[str, Any]:
     return latest_info
 
 
-def terminate_service(controller_port: int) -> str:
+def terminate_service(service_name: str) -> str:
+    controller_port = _get_controller_port_from_service_name(service_name)
     resp = requests.post(
         _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
         '/controller/terminate')
@@ -479,13 +526,13 @@ def _follow_replica_logs(
 
 
 def stream_replica_logs(service_name: str,
-                        controller_port: int,
                         replica_id: int,
                         follow: bool,
                         skip_local_log_file_check: bool = False) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
+    controller_port = _get_controller_port_from_service_name(service_name)
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
     local_log_file_name = generate_replica_local_log_file_name(
@@ -590,6 +637,38 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+def wait_until_controller_and_load_balancer_terminate(
+        service_name: str) -> None:
+
+    def wait_until_terminate_info_appear_in_log_file(log_file: str) -> bool:
+        all_terminate_information = copy.copy(_FASTAPI_APP_TERMINATE_MSGS)
+        start_time = time.time()
+        with open(os.path.expanduser(log_file), 'r', newline='') as f:
+            for line in _follow_logs(f, exit_if_stream_end=False):
+                for info in all_terminate_information:
+                    if info in line:
+                        all_terminate_information.remove(info)
+                if not all_terminate_information:
+                    return True
+                if (time.time() - start_time >
+                        constants.SERVE_TERMINATE_WAIT_TIMEOUT):
+                    break
+        return False
+
+    # Wait the load balancer to terminate first since it is the first one
+    # to terminate and the controller will wait for it to terminate.
+    load_balancer_log = generate_remote_load_balancer_log_file_name(
+        service_name)
+    if not wait_until_terminate_info_appear_in_log_file(load_balancer_log):
+        raise ValueError(
+            f'{colorama.Fore.RED}Failed to wait for load balancer to '
+            f'terminate.{colorama.Style.RESET_ALL}')
+    controller_log = generate_remote_controller_log_file_name(service_name)
+    if not wait_until_terminate_info_appear_in_log_file(controller_log):
+        raise ValueError(f'{colorama.Fore.RED}Failed to wait for controller to '
+                         f'terminate.{colorama.Style.RESET_ALL}')
+
+
 def cleanup_service_utility_files(service_name: str) -> None:
     """Cleanup utility files for a service."""
     dir_name = generate_remote_service_dir_name(service_name)
@@ -598,37 +677,11 @@ def cleanup_service_utility_files(service_name: str) -> None:
         shutil.rmtree(dir_name)
 
 
-def refresh_service_status() -> None:
-    services = serve_state.get_services()
-    for record in services:
-        controller_status = job_lib.get_status(record['controller_job_id'])
-        if controller_status is None or controller_status.is_terminal():
-            # If controller job is not running, set it as controller failed.
-            serve_state.set_status(record['name'],
-                                   status_lib.ServiceStatus.CONTROLLER_FAILED)
-        elif record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
-            if controller_status == job_lib.JobStatus.RUNNING:
-                # If controller job is running, update the status to
-                # REPLICA_INIT.
-                serve_state.set_status(record['name'],
-                                       status_lib.ServiceStatus.REPLICA_INIT)
-        # When the service is shutting down, there is a period of time which the
-        # controller still responds to the request, and the replica is not
-        # terminated, so the return value for _service_status_from_replica_info
-        # will still be READY, but we don't want change service status to READY.
-        elif record['status'] != status_lib.ServiceStatus.SHUTTING_DOWN:
-            latest_info = load_latest_info(
-                get_latest_info(record['controller_port']))
-            serve_state.set_status(
-                record['name'],
-                replica_info_to_service_status(latest_info['replica_info']))
-
-
 class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_latest_info(controller_port)
+      >> code = ServeCodeGen.get_latest_info(service_name)
     """
     _PREFIX = [
         'from sky.serve import serve_state',
@@ -645,17 +698,17 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_latest_info(cls, controller_port: int) -> str:
+    def get_latest_info(cls, service_name: str) -> str:
         code = [
-            f'msg = serve_utils.get_latest_info({controller_port})',
+            f'msg = serve_utils.get_latest_info({service_name!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def terminate_service(cls, controller_port: int) -> str:
+    def terminate_service(cls, service_name: str) -> str:
         code = [
-            f'msg = serve_utils.terminate_service({controller_port})',
+            f'msg = serve_utils.terminate_service({service_name!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -663,13 +716,12 @@ class ServeCodeGen:
     @classmethod
     def stream_replica_logs(cls,
                             service_name: str,
-                            controller_port: int,
                             replica_id: int,
                             follow: bool,
                             skip_local_log_file_check: bool = False) -> str:
         code = [
-            f'msg = serve_utils.stream_replica_logs({service_name!r}, '
-            f'{controller_port}, {replica_id!r}, follow={follow}, '
+            'msg = serve_utils.stream_replica_logs('
+            f'{service_name!r}, {replica_id!r}, follow={follow}, '
             f'skip_local_log_file_check={skip_local_log_file_check})',
             'print(msg, flush=True)'
         ]
@@ -687,6 +739,8 @@ class ServeCodeGen:
     @classmethod
     def cleanup_service(cls, service_name: str) -> str:
         code = [
+            'serve_utils.wait_until_controller_and_load_balancer_terminate('
+            f'{service_name!r})',
             f'serve_utils.cleanup_service_utility_files({service_name!r})',
             f'serve_state.remove_service({service_name!r})',
         ]
