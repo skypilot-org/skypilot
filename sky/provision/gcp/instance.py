@@ -37,10 +37,11 @@ def _filter_instances(
     instances = set()
     logger.debug(f'handlers: {handlers}')
     for instance_handler in handlers:
-        instances |= set(
-            instance_handler.filter(project_id, zone, label_filters,
-                                    status_filters_fn(instance_handler),
-                                    included_instances, excluded_instances))
+        instance_dict = instance_handler.filter(
+            project_id, zone, label_filters,
+            status_filters_fn(instance_handler), included_instances,
+            excluded_instances)
+        instances |= set(instance_dict.keys())
     handler_to_instances = collections.defaultdict(list)
     for instance in instances:
         handler = instance_utils.instance_to_handler(instance)

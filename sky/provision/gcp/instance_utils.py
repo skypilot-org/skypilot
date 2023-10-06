@@ -1,6 +1,7 @@
 """Utilities for GCP instances."""
+import enum
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -73,7 +74,7 @@ class GCPInstance:
         status_filters: Optional[List[str]],
         included_instances: Optional[List[str]] = None,
         excluded_instances: Optional[List[str]] = None,
-    ) -> List[str]:
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
     @classmethod
@@ -174,7 +175,7 @@ class GCPComputeInstance(GCPInstance):
         status_filters: Optional[List[str]],
         included_instances: Optional[List[str]] = None,
         excluded_instances: Optional[List[str]] = None,
-    ) -> List[str]:
+    ) -> Dict[str, Any]:
         if label_filters:
             label_filter_expr = ('(' + ' AND '.join([
                 '(labels.{key} = {value})'.format(key=key, value=value)
@@ -206,11 +207,17 @@ class GCPComputeInstance(GCPInstance):
             zone=zone,
         ).execute())
         instances = response.get('items', [])
-        instances = [i['name'] for i in instances]
+        instances = {i['name']: i for i in instances}
         if included_instances:
-            instances = [i for i in instances if i in included_instances]
+            instances = {
+                k: v for k, v in instances.items() if k in included_instances
+            }
         if excluded_instances:
-            instances = [i for i in instances if i not in excluded_instances]
+            instances = {
+                k: v
+                for k, v in instances.items()
+                if k not in excluded_instances
+            }
         return instances
 
     @classmethod
@@ -403,7 +410,7 @@ class GCPTPUVMInstance(GCPInstance):
         status_filters: Optional[List[str]],
         included_instances: Optional[List[str]] = None,
         excluded_instances: Optional[List[str]] = None,
-    ) -> List[str]:
+    ) -> Dict[str, Any]:
         path = f'projects/{project_id}/locations/{zone}'
         try:
             response = (cls.load_resource().projects().locations().nodes().list(
@@ -413,7 +420,7 @@ class GCPTPUVMInstance(GCPInstance):
             # Return empty list instead of raising exception to not break
             # ray down.
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
-            return []
+            return {}
 
         instances = response.get('nodes', [])
 
@@ -439,13 +446,18 @@ class GCPTPUVMInstance(GCPInstance):
             return True
 
         instances = list(filter(filter_instance, instances))
-        instances = [i['name'] for i in instances]
+        instances = {i['name']: i for i in instances}
 
         if included_instances:
-            instances = [i for i in instances if i in included_instances]
+            instances = {
+                k: v for k, v in instances.items() if k in included_instances
+            }
         if excluded_instances:
-            instances = [i for i in instances if i not in excluded_instances]
-
+            instances = {
+                k: v
+                for k, v in instances.items()
+                if k not in excluded_instances
+            }
         return instances
 
     @classmethod
@@ -512,3 +524,19 @@ class GCPTPUVMInstance(GCPInstance):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Failed to get VPC name for instance {instance}') from e
+
+
+class GCPNodeType(enum.Enum):
+    """Enum for GCP node types (compute & tpu)"""
+
+    COMPUTE = "compute"
+    TPU = "tpu"
+
+    @staticmethod
+    def name_to_type(name: str):
+        """Provided a node name, determine the type.
+
+        This expects the name to be in format '[NAME]-[UUID]-[TYPE]',
+        where [TYPE] is either 'compute' or 'tpu'.
+        """
+        return GCPNodeType(name.split("-")[-1])

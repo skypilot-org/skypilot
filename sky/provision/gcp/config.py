@@ -1,4 +1,4 @@
-"""GCP config module."""
+"""GCP configuration bootstrapping."""
 import copy
 import json
 import logging
@@ -11,6 +11,7 @@ from googleapiclient import discovery
 from googleapiclient import errors
 
 from sky.provision import common
+from sky.provision.gcp import instance_utils
 from sky.provision.gcp.constants import FIREWALL_RULES_REQUIRED
 from sky.provision.gcp.constants import FIREWALL_RULES_TEMPLATE
 from sky.provision.gcp.constants import MAX_POLLS
@@ -19,8 +20,6 @@ from sky.provision.gcp.constants import SKYPILOT_VPC_NAME
 from sky.provision.gcp.constants import TPU_MINIMAL_PERMISSIONS
 from sky.provision.gcp.constants import VM_MINIMAL_PERMISSIONS
 from sky.provision.gcp.constants import VPC_TEMPLATE
-from sky.skylet.providers.gcp.node import GCPCompute
-from sky.skylet.providers.gcp.node import GCPNodeType
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ HAS_TPU_PROVIDER_FIELD = '_has_tpus'
 # with ServiceAccounts.
 
 
-def get_node_type(node: dict) -> GCPNodeType:
+def get_node_type(node: dict) -> instance_utils.GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
     This is a very simple check. If we have a ``machineType`` key,
@@ -82,8 +81,8 @@ def get_node_type(node: dict) -> GCPNodeType:
             f'Got {list(node)}')
 
     if 'machineType' not in node and 'acceleratorType' in node:
-        return GCPNodeType.TPU
-    return GCPNodeType.COMPUTE
+        return instance_utils.GCPNodeType.TPU
+    return instance_utils.GCPNodeType.COMPUTE
 
 
 def wait_for_crm_operation(operation, crm):
@@ -211,11 +210,12 @@ def construct_clients_from_provider_config(provider_config):
     )
 
 
-def bootstrap_gcp(region: str, cluster_name: str,
-                  config: common.ProvisionConfig):
+def bootstrap_instances(
+        region: str, cluster_name: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
     # Check if we have any TPUs defined, and if so,
     # insert that information into the provider config
-    if get_node_type(config.node_config) == GCPNodeType.TPU:
+    if get_node_type(config.node_config) == instance_utils.GCPNodeType.TPU:
         config.provider_config[HAS_TPU_PROVIDER_FIELD] = True
 
     crm, iam, compute, tpu = construct_clients_from_provider_config(
@@ -408,7 +408,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         # account is limited by the IAM rights specified below.
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
-    if get_node_type(config.node_config) == GCPNodeType.TPU:
+    if get_node_type(config.node_config) == instance_utils.GCPNodeType.TPU:
         # SKY: The API for TPU VM is slightly different from normal compute instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
         account_dict['scope'] = account_dict['scopes']
@@ -568,15 +568,15 @@ def get_usable_vpc(cluster_name: str, config: common.ProvisionConfig):
         config.provider_config)
 
     # For backward compatibility, reuse the VPC if the VM is launched.
-    resource = GCPCompute(
-        compute,
+    instance_dict = instance_utils.GCPComputeInstance.filter(
         project_id,
         config.provider_config['availability_zone'],
-        cluster_name,
-    )
-    node = resource._list_instances(label_filters=None, status_filter=None)
-    if len(node) > 0:
-        netInterfaces = node[0].get('networkInterfaces', [])
+        label_filters=None,
+        status_filters=None)
+
+    if instance_dict:
+        instance_metadata = list(instance_dict.values())[0]
+        netInterfaces = instance_metadata.get('networkInterfaces', [])
         if len(netInterfaces) > 0:
             vpc_name = netInterfaces[0]['network'].split('/')[-1]
             return vpc_name
