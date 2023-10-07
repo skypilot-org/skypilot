@@ -42,8 +42,7 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     k8s_cloud = Kubernetes()
     if not any(
-            map(lambda cloud: k8s_cloud.is_same_cloud(cloud),
-                global_user_state.get_enabled_clouds())
+            map(k8s_cloud.is_same_cloud, global_user_state.get_enabled_clouds())
     ) or not kubernetes_utils.check_credentials()[0]:
         return {}
 
