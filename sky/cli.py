@@ -3238,9 +3238,6 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
-    # validation for the --cloud kubernetes
-    if cloud == 'kubernetes':
-        raise click.UsageError('Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3271,6 +3268,11 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
+
+            if len(result) == 0 and cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -3327,6 +3329,10 @@ def show_gpus(
                                                    case_sensitive=False)
 
         if len(result) == 0:
+            if cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             yield f'Resources \'{name}\'{quantity_str} not found. '
