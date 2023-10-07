@@ -36,6 +36,8 @@ botocore = None
 _session_creation_lock = threading.RLock()
 _local = threading.local()
 
+version = 1
+
 
 def import_package(func):
 
