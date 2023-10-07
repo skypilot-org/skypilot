@@ -98,12 +98,15 @@ def resource(service_name: str, **kwargs):
 
     Args:
         service_name: AWS resource name (e.g., 's3').
-        kwargs: Other options.
+        kwargs: Other options. We add max_attempts to the kwargs instead of
+            using botocore.config.Config() because the latter is not hashable.
     """
     assert 'config' not in kwargs, (
         'config should not be passed to resource(), '
         'as botocore.config.Config() is not hashiable.')
     if not hasattr(_local, 'resource'):
+        # TODO(zhwu): this dict should be LRU cache, instead of growing forever,
+        # to avoid issues in #2668.
         _local.resource = {}
 
     # Using service name and kwargs as key
