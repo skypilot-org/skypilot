@@ -68,14 +68,17 @@ def safe_status(msg: str):
         return _status
     return _NoOpConsoleStatus()
 
-def safe_progress(transient: bool, redirect_stdout: bool, redirect_stderr: bool):
+def safe_progress(transient: bool, redirect_stdout: bool,
+                  redirect_stderr: bool):
     """ A wrapper for multi-threaded rich.progress."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         global _progress
         if _progress is None:
-            _progress = rich_progress.Progress(transient=transient, redirect_stdout=redirect_stdout, redirect_stderr=redirect_stderr)
+            _progress = rich_progress.Progress(transient=transient,
+                                               redirect_stdout=redirect_stdout,
+                                               redirect_stderr=redirect_stderr)
         return _progress
     return _NoOpProgress()
 

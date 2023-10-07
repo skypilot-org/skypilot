@@ -41,7 +41,6 @@ import webbrowser
 import click
 import colorama
 import dotenv
-from rich import progress as rich_progress
 import yaml
 
 import sky
@@ -2834,7 +2833,7 @@ def _down_or_stop_clusters(
             show_default=True)
 
     plural = 's' if len(clusters) > 1 else ''
-    progress = rich_progress.Progress(transient=True,
+    progress = rich_utils.safe_progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
@@ -4543,7 +4542,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             abort=True,
             show_default=True)
 
-    progress = rich_progress.Progress(transient=True,
+    progress = rich_utils.safe_progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(

@@ -16,7 +16,6 @@ import uuid
 
 import colorama
 import prettytable
-from rich import progress as rich_progress
 
 import sky
 from sky import backends
@@ -574,7 +573,7 @@ def update_benchmark_state(benchmark: str) -> None:
     # Update the benchmark results in parallel.
     num_candidates = len(benchmark_results)
     plural = 's' if num_candidates > 1 else ''
-    progress = rich_progress.Progress(transient=True,
+    progress = rich_utils.safe_progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
