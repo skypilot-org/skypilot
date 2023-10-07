@@ -98,6 +98,6 @@ def list_accelerators(
 def validate_region_zone(
     region_name: Optional[str],
     zone_name: Optional[str],
-    clouds: CloudFilter = None  # type: ignore
+    clouds: CloudFilter = None  # pylint: disable=unused-argument
 ) -> Tuple[Optional[str], Optional[str]]:
     return (region_name, zone_name)
