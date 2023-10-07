@@ -100,19 +100,26 @@ def resource(service_name: str, **kwargs):
         service_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
+    assert 'config' not in kwargs, (
+        'config should not be passed to resource(), '
+        'as botocore.config.Config() is not hashiable.')
     if not hasattr(_local, 'resource'):
         _local.resource = {}
 
     # Using service name and kwargs as key
     sorted_kwargs = tuple(sorted(kwargs.items(), key=lambda x: x[0]))
     key = (service_name, sorted_kwargs)
+    max_attempts = kwargs.pop('max_attempts', None)
+    if max_attempts is not None:
+        config = botocore_config().Config(
+            retries={'max_attempts': max_attempts})
+        kwargs['config'] = config
     if key not in _local.resource:
         with _session_creation_lock:
-            # NOTE: we need the lock here to avoid
-            # thread-safety issues when creating the resource,
-            # because Python module is a shared object,
-            # and we are not sure if the code inside
-            # 'session().resource()' is thread-safe.
+            # NOTE: we need the lock here to avoid thread-safety issues when
+            # creating the resource, because Python module is a shared object,
+            # and we are not sure if the code inside 'session().resource()'
+            # is thread-safe.
             _local.resource[key] = session().resource(service_name, **kwargs)
 
     return _local.resource[key]

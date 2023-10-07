@@ -46,24 +46,10 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
-@aws.import_package
-def botocore_config():
-    """Get botocore.config module.
-
-    This is for backward compatibility when `aws` module is imported before the
-    `botocore_config()` function is added in #1702.
-    TODO: remove this function after 0.6.0 release, when new provisioner is
-    used by default.
-    """
-    config = aws.botocore.config
-    return config
-
-
 def _default_ec2_resource(region: str) -> Any:
     return aws.resource('ec2',
                         region_name=region,
-                        config=botocore_config().Config(
-                            retries={'max_attempts': BOTO_MAX_RETRIES}))
+                        max_attempts=BOTO_MAX_RETRIES)
 
 
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:
@@ -351,10 +337,7 @@ def run_instances(region: str, cluster_name: str,
         #  resumed), then we cannot guarantee that they will be in the same
         #  availability zone (when there are multiple zones specified).
         #  This is a known issue before.
-        ec2_fail_fast = aws.resource(
-            'ec2',
-            region_name=region,
-            config=botocore_config().Config(retries={'max_attempts': 0}))
+        ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
         created_instances = _create_instances(ec2_fail_fast, cluster_name,
                                               config.node_config, tags,
