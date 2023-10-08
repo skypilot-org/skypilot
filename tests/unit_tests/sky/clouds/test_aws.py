@@ -2,6 +2,7 @@
 
 Used by spot controller. This test prevents #2668 from regressing.
 """
+
 import os
 
 import memory_profiler
