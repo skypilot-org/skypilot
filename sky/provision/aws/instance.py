@@ -49,7 +49,7 @@ _DEPENDENCY_VIOLATION_PATTERN = re.compile(
 def _default_ec2_resource(region: str) -> Any:
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
-        # imported before and staled.
+        # imported before and stale. Used for, e.g., a live spot controller running an older version and a new version gets installed by `sky spot launch`.
         import importlib  # pylint: disable=import-outside-toplevel
         importlib.reload(aws)
     return aws.resource('ec2',
