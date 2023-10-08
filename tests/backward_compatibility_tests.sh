@@ -11,7 +11,7 @@ start_from=${2:-0}
 source ~/.bashrc 
 CLUSTER_NAME="test-back-compat-$USER"
 source $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
-CLOUD="gcp"
+CLOUD="aws"
 
 git clone https://github.com/skypilot-org/skypilot.git ../sky-master || true
 
@@ -41,9 +41,11 @@ if [ "$start_from" -le 1 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 which sky
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME} examples/minimal.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME} examples/minimal.yaml
+sky autostop -i 10 -y ${CLUSTER_NAME}
 
 conda activate sky-back-compat-current
+sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
@@ -60,7 +62,7 @@ fi
 if [ "$start_from" -le 2 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}-2 examples/minimal.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-2 examples/minimal.yaml
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
@@ -74,7 +76,7 @@ fi
 if [ "$start_from" -le 3 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}-3 examples/minimal.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-3 examples/minimal.yaml
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
@@ -87,7 +89,7 @@ fi
 if [ "$start_from" -le 4 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}-4 examples/minimal.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-4
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
@@ -103,7 +105,7 @@ fi
 if [ "$start_form" -le 5 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}-5 examples/minimal.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-5
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
@@ -121,7 +123,7 @@ fi
 if [ "$start_from" -le 6 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
+sky launch --cloud ${CLOUD} -y --cpus 2 -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky stop -y ${CLUSTER_NAME}-6
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true

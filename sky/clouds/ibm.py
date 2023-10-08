@@ -355,8 +355,16 @@ class IBM(clouds.Cloud):
         except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
             logger.error(e.message)
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} not found in '
-                                 f'IBM region "{region}"') from None
+                raise ValueError(
+                    f'Image {image_id!r} not found in IBM region "{region}".\n'
+                    '\nTo use image id in IBM, create a private VPC image and '
+                    'paste its ID in the image_id section.\n'
+                    '\nTo create an image manually:\n'
+                    'https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume\n'  # pylint: disable=line-too-long
+                    '\nTo use an official VPC image creation tool:\n'
+                    'https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure\n'  # pylint: disable=line-too-long
+                    '\nTo use a more limited but easier to manage tool:\n'
+                    'https://github.com/IBM/vpc-img-inst') from None
         try:
             # image_size['file']['size'] is not relevant, since
             # the minimum size of a volume onto which this image

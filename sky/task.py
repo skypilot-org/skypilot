@@ -19,8 +19,8 @@ from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -132,7 +132,7 @@ def _with_docker_login_config(
 ) -> Set['resources_lib.Resources']:
     if not _check_docker_login_config(task_envs):
         return resources_set
-    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -1082,8 +1082,6 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
-            return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
@@ -1095,7 +1093,10 @@ class Task:
         else:
             run_msg = 'run=<fn>'
 
-        s = f'Task({run_msg})'
+        name_str = ''
+        if self.name is not None:
+            name_str = f'<name={self.name}>'
+        s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
@@ -1103,10 +1104,13 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+            resources_str = ('{' + ', '.join(
+                r.repr_with_region_zone for r in self.resources) + '}')
+            s += f'\n  resources: {resources_str}'
+        elif (len(self.resources) == 1 and
+              not list(self.resources)[0].is_empty()):
+            s += (f'\n  resources: '
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s

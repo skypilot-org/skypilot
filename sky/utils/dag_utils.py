@@ -2,10 +2,13 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
+from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+
+logger = sky_logging.init_logger(__name__)
 
 
 def load_chain_dag_from_yaml(
@@ -89,11 +92,21 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
                 task.name = f'{dag.name}-{task_id}'
 
 
-def fill_default_spot_config_in_dag(dag: dag_lib.Dag) -> None:
+def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
         for resources in task_.get_resources():
+            change_default_value: Dict[str, Any] = {}
+            if resources.use_spot_specified and not resources.use_spot:
+                logger.info(
+                    'Field `use_spot` is set to false but a managed spot job is '  # pylint: disable=line-too-long
+                    'being launched. Ignoring the field and proceeding to use spot '  # pylint: disable=line-too-long
+                    'instance(s).')
+            change_default_value['use_spot'] = True
+            if resources.spot_recovery is None:
+                change_default_value[
+                    'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
             change_default_value: Dict[str, Any] = {}
             if not resources.use_spot_specified:
