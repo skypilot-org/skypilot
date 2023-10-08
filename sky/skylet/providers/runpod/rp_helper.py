@@ -1,6 +1,5 @@
-'''
-RunPod library wrapper, formats the input/output of the RunPod library for SkyPilot.
-'''
+"""RunPod library wrapper, formats the input/output of the RunPod library for SkyPilot."""
+
 import os
 import json
 from typing import Dict
@@ -36,17 +35,15 @@ GPU_NAME_MAP = {
 }
 
 
-TAG_FILE = os.path.expanduser('~/.runpod/skypilot_tags.json')
+TAG_FILE = os.path.expanduser("~/.runpod/skypilot_tags.json")
 
 if not os.path.exists(TAG_FILE):
-    with open(TAG_FILE, 'w') as tag_file:
-        json.dump({}, tag_file)
+    with open(TAG_FILE, "w", encoding="UTF-8") as tags:
+        json.dump({}, tags)
 
 
 def list_instances():
-    '''
-    Lists instances associated with API key.
-    '''
+    """Lists instances associated with API key."""
     instances = runpod.rp_wrapper().get_pods()
 
     instance_list = {}
@@ -56,22 +53,26 @@ def list_instances():
         instance_list[instance['id']]['status'] = instance['desiredStatus']
         instance_list[instance['id']]['name'] = instance['name']
 
+        print(f"Instance {instance['id']} status: {instance['desiredStatus']}")
+        print(f"Instance {instance['id']} name: {instance['name']}")
+        print(f"Instance {instance['id']} tags: {instance['tags']}")
+        print(f"Instance {instance['id']} runtime: {instance['runtime']}")
+
         if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime', None):
             for port in instance['runtime']['ports']:
                 if port['privatePort'] == 22:
                     instance_list[instance['id']]['ip'] = port['ip']
 
         # Set tags
-        with open(TAG_FILE, 'r') as tag_file:
-            instance_tags = json.load(tag_file)
+        with open(TAG_FILE, 'r', encoding="UTF-8") as tags:
+            instance_tags = json.load(tags)
         instance_list[instance['id']]['tags'] = instance_tags[instance['id']]
 
     return instance_list
 
 
 def launch(name: str, instance_type: str, region: str):
-    """
-    Launches an instance with the given parameters.
+    """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the GPU, and launches the instance.
     """
@@ -83,11 +84,11 @@ def launch(name: str, instance_type: str, region: str):
 
     new_instance = runpod.rp_wrapper().create_pod(
         name=name,
-        image_name='runpod/base:0.0.0',
+        image_name="runpod/base:0.0.0",
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         min_vcpu_count=4*gpu_quantity,
-        min_memory_in_gb=gpu_specs['memoryInGb']*gpu_quantity,
+        min_memory_in_gb=gpu_specs["memoryInGb"]*gpu_quantity,
         country_code=region,
         ports="22/tcp",
         support_public_ip=True,
@@ -97,20 +98,16 @@ def launch(name: str, instance_type: str, region: str):
 
 
 def set_tags(instance_id: str, tags: Dict):
-    '''
-    Sets the tags for the given instance.
-    '''
-    with open(TAG_FILE, 'r') as tag_file:
-        instance_tags = json.load(tag_file)
+    """Sets the tags for the given instance."""
+    with open(TAG_FILE, "r", encoding="UTF-8") as tag_list:
+        instance_tags = json.load(tag_list)
 
     instance_tags[instance_id] = tags
 
-    with open(TAG_FILE, 'w') as tag_file:
-        json.dump(instance_tags, tag_file)
+    with open(TAG_FILE, "w", encoding="UTF-8") as tag_list:
+        json.dump(instance_tags, tag_list)
 
 
 def remove(instance_id: str):
-    '''
-    Terminates the given instance.
-    '''
+    """Terminates the given instance."""
     runpod.rp_wrapper().terminate_pod(instance_id)

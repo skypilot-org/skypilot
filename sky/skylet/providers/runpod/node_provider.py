@@ -82,8 +82,6 @@ class RunPodNodeProvider(NodeProvider):
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace."""
-        logger.debug('Creating RunPod node with config: %s', node_config)
-
         # Get the tags
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
@@ -141,8 +139,6 @@ class RunPodNodeProvider(NodeProvider):
         Returns the node with the given node_id, if it exists.
         """
         instances = runpod_api.list_instances()
-        logger.debug('Instances: %s', instances)
-
         for instance_id, instance in instances.items():
             if instance_id == node_id:
                 return instance
