@@ -1,5 +1,4 @@
-"""
-RunPod Node Provider. A RunPod pod is a node within the Sky paradigm.
+"""RunPod Node Provider. A RunPod pod is a node within the Sky paradigm.
 
 Node provider is called by the Ray Autoscaler to provision new compute resources.
 
@@ -83,6 +82,8 @@ class RunPodNodeProvider(NodeProvider):
 
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace."""
+        logger.debug('Creating RunPod node with config: %s', node_config)
+
         # Get the tags
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
@@ -121,9 +122,9 @@ class RunPodNodeProvider(NodeProvider):
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
-        '''SkyPilot Method
+        """SkyPilot Method
         Caches the nodes with the given tag_filters.
-        '''
+        """
         instances = runpod_api.list_instances()
 
         filtered_nodes = {}
@@ -136,20 +137,14 @@ class RunPodNodeProvider(NodeProvider):
         return filtered_nodes
 
     def _get_node(self, node_id: str):
-        ''' SkyPilot Method
+        """ SkyPilot Method
         Returns the node with the given node_id, if it exists.
-        '''
+        """
         instances = runpod_api.list_instances()
+        logger.debug('Instances: %s', instances)
+
         for instance_id, instance in instances.items():
             if instance_id == node_id:
                 return instance
 
         return None
-
-    def _get_cached_node(self, node_id):
-        ''' SkyPilot Method
-        Returns the node with the given node_id, if it is cached.
-        '''
-        if node_id in self.cached_nodes:
-            return self.cached_nodes[node_id]
-        return self._get_node(node_id=node_id)
