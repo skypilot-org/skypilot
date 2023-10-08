@@ -2185,7 +2185,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_zones(
                     to_provision,
                     num_nodes,
-                    requested_resources=task.resources,
+                    requested_resources=set(task.resources),
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -3095,7 +3095,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             global_user_state.add_or_update_cluster(
                 handle.cluster_name,
                 handle,
-                task.resources,
+                set(task.resources),
                 ready=True,
             )
             usage_lib.messages.usage.update_final_cluster_status(

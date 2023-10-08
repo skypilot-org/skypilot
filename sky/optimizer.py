@@ -845,9 +845,9 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
-            resources_pref_list = [
+            resources_list = [
                 r.get_accelerators_str() + r.get_spot_str()
-                for r in task.resources_pref_list
+                for r in task.resources
             ]
             task_str = (f'for task {repr(task)!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
@@ -903,7 +903,7 @@ class Optimizer:
                 rows = sorted(
                     rows,
                     key=lambda x: (
-                        resources_pref_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
+                        resources_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
                             '[Spot]' if '[Spot]' in x[1] else '')),  # pylint: disable=cell-var-from-loop
                         x[-2]))  # pylint: disable=cell-var-from-loop
             else:
@@ -1027,7 +1027,7 @@ class Optimizer:
                     k: v for k, v in launchable_resources_map.items() if v
                 }
                 best_resource = None
-                for res in node.resources_pref_list:
+                for res in node.resources:
                     launchable_resources = launchable_resources_map.get(res)
                     if launchable_resources is not None and len(
                             launchable_resources) > 0:

@@ -250,8 +250,8 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPUNode
-        self.resources = {sky.Resources()}
-        self.resources_pref_list: List[sky.Resources] = []
+        self.resources: Union[List[sky.Resources],
+                              Set[sky.Resources]] = {sky.Resources()}
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -428,8 +428,6 @@ class Task:
         if resources_config and resources_config.get(
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
-
-            resources_ordered = resources_config.get('resources_ordered', False)
             resources_config.pop('resources_ordered', None)
 
             if isinstance(accelerators, str):
@@ -448,7 +446,7 @@ class Task:
                     sky.Resources.from_yaml_config(tmp_resource))
 
             if isinstance(accelerators, list):
-                task.set_resources(tmp_resources_list, resources_ordered)
+                task.set_resources(tmp_resources_list)
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
         else:
@@ -504,7 +502,7 @@ class Task:
 
     @property
     def is_resources_ordered(self) -> bool:
-        return len(self.resources_pref_list) >= 1
+        return isinstance(self.resources, list)
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -551,8 +549,11 @@ class Task:
         # manually update docker login config in task resources, in case the
         # docker login envs are newly added.
         if _check_docker_login_config(self._envs):
-            self.resources = _with_docker_login_config(self.resources,
+            is_set = isinstance(self.resources, set)
+            self.resources = _with_docker_login_config(set(self.resources),
                                                        self._envs)
+            if not is_set:
+                self.resources = list(self.resources)
         return self
 
     @property
@@ -601,11 +602,11 @@ class Task:
     def get_estimated_outputs_size_gigabytes(self) -> Optional[float]:
         return self.estimated_outputs_size_gigabytes
 
-    def set_resources(self,
-                      resources: Union['resources_lib.Resources',
-                                       Set['resources_lib.Resources'],
-                                       List['resources_lib.Resources']],
-                      is_resources_ordered: bool = False) -> 'Task':
+    def set_resources(
+        self, resources: Union['resources_lib.Resources',
+                               Set['resources_lib.Resources'],
+                               List['resources_lib.Resources']]
+    ) -> 'Task':
         """Sets the required resources to execute this task.
 
         If this function is not called for a Task, default resource
@@ -625,18 +626,12 @@ class Task:
           self: The current task, with resources set.
         """
         # Reset the preference list.
-        self.resources_pref_list = []
         if isinstance(resources, sky.Resources):
-            if is_resources_ordered:
-                self.resources_pref_list = list(resources)
-            resources = {resources}
+            self.resources = set(resources)
         elif isinstance(resources, list):
-            if is_resources_ordered:
-                self.resources_pref_list = resources
-            resources = set(resources)
+            self.resources = resources
         elif isinstance(resources, set):
-            assert not is_resources_ordered, 'Cannot set resources as a set and specify is_resources_ordered=True'  #pylint: disable=line-too-long
-        # TODO(woosuk): Check if the resources are None.
+            self.resources = resources
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
@@ -647,14 +642,11 @@ class Task:
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        self.set_resources(new_resources_list, self.is_resources_ordered)
+        self.set_resources(new_resources_list)
         return self
 
-    def get_resources(self) -> List['resources_lib.Resources']:
-        if self.is_resources_ordered:
-            return self.resources_pref_list.copy()
-        else:
-            return list(self.resources)
+    def get_resources(self):
+        return self.resources
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -1026,9 +1018,9 @@ class Task:
         add_if_not_none('name', self.name)
 
         if self.is_resources_ordered:
-            tmp_resource_config = self.resources_pref_list[0].to_yaml_config()
+            tmp_resource_config = list(self.resources)[0].to_yaml_config()
             accelerators_list = []
-            for r in self.resources_pref_list:
+            for r in self.resources:
                 if r.accelerators is not None:
                     k, v = r.accelerators.popitem()
                     if f'{k}:{v}' not in accelerators_list:

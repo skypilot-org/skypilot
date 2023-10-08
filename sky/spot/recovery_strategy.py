@@ -101,7 +101,7 @@ class StrategyExecutor:
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
         new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
-        task.set_resources(new_resources_list, task.is_resources_ordered)
+        task.set_resources(new_resources_list)
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 

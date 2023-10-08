@@ -1985,7 +1985,7 @@ def check_can_clone_disk_and_override_task(
         task_resources = task_resources.copy(**override_param)
         new_task_resources.append(task_resources)
 
-    task.set_resources(new_task_resources, task.is_resources_ordered)
+    task.set_resources(new_task_resources)
     # Reset the best_resources to triger re-optimization
     # later, so that the new task_resources will be used.
     task.best_resources = None
