@@ -158,6 +158,7 @@ class GCPInstance:
     ) -> None:
         raise NotImplementedError
 
+    @classmethod
     def create_instance(self,
                         node_config: dict,
                         labels: dict,
@@ -196,6 +197,7 @@ class GCPInstance:
 
         return results
 
+    @classmethod
     def start_instance(cls,
                        node_id: str,
                        project_id: str,
@@ -489,12 +491,14 @@ class GCPComputeInstance(GCPInstance):
 
         return result
 
+    @classmethod
     def create_instance(self,
                         node_config: dict,
                         labels: dict,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
         raise NotImplementedError
 
+    @classmethod
     def start_instance(cls,
                        node_id: str,
                        project_id: str,
@@ -701,12 +705,14 @@ class GCPTPUVMInstance(GCPInstance):
 
         return result
 
-    def create_instance(self,
+    @classmethod
+    def create_instance(cls,
                         node_config: dict,
                         labels: dict,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
         raise NotImplementedError
 
+    @classmethod
     def start_instance(cls,
                        node_id: str,
                        project_id: str,
