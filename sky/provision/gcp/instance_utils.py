@@ -1,10 +1,14 @@
 """Utilities for GCP instances."""
 import enum
+import functools
 import re
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.provision.gcp.constants import MAX_POLLS
+from sky.provision.gcp.constants import POLL_INTERVAL
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -15,6 +19,45 @@ TPU_VERSION = 'v2'
 
 _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/global/firewalls/.*\' was not found')
+
+
+def _retry_on_http_exception(
+    regex: Optional[str] = None,
+    max_retries: int = MAX_POLLS,
+    retry_interval_s: int = POLL_INTERVAL,
+):
+    """Retry a function call n-times for as long as it throws an exception."""
+    from googleapiclient.errors import HttpError
+
+    exception = HttpError
+
+    def dec(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+
+            def try_catch_exc():
+                try:
+                    value = func(*args, **kwargs)
+                    return value
+                except Exception as e:
+                    if not isinstance(e, exception) or (
+                            regex and not re.search(regex, str(e))):
+                        raise e
+                    return e
+
+            for _ in range(max_retries):
+                ret = try_catch_exc()
+                if not isinstance(ret, Exception):
+                    break
+                time.sleep(retry_interval_s)
+            if isinstance(ret, Exception):
+                raise ret
+            return ret
+
+        return wrapper
+
+    return dec
 
 
 def instance_to_handler(instance: str):
@@ -114,6 +157,61 @@ class GCPInstance:
         tag: str,
     ) -> None:
         raise NotImplementedError
+
+    def create_instance(self,
+                        node_config: dict,
+                        labels: dict,
+                        wait_for_operation: bool = True) -> Tuple[dict, str]:
+        """Creates a single instance and returns result.
+
+        Returns a tuple of (result, node_name).
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def create_instances(
+        cls,
+        project_id: str,
+        zone: str,
+        node_config: dict,
+        labels: dict,
+        count: int,
+        wait_for_operation: bool = True,
+    ) -> List[Tuple[dict, str]]:
+        """Creates multiple instances and returns result.
+
+        Returns a list of tuples of (result, node_name).
+        """
+        operations = [
+            cls.create_instance(node_config, labels, wait_for_operation=False)
+            for i in range(count)
+        ]
+
+        if wait_for_operation:
+            results = [(cls.wait_for_operation(operation, project_id,
+                                               zone), node_name)
+                       for operation, node_name in operations]
+        else:
+            results = operations
+
+        return results
+
+    def start_instance(cls,
+                       node_id: str,
+                       project_id: str,
+                       zone: str,
+                       wait_for_operation: bool = True) -> dict:
+        """Start a stopped instance."""
+        raise NotImplementedError
+
+    @classmethod
+    def set_labels(cls,
+                   project_id: str,
+                   availability_zone: str,
+                   node: dict,
+                   labels: dict,
+                   wait_for_operation: bool = True) -> dict:
+        return NotImplementedError
 
 
 class GCPComputeInstance(GCPInstance):
@@ -364,6 +462,57 @@ class GCPComputeInstance(GCPInstance):
             ).execute()
         return operation
 
+    @classmethod
+    def set_labels(cls,
+                   project_id: str,
+                   availability_zone: str,
+                   node: dict,
+                   labels: dict,
+                   wait_for_operation: bool = True) -> dict:
+        body = {
+            "labels": dict(node["labels"], **labels),
+            "labelFingerprint": node["labelFingerprint"],
+        }
+        node_id = node["name"]
+        operation = (cls.load_resource().instances().setLabels(
+            project=project_id,
+            zone=availability_zone,
+            instance=node_id,
+            body=body,
+        ).execute())
+
+        if wait_for_operation:
+            result = cls.wait_for_operation(operation, project_id,
+                                            availability_zone)
+        else:
+            result = operation
+
+        return result
+
+    def create_instance(self,
+                        node_config: dict,
+                        labels: dict,
+                        wait_for_operation: bool = True) -> Tuple[dict, str]:
+        raise NotImplementedError
+
+    def start_instance(cls,
+                       node_id: str,
+                       project_id: str,
+                       zone: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = (cls.load_resource().instances().start(
+            project=project_id,
+            zone=zone,
+            instance=node_id,
+        ).execute())
+
+        if wait_for_operation:
+            result = cls.wait_for_operation(operation, project_id, zone)
+        else:
+            result = operation
+
+        return result
+
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU node."""
@@ -525,6 +674,55 @@ class GCPTPUVMInstance(GCPInstance):
                 raise ValueError(
                     f'Failed to get VPC name for instance {instance}') from e
 
+    @classmethod
+    @_retry_on_http_exception("unable to queue the operation")
+    def set_labels(cls,
+                   project_id: str,
+                   availability_zone: str,
+                   node: dict,
+                   labels: dict,
+                   wait_for_operation: bool = True) -> dict:
+        body = {
+            "labels": dict(node["labels"], **labels),
+        }
+        update_mask = "labels"
+
+        operation = (cls.load_resource().projects().locations().nodes().patch(
+            name=node["name"],
+            updateMask=update_mask,
+            body=body,
+        ).execute())
+
+        if wait_for_operation:
+            result = cls.wait_for_operation(project_id, availability_zone,
+                                            operation)
+        else:
+            result = operation
+
+        return result
+
+    def create_instance(self,
+                        node_config: dict,
+                        labels: dict,
+                        wait_for_operation: bool = True) -> Tuple[dict, str]:
+        raise NotImplementedError
+
+    def start_instance(cls,
+                       node_id: str,
+                       project_id: str,
+                       zone: str,
+                       wait_for_operation: bool = True) -> dict:
+        operation = (cls.load_resource().projects().locations().nodes().start(
+            name=node_id).execute())
+
+        # FIXME: original implementation has the "max_polls=MAX_POLLS" option.
+        if wait_for_operation:
+            result = cls.wait_for_operation(operation, project_id, zone)
+        else:
+            result = operation
+
+        return result
+
 
 class GCPNodeType(enum.Enum):
     """Enum for GCP node types (compute & tpu)"""
@@ -540,3 +738,27 @@ class GCPNodeType(enum.Enum):
         where [TYPE] is either 'compute' or 'tpu'.
         """
         return GCPNodeType(name.split("-")[-1])
+
+
+def get_node_type(node: dict) -> GCPNodeType:
+    """Returns node type based on the keys in ``node``.
+
+    This is a very simple check. If we have a ``machineType`` key,
+    this is a Compute instance. If we don't have a ``machineType`` key,
+    but we have ``acceleratorType``, this is a TPU. Otherwise, it's
+    invalid and an exception is raised.
+
+    This works for both node configs and API returned nodes.
+    """
+
+    if 'machineType' not in node and 'acceleratorType' not in node:
+        raise ValueError(
+            'Invalid node. For a Compute instance, "machineType" is '
+            'required. '
+            'For a TPU instance, "acceleratorType" and no "machineType" '
+            'is required. '
+            f'Got {list(node)}')
+
+    if 'machineType' not in node and 'acceleratorType' in node:
+        return GCPNodeType.TPU
+    return GCPNodeType.COMPUTE

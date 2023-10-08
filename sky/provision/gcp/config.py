@@ -61,30 +61,6 @@ HAS_TPU_PROVIDER_FIELD = '_has_tpus'
 # with ServiceAccounts.
 
 
-def get_node_type(node: dict) -> instance_utils.GCPNodeType:
-    """Returns node type based on the keys in ``node``.
-
-    This is a very simple check. If we have a ``machineType`` key,
-    this is a Compute instance. If we don't have a ``machineType`` key,
-    but we have ``acceleratorType``, this is a TPU. Otherwise, it's
-    invalid and an exception is raised.
-
-    This works for both node configs and API returned nodes.
-    """
-
-    if 'machineType' not in node and 'acceleratorType' not in node:
-        raise ValueError(
-            'Invalid node. For a Compute instance, "machineType" is '
-            'required. '
-            'For a TPU instance, "acceleratorType" and no "machineType" '
-            'is required. '
-            f'Got {list(node)}')
-
-    if 'machineType' not in node and 'acceleratorType' in node:
-        return instance_utils.GCPNodeType.TPU
-    return instance_utils.GCPNodeType.COMPUTE
-
-
 def wait_for_crm_operation(operation, crm):
     """Poll for cloud resource manager operation until finished."""
     logger.info('wait_for_crm_operation: '
@@ -215,7 +191,8 @@ def bootstrap_instances(
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     # Check if we have any TPUs defined, and if so,
     # insert that information into the provider config
-    if get_node_type(config.node_config) == instance_utils.GCPNodeType.TPU:
+    if instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU:
         config.provider_config[HAS_TPU_PROVIDER_FIELD] = True
 
     crm, iam, compute, tpu = construct_clients_from_provider_config(
@@ -408,7 +385,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         # account is limited by the IAM rights specified below.
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
-    if get_node_type(config.node_config) == instance_utils.GCPNodeType.TPU:
+    if instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU:
         # SKY: The API for TPU VM is slightly different from normal compute instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
         account_dict['scope'] = account_dict['scopes']

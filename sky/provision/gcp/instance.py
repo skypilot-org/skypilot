@@ -1,12 +1,28 @@
 """GCP instance provisioning."""
 import collections
+import copy
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
+from sky import status_lib
 from sky.adaptors import gcp
+from sky.provision import common
 from sky.provision.gcp import instance_utils
+
+# Tag for user defined node types (e.g., m4xl_spot). This is used for multi
+# node type clusters.
+TAG_RAY_USER_NODE_TYPE = "ray-user-node-type"
+# Hash of the node launch config, used to identify out-of-date nodes
+TAG_RAY_LAUNCH_CONFIG = "ray-launch-config"
+# Tag for autofilled node types for legacy cluster yamls without multi
+# node type defined in the cluster configs.
+NODE_TYPE_LEGACY_HEAD = "ray-legacy-head-node-type"
+NODE_TYPE_LEGACY_WORKER = "ray-legacy-worker-node-type"
+
+# Tag that reports the current state of the node (e.g. Updating, Up-to-date)
+TAG_RAY_NODE_STATUS = "ray-node-status"
 
 logger = sky_logging.init_logger(__name__)
 
@@ -71,6 +87,134 @@ def _wait_for_operations(
                     break
                 time.sleep(POLL_INTERVAL)
                 total_polls += 1
+
+
+def run_instances(region: str, cluster_name: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """See sky/provision/__init__.py"""
+    result_dict = {}
+    labels = config.tags  # gcp uses "labels" instead of aws "tags"
+    labels = dict(sorted(copy.deepcopy(labels).items()))
+    node_type = instance_utils.get_node_type(config.node_config)
+    count = config.count
+    project_id = config.provider_config['project_id']
+    availability_zone = config.provider_config['availability_zone']
+
+    # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
+    # "STOPPING" means the VM is being stopped, which needs
+    # to be included to avoid creating a new VM.
+    if node_type == instance_utils.GCPNodeType.COMPUTE:
+        resource = instance_utils.GCPComputeInstance
+        STOPPED_STATUS = ["TERMINATED", "STOPPING"]
+    elif node_type == instance_utils.GCPNodeType.TPU:
+        resource = instance_utils.GCPTPUVMInstance
+        STOPPED_STATUS = ["STOPPED", "STOPPING"]
+    else:
+        raise ValueError(f'Unknown node type {node_type}')
+
+    # Try to reuse previously stopped nodes with compatible configs
+    if config.resume_stopped_nodes:
+        filters = {
+            TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
+            # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
+            # with different launch configs.
+            # Reference: https://github.com/skypilot-org/skypilot/pull/1671
+        }
+        # This tag may not always be present.
+        if TAG_RAY_USER_NODE_TYPE in labels:
+            filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
+        filters_with_launch_config = copy.copy(filters)
+        filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = labels[
+            TAG_RAY_LAUNCH_CONFIG]
+
+        # SkyPilot: We try to use the instances with the same matching launch_config first. If
+        # there is not enough instances with matching launch_config, we then use all the
+        # instances with the same matching launch_config plus some instances with wrong
+        # launch_config.
+        def get_order_key(node):
+            import datetime
+
+            timestamp = node.get("lastStartTimestamp")
+            if timestamp is not None:
+                return datetime.datetime.strptime(timestamp,
+                                                  "%Y-%m-%dT%H:%M:%S.%f%z")
+            return node.id
+
+        nodes_matching_launch_config = resource.filter(
+            project_id=project_id,
+            zone=availability_zone,
+            label_filters=filters_with_launch_config,
+            status_filters=STOPPED_STATUS,
+        )
+        nodes_matching_launch_config = list(
+            nodes_matching_launch_config.values())
+
+        nodes_matching_launch_config.sort(key=lambda n: get_order_key(n),
+                                          reverse=True)
+        if len(nodes_matching_launch_config) >= count:
+            reuse_nodes = nodes_matching_launch_config[:count]
+        else:
+            nodes_all = resource.filter(
+                project_id=project_id,
+                zone=availability_zone,
+                label_filters=filters,
+                status_filters=STOPPED_STATUS,
+            )
+            nodes_all = list(nodes_all.values())
+
+            nodes_matching_launch_config_ids = set(
+                n.id for n in nodes_matching_launch_config)
+            nodes_non_matching_launch_config = [
+                n for n in nodes_all
+                if n.id not in nodes_matching_launch_config_ids
+            ]
+            # This is for backward compatibility, where the uesr already has leaked
+            # stopped nodes with the different launch config before update to #1671,
+            # and the total number of the leaked nodes is greater than the number of
+            # nodes to be created. With this, we will make sure we will reuse the
+            # most recently used nodes.
+            # This can be removed in the future when we are sure all the users
+            # have updated to #1671.
+            nodes_non_matching_launch_config.sort(
+                key=lambda n: get_order_key(n), reverse=True)
+            reuse_nodes = (nodes_matching_launch_config +
+                           nodes_non_matching_launch_config)
+            # The total number of reusable nodes can be less than the number of nodes to be created.
+            # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+            # less nodes.
+            reuse_nodes = reuse_nodes[:count]
+
+        reuse_node_ids = [n.id for n in reuse_nodes]
+        if reuse_nodes:
+            # TODO(suquark): Some instances could still be stopping.
+            # We may wait until these instances stop.
+            logger.info(
+                # TODO: handle plural vs singular?
+                f"Reusing nodes {reuse_node_ids}. "
+                "To disable reuse, set `cache_stopped_nodes: False` "
+                "under `provider` in the cluster configuration.")
+            for node_id in reuse_node_ids:
+                result = resource.start_instance(node_id, project_id,
+                                                 availability_zone)
+                result_dict[node_id] = {node_id: result}
+            for node in reuse_nodes:
+                resource.set_labels(project_id, availability_zone, node, labels)
+            count -= len(reuse_node_ids)
+    if count:
+        results = resource.create_instances(project_id, availability_zone,
+                                            config.node_config, labels, count)
+        result_dict.update(
+            {instance_id: result for result, instance_id in results})
+    return result_dict
+
+
+def wait_instances(region: str, cluster_name: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    """See sky/provision/__init__.py"""
+    # TODO: maybe we just wait for the instances to be running, immediately
+    # after the instances are created, so we do not need to wait for the
+    # instances to be ready here.
+    raise NotImplementedError
 
 
 def stop_instances(
