@@ -103,7 +103,8 @@ def resource(service_name: str, **kwargs):
     Args:
         service_name: AWS resource name (e.g., 's3').
         kwargs: Other options. We add max_attempts to the kwargs instead of
-            using botocore.config.Config() because the latter is not hashable.
+            using botocore.config.Config() because the latter will generate
+            different keys even if the config is the same
     """
     _assert_kwargs_builtin_type(kwargs)
 
