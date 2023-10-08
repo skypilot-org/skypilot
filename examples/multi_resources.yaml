@@ -2,24 +2,8 @@ name: multi-resources
 
 resources:
   cloud: gcp
-  # zone: us-east-1d
-  # use_spot: True
-
   region: [us-west1, asia-east1]
-
-  # spot_recovery: FAILOVER
-  # spot_recovery: EAGER_NEXT_REGION
-
-  # Ordered Accelerators List
-  resources_ordered: True
   accelerators: ['A100-40GB:1', 'V100:1', 'T4:1', 'K80:1']
-
-  # Unordered Accelerators
-  # resources_ordered: False
-  # accelerators: ['A100-40GB':1, 'T4':1, 'V100':1, 'K80':1]
-
-  # Single Accelerator
-  # accelerators: V100:1
 
 run: |
   nvidia-smi

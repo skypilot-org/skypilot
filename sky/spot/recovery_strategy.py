@@ -94,7 +94,7 @@ class StrategyExecutor:
              task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
-        resource_list = task.get_resources()
+        resource_list = list(task.resources)
         spot_recovery = resource_list[0].spot_recovery
         if spot_recovery is None:
             spot_recovery = SPOT_DEFAULT_STRATEGY
@@ -414,7 +414,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             if self._launched_cloud_region is not None:
                 task = self.dag.tasks[0]
                 launched_cloud, launched_region = self._launched_cloud_region
-                original_resources = task.get_resources()
+                original_resources = list(task.resources)
                 # Remove the spot_recovery field from the resources, as
                 # the strategy will be handled by the strategy class.
                 new_resources_list = []

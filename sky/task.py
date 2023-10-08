@@ -646,7 +646,7 @@ class Task:
         return self
 
     def get_resources(self):
-        return self.resources
+        return list(self.resources)
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':

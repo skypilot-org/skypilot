@@ -1136,7 +1136,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.name = name
     task.update_envs(env)
     # TODO(wei-lin): move this validation into Python API.
-    for res in task.resources:
+    for res in list(task.resources):
         if res.accelerators is not None:
             acc, _ = list(res.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:

@@ -847,7 +847,7 @@ class Optimizer:
         for task, v in ordered_node_to_cost_map.items():
             resources_list = [
                 r.get_accelerators_str() + r.get_spot_str()
-                for r in task.resources
+                for r in list(task.resources)
             ]
             task_str = (f'for task {repr(task)!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
@@ -1172,7 +1172,7 @@ def _fill_in_launchable_resources(
         List[resources_lib.Resources])
     if blocked_resources is None:
         blocked_resources = []
-    for resources in task.get_resources():
+    for resources in list(task.resources):
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:

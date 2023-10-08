@@ -97,7 +97,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
         # NOTE: Here we assume that the Sky DAG is topologically sorted.
         nonlocal final_plan, min_objective
         task = tasks[0]
-        for resources in task.get_resources():
+        for resources in list(task.resources):
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
             resources_stack.append(resources)

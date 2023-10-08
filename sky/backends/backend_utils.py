@@ -1948,7 +1948,7 @@ def check_can_clone_disk_and_override_task(
                     'a new target cluster name.')
 
     new_task_resources = []
-    for task_resources in task.get_resources():
+    for task_resources in list(list(task.resources)):
         if handle.launched_resources.disk_size > task_resources.disk_size:
             # The target cluster's disk should be at least as large as the source.
             with ux_utils.print_exception_no_traceback():
@@ -2701,7 +2701,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     else:
         # Multiple resources specified.
         accelerator_dict = {}
-        for resource in task.get_resources():
+        for resource in list(task.resources):
             accelerator_dict.update(resource.accelerators)
         return accelerator_dict
     return resources.accelerators
