@@ -48,25 +48,24 @@ def list_instances():
 
     instance_list = {}
     for instance in instances:
-        instance_list[instance['id']] = {}
+        instance_list[instance["id"]] = {}
 
-        instance_list[instance['id']]['status'] = instance['desiredStatus']
-        instance_list[instance['id']]['name'] = instance['name']
+        instance_list[instance["id"]]["status"] = instance["desiredStatus"]
+        instance_list[instance["id"]]["name"] = instance["name"]
 
         print(f"Instance {instance['id']} status: {instance['desiredStatus']}")
         print(f"Instance {instance['id']} name: {instance['name']}")
-        print(f"Instance {instance['id']} tags: {instance['tags']}")
         print(f"Instance {instance['id']} runtime: {instance['runtime']}")
 
-        if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime', None):
-            for port in instance['runtime']['ports']:
-                if port['privatePort'] == 22:
-                    instance_list[instance['id']]['ip'] = port['ip']
+        if instance["desiredStatus"] == "RUNNING" and instance.get("runtime", None):
+            for port in instance["runtime"]["ports"]:
+                if port["privatePort"] == 22:
+                    instance_list[instance["id"]]["ip"] = port["ip"]
 
         # Set tags
-        with open(TAG_FILE, 'r', encoding="UTF-8") as tags:
+        with open(TAG_FILE, "r", encoding="UTF-8") as tags:
             instance_tags = json.load(tags)
-        instance_list[instance['id']]['tags'] = instance_tags[instance['id']]
+        instance_list[instance["id"]]["tags"] = instance_tags[instance["id"]]
 
     return instance_list
 
@@ -76,9 +75,9 @@ def launch(name: str, instance_type: str, region: str):
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the GPU, and launches the instance.
     """
-    gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
-    gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
-    cloud_type = instance_type.split('_')[2]
+    gpu_type = GPU_NAME_MAP[instance_type.split("_")[1]]
+    gpu_quantity = int(instance_type.split("_")[0].replace("x", ""))
+    cloud_type = instance_type.split("_")[2]
 
     gpu_specs = runpod.rp_wrapper().get_gpu(gpu_type)
 
@@ -94,7 +93,7 @@ def launch(name: str, instance_type: str, region: str):
         support_public_ip=True,
     )
 
-    return new_instance['id']
+    return new_instance["id"]
 
 
 def set_tags(instance_id: str, tags: Dict):
