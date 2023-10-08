@@ -50,7 +50,7 @@ def _default_ec2_resource(region: str) -> Any:
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
         # imported before and staled.
-        import importlib # pylint: disable=import-outside-toplevel
+        import importlib  # pylint: disable=import-outside-toplevel
         importlib.reload(aws)
     return aws.resource('ec2',
                         region_name=region,

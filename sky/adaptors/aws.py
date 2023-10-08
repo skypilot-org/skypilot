@@ -56,9 +56,11 @@ def import_package(func):
 
     return wrapper
 
+
 def _assert_kwargs_builtin_type(kwargs):
     assert all(isinstance(v, (int, float, str)) for v in kwargs.values()), (
         f'kwargs should not contain none built-in types: {kwargs}')
+
 
 @import_package
 @functools.lru_cache()
@@ -139,7 +141,6 @@ def client(service_name: str, **kwargs):
         # and we are not sure if the code inside
         # 'session().client()' is thread-safe.
         return session().client(service_name, **kwargs)
-
 
 
 @import_package
