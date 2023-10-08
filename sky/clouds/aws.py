@@ -95,11 +95,11 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
     # AWS has a limit of the tag value length to 256 characters.
-    # By testing, the actual limit is 256 - 12 = 244 characters
-    # (ray adds additional `ray-` and `-worker`), due to the
+    # By testing, the actual limit is 256 - 8 = 248 characters
+    # (our provisioner adds additional `-worker`), due to the
     # maximum length of DescribeInstances API filter value.
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 244
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 248
 
     _regions: List[clouds.Region] = []
 
@@ -251,8 +251,10 @@ class AWS(clouds.Cloud):
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} not found in '
-                                 f'AWS region {region}') from None
+                raise ValueError(
+                    f'Image {image_id!r} not found in AWS region {region}.\n'
+                    f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
+                    'Example: ami-0729d913a335efca7') from None
         return image_size
 
     @classmethod

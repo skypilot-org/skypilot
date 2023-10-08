@@ -1,16 +1,6 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum
@@ -629,7 +619,7 @@ def spot_launch(
                 'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     for task_ in dag.tasks:
         _maybe_translate_local_file_mounts_and_sync_up(task_)

@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.service_catalog import common
-from sky.skylet.providers.oci.config import oci_conf
+from sky.clouds.utils import oci_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -45,7 +45,7 @@ def _get_df() -> 'pd.DataFrame':
             return _df
 
         try:
-            config_profile = oci_conf.get_profile()
+            config_profile = oci_utils.oci_config.get_profile()
             client = oci_adaptor.get_identity_client(profile=config_profile)
 
             subscriptions = client.list_region_subscriptions(
@@ -110,15 +110,15 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
     del disk_tier  # unused
     if cpus is None:
-        cpus = f'{oci_conf.DEFAULT_NUM_VCPUS}+'
+        cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
 
     if memory is None:
-        memory_gb_or_ratio = f'{oci_conf.DEFAULT_MEMORY_CPU_RATIO}x'
+        memory_gb_or_ratio = f'{oci_utils.oci_config.DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
 
     instance_type_prefix = tuple(
-        f'{family}' for family in oci_conf.DEFAULT_INSTANCE_FAMILY)
+        f'{family}' for family in oci_utils.oci_config.DEFAULT_INSTANCE_FAMILY)
 
     df = _get_df()
     df = df[df['InstanceType'].notna()]
@@ -197,8 +197,9 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     app_catalog_listing_id = df['AppCatalogListingId'].iloc[0]
     resource_version = df['ResourceVersion'].iloc[0]
 
-    return (f'{image_str}{oci_conf.IMAGE_TAG_SPERATOR}{app_catalog_listing_id}'
-            f'{oci_conf.IMAGE_TAG_SPERATOR}{resource_version}')
+    return (f'{image_str}{oci_utils.oci_config.IMAGE_TAG_SPERATOR}'
+            f'{app_catalog_listing_id}{oci_utils.oci_config.IMAGE_TAG_SPERATOR}'
+            f'{resource_version}')
 
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:

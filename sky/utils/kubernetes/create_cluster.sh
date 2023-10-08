@@ -36,8 +36,10 @@ kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
 
 # Load local skypilot image on to the cluster for faster startup
 echo "Loading local skypilot image on to the cluster"
-docker pull us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
-kind load docker-image --name skypilot us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+#docker pull us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+docker pull us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s-test-doyoung/no-conda:latest
+#kind load docker-image --name skypilot us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+kind load docker-image --name us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s-test-doyoung/no-conda:latest
 
 # Print CPUs available on the local cluster
 NUM_CPUS=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}')

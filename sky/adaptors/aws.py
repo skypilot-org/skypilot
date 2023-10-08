@@ -152,3 +152,10 @@ def botocore_exceptions():
     """AWS botocore exception."""
     from botocore import exceptions
     return exceptions
+
+
+@import_package
+def botocore_config():
+    """AWS botocore exception."""
+    from botocore import config
+    return config

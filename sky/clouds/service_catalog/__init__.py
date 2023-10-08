@@ -20,6 +20,13 @@ _ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci')
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
         clouds = list(_ALL_CLOUDS)
+
+        # TODO(hemil): Remove this once the common service catalog
+        # functions are refactored from clouds/kubernetes.py to
+        # kubernetes_catalog.py and add kubernetes to _ALL_CLOUDS
+        if method_name == 'list_accelerators':
+            clouds.append('kubernetes')
+
     single = isinstance(clouds, str)
     if single:
         clouds = [clouds]  # type: ignore
