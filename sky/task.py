@@ -439,6 +439,7 @@ class Task:
                 accelerators = [accelerators]
             elif isinstance(accelerators, dict):
                 accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
+                accelerators = set(accelerators)
 
             # In yaml file, we store accelerators as a list.
             # In Task, we store a list of resources, each with 1 accelerator.
@@ -452,6 +453,8 @@ class Task:
 
             if isinstance(accelerators, list):
                 task.set_resources(tmp_resources_list)
+            elif isinstance(accelerators, set):
+                task.set_resources(set(tmp_resources_list))
             else:
                 raise RuntimeError('Accelerators must be a list or a set.')
         else:
