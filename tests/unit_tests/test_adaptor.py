@@ -10,10 +10,10 @@ import memory_profiler
 
 from sky.provision.aws import instance
 
-regions = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
+aws_regions = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 
-def test_aws_resources_memory_leakage():
+def test_aws_adaptor_resources_memory_leakage():
     memory_usage_before = memory_profiler.memory_usage(os.getpid(),
                                                        interval=0.1,
                                                        timeout=1)[0]
