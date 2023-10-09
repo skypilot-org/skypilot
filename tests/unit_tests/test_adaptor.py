@@ -19,7 +19,7 @@ def test_aws_adaptor_resources_memory_leakage():
                                                        timeout=1)[0]
     total_num = int(1e3)
     for i in range(total_num):
-        instance._default_ec2_resource(regions[i % len(regions)])
+        instance._default_ec2_resource(aws_regions[i % len(aws_regions)])
         if math.log10(i + 1).is_integer():
             print(i)
             mem_usage_after = memory_profiler.memory_usage(os.getpid(),
