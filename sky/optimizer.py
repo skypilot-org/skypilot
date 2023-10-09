@@ -128,7 +128,7 @@ class Optimizer:
                 # Honor the user's choice.
                 # Take dag.tasks[0], the actual task
                 # dag can store dummy tasks.
-                resources_list = dag.tasks[0].get_resources()
+                resources_list = dag.tasks[0].resources
                 accelerators_str = ', '.join([
                     r.get_accelerators_str() + r.get_spot_str()
                     for r in resources_list

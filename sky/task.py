@@ -127,11 +127,12 @@ def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
 
 
 def _with_docker_login_config(
-    resources_set: Set['resources_lib.Resources'],
+    resources: Union[Set['resources_lib.Resources'],
+                     List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-) -> Set['resources_lib.Resources']:
+) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     if not _check_docker_login_config(task_envs):
-        return resources_set
+        return resources
     docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
@@ -155,7 +156,13 @@ def _with_docker_login_config(
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
 
-    return {_add_docker_login_config(resources) for resources in resources_set}
+    new_resources = []
+    for r in resources:
+        new_resources.append(_add_docker_login_config(r))
+    if isinstance(resources, list):
+        return new_resources
+    else:
+        return set(new_resources)
 
 
 class Task:
@@ -543,11 +550,8 @@ class Task:
         # manually update docker login config in task resources, in case the
         # docker login envs are newly added.
         if _check_docker_login_config(self._envs):
-            is_set = isinstance(self.resources, set)
-            self.resources = _with_docker_login_config(set(self.resources),
+            self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
-            if not is_set:
-                self.resources = list(self.resources)
         return self
 
     @property
@@ -598,8 +602,8 @@ class Task:
 
     def set_resources(
         self, resources: Union['resources_lib.Resources',
-                               Set['resources_lib.Resources'],
-                               List['resources_lib.Resources']]
+                               List['resources_lib.Resources'],
+                               Set['resources_lib.Resources']]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -613,13 +617,9 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
-        # Reset the preference list.
         if isinstance(resources, sky.Resources):
-            self.resources = set(resources)
-        elif isinstance(resources, list):
-            self.resources = resources
-        elif isinstance(resources, set):
-            self.resources = resources
+            resources = {resources}
+        # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
@@ -635,9 +635,6 @@ class Task:
         else:
             self.set_resources(set(new_resources_list))
         return self
-
-    def get_resources(self):
-        return self.resources
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
