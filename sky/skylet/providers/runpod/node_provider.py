@@ -118,9 +118,11 @@ class RunPodNodeProvider(NodeProvider):
         runpod_api.set_tags(instance_id, config_tags)
 
         instance_status = "PENDING"
-        while instance_status != "RUNNING":
-            time.sleep(1)
+        instance_ip = None
+        while instance_status != "RUNNING" and instance_ip is not None:
+            time.sleep(3)
             instance_status = runpod_api.list_instances()[instance_id]['status']
+            instance_ip = runpod_api.list_instances()[instance_id].get('ip', None)
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
