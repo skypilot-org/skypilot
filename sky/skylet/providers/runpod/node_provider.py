@@ -81,7 +81,7 @@ class RunPodNodeProvider(NodeProvider):
 
     def external_port(self, node_id):
         """Returns the external SSH port of the given node."""
-        return self._get_node(node_id=node_id)['ssh_port']
+        return self._get_node(node_id=node_id).get('ssh_port', 22)
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
