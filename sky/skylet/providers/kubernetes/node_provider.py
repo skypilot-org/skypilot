@@ -262,8 +262,9 @@ class KubernetesNodeProvider(NodeProvider):
         # exceeds the timeout, raise an exception. If pod's container
         # is ContainerCreating, then we can assume that resources have been
         # allocated and we can exit.
+        ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
         jump_pod = kubernetes.core_api().read_namespaced_pod(
-            clouds.Kubernetes.SKY_SSH_JUMP_NAME, self.namespace)
+            ssh_jump_pod_name, self.namespace)
         new_nodes.append(jump_pod)
         start = time.time()
         while True:
