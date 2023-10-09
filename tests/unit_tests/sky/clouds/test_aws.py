@@ -3,6 +3,7 @@
 Used by spot controller. This test prevents #2668 from regressing.
 """
 
+import math
 import os
 
 import memory_profiler
@@ -16,9 +17,10 @@ def test_aws_resources_memory_leakage():
     memory_usage_before = memory_profiler.memory_usage(os.getpid(),
                                                        interval=0.1,
                                                        timeout=1)[0]
-    for i in range(int(1e6)):
+    total_num = int(1e6)
+    for i in range(total_num):
         instance._default_ec2_resource(regions[i % len(regions)])
-        if i % int(1e3) == 0:
+        if math.log10(i + 1).is_integer():
             mem_usage_after = memory_profiler.memory_usage(os.getpid(),
                                                            interval=0.1,
                                                            timeout=1)[0]
