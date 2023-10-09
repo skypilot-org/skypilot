@@ -117,12 +117,12 @@ class RunPodNodeProvider(NodeProvider):
 
         runpod_api.set_tags(instance_id, config_tags)
 
-        instance_status = runpod_api.list_instances()[instance_id]
-        while instance_status.get('status', None) != "RUNNING" or instance_status.get('ssh_port', False):
-            instance_status = runpod_api.list_instances()[instance_id]
-            time.sleep(1)
+        instance_status = runpod_api.list_instances().get(instance_id, {})
 
-        time.sleep(5)
+        while not (instance_status.get('status') == "RUNNING" and instance_status.get('ssh_port')):
+            time.sleep(1)
+            instance_status = runpod_api.list_instances().get(instance_id, {})
+
         print(f"Instance {instance_id} is running and ready to use.")
 
     @synchronized
