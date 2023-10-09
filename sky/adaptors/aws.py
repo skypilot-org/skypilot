@@ -38,6 +38,28 @@ _session_creation_lock = threading.RLock()
 version = 1
 
 
+class ThreadLocalLRUCache(threading.local):
+
+    def __init__(self, maxsize=32):
+        self.cache = functools.lru_cache(maxsize=maxsize)
+
+
+def thread_local_lru_cache(maxsize=32):
+    # Create thread-local storage for the LRU cache
+    local_cache = ThreadLocalLRUCache(maxsize)
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Use the thread-local LRU cache
+            return local_cache.cache(func)(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def import_package(func):
 
     @functools.wraps(func)
@@ -63,7 +85,9 @@ def _assert_kwargs_builtin_type(kwargs):
 
 
 @import_package
-@functools.lru_cache()
+# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# same session object, which is not guaranteed to be thread-safe.
+@thread_local_lru_cache()
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -96,7 +120,9 @@ def session():
 
 
 @import_package
-@functools.lru_cache()
+# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# same resource object, which is not guaranteed to be thread-safe.
+@thread_local_lru_cache()
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
@@ -122,7 +148,9 @@ def resource(service_name: str, **kwargs):
         return session().resource(service_name, **kwargs)
 
 
-@functools.lru_cache()
+# The LRU cache needs to be thread-local to avoid multiple threads sharing the
+# same client object, which is not guaranteed to be thread-safe.
+@thread_local_lru_cache()
 def client(service_name: str, **kwargs):
     """Create an AWS client of a certain service.
 
