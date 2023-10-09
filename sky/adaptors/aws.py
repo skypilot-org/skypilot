@@ -41,6 +41,7 @@ version = 1
 class ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
+        super().__init__()
         self.cache = functools.lru_cache(maxsize=maxsize)
 
 
