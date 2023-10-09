@@ -9,11 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib
-from sky.provision import common
-
 from sky.provision import aws
-from sky.provision import gcp
 from sky.provision import azure
+from sky.provision import common
+from sky.provision import gcp
 
 logger = sky_logging.init_logger(__name__)
 
