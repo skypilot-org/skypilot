@@ -355,6 +355,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     port_forward_mode = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD
     network_mode_str = skypilot_config.get_nested(('kubernetes', 'networking'),
                                                   port_forward_mode.value)
+    context = config['provider']['k8s_context']
     try:
         network_mode = kubernetes_utils.KubernetesNetworkingMode.from_str(
             network_mode_str)
@@ -370,7 +371,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     cmd = f'kubectl create secret generic {key_label} ' \
-          f'--from-file=ssh-publickey={public_key_path}'
+          f'--from-file=ssh-publickey={public_key_path} ' \
+          f'--context {context}'
     try:
         subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
     except subprocess.CalledProcessError as e:
@@ -406,13 +408,14 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
-    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace(context=context)
+    kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type, context=context)
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
         PRIVATE_SSH_KEY_PATH, ssh_jump_name, network_mode, namespace,
         clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_PATH,
-        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE)
+        clouds.Kubernetes.PORT_FORWARD_PROXY_CMD_TEMPLATE,
+    context=context)
 
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 

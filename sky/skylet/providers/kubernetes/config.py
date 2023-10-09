@@ -1,7 +1,7 @@
 import copy
 import logging
 import math
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, Optional
 
 from sky.adaptors import kubernetes
 from sky.utils import kubernetes_utils
@@ -53,15 +53,16 @@ def not_provided_msg(resource_type: str) -> str:
 def bootstrap_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
-    _configure_services(namespace, config['provider'])
+    context = config['provider']['k8s_context']
+    _configure_services(namespace, config['provider'], context=context)
 
-    config = _configure_ssh_jump(namespace, config)
+    config = _configure_ssh_jump(namespace, config, context=context)
 
     if not config['provider'].get('_operator'):
         # These steps are unecessary when using the Operator.
-        _configure_autoscaler_service_account(namespace, config['provider'])
-        _configure_autoscaler_role(namespace, config['provider'])
-        _configure_autoscaler_role_binding(namespace, config['provider'])
+        _configure_autoscaler_service_account(namespace, config['provider'], context)
+        _configure_autoscaler_role(namespace, config['provider'], context)
+        _configure_autoscaler_role_binding(namespace, config['provider'], context)
 
     return config
 
@@ -172,7 +173,7 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
 
 
 def _configure_autoscaler_service_account(
-        namespace: str, provider_config: Dict[str, Any]) -> None:
+        namespace: str, provider_config: Dict[str, Any], context: Optional[str] = None) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(account_field))
@@ -186,7 +187,7 @@ def _configure_autoscaler_service_account(
 
     name = account['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.core_api().list_namespaced_service_account(
+    accounts = (kubernetes.core_api(context).list_namespaced_service_account(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
@@ -194,12 +195,13 @@ def _configure_autoscaler_service_account(
         return
 
     logger.info(log_prefix + not_found_msg(account_field, name))
-    kubernetes.core_api().create_namespaced_service_account(namespace, account)
+    kubernetes.core_api(context).create_namespaced_service_account(namespace, account)
     logger.info(log_prefix + created_msg(account_field, name))
 
 
 def _configure_autoscaler_role(namespace: str,
-                               provider_config: Dict[str, Any]) -> None:
+                               provider_config: Dict[str, Any],
+                               context: Optional[str] = None) -> None:
     role_field = 'autoscaler_role'
     if role_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(role_field))
@@ -213,7 +215,7 @@ def _configure_autoscaler_role(namespace: str,
 
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role(
+    accounts = (kubernetes.auth_api(context).list_namespaced_role(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
@@ -221,12 +223,13 @@ def _configure_autoscaler_role(namespace: str,
         return
 
     logger.info(log_prefix + not_found_msg(role_field, name))
-    kubernetes.auth_api().create_namespaced_role(namespace, role)
+    kubernetes.auth_api(context).create_namespaced_role(namespace, role)
     logger.info(log_prefix + created_msg(role_field, name))
 
 
 def _configure_autoscaler_role_binding(namespace: str,
-                                       provider_config: Dict[str, Any]) -> None:
+                                       provider_config: Dict[str, Any],
+                                       context: Optional[str] = None) -> None:
     binding_field = 'autoscaler_role_binding'
     if binding_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(binding_field))
@@ -247,7 +250,7 @@ def _configure_autoscaler_role_binding(namespace: str,
 
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.auth_api().list_namespaced_role_binding(
+    accounts = (kubernetes.auth_api(context).list_namespaced_role_binding(
         namespace, field_selector=field_selector).items)
     if len(accounts) > 0:
         assert len(accounts) == 1
@@ -255,11 +258,11 @@ def _configure_autoscaler_role_binding(namespace: str,
         return
 
     logger.info(log_prefix + not_found_msg(binding_field, name))
-    kubernetes.auth_api().create_namespaced_role_binding(namespace, binding)
+    kubernetes.auth_api(context).create_namespaced_role_binding(namespace, binding)
     logger.info(log_prefix + created_msg(binding_field, name))
 
 
-def _configure_ssh_jump(namespace, config):
+def _configure_ssh_jump(namespace, config, context: Optional[str] = None):
     """Creates a SSH jump pod to connect to the cluster.
 
     Also updates config['auth']['ssh_proxy_command'] to use the newly created
@@ -289,12 +292,13 @@ def _configure_ssh_jump(namespace, config):
     #  service is missing, we should raise an error.
 
     kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
-                                        ssh_key_secret_name, namespace)
+                                        ssh_key_secret_name, namespace, context=context)
     return config
 
 
 def _configure_services(namespace: str, provider_config: Dict[str,
-                                                              Any]) -> None:
+                                                              Any],
+                        context: Optional[str] = None) -> None:
     service_field = 'services'
     if service_field not in provider_config:
         logger.info(log_prefix + not_provided_msg(service_field))
@@ -309,7 +313,7 @@ def _configure_services(namespace: str, provider_config: Dict[str,
 
         name = service['metadata']['name']
         field_selector = f'metadata.name={name}'
-        services = (kubernetes.core_api().list_namespaced_service(
+        services = (kubernetes.core_api(context).list_namespaced_service(
             namespace, field_selector=field_selector).items)
         if len(services) > 0:
             assert len(services) == 1
@@ -319,11 +323,11 @@ def _configure_services(namespace: str, provider_config: Dict[str,
                 return
             else:
                 logger.info(log_prefix + updating_existing_msg('service', name))
-                kubernetes.core_api().patch_namespaced_service(
+                kubernetes.core_api(context).patch_namespaced_service(
                     name, namespace, service)
         else:
             logger.info(log_prefix + not_found_msg('service', name))
-            kubernetes.core_api().create_namespaced_service(namespace, service)
+            kubernetes.core_api(context).create_namespaced_service(namespace, service)
             logger.info(log_prefix + created_msg('service', name))
 
 

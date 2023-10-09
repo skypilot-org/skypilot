@@ -183,8 +183,7 @@ LABEL_FORMATTER_REGISTRY = [
 ]
 
 
-def detect_gpu_label_formatter(
-) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
+def detect_gpu_label_formatter(context: Optional[str]) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
     Returns:
@@ -193,7 +192,7 @@ def detect_gpu_label_formatter(
     """
     # Get all labels across all nodes
     node_labels: List[Tuple[str, str]] = []
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         node_labels.extend(node.metadata.labels.items())
 
@@ -213,7 +212,7 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-def detect_gpu_resource() -> Tuple[bool, Set[str]]:
+def detect_gpu_resource(context: Optional[str] = None) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has nvidia.com/gpu resource.
 
     If nvidia.com/gpu resource is missing, that typically means that the
@@ -225,7 +224,7 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_gpu = 'nvidia.com/gpu' in cluster_resources
@@ -233,12 +232,12 @@ def detect_gpu_resource() -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
-def get_kubernetes_nodes() -> List[Any]:
+def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     # TODO(romilb): Calling kube API can take between 10-100ms depending on
     #  the control plane. Consider caching calls to this function (using
     #  kubecontext hash as key).
     try:
-        nodes = kubernetes.core_api().list_node(
+        nodes = kubernetes.core_api(context).list_node(
             _request_timeout=kubernetes.API_TIMEOUT).items
     except kubernetes.max_retry_error():
         raise exceptions.ResourcesUnavailableError(
@@ -247,7 +246,7 @@ def get_kubernetes_nodes() -> List[Any]:
     return nodes
 
 
-def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
+def check_instance_fits(instance: str, context: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
 
     If the instance has GPU requirements, checks if the GPU type is
@@ -288,7 +287,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
             'Maximum resources found on a single node: '
             f'{max_cpu} CPUs, {common_utils.format_float(max_mem)}G Memory')
 
-    nodes = get_kubernetes_nodes()
+    nodes = get_kubernetes_nodes(context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -296,7 +295,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         # If GPUs are requested, check if GPU type is available, and if so,
         # check if CPU and memory requirements on the specific node are met.
         try:
-            gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type)
+            gpu_label_key, gpu_label_val = get_gpu_label_key_value(acc_type, context=context)
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
             return False, str(e)
@@ -323,7 +322,7 @@ def check_instance_fits(instance: str) -> Tuple[bool, Optional[str]]:
         return fits, reason
 
 
-def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
+def get_gpu_label_key_value(acc_type: str, check_mode=False, context: Optional[str] = None) -> Tuple[str, str]:
     """Returns the label key and value for the given GPU type.
 
     Args:
@@ -348,11 +347,11 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
     #  For AS clusters, we may need a way for users to specify GPU node pools
     #  to use since the cluster may be scaling up from zero nodes and may not
     #  have any GPU nodes yet.
-    has_gpus, cluster_resources = detect_gpu_resource()
+    has_gpus, cluster_resources = detect_gpu_resource(context=context)
     if has_gpus:
         # Check if the cluster has GPU labels setup correctly
         label_formatter, node_labels = \
-            detect_gpu_label_formatter()
+            detect_gpu_label_formatter(context)
         if label_formatter is None:
             # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
             # detected, raise error
@@ -422,7 +421,7 @@ def get_head_ssh_port(cluster_name: str, namespace: str) -> int:
     return get_port(svc_name, namespace)
 
 
-def get_port(svc_name: str, namespace: str) -> int:
+def get_port(svc_name: str, namespace: str, context: Optional[str] = None) -> int:
     """Gets the nodeport of the specified service.
 
     Args:
@@ -430,7 +429,7 @@ def get_port(svc_name: str, namespace: str) -> int:
             different from the cluster name.
         namespace (str): Kubernetes namespace to look for the service in.
     """
-    head_service = kubernetes.core_api().read_namespaced_service(
+    head_service = kubernetes.core_api(context).read_namespaced_service(
         svc_name, namespace)
     return head_service.spec.ports[0].node_port
 
@@ -439,6 +438,7 @@ def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
     if network_mode == KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP
+    # TODO: Handle context here for portforward mode
     nodes = kubernetes.core_api().list_node().items
     for node in nodes:
         if node.status.addresses:
@@ -451,7 +451,8 @@ def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
     return parsed_url.hostname
 
 
-def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
+def check_credentials(context: Optional[str] = None,
+                      timeout: int = kubernetes.API_TIMEOUT) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -463,8 +464,8 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
         str: Error message if credentials are invalid, None otherwise
     """
     try:
-        ns = get_current_kube_config_context_namespace()
-        kubernetes.core_api().list_namespaced_pod(ns, _request_timeout=timeout)
+        ns = get_current_kube_config_context_namespace(context)
+        kubernetes.core_api(context).list_namespaced_pod(ns, _request_timeout=timeout)
     except ImportError:
         # TODO(romilb): Update these error strs to also include link to docs
         #  when docs are ready.
@@ -495,7 +496,7 @@ def check_credentials(timeout: int = kubernetes.API_TIMEOUT) -> \
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
     try:
-        _, _ = get_gpu_label_key_value(acc_type='', check_mode=True)
+        _, _ = get_gpu_label_key_value(acc_type='', check_mode=True, context=context)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which
@@ -518,7 +519,7 @@ def get_current_kube_config_context_name() -> Optional[str]:
         return None
 
 
-def get_current_kube_config_context_namespace() -> str:
+def get_current_kube_config_context_namespace(context: Optional[str] = None) -> str:
     """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
@@ -527,9 +528,26 @@ def get_current_kube_config_context_namespace() -> str:
     """
     k8s = kubernetes.get_kubernetes()
     try:
-        _, current_context = k8s.config.list_kube_config_contexts()
-        if 'namespace' in current_context['context']:
-            return current_context['context']['namespace']
+        k8s.config.load_kube_config()
+        all_contexts, current_context = k8s.config.list_kube_config_contexts()
+        all_context_names = [context['name'] for context in all_contexts]
+
+        # assign context name if not set
+        if context is None:
+            context = current_context['name']
+
+        target_context = None
+        for c in all_contexts:
+            if c['name'] == context:
+                target_context = c
+                break
+
+        if target_context is None:
+            raise ValueError(f'Context {context} not found in kubeconfig. '
+                             f'Available contexts: {all_context_names}')
+
+        if 'namespace' in target_context['context']:
+            return target_context['context']['namespace']
         else:
             return DEFAULT_NAMESPACE
     except k8s.config.config_exception.ConfigException:
@@ -707,7 +725,8 @@ def construct_ssh_jump_command(private_key_path: str,
 def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
                           network_mode: KubernetesNetworkingMode,
                           namespace: str, port_fwd_proxy_cmd_path: str,
-                          port_fwd_proxy_cmd_template: str) -> str:
+                          port_fwd_proxy_cmd_template: str,
+                          context: Optional[str] = None) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
     By default, establishing an SSH connection creates a communication
@@ -764,7 +783,9 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     else:
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
+            'k8s_context': context
         }
+        print(f'Writing with template {vars_to_fill}')
         backend_utils.fill_template(port_fwd_proxy_cmd_template,
                                     vars_to_fill,
                                     output_path=port_fwd_proxy_cmd_path)
@@ -776,7 +797,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
-                       service_type: KubernetesServiceType):
+                       service_type: KubernetesServiceType, context: Optional[str] = None):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -793,12 +814,12 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
     content = fill_ssh_jump_template('', '', ssh_jump_name, service_type.value)
     # Create service
     try:
-        kubernetes.core_api().create_namespaced_service(namespace,
+        kubernetes.core_api(context).create_namespaced_service(namespace,
                                                         content['service_spec'])
     except kubernetes.api_exception() as e:
         # SSH Jump Pod service already exists.
         if e.status == 409:
-            ssh_jump_service = kubernetes.core_api().read_namespaced_service(
+            ssh_jump_service = kubernetes.core_api(context).read_namespaced_service(
                 name=ssh_jump_name, namespace=namespace)
             curr_svc_type = ssh_jump_service.spec.type
             if service_type.value == curr_svc_type:
@@ -811,9 +832,9 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                 # If a different type of service type for SSH Jump pod compared
                 # to user's configuration for networking mode exists, we remove
                 # existing servie to create a new one following user's config
-                kubernetes.core_api().delete_namespaced_service(
+                kubernetes.core_api(context).delete_namespaced_service(
                     name=ssh_jump_name, namespace=namespace)
-                kubernetes.core_api().create_namespaced_service(
+                kubernetes.core_api(context).create_namespaced_service(
                     namespace, content['service_spec'])
                 port_forward_mode = KubernetesNetworkingMode.PORTFORWARD.value
                 nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
@@ -838,7 +859,7 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
 
 
 def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
-                       ssh_key_secret: str, namespace: str):
+                       ssh_key_secret: str, namespace: str, context: Optional[str] = None):
     """Sets up Kubernetes RBAC and pod for SSH jump host.
 
     Our Kubernetes implementation uses a SSH jump pod to reach SkyPilot clusters
@@ -862,7 +883,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
                                      ssh_jump_name, '')
     # ServiceAccount
     try:
-        kubernetes.core_api().create_namespaced_service_account(
+        kubernetes.core_api(context).create_namespaced_service_account(
             namespace, content['service_account'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
@@ -875,7 +896,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
         logger.info('Created SSH Jump ServiceAccount.')
     # Role
     try:
-        kubernetes.auth_api().create_namespaced_role(namespace, content['role'])
+        kubernetes.auth_api(context=context).create_namespaced_role(namespace, content['role'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.info(
@@ -886,7 +907,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
         logger.info('Created SSH Jump Role.')
     # RoleBinding
     try:
-        kubernetes.auth_api().create_namespaced_role_binding(
+        kubernetes.auth_api(context=context).create_namespaced_role_binding(
             namespace, content['role_binding'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
@@ -899,7 +920,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
         logger.info('Created SSH Jump RoleBinding.')
     # Pod
     try:
-        kubernetes.core_api().create_namespaced_pod(namespace,
+        kubernetes.core_api(context).create_namespaced_pod(namespace,
                                                     content['pod_spec'])
     except kubernetes.api_exception() as e:
         if e.status == 409:
@@ -912,7 +933,7 @@ def setup_ssh_jump_pod(ssh_jump_name: str, ssh_jump_image: str,
         logger.info(f'Created SSH Jump Host {ssh_jump_name}.')
 
 
-def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
+def clean_zombie_ssh_jump_pod(namespace: str, node_id: str, context: Optional[str] = None):
     """Analyzes SSH jump pod and removes if it is in a bad state
 
     Prevents the existence of a dangling SSH jump pod. This could happen
@@ -932,7 +953,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
 
     # Get the SSH jump pod name from the head pod
     try:
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, namespace)
+        pod = kubernetes.core_api(context).read_namespaced_pod(node_id, namespace)
     except kubernetes.api_exception() as e:
         if e.status == 404:
             logger.warning(f'Failed to get pod {node_id},'
@@ -941,7 +962,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
     else:
         ssh_jump_name = pod.metadata.labels.get('skypilot-ssh-jump')
     try:
-        ssh_jump_pod = kubernetes.core_api().read_namespaced_pod(
+        ssh_jump_pod = kubernetes.core_api(context=context).read_namespaced_pod(
             ssh_jump_name, namespace)
         cont_ready_cond = find(ssh_jump_pod.status.conditions,
                                lambda c: c.type == 'ContainersReady')
@@ -951,9 +972,9 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
             # and prevent a dangling ssh jump pod, lets remove it and
             # the service. Otherwise main container is ready and its lifecycle
             # management script takes care of the cleaning.
-            kubernetes.core_api().delete_namespaced_pod(ssh_jump_name,
+            kubernetes.core_api(context=context).delete_namespaced_pod(ssh_jump_name,
                                                         namespace)
-            kubernetes.core_api().delete_namespaced_service(
+            kubernetes.core_api(context=context).delete_namespaced_service(
                 ssh_jump_name, namespace)
     # only warn and proceed as usual
     except kubernetes.api_exception() as e:
@@ -965,7 +986,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
         # We encountered an issue while checking ssh jump pod. To be on
         # the safe side, lets remove its service so the port is freed
         try:
-            kubernetes.core_api().delete_namespaced_service(
+            kubernetes.core_api(context=context).delete_namespaced_service(
                 ssh_jump_name, namespace)
         except kubernetes.api_exception():
             pass

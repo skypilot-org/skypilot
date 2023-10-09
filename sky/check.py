@@ -26,7 +26,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
                 f'{cloud}: {status_msg}', fg=status_color, bold=True) +
                  ' ' * 30)
         if ok:
-            enabled_clouds.append(str(cloud))
+            enabled_clouds.append(cloud.__repr__())
             if verbose:
                 activated_account = cloud.get_current_user_identity_str()
                 if activated_account is not None:

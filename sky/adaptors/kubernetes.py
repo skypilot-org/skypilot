@@ -4,6 +4,7 @@
 
 import functools
 import os
+from typing import Optional
 
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -11,11 +12,12 @@ from sky.utils import ux_utils
 kubernetes = None
 urllib3 = None
 
-_configured = False
-_core_api = None
-_auth_api = None
-_networking_api = None
-_custom_objects_api = None
+# Maps to cache context -> api objects
+_configured_map = {}
+_core_api_map = {}
+_auth_api_map = {}
+_networking_api_map = {}
+_custom_objects_api_map = {}
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -50,9 +52,9 @@ def get_kubernetes():
 
 
 @import_package
-def _load_config():
-    global _configured
-    if _configured:
+def _load_config(context: Optional[str]):
+    global _configured_map
+    if _configured_map.get(context, False):
         return
     try:
         # Load in-cluster config if running in a pod
@@ -65,7 +67,7 @@ def _load_config():
         kubernetes.config.load_incluster_config()
     except kubernetes.config.config_exception.ConfigException:
         try:
-            kubernetes.config.load_kube_config()
+            kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = ''
             if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -83,47 +85,51 @@ def _load_config():
                     f'Please check if your kubeconfig file is valid.{suffix}')
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
-    _configured = True
+    _configured_map[context] = True
 
 
 @import_package
-def core_api():
-    global _core_api
-    if _core_api is None:
-        _load_config()
+def core_api(context: Optional[str] = None):
+    global _core_api_map
+    if _core_api_map.get(context, None) is None:
+        _load_config(context)
         _core_api = kubernetes.client.CoreV1Api()
+        _core_api_map[context] = _core_api
 
-    return _core_api
+    return _core_api_map[context]
 
 
 @import_package
-def auth_api():
-    global _auth_api
-    if _auth_api is None:
-        _load_config()
+def auth_api(context: Optional[str] = None):
+    global _auth_api_map
+    if _auth_api_map.get(context, None) is None:
+        _load_config(context)
         _auth_api = kubernetes.client.RbacAuthorizationV1Api()
+        _auth_api_map[context] = _auth_api
 
-    return _auth_api
+    return _auth_api_map[context]
 
 
 @import_package
-def networking_api():
-    global _networking_api
-    if _networking_api is None:
-        _load_config()
+def networking_api(context: Optional[str] = None):
+    global _networking_api_map
+    if _networking_api_map.get(context, None) is None:
+        _load_config(context)
         _networking_api = kubernetes.client.NetworkingV1Api()
+        _networking_api_map[context] = _networking_api
 
-    return _networking_api
+    return _networking_api_map[context]
 
 
 @import_package
-def custom_objects_api():
-    global _custom_objects_api
-    if _custom_objects_api is None:
-        _load_config()
+def custom_objects_api(context: Optional[str] = None):
+    global _custom_objects_api_map
+    if _custom_objects_api_map.get(context, None) is None:
+        _load_config(context)
         _custom_objects_api = kubernetes.client.CustomObjectsApi()
+        _custom_objects_api_map[context] = _custom_objects_api
 
-    return _custom_objects_api
+    return _custom_objects_api_map[context]
 
 
 @import_package

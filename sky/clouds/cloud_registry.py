@@ -31,7 +31,7 @@ class _CloudRegistry(dict):
         return self.get(name.lower())
 
     def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
-        name = cloud_cls.__name__.lower()
+        name = cloud_cls().__repr__().lower()
         assert name not in self, f'{name} already registered'
         self[name] = cloud_cls()
         return cloud_cls

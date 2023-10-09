@@ -20,13 +20,13 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIAL_PATH = '~/.kube/config'
-
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
+    CREDENTIAL_PATH = '~/.kube/config'
+    CONTEXT = 'kind-skypilot'
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
@@ -45,7 +45,7 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
-    _REPR = 'Kubernetes'
+    _REPR = 'LocalKubernetes'
     _SINGLETON_REGION = 'kubernetes'
     _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -120,8 +120,8 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def get_port(cls, svc_name) -> int:
-        ns = kubernetes_utils.get_current_kube_config_context_namespace()
-        return kubernetes_utils.get_port(svc_name, ns)
+        ns = kubernetes_utils.get_current_kube_config_context_namespace(context=cls.CONTEXT)
+        return kubernetes_utils.get_port(svc_name, ns, context=cls.CONTEXT)
 
     @classmethod
     def get_default_instance_type(cls,
@@ -223,7 +223,7 @@ class Kubernetes(clouds.Cloud):
         # If GPUs are requested, set node label to match the GPU type.
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(acc_type)
+                kubernetes_utils.get_gpu_label_key_value(acc_type, context=self.CONTEXT)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -238,6 +238,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_acc_label_value': k8s_acc_label_value,
             'k8s_ssh_jump_name': self.SKY_SSH_JUMP_NAME,
             'k8s_ssh_jump_image': ssh_jump_image,
+            'k8s_context': self.CONTEXT,
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
@@ -256,7 +257,7 @@ class Kubernetes(clouds.Cloud):
             resource_list = []
             for instance_type in instance_list:
                 r = resources.copy(
-                    cloud=Kubernetes(),
+                    cloud=self,
                     instance_type=instance_type,
                     accelerators=None,
                 )
@@ -307,19 +308,19 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+        if os.path.exists(os.path.expanduser(cls.CREDENTIAL_PATH)):
             # Test using python API
             try:
-                return kubernetes_utils.check_credentials()
+                return kubernetes_utils.check_credentials(cls.CONTEXT)
             except Exception as e:  # pylint: disable=broad-except
                 return (False, 'Credential check failed: '
                         f'{common_utils.format_exception(e)}')
         else:
             return (False, 'Credentials not found - '
-                    f'check if {CREDENTIAL_PATH} exists.')
+                    f'check if {cls.CREDENTIAL_PATH} exists.')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {CREDENTIAL_PATH: CREDENTIAL_PATH}
+        return {self.CREDENTIAL_PATH: self.CREDENTIAL_PATH}
 
     def instance_type_exists(self, instance_type: str) -> bool:
         return kubernetes_utils.KubernetesInstanceType.is_valid_instance_type(
@@ -342,7 +343,7 @@ class Kubernetes(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         try:
             # Check if accelerator is available by checking node labels
-            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator)
+            _, _ = kubernetes_utils.get_gpu_label_key_value(accelerator, context=self.CONTEXT)
             return True
         except exceptions.ResourcesUnavailableError:
             return False
@@ -356,7 +357,7 @@ class Kubernetes(clouds.Cloud):
 
         # Get all the pods with the label skypilot-cluster: <cluster_name>
         try:
-            pods = kubernetes.core_api().list_namespaced_pod(
+            pods = kubernetes.core_api(cls.CONTEXT).list_namespaced_pod(
                 namespace,
                 label_selector=f'skypilot-cluster={name}',
                 _request_timeout=kubernetes.API_TIMEOUT).items
@@ -398,3 +399,9 @@ class Kubernetes(clouds.Cloud):
             return [f'{cluster}_{user}_{namespace}']
         except k8s.config.config_exception.ConfigException:
             return None
+
+
+@clouds.CLOUD_REGISTRY.register
+class Kubernetes2(Kubernetes):
+    _REPR = 'GKE'
+    CONTEXT = 'kind-kind'

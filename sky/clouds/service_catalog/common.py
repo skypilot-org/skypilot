@@ -70,7 +70,11 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    try:
+        # Should pass cloud as an arg perhaps
+        cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    except ValueError:
+        cloud = 'Unknown' # Used only for loggin
 
     meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)

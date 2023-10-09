@@ -11,7 +11,7 @@ from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
-from sky.clouds.kubernetes import Kubernetes
+from sky.clouds.kubernetes import Kubernetes, Kubernetes2
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
@@ -28,6 +28,7 @@ __all__ = [
     'SCP',
     'OCI',
     'Kubernetes',
+    'Kubernetes2',
     'CloudImplementationFeatures',
     'Region',
     'Zone',

@@ -147,6 +147,7 @@ def _get_cluster_config_template(cloud):
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.Kubernetes2: 'kubernetes-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -1184,6 +1185,7 @@ class RetryingVmProvisioner(object):
             clouds.SCP: self._update_blocklist_on_scp_error,
             clouds.Local: self._update_blocklist_on_local_error,
             clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
+            clouds.Kubernetes2: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
         }
         cloud = launchable_resources.cloud

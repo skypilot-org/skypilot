@@ -52,14 +52,14 @@ class KubernetesNodeProvider(NodeProvider):
         self.cluster_name = cluster_name
 
         # Kubernetes namespace to user
-        self.namespace = kubernetes_utils.get_current_kube_config_context_namespace(
-        )
+        self.namespace = kubernetes_utils.get_current_kube_config_context_namespace()
 
         # Timeout for resource provisioning. If it takes longer than this
         # timeout, the resource provisioning will be considered failed.
         # This is useful for failover. May need to be adjusted for different
         # kubernetes setups.
         self.timeout = provider_config['timeout']
+        self.context = provider_config['k8s_context']
 
     def non_terminated_nodes(self, tag_filters):
         # Match pods that are in the 'Pending' or 'Running' phase.
@@ -74,7 +74,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         tag_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
         label_selector = to_label_selector(tag_filters)
-        pod_list = kubernetes.core_api().list_namespaced_pod(
+        pod_list = kubernetes.core_api(self.context).list_namespaced_pod(
             self.namespace,
             field_selector=field_selector,
             label_selector=label_selector)
@@ -88,15 +88,15 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
     def is_running(self, node_id):
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api(self.context).read_namespaced_pod(node_id, self.namespace)
         return pod.status.phase == 'Running'
 
     def is_terminated(self, node_id):
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api(self.context).read_namespaced_pod(node_id, self.namespace)
         return pod.status.phase not in ['Running', 'Pending']
 
     def node_tags(self, node_id):
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api(self.context).read_namespaced_pod(node_id, self.namespace)
         return pod.metadata.labels
 
     def external_ip(self, node_id):
@@ -112,7 +112,7 @@ class KubernetesNodeProvider(NodeProvider):
         return kubernetes_utils.get_head_ssh_port(cluster_name, self.namespace)
 
     def internal_ip(self, node_id):
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api(self.context).read_namespaced_pod(node_id, self.namespace)
         return pod.status.pod_ip
 
     def get_node_id(self, ip_address, use_internal_ip=True) -> str:
@@ -158,15 +158,15 @@ class KubernetesNodeProvider(NodeProvider):
         self._set_node_tags(node_ids, tags)
 
     def _set_node_tags(self, node_id, tags):
-        pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
+        pod = kubernetes.core_api(self.context).read_namespaced_pod(node_id, self.namespace)
         pod.metadata.labels.update(tags)
-        kubernetes.core_api().patch_namespaced_pod(node_id, self.namespace, pod)
+        kubernetes.core_api(self.context).patch_namespaced_pod(node_id, self.namespace, pod)
 
     def _raise_pod_scheduling_errors(self, new_nodes):
         for new_node in new_nodes:
             pod_status = new_node.status.phase
             pod_name = new_node._metadata._name
-            events = kubernetes.core_api().list_namespaced_event(
+            events = kubernetes.core_api(self.context).list_namespaced_event(
                 self.namespace,
                 field_selector=(f'involvedObject.name={pod_name},'
                                 'involvedObject.kind=Pod'))
@@ -239,7 +239,7 @@ class KubernetesNodeProvider(NodeProvider):
                     'calling create_namespaced_pod (count={}).'.format(count))
         new_nodes = []
         for _ in range(count):
-            pod = kubernetes.core_api().create_namespaced_pod(
+            pod = kubernetes.core_api(self.context).create_namespaced_pod(
                 self.namespace, pod_spec)
             new_nodes.append(pod)
 
@@ -253,7 +253,7 @@ class KubernetesNodeProvider(NodeProvider):
                 metadata['name'] = new_node.metadata.name
                 service_spec['metadata'] = metadata
                 service_spec['spec']['selector'] = {'ray-node-uuid': node_uuid}
-                svc = kubernetes.core_api().create_namespaced_service(
+                svc = kubernetes.core_api(self.context).create_namespaced_service(
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
@@ -275,7 +275,7 @@ class KubernetesNodeProvider(NodeProvider):
 
             all_ready = True
             for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
+                pod = kubernetes.core_api(self.context).read_namespaced_pod(
                     node.metadata.name, self.namespace)
                 if pod.status.phase == 'Pending':
                     # Iterate over each pod to check their status
@@ -305,7 +305,7 @@ class KubernetesNodeProvider(NodeProvider):
         while True:
             pods = []
             for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
+                pod = kubernetes.core_api(self.context).read_namespaced_pod(
                     node.metadata.name, self.namespace)
                 pods.append(pod)
             if all([pod.status.phase == "Running" for pod in pods]) \
@@ -334,7 +334,7 @@ class KubernetesNodeProvider(NodeProvider):
         ]
         for new_node in new_nodes:
             kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                kubernetes.core_api(self.context).connect_get_namespaced_pod_exec,
                 new_node.metadata.name,
                 self.namespace,
                 command=set_k8s_env_var_cmd,
@@ -352,11 +352,11 @@ class KubernetesNodeProvider(NodeProvider):
             logger.warning(config.log_prefix +
                            f'Error occurred when analyzing SSH Jump pod: {e}')
         try:
-            kubernetes.core_api().delete_namespaced_service(
+            kubernetes.core_api(self.context).delete_namespaced_service(
                 node_id,
                 self.namespace,
                 _request_timeout=config.DELETION_TIMEOUT)
-            kubernetes.core_api().delete_namespaced_service(
+            kubernetes.core_api(self.context).delete_namespaced_service(
                 f'{node_id}-ssh',
                 self.namespace,
                 _request_timeout=config.DELETION_TIMEOUT)
@@ -366,7 +366,7 @@ class KubernetesNodeProvider(NodeProvider):
         # This is to ensure there are no leftover resources if this down is run
         # from within the pod, e.g., for autodown.
         try:
-            kubernetes.core_api().delete_namespaced_pod(
+            kubernetes.core_api(self.context).delete_namespaced_pod(
                 node_id,
                 self.namespace,
                 _request_timeout=config.DELETION_TIMEOUT)
