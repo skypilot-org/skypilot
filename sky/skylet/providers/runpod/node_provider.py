@@ -23,6 +23,14 @@ import sky.skylet.providers.runpod.rp_helper as runpod_api
 logger = logging.getLogger(__name__)
 
 
+# Monkey patch SSHCommandRunner to allow specifying SSH port
+def set_port(self, port):
+    self.ssh_options.arg_dict['Port'] = port
+
+
+SSHCommandRunner.set_port = set_port
+
+
 class RunPodError(Exception):
     pass
 
