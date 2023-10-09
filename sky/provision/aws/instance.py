@@ -52,6 +52,22 @@ def _default_ec2_resource(region: str) -> Any:
         # imported before and stale. Used for, e.g., a live spot controller
         # running an older version and a new version gets installed by
         # `sky spot launch`.
+        #
+        # In such case, when `sky spot canel` is called for the old spot jobs,
+        # as the `sky.provision.aws`` is only imported in the controller
+        # process (started as a multiprocessing.Process in sky.spot.controller),
+        # the new version of `sky.provision.aws` will be loaded again, after the
+        # process exit and the main process tries to cleanup the spot job.
+        #
+        # However, since `sky.adaptors.aws` is already loaded when the main
+        # process starts due to Python's loading mechanism. There will be a
+        # version mismatch between `sky.adaptors.aws` and `sky.provision.aws`,
+        # causing backward compatibility issues, when the API changes in
+        # `sky.adaptors.aws`.
+        #
+        # For version < 1 (variable not exists), we do not have `max_attempts`
+        # in the `aws.resource` call, so we need to reload the module to get
+        # the latest `aws.resource` function.
         import importlib  # pylint: disable=import-outside-toplevel
         importlib.reload(aws)
     return aws.resource('ec2',
