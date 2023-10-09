@@ -30,9 +30,9 @@ def _route_to_cloud_impl(func):
         else:
             provider_name = kwargs.pop('provider_name')
 
-        module_name = provider_name
+        module_name = provider_name.lower()
         module = globals().get(module_name)
-        assert module is not None, f'Unknown provider: {provider_name}'
+        assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__)
         return impl(*args, **kwargs)
