@@ -1,4 +1,9 @@
-"""AWS instance provisioning."""
+"""AWS instance provisioning.
+
+Note (dev): If API changes are made to adaptors/aws.py and the new API is used
+in this or config module, please make sure to reload it as in
+_default_ec2_resource() to avoid version mismatch issues.
+"""
 import copy
 import re
 import time
@@ -53,21 +58,35 @@ def _default_ec2_resource(region: str) -> Any:
         # running an older version and a new version gets installed by
         # `sky spot launch`.
         #
-        # In such case, when `sky spot canel` is called for the old spot jobs,
-        # as the `sky.provision.aws`` is only imported in the controller
-        # process (started as a multiprocessing.Process in sky.spot.controller),
-        # the new version of `sky.provision.aws` will be loaded again, after the
-        # process exit and the main process tries to cleanup the spot job.
+        # Detailed explanation follows. Assume we're in this situation: an old
+        # spot controller running a spot job and then the code gets updated on
+        # the controller due to a new `sky spot launch` or `sky start`.
         #
-        # However, since `sky.adaptors.aws` is already loaded when the main
-        # process starts due to Python's loading mechanism, there will be a
-        # version mismatch between `sky.adaptors.aws` and `sky.provision.aws`,
-        # causing backward compatibility issues, when the API changes in
-        # `sky.adaptors.aws`.
+        # First, controller consists of an outer process (sky.spot.controller's
+        # main) and an inner process running the controller logic (started as a
+        # multiprocessing.Process in sky.spot.controller). `sky.provision.aws`
+        # is only imported in the inner process due to its load-on-use
+        # semantics.
         #
-        # For version < 1 (variable not exists), we do not have `max_attempts`
-        # in the `aws.resource` call, so we need to reload the module to get
-        # the latest `aws.resource` function.
+        # At this point in the normal execution, inner process has loaded
+        # {old sky.provision.aws, old sky.adaptors.aws}, and outer process has
+        # loaded {old sky.adaptors.aws}.
+        #
+        # In controller.py's start(), the inner process may exit due to spot job
+        # exits or `sky spot cancel`, entering outer process'
+        # `finally: ... _cleanup()` path. Inside _cleanup(), we eventually call
+        # into `sky.provision.aws` which loads this module for the first time
+        # for the outer process. At this point, outer process has loaded
+        # {old sky.adaptors.aws, new sky.provision.aws}.
+        #
+        # This version mismatch becomes a "backward compatibility" problem if
+        # `new sky.provision.aws` depends on `new sky.adaptors.aws` (assuming
+        # API changes in sky.adaptors.aws). Therefore, here we use a hack to
+        # reload sky.adaptors.aws to go from old to new.
+        #
+        # For version < 1 (variable does not exist), we do not have
+        # `max_attempts` in the `aws.resource` call, so we need to reload the
+        # module to get the latest `aws.resource` function.
         import importlib  # pylint: disable=import-outside-toplevel
         importlib.reload(aws)
     return aws.resource('ec2',
