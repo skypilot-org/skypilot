@@ -15,7 +15,7 @@ from ray.autoscaler.tags import TAG_RAY_NODE_STATUS
 from ray.autoscaler.tags import TAG_RAY_USER_NODE_TYPE
 
 from sky import authentication as auth
-from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.clouds.utils import lambda_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
