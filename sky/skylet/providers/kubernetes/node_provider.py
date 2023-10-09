@@ -10,7 +10,6 @@ from ray.autoscaler.tags import NODE_KIND_HEAD
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
-from sky import clouds
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils

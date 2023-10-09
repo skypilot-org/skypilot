@@ -211,14 +211,12 @@ class Kubernetes(clouds.Cloud):
         #  so the image_id should start with 'skypilot:'.
         #  In the future we may want to get image_id from the resources object.
         assert image_id.startswith('skypilot:')
-        #image_id = service_catalog.get_image_id_from_tag(image_id,
-        #                                                 clouds='kubernetes')
+        image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                         clouds='kubernetes')
         # TODO(romilb): Create a lightweight image for SSH jump host
-        #ssh_jump_image = service_catalog.get_image_id_from_tag(
-        #    self.IMAGE_CPU, clouds='kubernetes')
-        image_id = 'us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s-test-doyoung/no-conda:latest'
-        ssh_jump_image = 'us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s-test-doyoung/no-conda:latest'
-        
+        ssh_jump_image = service_catalog.get_image_id_from_tag(
+            self.IMAGE_CPU, clouds='kubernetes')
+
         k8s_acc_label_key = None
         k8s_acc_label_value = None
 
