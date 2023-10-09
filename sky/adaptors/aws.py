@@ -135,7 +135,6 @@ def resource(service_name: str, **kwargs):
     """
     _assert_kwargs_builtin_type(kwargs)
 
-    # Using service name and kwargs as key
     max_attempts = kwargs.pop('max_attempts', None)
     if max_attempts is not None:
         config = botocore_config().Config(
