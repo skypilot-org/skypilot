@@ -96,7 +96,7 @@ def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
-        for resources in task_.get_resources():
+        for resources in list(task_.resources):
             change_default_value: Dict[str, Any] = {}
             if resources.use_spot_specified and not resources.use_spot:
                 logger.info(
@@ -117,5 +117,8 @@ def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)
-        task_.set_resources(new_resources_list,
-                            is_resources_ordered=task_.is_resources_ordered)
+
+        if isinstance(task_.resources, list):
+            task_.set_resources(new_resources_list)
+        else:
+            task_.set_resources(set(new_resources_list))

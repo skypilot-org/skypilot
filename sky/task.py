@@ -428,8 +428,6 @@ class Task:
         if resources_config and resources_config.get(
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
-            resources_config.pop('resources_ordered', None)
-
             if isinstance(accelerators, str):
                 accelerators = [accelerators]
             elif isinstance(accelerators, dict):
@@ -499,10 +497,6 @@ class Task:
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
-
-    @property
-    def is_resources_ordered(self) -> bool:
-        return isinstance(self.resources, list)
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -616,12 +610,6 @@ class Task:
           resources: either a sky.Resources, a set of them, or a list of them.
             A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
-          is_resources_ordered: whether the resources are ordered.
-            If True, the optimizer will consider
-            the resources in the order they are specified (requiring resources to be a list). #pylint: disable=line-too-long
-            If False, the optimizer will pick the best
-            resources from the set of resources (e.g. by cost).
-
         Returns:
           self: The current task, with resources set.
         """
@@ -638,15 +626,18 @@ class Task:
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
         new_resources_list = []
-        for res in self.get_resources():
+        for res in list(self.resources):
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        self.set_resources(new_resources_list)
+        if isinstance(self.resources, list):
+            self.set_resources(new_resources_list)
+        else:
+            self.set_resources(set(new_resources_list))
         return self
 
     def get_resources(self):
-        return list(self.resources)
+        return self.resources
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -881,7 +872,7 @@ class Task:
         if self.best_resources is not None:
             storage_cloud = self.best_resources.cloud
         else:
-            resources = self.get_resources()[0]
+            resources = list(self.resources)[0]
             storage_cloud = resources.cloud
         if storage_cloud is not None:
             if str(storage_cloud) not in enabled_storage_clouds:
@@ -1017,7 +1008,7 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.is_resources_ordered:
+        if isinstance(self.resources, list):
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
             accelerators_list = []
             for r in self.resources:
@@ -1027,11 +1018,10 @@ class Task:
                         accelerators_list.append(f'{k}:{v}')
                     r.accelerators[k] = v
             tmp_resource_config['accelerators'] = accelerators_list
-            tmp_resource_config['resources_ordered'] = True
         elif len(self.resources) > 1:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
             accelerators_dict = {}
-            for r in self.resources:
+            for r in list(self.resources):
                 if r.accelerators is not None:
                     k, v = r.accelerators.popitem()
                     accelerators_dict[k] = v

@@ -13,8 +13,7 @@ def test_ordered_resources():
         sky.Resources(accelerators={'V100': 1}),
         sky.Resources(accelerators={'K80': 1}),
         sky.Resources(accelerators={'T4': 4}),
-    ],
-                       is_resources_ordered=True)
+    ])
 
     dag = sky.optimize(dag, quiet=True)
     # 'V100' is picked because it is the first in the list.
@@ -27,13 +26,13 @@ def test_unordered_resources():
     task = sky.Task(run='nvidia-smi')
     dag.add(task)
 
-    task.set_resources([
+    task.set_resources({
         sky.Resources(accelerators={'V100': 1}),
         sky.Resources(accelerators={'T4': 1}),
         sky.Resources(accelerators={'V100': 1}),
         sky.Resources(accelerators={'K80': 1}),
         sky.Resources(accelerators={'T4': 4}),
-    ])
+    })
 
     dag = sky.optimize(dag, quiet=True)
     # 'K80' is picked because it is the cheapest.

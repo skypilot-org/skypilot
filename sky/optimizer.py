@@ -61,7 +61,7 @@ def _is_dag_resources_ordered(dag: 'dag_lib.Dag') -> bool:
     graph = dag.get_graph()
     topo_order = list(nx.topological_sort(graph))
     for node in topo_order:
-        if node.is_resources_ordered:
+        if isinstance(node.resources, list):
             return True
     return False
 
@@ -270,7 +270,7 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                node_to_cost_map[node][node.get_resources()[0]] = 0
+                node_to_cost_map[node][list(node.resources)[0]] = 0
                 continue
 
             # Don't print for the last node, Sink.
@@ -301,17 +301,17 @@ class Optimizer:
             else:
                 # Dummy sink node.
                 launchable_resources = {
-                    node.get_resources()[0]: node.get_resources()
+                    list(node.resources)[0]: list(node.resources)
                 }
 
-            num_resources = len(node.get_resources())
+            num_resources = len(list(node.resources))
 
             for orig_resources, launchable_list in launchable_resources.items():
                 if not launchable_list:
                     location_hint = ''
                     source_hint = 'catalog'
-                    if node.get_resources():
-                        specified_resources = node.get_resources()[0]
+                    if list(node.resources):
+                        specified_resources = list(node.resources)[0]
                         if specified_resources.zone is not None:
                             location_hint = (
                                 f' Zone: {specified_resources.zone}.')
@@ -368,7 +368,11 @@ class Optimizer:
                     # FIXME(zongheng): take 'num_nodes' as an arg/into
                     # account. It may be another reason to treat num_nodes as
                     # part of a Resources.
-                    estimated_runtime = node.estimate_runtime(orig_resources)
+                    if node.time_estimator_func is None:
+                        estimated_runtime = 1 * 3600
+                    else:
+                        estimated_runtime = node.estimate_runtime(
+                            orig_resources)
                 for resources in launchable_list:
                     if do_print:
                         logger.debug(f'resources: {resources}')
@@ -406,11 +410,11 @@ class Optimizer:
                 enabled_clouds = global_user_state.get_enabled_clouds()
                 if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
                     if any(orig_resources.cloud is None
-                           for orig_resources in node.get_resources()):
+                           for orig_resources in list(node.resources)):
                         source_hint = 'catalog and kubernetes cluster'
                     elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
-                            for orig_resources in node.get_resources()):
+                            for orig_resources in list(node.resources)):
                         source_hint = 'kubernetes cluster'
 
                 # TODO(romilb): When `sky show-gpus` supports Kubernetes,
@@ -461,7 +465,7 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if node_i == 0:
                 # Base case: a special source node.
-                dp_best_objective[node][node.get_resources()[0]] = 0
+                dp_best_objective[node][list(node.resources)[0]] = 0
                 continue
 
             parent = topo_order[node_i - 1]
@@ -899,7 +903,7 @@ class Optimizer:
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
             # x[-4] region, x[1] instance_type, x[-2] cost
-            if task.is_resources_ordered:
+            if isinstance(task.resources, list):
                 rows = sorted(
                     rows,
                     key=lambda x: (
@@ -923,7 +927,7 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            accelerator = node.get_resources()[0].accelerators
+            accelerator = list(node.resources)[0].accelerators
             is_multi_instances = False
             if accelerator:
                 acc_name, acc_count = list(accelerator.items())[0]

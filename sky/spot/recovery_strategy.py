@@ -101,7 +101,10 @@ class StrategyExecutor:
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
         new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
-        task.set_resources(new_resources_list)
+        if isinstance(task.resources, list):
+            task.set_resources(new_resources_list)
+        else:
+            task.set_resources(set(new_resources_list))
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
                                               retry_until_up)
 
@@ -415,6 +418,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                 task = self.dag.tasks[0]
                 launched_cloud, launched_region = self._launched_cloud_region
                 original_resources = list(task.resources)
+                is_resources_list = isinstance(task.resources, list)
                 # Remove the spot_recovery field from the resources, as
                 # the strategy will be handled by the strategy class.
                 new_resources_list = []
@@ -428,14 +432,19 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
                     else:
                         new_resources_list.append(r.copy())
 
-                task.set_resources(new_resources_list,
-                                   task.is_resources_ordered)
+                if is_resources_list:
+                    task.set_resources(new_resources_list)
+                else:
+                    task.set_resources(set(new_resources_list))
 
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
-                task.set_resources(original_resources,
-                                   task.is_resources_ordered)
+
+                if is_resources_list:
+                    task.set_resources(original_resources)
+                else:
+                    task.set_resources(set(original_resources))
                 if job_submitted_at is not None:
                     return job_submitted_at
 

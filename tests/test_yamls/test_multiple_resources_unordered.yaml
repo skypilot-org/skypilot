@@ -1,8 +1,0 @@
-name: multi-resources
-
-resources:
-  use_spot: True
-  accelerators: ['A100-40GB:1', 'T4:1', 'V100:1', 'T4:4']
-
-run: |
-  nvidia-smi
