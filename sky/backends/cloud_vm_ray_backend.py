@@ -2735,7 +2735,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         valid_resource = None
         requested_resource_list = []
-        for resource in list(task.resources):
+        for resource in task.resources:
             if (task.num_nodes <= handle.launched_nodes and
                     resource.less_demanding_than(
                         launched_resources,
@@ -4356,7 +4356,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        for resources in list(task.resources):
+        for resources in task.resources:
             task_cloud = (resources.cloud
                           if resources.cloud is not None else clouds.Cloud)
             task_cloud.check_cluster_name_is_valid(cluster_name)
