@@ -1,4 +1,9 @@
-"""AWS configuration bootstrapping."""
+"""AWS configuration bootstrapping.
+
+Note (dev): If API changes are made to adaptors/aws.py and the new API is used
+in this or config module, please make sure to reload it as in
+_default_ec2_resource() to avoid version mismatch issues.
+"""
 # The codes are adapted from
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479

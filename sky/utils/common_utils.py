@@ -416,7 +416,7 @@ def class_fullname(cls, skip_builtins: bool = True):
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit],
+def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
                      use_bracket: bool = False) -> str:
     """Format an exception to a string.
 

@@ -317,8 +317,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
             # NOTE: The id of the benchmarking job must be 1.
             # TODO(woosuk): Handle exceptions.
             job_status = backend.get_job_status(handle,
-                                                job_ids=['1'],
-                                                stream_logs=False)['1']
+                                                job_ids=[1],
+                                                stream_logs=False)[1]
 
     # Update the benchmark status.
     if (cluster_status == status_lib.ClusterStatus.INIT or
