@@ -89,7 +89,7 @@ class RunPodNodeProvider(NodeProvider):
 
     def external_port(self, node_id):
         """Returns the external SSH port of the given node."""
-        return self._get_node(node_id=node_id).get('ssh_port', 22)
+        return self._get_node(node_id=node_id)['ssh_port']
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
@@ -119,10 +119,10 @@ class RunPodNodeProvider(NodeProvider):
 
         instance_status = "PENDING"
         instance_ip = None
-        while instance_status != "RUNNING" and instance_ip is not None:
-            time.sleep(3)
+        while instance_status != "RUNNING" and instance_ip is None:
             instance_status = runpod_api.list_instances()[instance_id]['status']
             instance_ip = runpod_api.list_instances()[instance_id].get('ip', None)
+            time.sleep(.5)
 
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
