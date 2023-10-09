@@ -188,12 +188,14 @@ class RunPodNodeProvider(NodeProvider):
             "use_internal_ip": use_internal_ip,
         }
 
+        command_runner = SSHCommandRunner(**common_args)
         if use_internal_ip:
             port = 22
         else:
             port = self.external_port(node_id)
+        command_runner.set_port(port)
 
         if docker_config and docker_config["container_name"] != "":
             return DockerCommandRunner(docker_config, **common_args)
         else:
-            return SSHCommandRunner(**common_args).set_port(port)
+            return command_runner
