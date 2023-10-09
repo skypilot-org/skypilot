@@ -119,7 +119,7 @@ class RunPodNodeProvider(NodeProvider):
 
         instance_status = "PENDING"
         instance_ip = None
-        while instance_status != "RUNNING" and instance_ip is None:
+        while instance_status != "RUNNING" or instance_ip is None:
             instance_status = runpod_api.list_instances()[instance_id]['status']
             instance_ip = runpod_api.list_instances()[instance_id].get('ip', None)
             time.sleep(.5)
