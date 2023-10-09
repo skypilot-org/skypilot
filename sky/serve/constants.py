@@ -1,12 +1,14 @@
 """Constants used for SkyServe."""
 
+import os
+
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 CONTROLLER_PREFIX = 'sky-serve-controller-'
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
-SERVE_PREFIX = '~/.sky/serve'
+SERVE_PREFIX = os.path.expanduser('~/.sky/serve')
 
 # This is the same with sky.skylet.constants.CLUSTER_NAME_VALID_REGEX
 # The service name will be used as:
