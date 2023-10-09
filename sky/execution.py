@@ -301,10 +301,6 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    if cluster_exists:
-        backend.check_resources_fit_cluster(handle, task)
-        task.set_resources(handle.launched_resources)
-
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
                           requested_features=requested_features)

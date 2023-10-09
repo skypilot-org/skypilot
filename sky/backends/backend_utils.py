@@ -2704,7 +2704,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     else:
         # Multiple resources specified.
         accelerator_dict = {}
-        for resource in list(task.resources):
+        for resource in task.resources:
             accelerator_dict.update(resource.accelerators)
         return accelerator_dict
     return resources.accelerators
