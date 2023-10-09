@@ -18,12 +18,14 @@ GPU_NAME_MAP = {
     "RTX3080Ti": "NVIDIA GeForce RTX 3080 Ti",
     "RTX3090": "NVIDIA GeForce RTX 3090",
     "RTX3090Ti": "NVIDIA GeForce RTX 3090 Ti",
-    "RTX4070Ti": "NVIDIA GeForce 4070 Ti",
+    "RTX4070Ti": "NVIDIA GeForce RTX 4070 Ti",
     "RTX4080": "NVIDIA GeForce RTX 4080",
     "RTX4090": "NVIDIA GeForce RTX 4090",
     "H100-80GB-HBM3": "NVIDIA H100 80GB HBM3",
     "H100-PCIe": "NVIDIA H100 PCIe",
+    "L4": "NVIDIA L4",
     "L40": "NVIDIA L40",
+    "RTX4000-Ada-SFF": "NVIDIA RTX 4000 SFF Ada Generation",
     "RTX6000-Ada": "NVIDIA RTX 6000 Ada Generation",
     "RTXA4000": "NVIDIA RTX A4000",
     "RTXA4500": "NVIDIA RTX A4500",
@@ -31,7 +33,9 @@ GPU_NAME_MAP = {
     "RTXA6000": "NVIDIA RTX A6000",
     "RTX5000": "Quadro RTX 5000",
     "V100-16GB-FHHL": "Tesla V100-FHHL-16GB",
-    "V100-16GB-SXM2": "V100-SXM2-16GB"
+    "V100-16GB-SXM2": "V100-SXM2-16GB",
+    "RTXA2000": "NVIDIA RTX A2000",
+    "V100-16GB-PCIe": "Tesla V100-PCIE-16GB"
 }
 
 
@@ -61,10 +65,11 @@ def list_instances():
             for port in instance["runtime"]["ports"]:
                 if port["privatePort"] == 22:
                     instance_list[instance["id"]]["ip"] = port["ip"]
+                    instance_list[instance["id"]]["ssh_port"] = port["publicPort"]
 
         # Set tags
-        with open(TAG_FILE, "r", encoding="UTF-8") as tags:
-            instance_tags = json.load(tags)
+        with open(TAG_FILE, "r", encoding="UTF-8") as open_tag_file:
+            instance_tags = json.load(open_tag_file)
         instance_list[instance["id"]]["tags"] = instance_tags[instance["id"]]
 
     return instance_list

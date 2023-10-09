@@ -10,8 +10,11 @@ Class definition: https://github.com/ray-project/ray/blob/master/python/ray/auto
 import time
 import logging
 from threading import RLock
+from types import ModuleType
 from typing import Any, Dict, List, Optional
 
+from ray.autoscaler._private.command_runner import DockerCommandRunner, SSHCommandRunner
+from ray.autoscaler.command_runner import CommandRunnerInterface
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 
@@ -75,6 +78,10 @@ class RunPodNodeProvider(NodeProvider):
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
         return self._get_node(node_id=node_id)['ip']
+
+    def external_port(self, node_id):
+        """Returns the external SSH port of the given node."""
+        return self._get_node(node_id=node_id)['ssh_port']
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
@@ -144,3 +151,49 @@ class RunPodNodeProvider(NodeProvider):
                 return instance
 
         return None
+
+    def get_command_runner(
+        self,
+        log_prefix: str,
+        node_id: str,
+        auth_config: Dict[str, Any],
+        cluster_name: str,
+        process_runner: ModuleType,
+        use_internal_ip: bool,
+        docker_config: Optional[Dict[str, Any]] = None,
+    ) -> CommandRunnerInterface:
+        """Returns the CommandRunner class used to perform SSH commands.
+
+        Args:
+        log_prefix: stores "NodeUpdater: {}: ".format(<node_id>). Used
+            to print progress in the CommandRunner.
+        node_id: the node ID.
+        auth_config: the authentication configs from the autoscaler
+            yaml file.
+        cluster_name: the name of the cluster.
+        process_runner: the module to use to run the commands
+            in the CommandRunner. E.g., subprocess.
+        use_internal_ip: whether the node_id belongs to an internal ip
+            or external ip.
+        docker_config: If set, the docker information of the docker
+            container that commands should be run on.
+        """
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+
+        if use_internal_ip:
+            port = 22
+        else:
+            port = self.external_port(node_id)
+
+        if docker_config and docker_config["container_name"] != "":
+            return DockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args).set_port(port)
