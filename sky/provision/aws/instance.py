@@ -60,7 +60,7 @@ def _default_ec2_resource(region: str) -> Any:
         # process exit and the main process tries to cleanup the spot job.
         #
         # However, since `sky.adaptors.aws` is already loaded when the main
-        # process starts due to Python's loading mechanism. There will be a
+        # process starts due to Python's loading mechanism, there will be a
         # version mismatch between `sky.adaptors.aws` and `sky.provision.aws`,
         # causing backward compatibility issues, when the API changes in
         # `sky.adaptors.aws`.
