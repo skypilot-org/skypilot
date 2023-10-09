@@ -981,7 +981,11 @@ def storage_delete(name: str) -> None:
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
     else:
-        store_object = data.Storage(name=handle.storage_name,
-                                    source=handle.source,
-                                    sync_on_reconstruction=False)
+        try:
+            store_object = data.Storage(name=handle.storage_name,
+                                        source=handle.source,
+                                        sync_on_reconstruction=False)
+        except:
+            logger.info('No backing stores found. Deleting storage.')
+            global_user_state.remove_storage(handle.storage_name)
         store_object.delete()
