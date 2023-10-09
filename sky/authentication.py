@@ -41,6 +41,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
@@ -422,8 +423,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------------------------------- RunPod ---------------------------------- #
 def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sets up SSH authentication for RunPod.
+    """Sets up SSH authentication for RunPod.
     Verifies that the user has the public SSH key stored in their RunPod account settings.
     """
+    with open(os.path.expanduser(PUBLIC_SSH_KEY_PATH), 'r', encoding="UTF-8") as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        runpod.rp_wrapper().cli.groups.ssh.functions.add_ssh_key(public_key)
+
     return configure_ssh_info(config)
