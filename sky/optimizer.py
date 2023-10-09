@@ -1055,5 +1055,4 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
-    print(cloud_candidates)
     return launchable, cloud_candidates, list(sorted(all_fuzzy_candidates))

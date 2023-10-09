@@ -82,6 +82,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.Local: 90,
     clouds.OCI: 300,
     clouds.Kubernetes: 300,
+    clouds.Kubernetes2: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -2257,6 +2258,8 @@ class RetryingVmProvisioner(object):
                 prev_cluster_status = None
                 prev_handle = None
 
+
+            print(self._blocked_resources)
             # Set to None so that sky.optimize() will assign a new one
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
@@ -2272,6 +2275,7 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
+                print("FOUND NO OPTIONS AT ALL")
                 raise e.with_failover_history(failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'

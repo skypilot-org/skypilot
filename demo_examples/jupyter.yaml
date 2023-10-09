@@ -1,0 +1,16 @@
+name: jupyter
+
+resources:
+  accelerators: T4:1
+
+file_mounts:
+  /notebooks:
+    source: gs://romilb-notebooks
+    mode: MOUNT
+
+setup: |
+  pip install jupyter
+
+run: |
+  cd /notebooks
+  jupyter notebook --port 8888

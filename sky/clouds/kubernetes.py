@@ -26,7 +26,8 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     CREDENTIAL_PATH = '~/.kube/config'
-    CONTEXT = 'kind-skypilot'
+    CONTEXT = 'gkeuse1'
+    _REPR = 'GKE Dev Cluster 1 (us-east1)'
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
@@ -45,7 +46,6 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_NUM_VCPUS = 2
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
-    _REPR = 'LocalKubernetes'
     _SINGLETON_REGION = 'kubernetes'
     _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
     _CLOUD_UNSUPPORTED_FEATURES = {
@@ -116,7 +116,11 @@ class Kubernetes(clouds.Cloud):
         return self._REPR
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        return isinstance(other, Kubernetes)
+        if not isinstance(other, Kubernetes):
+            return False
+        else:
+            # Check if contexts match
+            return self.CONTEXT == other.CONTEXT
 
     @classmethod
     def get_port(cls, svc_name) -> int:
@@ -403,5 +407,5 @@ class Kubernetes(clouds.Cloud):
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes2(Kubernetes):
-    _REPR = 'GKE'
-    CONTEXT = 'kind-kind'
+    _REPR = 'GKE Dev Cluster 2 (us-central1)'
+    CONTEXT = 'gkeusc1'

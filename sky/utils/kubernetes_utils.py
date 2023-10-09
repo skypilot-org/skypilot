@@ -183,7 +183,7 @@ LABEL_FORMATTER_REGISTRY = [
 ]
 
 
-def detect_gpu_label_formatter(context: Optional[str]) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
+def detect_gpu_label_formatter(context: Optional[str] = None) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
     Returns:
@@ -785,7 +785,6 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
             'ssh_jump_name': ssh_jump_name,
             'k8s_context': context
         }
-        print(f'Writing with template {vars_to_fill}')
         backend_utils.fill_template(port_fwd_proxy_cmd_template,
                                     vars_to_fill,
                                     output_path=port_fwd_proxy_cmd_path)
