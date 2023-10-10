@@ -702,29 +702,34 @@ class Storage(object):
         for s_type, s_metadata in sky_stores.items():
             # When initializing from global_user_state, we override the
             # source from the YAML
-            if s_type == StoreType.S3:
-                store = S3Store.from_metadata(
-                    s_metadata,
-                    source=self.source,
-                    sync_on_reconstruction=self.sync_on_reconstruction)
-            elif s_type == StoreType.GCS:
-                store = GcsStore.from_metadata(
-                    s_metadata,
-                    source=self.source,
-                    sync_on_reconstruction=self.sync_on_reconstruction)
-            elif s_type == StoreType.R2:
-                store = R2Store.from_metadata(
-                    s_metadata,
-                    source=self.source,
-                    sync_on_reconstruction=self.sync_on_reconstruction)
-            elif s_type == StoreType.IBM:
-                store = IBMCosStore.from_metadata(
-                    s_metadata,
-                    source=self.source,
-                    sync_on_reconstruction=self.sync_on_reconstruction)
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unknown store type: {s_type}')
+            try:
+                if s_type == StoreType.S3:
+                    store = S3Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.GCS:
+                    store = GcsStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.R2:
+                    store = R2Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.IBM:
+                    store = IBMCosStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unknown store type: {s_type}')
+            # Following error is raised from _get_bucket and caught only when
+            # an externally removed storage is attempted to be fetched.
+            except exceptions.StorageExternalDeletionError:
+                continue
 
             self._add_store(store, is_reconstructed=True)
 
@@ -1238,18 +1243,24 @@ class S3Store(AbstractStore):
         if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using `aws s3 ls '
                     f'{self.source}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
-        # Store object is being reconstructed for deletion.
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
             bucket = self._create_s3_bucket(self.name)
             return bucket, True
         else:
-            return None, False
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -1657,17 +1668,23 @@ class GcsStore(AbstractStore):
             if isinstance(self.source, str) and self.source.startswith('gs://'):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Attempted to connect to a non-existent bucket: '
+                        'Attempted to use a non-existent bucket as a source: '
                         f'{self.source}') from e
             else:
                 # If bucket cannot be found (i.e., does not exist), it is to be
                 # created by Sky. However, creation is skipped if Store object
-                # is being reconstructed for deletion.
+                # is being reconstructed for deletion or re-mount with
+                # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
                     bucket = self._create_gcs_bucket(self.name)
                     return bucket, True
                 else:
-                    return None, False
+                    # This is raised when Storage object is reconstructed for
+                    # sky storage delete or to re-mount Storages with sky start
+                    # but the storage is already removed externally.
+                    raise exceptions.StorageExternalDeletionError(
+                        'Attempted to fetch a non-existent bucket: '
+                        f'{self.name}') from e
         except gcp.forbidden_exception():
             # Try public bucket to see if bucket exists
             logger.info(
@@ -2032,13 +2049,19 @@ class R2Store(AbstractStore):
                     'to debug.')
 
         # If bucket cannot be found in both private and public settings,
-        # the bucket is to be created by Sky. However, skip creation if
-        # Store object is being reconstructed for deletion.
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
             bucket = self._create_r2_bucket(self.name)
             return bucket, True
         else:
-            return None, False
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on r2 bucket
@@ -2440,6 +2463,13 @@ class IBMCosStore(AbstractStore):
         if not bucket_region and self.sync_on_reconstruction:
             # bucket doesn't exist
             return self._create_cos_bucket(self.name, self.region), True
+        elif not bucket_region and not self.sync_on_reconstruction:
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
         else:
             # bucket exists
             return self.s3_resource.Bucket(self.name), False

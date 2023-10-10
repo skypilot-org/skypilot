@@ -173,6 +173,12 @@ class StorageModeError(StorageSpecError):
     pass
 
 
+class StorageExternalDeletionError(StorageError):
+    # Error raised when the bucket is attempted to be fetched while it has been
+    # deleted externally.
+    pass
+
+
 class FetchIPError(Exception):
     """Raised when fetching the IP fails."""
 

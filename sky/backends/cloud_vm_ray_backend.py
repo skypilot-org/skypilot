@@ -4599,14 +4599,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
                 dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
+            # Raised when the bucket is externall removed before re-mounting
+            # with sky start.
+            if not storage_obj.stores:
+                raise exceptions.StorageExternalDeletionError(
+                    f'The bucket, {storage_obj.name!r}, could not be mounted '
+                    f'on cluster {handle.cluster_name!r}. Please '
+                    'verify that the bucket exists.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
+            mount_cmd = store.mount_command(dst)
+            src_print = (storage_obj.source
+                         if storage_obj.source else storage_obj.name)
+            if isinstance(src_print, list):
+                src_print = ', '.join(src_print)
             try:
-                mount_cmd = store.mount_command(dst)
-                src_print = (storage_obj.source
-                             if storage_obj.source else storage_obj.name)
-                if isinstance(src_print, list):
-                    src_print = ', '.join(src_print)
                 backend_utils.parallel_data_transfer_to_nodes(
                     runners,
                     source=src_print,
@@ -4630,18 +4637,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     # Strip the command (a big heredoc) from the exception
                     raise exceptions.CommandError(
-                        e.returncode, command='to mount',
+                        e.returncode,
+                        command='to mount',
                         error_msg=e.error_msg,
                         detailed_reason=e.detailed_reason) from None
-            except AttributeError as e:
-                # This catches the error raised from mount_command when
-                # store.bucket is set to None
-                if 'has no attribute \'name\'' in str(e):
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageError(
-                            f'The bucket, {store.name!r}, could not be mounted '
-                            f'on cluster {handle.cluster_name!r}. Please '
-                            'verify that the bucket exists.')
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
