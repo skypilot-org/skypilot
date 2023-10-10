@@ -57,10 +57,6 @@ def list_instances():
         instance_list[instance["id"]]["status"] = instance["desiredStatus"]
         instance_list[instance["id"]]["name"] = instance["name"]
 
-        print(f"Instance {instance['id']} status: {instance['desiredStatus']}")
-        print(f"Instance {instance['id']} name: {instance['name']}")
-        print(f"Instance {instance['id']} runtime: {instance['runtime']}")
-
         if instance["desiredStatus"] == "RUNNING" and instance.get("runtime", None):
             for port in instance["runtime"]["ports"]:
                 if port["privatePort"] == 22:
