@@ -1134,7 +1134,7 @@ def serve_down(service_name: str, purge: bool = False) -> None:
 
             subprocess_utils.handle_returncode(
                 returncode,
-                code, ('Failed when submit terminate request to controller '
+                code, ('Failed when submit termination request to controller '
                        f'of service {service_name!r}'),
                 stderr,
                 stream_logs=False)
@@ -1191,7 +1191,7 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                                                         separate_stderr=True)
             subprocess_utils.handle_returncode(
                 returncode,
-                code, ('Failed when cleaning up service {service_name!r}'),
+                code, (f'Failed cleaning up service {service_name!r}'),
                 stderr,
                 stream_logs=False)
 

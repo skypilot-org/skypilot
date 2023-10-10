@@ -16,7 +16,7 @@ file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
 
 run: |
-  # Create working directory for this services.
+  # Create working directory for this service.
   mkdir -p {{service_dir}}
   # Start sky serve controller.
   python -u -m sky.serve.controller --service-name {{service_name}} \

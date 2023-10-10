@@ -2792,8 +2792,8 @@ def _refresh_service_record(
             global_user_state.get_service_from_name(service_name)), msg
 
 
-# TODO(tian): Maybe aggregate services using same controller to reduce SSH
-# overhead?
+# TODO(tian): We can optimize the number of ssh connections, by querying the
+# statuses of multiple services in a single ssh
 def refresh_service_status(
         service_names: Optional[Union[str, List[str]]]) -> List[Dict[str, Any]]:
     yellow = colorama.Fore.YELLOW
