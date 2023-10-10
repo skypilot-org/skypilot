@@ -4604,8 +4604,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if not storage_obj.stores:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageExternalDeletionError(
-                        f'The bucket, {storage_obj.name!r}, could not be mounted '
-                        f'on cluster {handle.cluster_name!r}. Please '
+                        f'The bucket, {storage_obj.name!r}, could not be '
+                        f'mounted on cluster {handle.cluster_name!r}. Please '
                         'verify that the bucket exists.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
