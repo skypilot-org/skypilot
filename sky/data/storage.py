@@ -746,7 +746,6 @@ class Storage(object):
                           sync_on_reconstruction=override_args.get(
                               'sync_on_reconstruction', True),
                           mode=override_args.get('mode', metadata.mode))
-        storage_obj._add_store_from_metadata(metadata.sky_stores)
         return storage_obj
 
     def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:

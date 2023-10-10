@@ -3225,7 +3225,7 @@ class TestStorageWithCredentials:
 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
-                match='Attempted to connect to a non-existent bucket'):
+                match='Attempted to use a non-existent bucket as a source'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
