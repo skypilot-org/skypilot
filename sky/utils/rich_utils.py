@@ -15,7 +15,7 @@ class _NoOpConsoleStatus:
     """An empty class for multi-threaded console.status."""
 
     def __enter__(self):
-        pass
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass

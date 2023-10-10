@@ -29,6 +29,10 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
+NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
+If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
+(e.g., skypilot.co/accelerators) are setup correctly. \
+To further debug, run: sky check.'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -78,6 +82,11 @@ class GPULabelFormatter:
         """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        """Given a label value, returns the GPU type"""
+        raise NotImplementedError
+
 
 def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
@@ -111,6 +120,10 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         # See sky.utils.kubernetes.gpu_labeler.
         return accelerator.lower()
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.upper()
+
 
 class CoreWeaveLabelFormatter(GPULabelFormatter):
     """CoreWeave label formatter
@@ -129,6 +142,10 @@ class CoreWeaveLabelFormatter(GPULabelFormatter):
     def get_label_value(cls, accelerator: str) -> str:
         return accelerator.upper()
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value
+
 
 class GKELabelFormatter(GPULabelFormatter):
     """GKE label formatter
@@ -146,6 +163,16 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
         return get_gke_accelerator_name(accelerator)
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        if value.startswith('nvidia-tesla-'):
+            return value.replace('nvidia-tesla-', '').upper()
+        elif value.startswith('nvidia-'):
+            return value.replace('nvidia-', '').upper()
+        else:
+            raise ValueError(
+                f'Invalid accelerator name in GKE cluster: {value}')
 
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
