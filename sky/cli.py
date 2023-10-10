@@ -2836,16 +2836,6 @@ def _down_or_stop_clusters(
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters.
         if reserved_clusters:
-            name2group: Dict[str, backend_utils.ReservedClusterGroup] = dict()
-            for name in reserved_clusters:
-                group = backend_utils.ReservedClusterGroup.get_group(name)
-                assert group is not None
-                name2group[name] = group
-            # Use set to remove duplicated sky serve controller messages.
-            decline_stop_hints = set()
-            for group in name2group.values():
-                decline_stop_hints.add(group.value.decline_stop_hint)
-            decline_stop_hints = ' '.join(decline_stop_hints)
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
@@ -2862,11 +2852,13 @@ def _down_or_stop_clusters(
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} is currently not supported. '
-                    f'{decline_stop_hints}')
+                    f'{reserved_clusters_str} is currently not supported.')
             else:
+                reserved_group = backend_utils.ReservedClusterGroup.get_group(
+                    reserved_cluster)
+                assert reserved_group is not None
                 hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
-                    name2group[reserved_cluster]]
+                    reserved_group]
                 hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(

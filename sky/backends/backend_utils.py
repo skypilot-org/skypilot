@@ -110,7 +110,6 @@ class ReservedClusterRecord:
     group_name: str
     check: Callable[[str], bool]
     sky_status_hint: str
-    decline_stop_hint: str
     decline_cancel_hint: str
     check_cluster_name_hint: str
 
@@ -125,8 +124,6 @@ class ReservedClusterGroup(enum.Enum):
         sky_status_hint=(
             f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
             f'sky spot queue{colorama.Style.RESET_ALL}'),
-        decline_stop_hint=('Spot controller will be auto-stopped after all '
-                           'spot jobs finish.'),
         decline_cancel_hint=(
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
@@ -140,8 +137,6 @@ class ReservedClusterGroup(enum.Enum):
         sky_status_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status{colorama.Style.RESET_ALL}'),
-        decline_stop_hint=(f'To teardown a service, use {colorama.Style.BRIGHT}'
-                           f'sky serve down{colorama.Style.RESET_ALL}.'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         check_cluster_name_hint=(
