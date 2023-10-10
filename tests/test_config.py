@@ -94,6 +94,23 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     assert 'Invalid config YAML' in e.value.args[0]
 
 
+def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file contains an invalid enum value."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        spot:
+            controller:
+                resources:
+                    cloud: notacloud
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     """Test that set_nested(), get_nested() works."""
 
