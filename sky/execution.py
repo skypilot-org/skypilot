@@ -585,17 +585,20 @@ def exec(  # pylint: disable=redefined-builtin
 
 
 def _shared_controller_env_vars() -> Dict[str, Any]:
-    return {
-        'SKYPILOT_USER_ID': common_utils.get_user_hash(),
-        'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK': 1,
+    env_vars: Dict[str, Any] = {
+        env.value: 1 for env in env_options.Options if env.get()
+    }
+    # TODO(tian): Why does spot controller not set this env variable?
+    env_vars.pop(env_options.Options.MINIMIZE_LOGGING.value, None)
+    env_vars.update({
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
-        'SKYPILOT_USER': getpass.getuser(),
-        'SKYPILOT_DEV': env_options.Options.IS_DEVELOPER.get(),
-        'SKYPILOT_DEBUG': env_options.Options.SHOW_DEBUG_INFO.get(),
-        'SKYPILOT_DISABLE_USAGE_COLLECTION':
-            env_options.Options.DISABLE_LOGGING.get(),
-    }
+        constants.USER_ENV_VAR: getpass.getuser(),
+        constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
+        # Skip cloud identity check to avoid the overhead.
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: 1,
+    })
+    return env_vars
 
 
 @usage_lib.entrypoint
@@ -715,12 +718,13 @@ def spot_launch(
                 remote_user_config_path = (
                     f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
                 common_utils.dump_yaml(tmpfile.name, config_dict)
+                spot_env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
+                    remote_user_config_path)
                 vars_to_fill.update({
                     'user_config_path': tmpfile.name,
                     'remote_user_config_path': remote_user_config_path,
+                    'envs': spot_env_vars,
                 })
-                spot_env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
-                    remote_user_config_path)
 
             # Override the controller resources with the ones specified in the
             # config.
@@ -759,8 +763,6 @@ def spot_launch(
 
         controller_task.spot_dag = dag
         assert len(controller_task.resources) == 1
-
-        controller_task.update_envs(spot_env_vars)
 
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {dag.name!r} from spot controller...'
@@ -1082,6 +1084,7 @@ def serve_up(
             'app_port': task.service.app_port,
             'controller_log_file': controller_log_file,
             'load_balancer_log_file': load_balancer_log_file,
+            'envs': _shared_controller_env_vars(),
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
             service_name)
@@ -1095,8 +1098,6 @@ def serve_up(
         # instead of default 0.5 vCPU. We need to set it to a smaller value
         # to support a larger number of services.
         controller_task.service_handle = service_handle
-
-        controller_task.update_envs(_shared_controller_env_vars())
 
         fore = colorama.Fore
         style = colorama.Style

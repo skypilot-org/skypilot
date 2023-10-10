@@ -1066,10 +1066,10 @@ def write_cluster_config(
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see spot-controller.yaml.j2), also
-                # execution.py::serve_up.
-                'user': get_cleaned_username(os.environ.get(
-                    'SKYPILOT_USER', '')),
+                # SKYPILOT_USER env var (see
+                # execution.py::_shared_controller_env_vars).
+                'user': get_cleaned_username(
+                    os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # AWS only:
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
@@ -2750,7 +2750,7 @@ def _refresh_service_record_no_lock(
 
     controller_name = record['controller_name']
     status, handle = refresh_cluster_status_handle(controller_name)
-    if status == status_lib.ClusterStatus.STOPPED:
+    if status is None or status == status_lib.ClusterStatus.STOPPED:
         return record, None
 
     backend = get_backend_from_handle(handle)

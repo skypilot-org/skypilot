@@ -81,8 +81,14 @@ CONDA_INSTALLATION_COMMANDS = (
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
-# will be recognized as the same user (e.g., spot controller).
+# will be recognized as the same user (e.g., spot controller or sky serve
+# controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+
+# The name for the environment variable that stores SkyPilot user name.
+# Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
+# runs on a VM launched by SkyPilot will be recognized as the same user.
+USER_ENV_VAR = 'SKYPILOT_USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.

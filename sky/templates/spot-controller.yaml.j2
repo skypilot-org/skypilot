@@ -36,3 +36,8 @@ run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{dag_name}}-{{uuid}}.yaml \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+
+envs:
+{%- for env_name, env_value in envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

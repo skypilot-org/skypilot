@@ -1076,6 +1076,10 @@ def serve_tail_logs(
         core.serve_tail_logs(
             service_name, target='replica',
             follow=False, replica_id=3)
+
+    Raises:
+        sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
+        ValueError: arguments not valid, or failed to tail the logs.
     """
     if isinstance(target, str):
         target = serve.ServiceComponent(target)
@@ -1100,11 +1104,17 @@ def serve_tail_logs(
                              'Cannot stream logs.')
     service_handle: serve.ServiceHandle = service_record['handle']
     controller_name = service_record['controller_name']
-    handle = global_user_state.get_handle_from_cluster_name(controller_name)
-    if handle is None:
+    controller_status, handle = backend_utils.refresh_cluster_status_handle(
+        controller_name)
+    if controller_status is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Cannot find controller for service {service_name}.')
+    if controller_status == status_lib.ClusterStatus.STOPPED:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Controller for service {service_name} is auto-stopped.',
+                cluster_status=controller_status)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -1124,6 +1134,10 @@ def serve_down(service_name: str, purge: bool = False) -> None:
     Args:
         service_name: Name of the service.
         purge: If true, ignore errors when cleaning up the controller.
+
+    Raises:
+        ValueError: if the service does not exist.
+        RuntimeError: if failed to terminate the service.
     """
     service_record = global_user_state.get_service_from_name(service_name)
 
@@ -1136,10 +1150,15 @@ def serve_down(service_name: str, purge: bool = False) -> None:
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
     controller_fetch_ip_error_message = (
-        'Failed to fetch controller IP. Please '
-        'check controller status and try again.')
+        'Failed to fetch controller IP. Please  refresh controller status by '
+        '`sky status -r <controller-name>` and try again.')
 
-    if handle is not None:
+    if handle is None:
+        if not purge:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Cannot find controller of service {service_name!r}.')
+    else:
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
         try:
@@ -1169,14 +1188,14 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                     raise RuntimeError('Failed to terminate replica of service '
                                        f'{service_name!r} due to request '
                                        f'failure: {resp.text}')
-            msg = resp.json()['message']
+            msg = resp.json().get('message')
             if msg:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Unexpected message when tearing down replica of '
                         f'service {service_name!r}: {msg}. Please login to '
-                        'the controller and make sure the service is properly '
-                        'cleaned up.')
+                        'the controller by `ssh <controller-name>` and '
+                        'make sure the service is properly cleaned up.')
 
         # We want to make sure no matter what error happens, we can still
         # clean up the record if purge is True.
@@ -1189,11 +1208,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(e) from e
-    else:
-        if not purge:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Cannot find controller of service {service_name!r}.')
 
     try:
         if handle is not None:
