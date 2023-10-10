@@ -438,7 +438,10 @@ class Task:
             if isinstance(accelerators, str):
                 accelerators = [accelerators]
             elif isinstance(accelerators, dict):
-                accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
+                accelerators = [
+                    f'{k}:{v}' if v is not None else f'{k}'
+                    for k, v in accelerators.items()
+                ]
                 accelerators = set(accelerators)
 
             # In yaml file, we store accelerators as a list.
