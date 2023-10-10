@@ -646,7 +646,7 @@ def spot_launch(
     dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     for task_ in dag.tasks:
-        _maybe_translate_local_file_mounts_and_sync_up(task_)
+        _maybe_translate_local_file_mounts_and_sync_up(task_, prefix='spot')
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
@@ -780,7 +780,8 @@ def spot_launch(
         )
 
 
-def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
+def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
+                                                   prefix: str):
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -818,7 +819,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
     if task.workdir is not None:
-        bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
+        bucket_name = constants.WORKDIR_BUCKET_NAME.format(
             username=getpass.getuser(), id=run_id)
         workdir = task.workdir
         task.workdir = None
@@ -852,7 +853,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        bucket_name = spot.constants.SPOT_FM_BUCKET_NAME.format(
+        bucket_name = constants.FM_BUCKET_NAME.format(
             username=getpass.getuser(),
             id=f'{run_id}-{i}',
         )
@@ -868,12 +869,13 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    local_fm_path = os.path.join(
-        tempfile.gettempdir(),
-        spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
+    local_fm_path = os.path.join(tempfile.gettempdir(),
+                                 constants.FM_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
+    file_bucket_name = constants.FM_FILE_ONLY_BUCKET_NAME.format(
         username=getpass.getuser(), id=run_id)
+    file_mount_remote_tmp_dir = constants.FM_REMOTE_TMP_DIR.format(
+        prefix=prefix)
     if copy_mounts_with_file_in_src:
         src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
@@ -882,18 +884,17 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
                     os.path.join(local_fm_path, f'file-{i}'))
 
         new_storage_mounts[
-            spot.constants.
-            SPOT_FM_REMOTE_TMP_DIR] = storage_lib.Storage.from_yaml_config({
+            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config({
                 'name': file_bucket_name,
                 'source': local_fm_path,
                 'persistent': False,
                 'mode': 'MOUNT',
             })
-        if spot.constants.SPOT_FM_REMOTE_TMP_DIR in original_storage_mounts:
+        if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Failed to translate file mounts, due to the default '
-                    f'destination {spot.constants.SPOT_FM_REMOTE_TMP_DIR} '
+                    f'destination {file_mount_remote_tmp_dir} '
                     'being taken.')
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
@@ -917,7 +918,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
     new_file_mounts = {}
     for dst, src in copy_mounts_with_file_in_src.items():
-        storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
+        storage = task.storage_mounts[file_mount_remote_tmp_dir]
         store_type = list(storage.stores.keys())[0]
         store_prefix = storage_lib.get_store_prefix(store_type)
         bucket_url = store_prefix + file_bucket_name
@@ -1050,9 +1051,7 @@ def serve_up(
                 f'{service_name!r}. Please check if there are some '
                 '`sky serve up` process hanging abnormally.') from e
 
-    # TODO(tian): Use skyserve constants, or maybe refactor these constants
-    # out of spot constants since their name is mostly not spot-specific.
-    _maybe_translate_local_file_mounts_and_sync_up(task)
+    _maybe_translate_local_file_mounts_and_sync_up(task, prefix='serve')
     ephemeral_storage = []
     if task.storage_mounts is not None:
         for storage in task.storage_mounts.values():
@@ -1152,4 +1151,9 @@ def serve_up(
               f'{style.RESET_ALL}{fore.CYAN}'
               f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
         print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
-        print('Please use the above command to find the latest status.')
+        print('\nTo monitor if replicas are ready:'
+              f'\n\t{backend_utils.BOLD}watch -n10 sky serve status '
+              f'{service_name}{backend_utils.RESET_BOLD}'
+              '\nTo send a test request:'
+              f'\n\t{backend_utils.BOLD}curl -L $(sky serve status '
+              f'{service_name} --endpoint){backend_utils.RESET_BOLD}')

@@ -93,3 +93,9 @@ USER_ENV_VAR = 'SKYPILOT_USER'
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
+
+WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
+FM_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
+FM_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FM_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
+FM_REMOTE_TMP_DIR = '/tmp/sky-{prefix}-filemounts-files'
