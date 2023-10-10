@@ -8,7 +8,7 @@ https://json-schema.org/
 def get_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
-    from sky.clouds import cloud_registry
+    from sky.clouds.service_catalog import _ALL_CLOUDS
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -17,8 +17,7 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(
-                    cloud_registry.CLOUD_REGISTRY.keys())
+                'case_insensitive_enum': list(_ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
@@ -283,7 +282,12 @@ def get_config_schema():
                         'required': [],
                         'additionalProperties': False,
                         'properties': {
-                            'resources': get_resources_schema(),
+                            'resources': {
+                                k: v
+                                for k, v in get_resources_schema().items()
+                                # Validation may fail if $schema is included.
+                                if k != '$schema'
+                            },
                         }
                     },
                 }
