@@ -4602,10 +4602,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Raised when the bucket is externall removed before re-mounting
             # with sky start.
             if not storage_obj.stores:
-                raise exceptions.StorageExternalDeletionError(
-                    f'The bucket, {storage_obj.name!r}, could not be mounted '
-                    f'on cluster {handle.cluster_name!r}. Please '
-                    'verify that the bucket exists.')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageExternalDeletionError(
+                        f'The bucket, {storage_obj.name!r}, could not be mounted '
+                        f'on cluster {handle.cluster_name!r}. Please '
+                        'verify that the bucket exists.')
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             mount_cmd = store.mount_command(dst)
