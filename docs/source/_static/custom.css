@@ -1,10 +1,10 @@
 #kapa-widget-container {
-  z-index: 10000 !important;
+  z-index: 399 !important; /* Set to 399 to avoid overlap with rtd flyout */
   position: absolute !important;
 }
 
 .mantine-Modal-root {
-  z-index: 10000;
+  z-index: 399; /* Set to 399 to avoid overlap with rtd flyout */
   position: absolute;
 }
 
