@@ -11,13 +11,6 @@ CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SERVE_PREFIX = '~/.sky/serve'
 
-# This is the same with sky.skylet.constants.CLUSTER_NAME_VALID_REGEX
-# The service name will be used as:
-# 1. controller cluster name: 'sky-serve-controller-<service_name>'
-# 2. replica cluster name: '<service_name>-<replica_id>'
-# In both cases, service name shares the same regex with cluster name.
-SERVICE_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
-
 # The filelock for selecting controller and service ports when starting a
 # service. In our current multi-service controller implementation, we need to:
 # 1. Select a controller if there are some existing controllers;

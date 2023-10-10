@@ -966,12 +966,16 @@ def serve_up(
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
-    if re.fullmatch(serve.SERVICE_NAME_VALID_REGEX, service_name) is None:
+    # The service name will be used as:
+    # 1. controller cluster name: 'sky-serve-controller-<service_name>'
+    # 2. replica cluster name: '<service_name>-<replica_id>'
+    # In both cases, service name shares the same regex with cluster name.
+    if re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service name {service_name!r} is invalid: '
                              f'ensure it is fully matched by regex (e.g., '
                              'only contains lower letters, numbers and dash): '
-                             f'{serve.SERVICE_NAME_VALID_REGEX}')
+                             f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     if global_user_state.get_service_from_name(service_name) is not None:
         with ux_utils.print_exception_no_traceback():
