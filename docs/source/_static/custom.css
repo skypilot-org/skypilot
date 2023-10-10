@@ -7,3 +7,11 @@
   z-index: 10000;
   position: absolute;
 }
+
+#kapa-widget-container figure {
+  padding: 0 !important;
+}
+
+.mantine-Modal-root figure {
+  padding: 0 !important;
+}
