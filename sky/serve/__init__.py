@@ -22,6 +22,7 @@ from sky.serve.serve_utils import get_available_controller_name
 from sky.serve.serve_utils import load_latest_info
 from sky.serve.serve_utils import load_terminate_service_result
 from sky.serve.serve_utils import ServeCodeGen
+from sky.serve.serve_utils import ServiceComponent
 from sky.serve.serve_utils import ServiceHandle
 from sky.serve.service_spec import SkyServiceSpec
 

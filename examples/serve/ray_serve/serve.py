@@ -1,17 +1,18 @@
 from typing import Dict
 
 from ray import serve
-from starlette.requests import Request
+from starlette import requests
 
 
-@serve.deployment(route_prefix="/", num_replicas=2)
+@serve.deployment(route_prefix='/', num_replicas=2)
 class ModelDeployment:
 
     def __init__(self, msg: str):
         self._msg = msg
 
-    def __call__(self, request: Request) -> Dict:
-        return {"result": self._msg}
+    def __call__(self, request: requests.Request) -> Dict:
+        del request  # unused
+        return {'result': self._msg}
 
 
-app = ModelDeployment.bind(msg="Hello Ray Serve!")
+app = ModelDeployment.bind(msg='Hello Ray Serve!')

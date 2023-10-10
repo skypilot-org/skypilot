@@ -4390,6 +4390,12 @@ def serve_down(
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--target',
+              default=None,
+              type=click.Choice(['controller', 'load-balancer', 'replica'],
+                                case_sensitive=False),
+              required=False,
+              help='Target to stream logs.')
 @click.argument('service_name',
                 required=True,
                 type=str,
@@ -4402,6 +4408,7 @@ def serve_logs(
     controller: bool,
     load_balancer: bool,
     replica_id: Optional[int],
+    target: Optional[str],
 ):
     """Tail the log of a service.
 
@@ -4417,15 +4424,48 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_ID] 1
+        \b
+        # Specify target to stream logs by `--target` is also supported
+        sky serve logs --target controller [SERVICE_ID]
+        sky serve logs --target load-balancer [SERVICE_ID]
+        sky serve logs --target replica [SERVICE_ID] 1
+        \b
+        # If both --target and --controller/--load-balancer are specified,
+        # --controller/--load-balancer takes precedence.
+        # Tail the controller logs of a service:
+        sky serve logs --controller --target load-balancer [SERVICE_ID]
     """
     have_replica_id = replica_id is not None
-    if (controller + load_balancer + have_replica_id) != 1:
+    num_flags = (controller + load_balancer + have_replica_id)
+    if num_flags > 1:
+        raise click.UsageError('At most one of --controller, --load-balancer, '
+                               '[REPLICA_ID] can be specified.')
+    if num_flags == 0 and target is None:
         raise click.UsageError(
-            'One and only one of --controller, --load-balancer, '
-            '[REPLICA_ID] can be specified.')
+            'One of --controller, --load-balancer, [REPLICA_ID] or --target '
+            'must be specified.')
+    if controller:
+        if target is not None:
+            click.secho(f'Overriding --target={target} with --controller.',
+                        fg='yellow')
+        target_component = sky.ServiceComponent.CONTROLLER
+    elif load_balancer:
+        if target is not None:
+            click.secho(f'Overriding --target={target} with --load-balancer.',
+                        fg='yellow')
+        target_component = sky.ServiceComponent.LOAD_BALANCER
+    elif target is not None:
+        # Change load-balancer to load_balancer to match the enum.
+        target = target.replace('-', '_')
+        target_component = sky.ServiceComponent(target)
+        if (target_component == sky.ServiceComponent.REPLICA and
+                not have_replica_id):
+            raise click.UsageError(
+                'REPLICA_ID must be specified when using --target replica.')
+    else:
+        target_component = sky.ServiceComponent.REPLICA
     core.serve_tail_logs(service_name,
-                         controller=controller,
-                         load_balancer=load_balancer,
+                         target=target_component,
                          replica_id=replica_id,
                          follow=follow)
 

@@ -2754,10 +2754,10 @@ def _refresh_service_record_no_lock(
         return record, None
 
     controller_name = record['controller_name']
-    cluster_record = global_user_state.get_cluster_from_name(controller_name)
-    assert cluster_record is not None
+    status, handle = refresh_cluster_status_handle(controller_name)
+    if status == status_lib.ClusterStatus.STOPPED:
+        return record, None
 
-    handle = cluster_record['handle']
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 

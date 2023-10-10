@@ -2,6 +2,7 @@
 import base64
 import collections
 import copy
+import enum
 import os
 import pickle
 import re
@@ -43,6 +44,13 @@ _FASTAPI_APP_TERMINATE_MSGS = [
     'Application shutdown complete.',
     'Finished server process',
 ]
+
+
+class ServiceComponent(enum.Enum):
+    CONTROLLER = 'controller'
+    LOAD_BALANCER = 'load_balancer'
+    REPLICA = 'replica'
+
 
 KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')

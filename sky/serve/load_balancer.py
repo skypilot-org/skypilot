@@ -69,7 +69,9 @@ class SkyServeLoadBalancer:
                     response = session.get(self.controller_url +
                                            '/controller/is_terminating')
                     response.raise_for_status()
-                    if bool(response.json()['is_terminating']):
+                    logger.debug(
+                        f'Controller terminating status: {response.json()}')
+                    if response.json().get('is_terminating'):
                         logger.info('Controller is terminating. '
                                     'Shutting down load balancer.')
                         os.kill(os.getpid(), signal.SIGINT)

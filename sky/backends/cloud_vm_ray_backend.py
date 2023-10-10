@@ -3793,12 +3793,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_handle: serve_lib.ServiceHandle,
-                        controller: bool, load_balancer: bool,
+                        target: serve_lib.ServiceComponent,
                         replica_id: Optional[int], follow: bool) -> None:
-        if controller or load_balancer:
+        if target != serve_lib.ServiceComponent.REPLICA:
             code = serve_lib.ServeCodeGen.stream_serve_process_logs(
                 service_handle.service_name,
-                stream_controller=controller,
+                stream_controller=(
+                    target == serve_lib.ServiceComponent.CONTROLLER),
                 follow=follow)
         else:
             assert replica_id is not None, service_handle
