@@ -29,7 +29,7 @@ class SkyServeLoadBalancer:
     """
 
     def __init__(
-        self, controller_url: str, load_balancer_port: int, app_port: int,
+        self, controller_url: str, load_balancer_port: int, replica_port: int,
         load_balancing_policy: load_balancing_policies.LoadBalancingPolicy
     ) -> None:
         self.app = fastapi.FastAPI()
@@ -37,7 +37,7 @@ class SkyServeLoadBalancer:
         # This is the port where the load balancer listens to.
         self.load_balancer_port = load_balancer_port
         # This is the port where the replica app listens to.
-        self.app_port = app_port
+        self.replica_port = replica_port
         self.load_balancing_policy = load_balancing_policy
         self.setup_query_interval()
 
@@ -107,7 +107,7 @@ class SkyServeLoadBalancer:
                                         'Use "sky serve status [SERVICE_ID]" '
                                         'to check the replica status.')
 
-        path = f'http://{replica_ip}:{self.app_port}{request.url.path}'
+        path = f'http://{replica_ip}:{self.replica_port}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
                         type=int,
                         help='Port to run the load balancer on.',
                         required=True)
-    parser.add_argument('--app-port',
+    parser.add_argument('--replica-port',
                         type=int,
                         help='Port that runs app on replica.',
                         required=True)
@@ -150,6 +150,6 @@ if __name__ == '__main__':
     load_balancer = SkyServeLoadBalancer(
         controller_url=args.controller_addr,
         load_balancer_port=args.load_balancer_port,
-        app_port=args.app_port,
+        replica_port=args.replica_port,
         load_balancing_policy=_load_balancing_policy)
     load_balancer.run()

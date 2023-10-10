@@ -2774,9 +2774,6 @@ def _refresh_service_record_no_lock(
 def _refresh_service_record(
         service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     try:
-        # TODO(tian): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
                                SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
             return _refresh_service_record_no_lock(service_name)

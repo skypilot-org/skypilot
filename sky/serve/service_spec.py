@@ -19,7 +19,7 @@ class SkyServiceSpec:
         self,
         readiness_path: str,
         initial_delay_seconds: int,
-        app_port: int,
+        replica_port: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
@@ -43,12 +43,12 @@ class SkyServiceSpec:
                                  f'Got: {readiness_path}')
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
-        if app_port < 0 or app_port > 65535:
+        if replica_port < 0 or replica_port > 65535:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Invalid app port: {app_port}. '
+                    f'Invalid app port: {replica_port}. '
                     'Please use a port number between 0 and 65535.')
-        self._app_port = str(app_port)
+        self._replica_port = str(replica_port)
         self._min_replicas = min_replicas
         self._max_replicas = max_replicas
         self._qps_upper_threshold = qps_upper_threshold
@@ -68,7 +68,7 @@ class SkyServiceSpec:
                     'the service YAML. Please use one of them.')
 
         service_config = {}
-        service_config['app_port'] = config['port']
+        service_config['replica_port'] = config['port']
 
         readiness_section = config['readiness_probe']
         if isinstance(readiness_section, str):
@@ -157,7 +157,7 @@ class SkyServiceSpec:
                         config[section] = dict()
                     config[section][key] = value
 
-        add_if_not_none('port', None, int(self.app_port))
+        add_if_not_none('port', None, int(self.replica_port))
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
@@ -199,7 +199,7 @@ class SkyServiceSpec:
 
     @property
     def readiness_suffix(self) -> str:
-        return f':{self._app_port}{self._readiness_path}'
+        return f':{self._replica_port}{self._readiness_path}'
 
     @property
     def readiness_path(self) -> str:
@@ -210,8 +210,8 @@ class SkyServiceSpec:
         return self._initial_delay_seconds
 
     @property
-    def app_port(self) -> str:
-        return self._app_port
+    def replica_port(self) -> str:
+        return self._replica_port
 
     @property
     def min_replicas(self) -> int:

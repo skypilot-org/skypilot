@@ -28,8 +28,8 @@ run: |
   # foreground so that the job will not finish, thus prevent our controller
   # from auto down.
   python -u -m sky.serve.load_balancer --load-balancer-port {{load_balancer_port}} \
-    --app-port {{app_port}} --controller-addr http://localhost:{{controller_port}} \
-    > {{load_balancer_log_file}} 2>&1
+    --replica-port {{replica_port}} --controller-addr \
+    http://localhost:{{controller_port}} > {{load_balancer_log_file}} 2>&1
 
 envs:
 {%- for env_name, env_value in envs.items() %}

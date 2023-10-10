@@ -1009,7 +1009,8 @@ def serve_up(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
 
-    task.set_resources(requested_resources.copy(ports=[task.service.app_port]))
+    task.set_resources(
+        requested_resources.copy(ports=[task.service.replica_port]))
 
     # Use filelock here to make sure only one process can write to database
     # at the same time. Then we generate available controller name again to
@@ -1018,9 +1019,6 @@ def serve_up(
     # In the same time, generate ports for the controller and load balancer.
     # Use file lock to make sure the ports are unique to each service.
     try:
-        # TODO(tian): remove pylint disabling when filelock
-        # version updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(
                 os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH),
                 serve.CONTROLLER_FILE_LOCK_TIMEOUT):
@@ -1085,7 +1083,7 @@ def serve_up(
             'service_name': service_name,
             'controller_port': controller_port,
             'load_balancer_port': load_balancer_port,
-            'app_port': task.service.app_port,
+            'replica_port': task.service.replica_port,
             'controller_log_file': controller_log_file,
             'load_balancer_log_file': load_balancer_log_file,
             'envs': _shared_controller_env_vars(),
