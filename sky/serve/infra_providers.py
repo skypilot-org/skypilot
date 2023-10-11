@@ -15,7 +15,6 @@ import requests
 
 from sky import backends
 from sky import global_user_state
-from sky import status_lib
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -96,52 +95,52 @@ class ReplicaStatusProperty:
             return False
         return True
 
-    def to_replica_status(self) -> status_lib.ReplicaStatus:
+    def to_replica_status(self) -> serve_state.ReplicaStatus:
         if self.sky_launch_status == ProcessStatus.RUNNING:
             # Still launching
-            return status_lib.ReplicaStatus.PROVISIONING
+            return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
-                return status_lib.ReplicaStatus.SHUTTING_DOWN
+                return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 # sky.down failed
-                return status_lib.ReplicaStatus.FAILED_CLEANUP
+                return serve_state.ReplicaStatus.FAILED_CLEANUP
             if self.user_app_failed:
                 # Failed on user setup/run
-                return status_lib.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED
             if not self.service_once_ready:
                 # initial delay seconds exceeded
-                return status_lib.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return status_lib.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED
             if self.sky_launch_status == ProcessStatus.FAILED:
                 # sky.launch failed
-                return status_lib.ReplicaStatus.FAILED
+                return serve_state.ReplicaStatus.FAILED
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica_info.
-            return status_lib.ReplicaStatus.UNKNOWN
+            return serve_state.ReplicaStatus.UNKNOWN
         if self.sky_launch_status == ProcessStatus.FAILED:
             # sky.launch failed
             # Down process should have been started.
             # If not started, this means some bug prevent sky.down from
             # executing. It is also a potential resource leak, so we mark
             # it as FAILED_CLEANUP.
-            return status_lib.ReplicaStatus.FAILED_CLEANUP
+            return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.service_ready_now:
             # Service is ready
-            return status_lib.ReplicaStatus.READY
+            return serve_state.ReplicaStatus.READY
         if self.user_app_failed:
             # Failed on user setup/run
             # Same as above
-            return status_lib.ReplicaStatus.FAILED_CLEANUP
+            return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.service_once_ready:
             # Service was ready before but not now
-            return status_lib.ReplicaStatus.NOT_READY
+            return serve_state.ReplicaStatus.NOT_READY
         else:
             # No readiness probe passed and sky.launch finished
-            return status_lib.ReplicaStatus.STARTING
+            return serve_state.ReplicaStatus.STARTING
 
 
 class ReplicaInfo:
@@ -172,9 +171,9 @@ class ReplicaInfo:
         return handle.head_ip
 
     @property
-    def status(self) -> status_lib.ReplicaStatus:
+    def status(self) -> serve_state.ReplicaStatus:
         replica_status = self.status_property.to_replica_status()
-        if replica_status == status_lib.ReplicaStatus.UNKNOWN:
+        if replica_status == serve_state.ReplicaStatus.UNKNOWN:
             logger.error('Detecting UNKNOWN replica status for cluster '
                          f'{self.cluster_name}')
         return replica_status
@@ -390,13 +389,13 @@ class SkyPilotInfraProvider(InfraProvider):
             return len(self.replica_info)
         return len([
             i for i in self.replica_info.values()
-            if i.status != status_lib.ReplicaStatus.FAILED
+            if i.status != serve_state.ReplicaStatus.FAILED
         ])
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
         for info in self.replica_info.values():
-            if info.status == status_lib.ReplicaStatus.READY:
+            if info.status == serve_state.ReplicaStatus.READY:
                 assert info.ip is not None
                 ready_replicas.add(info.ip)
         return ready_replicas
@@ -520,16 +519,16 @@ class SkyPilotInfraProvider(InfraProvider):
         msg = []
         for name, info in self.replica_info.items():
             if info.status in [
-                    status_lib.ReplicaStatus.FAILED_CLEANUP,
-                    status_lib.ReplicaStatus.UNKNOWN,
+                    serve_state.ReplicaStatus.FAILED_CLEANUP,
+                    serve_state.ReplicaStatus.UNKNOWN,
             ]:
                 msg.append(f'Cluster with status {info.status} found. Please '
                            'manually check the cloud console to make sure no '
                            'resource leak.')
             # Skip those already deleted and those are deleting
             if info.status not in [
-                    status_lib.ReplicaStatus.FAILED,
-                    status_lib.ReplicaStatus.SHUTTING_DOWN
+                    serve_state.ReplicaStatus.FAILED,
+                    serve_state.ReplicaStatus.SHUTTING_DOWN
             ]:
                 self._teardown_cluster(name, sync_down_logs=False)
         for name, p in self.down_process_pool.items():

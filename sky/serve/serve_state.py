@@ -1,9 +1,12 @@
 """The database for services information."""
+import collections
+import enum
 import pathlib
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from sky import status_lib
+import colorama
+
 from sky.serve import constants
 from sky.utils import db_utils
 
@@ -27,6 +30,113 @@ _CURSOR.execute("""\
 _CONN.commit()
 
 
+class ReplicaStatus(enum.Enum):
+    """Replica status."""
+
+    # The replica VM is being provisioned. i.e., the `sky.launch` is still
+    # running.
+    PROVISIONING = 'PROVISIONING'
+
+    # The replica VM is provisioned and the service is starting. This indicates
+    # user's `setup` section or `run` section is still running, and the
+    # readiness probe fails.
+    STARTING = 'STARTING'
+
+    # The replica VM is provisioned and the service is ready, i.e. the
+    # readiness probe is passed.
+    READY = 'READY'
+
+    # The service was ready before, but it becomes not ready now, i.e. the
+    # readiness probe fails.
+    NOT_READY = 'NOT_READY'
+
+    # The replica VM is being shut down. i.e., the `sky down` is still running.
+    SHUTTING_DOWN = 'SHUTTING_DOWN'
+
+    # The replica VM is once failed and has been deleted.
+    FAILED = 'FAILED'
+
+    # `sky.down` failed during service teardown. This could mean resource
+    # leakage.
+    FAILED_CLEANUP = 'FAILED_CLEANUP'
+
+    # Unknown status. This should never happen.
+    UNKNOWN = 'UNKNOWN'
+
+    @classmethod
+    def failed_statuses(cls):
+        return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
+
+    def colored_str(self):
+        color = _REPLICA_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_REPLICA_STATUS_TO_COLOR = {
+    ReplicaStatus.PROVISIONING: colorama.Fore.BLUE,
+    ReplicaStatus.STARTING: colorama.Fore.CYAN,
+    ReplicaStatus.READY: colorama.Fore.GREEN,
+    ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
+    ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
+    ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
+    ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.UNKNOWN: colorama.Fore.RED,
+}
+
+
+class ServiceStatus(enum.Enum):
+    """Service status as recorded in table 'services'."""
+
+    # Controller is initializing
+    CONTROLLER_INIT = 'CONTROLLER_INIT'
+
+    # Replica is initializing and no failure
+    REPLICA_INIT = 'REPLICA_INIT'
+
+    # Controller failed to initialize / controller or load balancer process
+    # status abnormal
+    CONTROLLER_FAILED = 'CONTROLLER_FAILED'
+
+    # At least one replica is ready
+    READY = 'READY'
+
+    # Service is being shutting down
+    SHUTTING_DOWN = 'SHUTTING_DOWN'
+
+    # Cannot connect to controller
+    UNKNOWN = 'UNKNOWN'
+
+    # At least one replica is failed and no replica is ready
+    FAILED = 'FAILED'
+
+    def colored_str(self):
+        color = _SERVICE_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+    @classmethod
+    def from_replica_info(
+            cls, replica_info: List[Dict[str, Any]]) -> 'ServiceStatus':
+        status2num = collections.Counter([i['status'] for i in replica_info])
+        # If one replica is READY, the service is READY.
+        if status2num[ReplicaStatus.READY] > 0:
+            return cls.READY
+        if sum(status2num[status]
+               for status in ReplicaStatus.failed_statuses()) > 0:
+            return cls.FAILED
+        return cls.REPLICA_INIT
+
+
+_SERVICE_STATUS_TO_COLOR = {
+    ServiceStatus.CONTROLLER_INIT: colorama.Fore.BLUE,
+    ServiceStatus.REPLICA_INIT: colorama.Fore.BLUE,
+    ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
+    ServiceStatus.READY: colorama.Fore.GREEN,
+    ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
+    ServiceStatus.UNKNOWN: colorama.Fore.YELLOW,
+    ServiceStatus.FAILED: colorama.Fore.RED,
+}
+
+
 def add_service(job_id: int, service_name: str, controller_port: int) -> None:
     """Adds a service to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -34,9 +144,8 @@ def add_service(job_id: int, service_name: str, controller_port: int) -> None:
             """\
             INSERT INTO services
             (name, controller_job_id, controller_port, status)
-            VALUES (?, ?, ?, ?)""",
-            (service_name, job_id, controller_port,
-             status_lib.ServiceStatus.CONTROLLER_INIT.value))
+            VALUES (?, ?, ?, ?)""", (service_name, job_id, controller_port,
+                                     ServiceStatus.CONTROLLER_INIT.value))
 
 
 def remove_service(service_name: str) -> None:
@@ -55,7 +164,7 @@ def set_uptime(service_name: str, uptime: int) -> None:
             uptime=(?) WHERE name=(?)""", (uptime, service_name))
 
 
-def set_status(service_name: str, status: status_lib.ServiceStatus) -> None:
+def set_status(service_name: str, status: ServiceStatus) -> None:
     """Sets the service status."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -70,7 +179,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'name': name,
         'controller_job_id': controller_job_id,
         'controller_port': controller_port,
-        'status': status_lib.ServiceStatus[status],
+        'status': ServiceStatus[status],
         'uptime': uptime,
     }
 

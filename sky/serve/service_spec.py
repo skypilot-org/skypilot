@@ -194,7 +194,6 @@ class SkyServiceSpec:
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
             Replica auto restart:             {self.auto_restart}
-            Please refer to SkyServe document for detailed explanations.
         """)
 
     @property

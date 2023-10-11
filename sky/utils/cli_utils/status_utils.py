@@ -7,6 +7,7 @@ import click
 import colorama
 
 from sky import backends
+from sky import serve
 from sky import spot
 from sky import status_lib
 from sky.backends import backend_utils
@@ -15,7 +16,6 @@ from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky import serve
 
 COMMAND_TRUNC_LENGTH = 25
 REPLICA_TRUNC_NUM = 10
@@ -393,8 +393,7 @@ _get_replica_id = lambda replica_record: replica_record['replica_id']
 _get_service_name = (lambda replica_record: replica_record['service_name'])
 
 
-def _get_service_handle(
-        service_record: _ServiceRecord) -> 'serve.ServiceHandle':
+def _get_service_handle(service_record: _ServiceRecord) -> serve.ServiceHandle:
     return service_record['handle']
 
 
@@ -423,11 +422,11 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
     ready_replica_num, total_replica_num = 0, 0
     auto_restart = _get_service_handle(service_record).auto_restart
     for info in service_record['replica_info']:
-        if _get_status(info) == status_lib.ReplicaStatus.READY:
+        if _get_status(info) == serve.ReplicaStatus.READY:
             ready_replica_num += 1
         # If auto restart enabled, not count FAILED replicas here.
         if (not auto_restart or
-                _get_status(info) != status_lib.ReplicaStatus.FAILED):
+                _get_status(info) != serve.ReplicaStatus.FAILED):
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 
@@ -448,8 +447,7 @@ def _get_display_endpoint(service_record: _ServiceRecord) -> str:
     return endpoint
 
 
-def _get_service_status(
-        service_record: _ServiceRecord) -> status_lib.ServiceStatus:
+def _get_service_status(service_record: _ServiceRecord) -> serve.ServiceStatus:
     return service_record['status']
 
 

@@ -17,7 +17,6 @@ import uvicorn
 from sky import authentication
 from sky import serve
 from sky import sky_logging
-from sky import status_lib
 from sky.serve import autoscalers
 from sky.serve import infra_providers
 from sky.serve import serve_state
@@ -110,7 +109,7 @@ class SkyServeController:
                     self.infra_provider.get_replica_info(verbose=True),
                 'uptime': record.get('uptime', None),
                 'status': record.get('status',
-                                     status_lib.ServiceStatus.UNKNOWN),
+                                     serve_state.ServiceStatus.UNKNOWN),
             }
             latest_info = {
                 k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
@@ -123,7 +122,7 @@ class SkyServeController:
             del request
             logger.info('Terminating service...')
             serve_state.set_status(self.infra_provider.service_name,
-                                   status_lib.ServiceStatus.SHUTTING_DOWN)
+                                   serve_state.ServiceStatus.SHUTTING_DOWN)
             if self.autoscaler is not None:
                 logger.info('Terminate autoscaler...')
                 self.autoscaler.terminate()

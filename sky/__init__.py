@@ -39,11 +39,11 @@ from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
+from sky.serve import ReplicaStatus
 from sky.serve import ServiceComponent
+from sky.serve import ServiceStatus
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
-from sky.status_lib import ReplicaStatus
-from sky.status_lib import ServiceStatus
 from sky.task import Task
 
 # Aliases.

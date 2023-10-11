@@ -10,6 +10,8 @@ from sky.serve.constants import CONTROLLER_SYNC_INTERVAL
 from sky.serve.constants import CONTROLLER_TEMPLATE
 from sky.serve.constants import SERVE_PREFIX
 from sky.serve.constants import SERVICES_TASK_CPU_DEMAND
+from sky.serve.serve_state import ReplicaStatus
+from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import gen_ports_for_serve_process
 from sky.serve.serve_utils import generate_controller_yaml_file_name
 from sky.serve.serve_utils import generate_remote_controller_log_file_name

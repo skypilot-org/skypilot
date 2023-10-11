@@ -71,12 +71,12 @@ class SpotJobUpdateEvent(SkyletEvent):
         spot_utils.update_spot_job_status()
 
 
-class ServiceJobStatusMonitorEvent(SkyletEvent):
-    """Skylet event for monitoring sky serve controller jobs."""
+class ServiceUpdateEvent(SkyletEvent):
+    """Skylet event for updating sky serve service status."""
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        serve_utils.monitor_service_controller_job_status()
+        serve_utils.update_service_status()
 
 
 class AutostopEvent(SkyletEvent):

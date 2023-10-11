@@ -1,6 +1,5 @@
 """User interface with the SkyServe."""
 import base64
-import collections
 import enum
 import os
 import pickle
@@ -310,32 +309,27 @@ def set_service_status_from_replica_info(
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist. '
                          'Cannot refresh service status.')
-    if record['status'] == status_lib.ServiceStatus.SHUTTING_DOWN:
+    if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
         # terminated, the service status will still be READY, but we don't want
         # change service status to READY.
         return
-    status2num = collections.Counter([i['status'] for i in replica_info])
-    # If one replica is READY, the service is READY.
-    if status2num[status_lib.ReplicaStatus.READY] > 0:
-        status = status_lib.ServiceStatus.READY
-    elif sum(status2num[status]
-             for status in status_lib.ReplicaStatus.failed_statuses()) > 0:
-        status = status_lib.ServiceStatus.FAILED
-    else:
-        status = status_lib.ServiceStatus.REPLICA_INIT
-    serve_state.set_status(service_name, status)
+    serve_state.set_status(
+        service_name, serve_state.ServiceStatus.from_replica_info(replica_info))
 
 
-def monitor_service_controller_job_status() -> None:
+def update_service_status() -> None:
     services = serve_state.get_services()
     for record in services:
+        if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+            # Skip services that is shutting down.
+            continue
         controller_status = job_lib.get_status(record['controller_job_id'])
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
             serve_state.set_status(record['name'],
-                                   status_lib.ServiceStatus.CONTROLLER_FAILED)
+                                   serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 class ServiceHandle(object):
@@ -457,10 +451,10 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
     service_record = serve_state.get_service_from_name(service_name)
     if service_record is None:
         return f'Service {service_name!r} does not exist.'
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_INIT:
+    if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT:
         return (f'Service {service_name!r} is still initializing its '
                 'controller. Please try again later.')
-    if service_record['status'] == status_lib.ServiceStatus.CONTROLLER_FAILED:
+    if service_record['status'] == serve_state.ServiceStatus.CONTROLLER_FAILED:
         return (f'Service {service_name!r}\'s controller failed. '
                 'Cannot tail logs.')
     return None
@@ -565,7 +559,7 @@ def stream_replica_logs(service_name: str,
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
-    def _get_replica_status() -> status_lib.ReplicaStatus:
+    def _get_replica_status() -> serve_state.ReplicaStatus:
         resp = requests.get(
             _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
             '/controller/get_latest_info')
@@ -586,7 +580,7 @@ def stream_replica_logs(service_name: str,
         return target_info['status']
 
     finish_stream = (
-        lambda: _get_replica_status() != status_lib.ReplicaStatus.PROVISIONING)
+        lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='') as f:
         for line in _follow_replica_logs(f,
                                          replica_cluster_name,
@@ -594,7 +588,7 @@ def stream_replica_logs(service_name: str,
                                          exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     if not follow and _get_replica_status(
-    ) == status_lib.ReplicaStatus.PROVISIONING:
+    ) == serve_state.ReplicaStatus.PROVISIONING:
         # Early exit if not following the logs.
         return ''
 

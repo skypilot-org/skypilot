@@ -2715,7 +2715,7 @@ def _add_default_value_to_local_record(
     # NOTE(dev): Keep this align with sky.serve.controller.get_latest_info
     if record is None:
         return record
-    record['status'] = status_lib.ServiceStatus.UNKNOWN
+    record['status'] = serve_lib.ServiceStatus.UNKNOWN
     record['uptime'] = None
     record['replica_info'] = []
     return record
@@ -2745,7 +2745,7 @@ def _refresh_service_record_no_lock(
     service_handle: serve_lib.ServiceHandle = record['handle']
     if not service_handle.endpoint_ip:
         # Service controller is still initializing. Skipped refresh status.
-        record['status'] = status_lib.ServiceStatus.CONTROLLER_INIT
+        record['status'] = serve_lib.ServiceStatus.CONTROLLER_INIT
         return record, None
 
     controller_name = record['controller_name']
