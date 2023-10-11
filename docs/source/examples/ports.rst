@@ -9,7 +9,7 @@ At times, it might be crucial to expose specific ports on your cluster to the pu
 - **Creating Web Services**: Whether you're setting up a web server, database, or another service, they all communicate via specific ports that need to be accessible.
 - **Collaborative Tools**: Some tools and platforms may require port openings to enable collaboration with teammates or to integrate with other services.
 
-Opening Ports for SkyPilot cluster
+Opening Ports on a Cluster
 ----------------------------------
 
 To open a port on a SkyPilot cluster, specify :code:`ports` in the :code:`resources` section of your task. For example, here is a YAML configuration to expose a Jupyter Lab server:
@@ -41,7 +41,7 @@ and look in for the logs for some output like:
 To get the public IP address of the head node of the cluster, run :code:`sky status --ip jupyter`:
 
 .. code-block:: bash
-    
+
     $ sky status --ip jupyter
     35.223.97.21
 

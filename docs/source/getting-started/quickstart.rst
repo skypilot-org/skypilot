@@ -6,9 +6,9 @@ Quickstart
 
 This guide will walk you through:
 
-- defining a task in a simple YAML format
-- provisioning a cluster and running a task
-- using the core SkyPilot CLI commands
+- Defining a task in a simple YAML format
+- Provisioning a cluster and running a task
+- Using the core SkyPilot CLI commands
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 

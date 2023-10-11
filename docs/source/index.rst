@@ -104,9 +104,10 @@ Documentation
    :maxdepth: 1
    :caption: Running Jobs
 
+   examples/spot-jobs
    reference/job-queue
-   reference/tpu
    examples/auto-failover
+   reference/kubernetes/index
    running-jobs/index
 
 .. toctree::
@@ -130,11 +131,10 @@ Documentation
 
    examples/docker-containers
    examples/ports
-   examples/iterative-dev-project
+   reference/tpu
    reference/interactive-nodes
    reference/faq
    reference/logging
-   reference/kubernetes/index
 
 .. toctree::
    :maxdepth: 1

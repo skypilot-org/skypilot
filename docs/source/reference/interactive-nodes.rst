@@ -88,6 +88,16 @@ Interactive nodes can be stopped, restarted, and terminated, like any other clus
 
 .. note::
 
+    Stopping a cluster does not lose data on the attached disks (billing for the
+    instances will stop while the disks will still be charged).  Those disks
+    will be reattached when restarting the cluster.
+
+    Terminating a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.  Terminated
+    clusters cannot be restarted.
+
+.. note::
+
     Since :code:`sky start` restarts a stopped cluster, :ref:`auto-failover
     provisioning <auto-failover>` is disabled---the cluster will be restarted on
     the same cloud and region where it was originally provisioned.
