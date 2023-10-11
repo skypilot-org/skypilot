@@ -128,9 +128,6 @@ def session():
 
 
 @import_package
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
-# same resource object, which is not guaranteed to be thread-safe.
-@_thread_local_lru_cache()
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
@@ -154,9 +151,7 @@ def resource(service_name: str, **kwargs):
                                                             **kwargs))
 
 
-# The LRU cache needs to be thread-local to avoid multiple threads sharing the
-# same client object, which is not guaranteed to be thread-safe.
-@_thread_local_lru_cache()
+@import_package
 def client(service_name: str, **kwargs):
     """Create an AWS client of a certain service.
 
