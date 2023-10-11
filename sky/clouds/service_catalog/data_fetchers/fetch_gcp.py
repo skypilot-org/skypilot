@@ -525,8 +525,12 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
         'K80': 12,
         '': ''
     }
+<<<<<<< HEAD
 
+    df['DeviceMemory'] = df.apply(
+=======
     df['Device_Memory'] = df.apply(
+>>>>>>> origin
         lambda row: gpu_map[row['AcceleratorName']] * row['AcceleratorCount']
         if pd.notnull(row['AcceleratorName']) else np.nan,
         axis=1)

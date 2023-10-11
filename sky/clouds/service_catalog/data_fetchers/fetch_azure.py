@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-US_REGIONS = {
+US_REGIONS = [
     'centralus',
     'eastus',
     'eastus2',
@@ -24,7 +24,7 @@ US_REGIONS = {
     'westus',
     'westus2',
     'westus3',
-}
+]
 
 # Exclude the following regions as they do not have ProductName in the
 # pricing table. Reference: #1768 #2548
