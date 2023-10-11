@@ -386,8 +386,6 @@ if __name__ == '__main__':
 
     if not region_filter:
         raise ValueError('No regions to fetch. Please check your arguments.')
-<<<<<<< HEAD
-=======
     parser.add_argument(
         '--all-regions',
         action='store_true',
@@ -396,7 +394,6 @@ if __name__ == '__main__':
 
     region_filter = get_regions() if args.all_regions else US_REGIONS
     region_filter = set(region_filter) - EXCLUDED_REGIONS
->>>>>>> 08511fd4 (updated branch)
 
     instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
