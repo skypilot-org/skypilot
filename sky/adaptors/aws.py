@@ -130,9 +130,7 @@ def session():
 
 
 @import_package
-# Avoid caching the resource/client objects, since it is possible that the
-# credentials will expire and we need to create a new resource/client object
-# with the new credentials.
+@_thread_local_lru_cache()
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
@@ -157,6 +155,7 @@ def resource(service_name: str, **kwargs):
 
 
 @import_package
+@_thread_local_lru_cache()
 def client(service_name: str, **kwargs):
     """Create an AWS client of a certain service.
 

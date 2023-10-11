@@ -441,6 +441,7 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 # non_terminated_only=True?
 # Will there be callers who would want this to be False?
 # stop() and terminate() for example already implicitly assume non-terminated.
+@common_utils.retry
 def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
