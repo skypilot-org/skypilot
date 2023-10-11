@@ -333,10 +333,11 @@ class SkyPilotInfraProvider(InfraProvider):
             backend = backends.CloudVmRayBackend()
             handle = info.handle
             assert handle is not None, info
-            # Only fetch job 1, which stands for user task job
-            job_statuses = backend.get_job_status(handle, [1],
+            # Use None to fetch latest job, which stands for user task job
+            job_statuses = backend.get_job_status(handle,
+                                                  None,
                                                   stream_logs=False)
-            job_status = job_statuses[1]
+            job_status = list(job_statuses.values())[0]
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:

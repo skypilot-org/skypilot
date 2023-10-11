@@ -162,8 +162,6 @@ def _with_docker_login_config(
 class Task:
     """Task: a computation to be run on the cloud."""
 
-    CLI_CMD_TASK_NAME = 'sky-cmd'
-
     def __init__(
         self,
         name: Optional[str] = None,
@@ -1043,7 +1041,7 @@ class Task:
             run_msg = 'run=<fn>'
 
         name_str = ''
-        if self.name is not None and self.name != self.CLI_CMD_TASK_NAME:
+        if self.name is not None:
             name_str = f'<name={self.name}>'
         s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:

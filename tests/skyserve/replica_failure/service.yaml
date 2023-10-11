@@ -3,7 +3,7 @@ resources:
   zone: us-central1-a
   cpus: 2+
 
-workdir: tests/skyserve/interrupt
+workdir: tests/skyserve/replica_failure
 
 setup: pip install fastapi[all] uvicorn
 

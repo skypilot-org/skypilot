@@ -1146,7 +1146,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
             f'If you see this, please file an issue; tasks: {dag.tasks}')
         task = dag.tasks[0]
     else:
-        task = sky.Task(name=sky.Task.CLI_CMD_TASK_NAME, run=entrypoint)
+        task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
 
     # Override.
@@ -4105,14 +4105,15 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
+    is_yaml, _ = _check_yaml(''.join(entrypoint))
+    if not is_yaml:
+        raise click.UsageError(
+            'For `sky serve up`, the entrypoint must be a YAML file.')
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint, entrypoint_name='Service')
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORT_MESSAGE.format(command='sky serve up'))
-    if task.name == sky.Task.CLI_CMD_TASK_NAME:
-        raise click.UsageError(
-            'For `sky serve up`, the entrypoint must be a YAML file.')
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
