@@ -242,7 +242,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name: str,
+def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
@@ -259,7 +259,7 @@ def run_instances(region: str, cluster_name: str,
         'Values': ['pending', 'running', 'stopping', 'stopped'],
     }, {
         'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-        'Values': [cluster_name],
+        'Values': [cluster_name_on_cloud],
     }]
     exist_instances = list(ec2.instances.filter(Filters=filters))
     exist_instances.sort(key=lambda x: x.id)
@@ -293,7 +293,7 @@ def run_instances(region: str, cluster_name: str,
                 'Value': 'head'
             }, {
                 'Key': 'Name',
-                'Value': f'sky-{cluster_name}-head'
+                'Value': f'sky-{cluster_name_on_cloud}-head'
             }]
         else:
             node_tag = [{
@@ -304,7 +304,7 @@ def run_instances(region: str, cluster_name: str,
                 'Value': 'worker'
             }, {
                 'Key': 'Name',
-                'Value': f'sky-{cluster_name}-worker'
+                'Value': f'sky-{cluster_name_on_cloud}-worker'
             }]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
@@ -323,7 +323,7 @@ def run_instances(region: str, cluster_name: str,
     if config.resume_stopped_nodes and len(exist_instances) > config.count:
         raise RuntimeError('The number of running/stopped/stopping '
                            f'instances combined ({len(exist_instances)}) in '
-                           f'cluster "{cluster_name}" is greater than the '
+                           f'cluster "{cluster_name_on_cloud}" is greater than the '
                            f'number requested by the user ({config.count}). '
                            'This is likely a resource leak. '
                            'Use "sky down" to terminate the cluster.')
@@ -337,7 +337,7 @@ def run_instances(region: str, cluster_name: str,
     if to_start_count < 0:
         raise RuntimeError('The number of running+pending instances '
                            f'({config.count - to_start_count}) in cluster '
-                           f'"{cluster_name}" is greater than the number '
+                           f'"{cluster_name_on_cloud}" is greater than the number '
                            f'requested by the user ({config.count}). '
                            'This is likely a resource leak. '
                            'Use "sky down" to terminate the cluster.')
@@ -381,7 +381,7 @@ def run_instances(region: str, cluster_name: str,
         #  This is a known issue before.
         ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
-        created_instances = _create_instances(ec2_fail_fast, cluster_name,
+        created_instances = _create_instances(ec2_fail_fast, cluster_name_on_cloud,
                                               config.node_config, tags,
                                               to_start_count)
         created_instances.sort(key=lambda x: x.id)
@@ -410,7 +410,7 @@ def run_instances(region: str, cluster_name: str,
     return common.ProvisionRecord(provider_name='aws',
                                   region=region,
                                   zone=zone,
-                                  cluster_name=cluster_name,
+                                  cluster_name=cluster_name_on_cloud,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)

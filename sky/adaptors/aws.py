@@ -26,6 +26,7 @@ import functools
 import logging
 import threading
 import time
+from typing import Any, Callable
 
 from sky.utils import common_utils
 
@@ -37,6 +38,10 @@ _session_creation_lock = threading.RLock()
 
 version = 1
 
+# Retry 12 times by default for potential credential errors,
+# mentioned in
+# https://github.com/skypilot-org/skypilot/pull/1988
+MAX_ATTEMPT_FOR_CREATION = 5
 
 class _ThreadLocalLRUCache(threading.local):
 
@@ -85,6 +90,31 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
+def _create_aws_object(creation_fn: Callable[[], Any]):
+    """Create an AWS object.
+
+    Args:
+        creation_fn: The function to create the AWS object.
+
+    Returns:
+        The created AWS object.
+    """
+    attempt = 0
+    backoff = common_utils.Backoff()
+    err = None
+    while attempt < MAX_ATTEMPT_FOR_CREATION:
+        try:
+            with _session_creation_lock:
+                return creation_fn()
+        except (botocore_exceptions().CredentialRetrievalError,
+                botocore_exceptions().NoCredentialsError) as e:
+            time.sleep(backoff.current_backoff())
+            logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
+            err = e
+            attempt += 1
+    raise err
+
+
 @import_package
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
@@ -94,30 +124,7 @@ def session():
     # Creating the session object is not thread-safe for boto3,
     # so we add a reentrant lock to synchronize the session creation.
     # Reference: https://github.com/boto/boto3/issues/1592
-
-    # Retry 5 times by default for potential credential errors,
-    # mentioned in
-    # https://github.com/skypilot-org/skypilot/pull/1988
-    max_attempts = 5
-    attempt = 0
-    backoff = common_utils.Backoff()
-    err = None
-    while attempt < max_attempts:
-        try:
-            with _session_creation_lock:
-                # NOTE: we need the lock here to avoid
-                # thread-safety issues when creating the session,
-                # because Python module is a shared object,
-                # and we are not sure the if code inside
-                # boto3.session.Session() is thread-safe.
-                return boto3.session.Session()
-        except (botocore_exceptions().CredentialRetrievalError,
-                botocore_exceptions().NoCredentialsError) as e:
-            time.sleep(backoff.current_backoff())
-            logger.info(f'Retry creating AWS session due to {e}.')
-            err = e
-            attempt += 1
-    raise err
+    return _create_aws_object(boto3.session.Session)
 
 
 @import_package
@@ -140,12 +147,11 @@ def resource(service_name: str, **kwargs):
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
         kwargs['config'] = config
-    with _session_creation_lock:
-        # NOTE: we need the lock here to avoid thread-safety issues when
-        # creating the resource, because Python module is a shared object,
-        # and we are not sure if the code inside 'session().resource()'
-        # is thread-safe.
-        return session().resource(service_name, **kwargs)
+    # NOTE: we need the lock here to avoid thread-safety issues when creating
+    # the resource, because Python module is a shared object, and we are not
+    # sure if the code inside 'session().resource()' is thread-safe.
+    return _create_aws_object(lambda: session().resource(service_name,
+                                                            **kwargs))
 
 
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
@@ -159,17 +165,14 @@ def client(service_name: str, **kwargs):
         kwargs: Other options.
     """
     _assert_kwargs_builtin_type(kwargs)
-    # Need to use the client retrieved from the per-thread session
-    # to avoid thread-safety issues (Directly creating the client
-    # with boto3.client() is not thread-safe).
-    # Reference: https://stackoverflow.com/a/59635814
-    with _session_creation_lock:
-        # NOTE: we need the lock here to avoid
-        # thread-safety issues when creating the client,
-        # because Python module is a shared object,
-        # and we are not sure if the code inside
-        # 'session().client()' is thread-safe.
-        return session().client(service_name, **kwargs)
+    # Need to use the client retrieved from the per-thread session to avoid
+    # thread-safety issues (Directly creating the client with boto3.client() is
+    # not thread-safe). Reference: https://stackoverflow.com/a/59635814
+
+    # NOTE: we need the lock here to avoid thread-safety issues when creating
+    # the client, because Python module is a shared object, and we are not sure
+    # if the code inside 'session().client()' is thread-safe.
+    return _create_aws_object(lambda: session().client(service_name, **kwargs))
 
 
 @import_package

@@ -58,7 +58,7 @@ def query_instances(
 
 @_route_to_cloud_impl
 def bootstrap_instances(
-        provider_name: str, region: str, cluster_name: str,
+        provider_name: str, region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """Bootstrap configurations for a cluster.
 
@@ -74,7 +74,7 @@ def bootstrap_instances(
 
 
 @_route_to_cloud_impl
-def run_instances(provider_name: str, region: str, cluster_name: str,
+def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError
