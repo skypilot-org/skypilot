@@ -43,6 +43,7 @@ version = 1
 # https://github.com/skypilot-org/skypilot/pull/1988
 MAX_ATTEMPT_FOR_CREATION = 5
 
+
 class _ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
@@ -112,6 +113,7 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
             logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
             err = e
             attempt += 1
+    assert err is not None, 'Should not reach here.'
     raise err
 
 
@@ -150,8 +152,8 @@ def resource(service_name: str, **kwargs):
     # NOTE: we need the lock here to avoid thread-safety issues when creating
     # the resource, because Python module is a shared object, and we are not
     # sure if the code inside 'session().resource()' is thread-safe.
-    return _create_aws_object(lambda: session().resource(service_name,
-                                                            **kwargs))
+    return _create_aws_object(
+        lambda: session().resource(service_name, **kwargs))
 
 
 @import_package

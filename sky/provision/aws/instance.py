@@ -321,12 +321,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
     if config.resume_stopped_nodes and len(exist_instances) > config.count:
-        raise RuntimeError('The number of running/stopped/stopping '
-                           f'instances combined ({len(exist_instances)}) in '
-                           f'cluster "{cluster_name_on_cloud}" is greater than the '
-                           f'number requested by the user ({config.count}). '
-                           'This is likely a resource leak. '
-                           'Use "sky down" to terminate the cluster.')
+        raise RuntimeError(
+            'The number of running/stopped/stopping '
+            f'instances combined ({len(exist_instances)}) in '
+            f'cluster "{cluster_name_on_cloud}" is greater than the '
+            f'number requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     to_start_count = (config.count - len(running_instances) -
                       len(pending_instances))
@@ -335,12 +336,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         zone = running_instances[0].placement['AvailabilityZone']
 
     if to_start_count < 0:
-        raise RuntimeError('The number of running+pending instances '
-                           f'({config.count - to_start_count}) in cluster '
-                           f'"{cluster_name_on_cloud}" is greater than the number '
-                           f'requested by the user ({config.count}). '
-                           'This is likely a resource leak. '
-                           'Use "sky down" to terminate the cluster.')
+        raise RuntimeError(
+            'The number of running+pending instances '
+            f'({config.count - to_start_count}) in cluster '
+            f'"{cluster_name_on_cloud}" is greater than the number '
+            f'requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     # Try to reuse previously stopped nodes with compatible configs
     if config.resume_stopped_nodes and to_start_count > 0 and (
@@ -381,7 +383,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         #  This is a known issue before.
         ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
-        created_instances = _create_instances(ec2_fail_fast, cluster_name_on_cloud,
+        created_instances = _create_instances(ec2_fail_fast,
+                                              cluster_name_on_cloud,
                                               config.node_config, tags,
                                               to_start_count)
         created_instances.sort(key=lambda x: x.id)
