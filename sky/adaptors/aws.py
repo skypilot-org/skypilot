@@ -38,7 +38,7 @@ _session_creation_lock = threading.RLock()
 
 version = 1
 
-# Retry 12 times by default for potential credential errors,
+# Retry 5 times by default for potential credential errors,
 # mentioned in
 # https://github.com/skypilot-org/skypilot/pull/1988
 MAX_ATTEMPT_FOR_CREATION = 5
