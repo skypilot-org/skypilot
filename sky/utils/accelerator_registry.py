@@ -22,6 +22,7 @@ _ACCELERATORS = [
     'A10G',
     'Gaudi HL-205',
     'Inferentia',
+    'Trainium',
     'K520',
     'K80',
     'M60',
