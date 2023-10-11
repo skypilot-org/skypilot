@@ -588,8 +588,6 @@ def _shared_controller_env_vars() -> Dict[str, Any]:
     env_vars: Dict[str, Any] = {
         env.value: 1 for env in env_options.Options if env.get()
     }
-    # TODO(tian): Why does spot controller not set this env variable?
-    env_vars.pop(env_options.Options.MINIMIZE_LOGGING.value, None)
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
         # running in a container.
@@ -1151,9 +1149,9 @@ def serve_up(
               f'{style.RESET_ALL}{fore.CYAN}'
               f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
         print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
-        print('\nTo monitor if replicas are ready:'
-              f'\n\t{backend_utils.BOLD}watch -n10 sky serve status '
+        print('\nTo monitor replica status:'
+              f'\t{backend_utils.BOLD}watch -n10 sky serve status '
               f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo send a test request:'
-              f'\n\t{backend_utils.BOLD}curl -L $(sky serve status '
+              f'\t\t{backend_utils.BOLD}curl -L $(sky serve status '
               f'{service_name} --endpoint){backend_utils.RESET_BOLD}')

@@ -4150,6 +4150,11 @@ def serve_up(
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--endpoint',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show service endpoint.')
 @click.argument('service_names',
                 required=False,
                 type=str,
@@ -4157,11 +4162,12 @@ def serve_up(
                 **_get_shell_complete_args(_complete_service_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, service_names: List[str]):
+def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe service.
 
     Show detailed statuses of the service. If SERVICE_NAME is not provided,
-    show all services' status.
+    show all services' status. If --endpoint is specified, output the endpoint
+    of the service only.
 
     Each service can have one of the following statuses:
 
@@ -4232,6 +4238,28 @@ def serve_status(all: bool, service_names: List[str]):
       # Only show status of my-service
       sky serve status my-service
     """
+    if endpoint:
+        if len(service_names) != 1:
+            plural = 's' if len(service_names) > 1 else ''
+            service_num = (str(len(service_names))
+                           if len(service_names) > 0 else 'No')
+            raise click.UsageError(
+                f'{service_num} service{plural} specified. Please specify an'
+                ' existing service to show its endpoint. Usage: '
+                '`sky serve status --endpoint <service-name>`')
+        service_name = service_names[0]
+        record = global_user_state.get_service_from_name(service_name)
+        if record is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'\nService {service_name!r} not found.')
+        service_endpoint = status_utils.get_endpoint(record)
+        if service_endpoint is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Endpoint not found for service {service_name!r}. '
+                    'Please check whether the service is ready.')
+        click.echo(service_endpoint)
+        return
     query_services: Optional[List[str]] = None
     if service_names:
         query_services = _get_glob_services(service_names)
