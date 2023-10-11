@@ -290,7 +290,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             if row['InstanceType'] == 'trn1.2xlarge':
                 acc_name = 'Trainium'
                 acc_count = 1
-            if row['InstanceType'] in [ 'trn1.32xlarge', 'trn1n.32xlarge' ] :
+            if row['InstanceType'] in ['trn1.32xlarge', 'trn1n.32xlarge'] :
                 acc_name = 'Trainium'
                 acc_count = 16
             return pd.Series({
