@@ -233,10 +233,6 @@ class InfraProvider:
         # Terminate service
         raise NotImplementedError
 
-    def start_replica_prober(self) -> None:
-        # Start the replica fetcher thread
-        raise NotImplementedError
-
 
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
@@ -252,6 +248,7 @@ class SkyPilotInfraProvider(InfraProvider):
 
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
+        self._start_replica_prober()
 
     # This process periodically checks all sky.launch and sky.down process
     # on the fly. If any of them finished, it will update the status of
@@ -308,7 +305,7 @@ class SkyPilotInfraProvider(InfraProvider):
 
     # TODO(tian): Maybe use decorator?
     def _process_pool_refresher(self) -> None:
-        while not self.process_pool_refresher_stop_event.is_set():
+        while True:
             logger.info('Refreshing process pool.')
             try:
                 self._refresh_process_pool()
@@ -316,7 +313,11 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # process pool refresher running.
                 logger.error(f'Error in process pool refresher: {e}')
-            time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
+            for _ in range(_PROCESS_POOL_REFRESH_INTERVAL):
+                if self.process_pool_refresher_stop_event.is_set():
+                    logger.info('Process pool refresher terminated.')
+                    return
+                time.sleep(1)
 
     def _start_process_pool_refresher(self) -> None:
         self.process_pool_refresher_stop_event = threading.Event()
@@ -355,7 +356,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(cluster_name, sync_down_logs=True)
 
     def _job_status_fetcher(self) -> None:
-        while not self.job_status_fetcher_stop_event.is_set():
+        while True:
             logger.info('Refreshing job status.')
             try:
                 self._fetch_job_status()
@@ -363,7 +364,11 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # job status fetcher running.
                 logger.error(f'Error in job status fetcher: {e}')
-            time.sleep(_JOB_STATUS_FETCH_INTERVAL)
+            for _ in range(_JOB_STATUS_FETCH_INTERVAL):
+                if self.job_status_fetcher_stop_event.is_set():
+                    logger.info('Job status fetcher terminated.')
+                    return
+                time.sleep(1)
 
     def _start_job_status_fetcher(self) -> None:
         self.job_status_fetcher_stop_event = threading.Event()
@@ -546,7 +551,7 @@ class SkyPilotInfraProvider(InfraProvider):
         return '\n'.join(msg)
 
     def _replica_prober(self) -> None:
-        while not self.replica_prober_stop_event.is_set():
+        while True:
             logger.info('Running replica prober.')
             try:
                 self._probe_all_replicas()
@@ -556,9 +561,13 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # replica prober running.
                 logger.error(f'Error in replica prober: {e}')
-            time.sleep(_ENDPOINT_PROBE_INTERVAL)
+            for _ in range(_ENDPOINT_PROBE_INTERVAL):
+                if self.replica_prober_stop_event.is_set():
+                    logger.info('Replica prober terminated.')
+                    return
+                time.sleep(1)
 
-    def start_replica_prober(self) -> None:
+    def _start_replica_prober(self) -> None:
         self.replica_prober_stop_event = threading.Event()
         self.replica_prober_thread = threading.Thread(
             target=self._replica_prober)

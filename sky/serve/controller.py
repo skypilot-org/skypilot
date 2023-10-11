@@ -9,7 +9,6 @@ import logging
 import pickle
 import threading
 import time
-from typing import Optional
 
 import fastapi
 import uvicorn
@@ -44,10 +43,8 @@ class SkyServeController:
         - Providing the HTTP Server API for SkyServe to communicate with.
     """
 
-    def __init__(self,
-                 port: int,
-                 infra_provider: infra_providers.InfraProvider,
-                 autoscaler: Optional[autoscalers.Autoscaler] = None) -> None:
+    def __init__(self, port: int, infra_provider: infra_providers.InfraProvider,
+                 autoscaler: autoscalers.Autoscaler) -> None:
         self.port = port
         self.infra_provider = infra_provider
         self.autoscaler = autoscaler
@@ -123,9 +120,8 @@ class SkyServeController:
             logger.info('Terminating service...')
             serve_state.set_status(self.infra_provider.service_name,
                                    serve_state.ServiceStatus.SHUTTING_DOWN)
-            if self.autoscaler is not None:
-                logger.info('Terminate autoscaler...')
-                self.autoscaler.terminate()
+            logger.info('Terminate autoscaler...')
+            self.autoscaler.terminate()
             msg = self.infra_provider.terminate()
             if msg is None:
                 # We cannot terminate the controller now because we still
@@ -133,12 +129,7 @@ class SkyServeController:
                 self.terminating = True
             return {'message': msg}
 
-        # Run replica_prober and autoscaler (if autoscaler is defined)
-        # in separate threads in the background.
-        # This should not block the main thread.
-        self.infra_provider.start_replica_prober()
-        if self.autoscaler is not None:
-            self.autoscaler.start()
+        self.autoscaler.start()
 
         # Start a daemon to check if the controller is terminating, and if so,
         # shutdown the controller so the skypilot jobs will finish, thus enable
