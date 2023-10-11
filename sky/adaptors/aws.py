@@ -128,6 +128,9 @@ def session():
 
 
 @import_package
+# Avoid caching the resource/client objects, since it is possible that the
+# credentials will expire and we need to create a new resource/client object
+# with the new credentials.
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
