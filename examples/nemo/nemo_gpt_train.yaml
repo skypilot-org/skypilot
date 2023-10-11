@@ -31,7 +31,7 @@ envs:
 file_mounts:
   ${DATASET_ROOT}:
     name: ${BUCKET_NAME}
-    store: gcs
+    store: gcs  # We recommend using GCS for large datasets in mount mode - S3 based mounts may fail with "transport endpoint is not connected" error.
     mode: MOUNT
     
 
