@@ -1,5 +1,6 @@
 """InfraProvider: handles the creation and deletion of endpoint replicas."""
 from concurrent import futures
+import dataclasses
 import enum
 import logging
 import random
@@ -49,37 +50,36 @@ class ProcessStatus(enum.Enum):
     # The process is running
     RUNNING = 'RUNNING'
 
-    # The process is finished and success
-    SUCCESS = 'SUCCESS'
+    # The process is finished and succeeded
+    SUCCEEDED = 'SUCCEEDED'
 
     # The process failed
     FAILED = 'FAILED'
 
 
+@dataclasses.dataclass
 class ReplicaStatusProperty:
     """Some properties that determine replica status."""
+    # Process status of sky.launch
+    # Initial value is RUNNING since each `ReplicaInfo` is created
+    # when `sky.launch` is called.
+    sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
+    # User job status in [FAILED, FAILED_SETUP]
+    user_app_failed: bool = False
+    # Latest readiness probe result
+    service_ready_now: bool = False
+    # Whether the service has been ready at least once
+    # If service was not ready before, we count how long it takes to startup
+    # and compare it with the initial delay seconds; otherwise, we count how
+    # many consecutive failures it has.
+    service_once_ready: bool = False
+    # Process status of sky.down. None means sky.down is not called yet.
+    sky_down_status: Optional[ProcessStatus] = None
 
-    def __init__(self) -> None:
-        # Process status of sky.launch
-        # Initial value is RUNNING since each `ReplicaInfo` is created
-        # when `sky.launch` is called.
-        self.sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
-        # User job status in [FAILED, FAILED_SETUP]
-        self.user_app_failed: bool = False
-        # Latest readiness probe result
-        self.service_ready_now: bool = False
-        # Whether the service has been ready at least once
-        # If service was not ready before, we count how long it takes to startup
-        # and compare it with the initial delay seconds; otherwise, we count how
-        # many consecutive failures it has.
-        self.service_once_ready: bool = False
-        # Process status of sky.down. None means sky.down is not called yet.
-        self.sky_down_status: Optional[ProcessStatus] = None
-
-    def is_scale_down_no_failure(self) -> bool:
-        if self.sky_launch_status != ProcessStatus.SUCCESS:
+    def is_scale_down_succeeded(self) -> bool:
+        if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             return False
-        if self.sky_down_status != ProcessStatus.SUCCESS:
+        if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
         if self.user_app_failed:
             return False
@@ -88,7 +88,7 @@ class ReplicaStatusProperty:
         return self.service_once_ready
 
     def should_track_status(self) -> bool:
-        if self.sky_launch_status != ProcessStatus.SUCCESS:
+        if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             return False
         if self.sky_down_status is not None:
             return False
@@ -277,7 +277,7 @@ class SkyPilotInfraProvider(InfraProvider):
                     self._teardown_cluster(cluster_name, sync_down_logs=True)
                 else:
                     info.status_property.sky_launch_status = (
-                        ProcessStatus.SUCCESS)
+                        ProcessStatus.SUCCEEDED)
         for cluster_name, p in list(self.down_process_pool.items()):
             if p.poll() is not None:
                 logger.info(f'Down process for {cluster_name} finished.')
@@ -290,12 +290,12 @@ class SkyPilotInfraProvider(InfraProvider):
                         ProcessStatus.FAILED)
                 else:
                     info.status_property.sky_down_status = (
-                        ProcessStatus.SUCCESS)
+                        ProcessStatus.SUCCEEDED)
                 # Failed replica still count as a replica. In our current
                 # design, we want to fail early if user code have any error.
                 # This will prevent infinite loop of teardown and
                 # re-provision.
-                if info.status_property.is_scale_down_no_failure():
+                if info.status_property.is_scale_down_succeeded():
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.
@@ -413,9 +413,9 @@ class SkyPilotInfraProvider(InfraProvider):
         # after we change to python API.
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
         cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
-        fn = serve_utils.generate_replica_launch_log_file_name(
+        log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self.service_name, replica_id)
-        with open(fn, 'w') as f:
+        with open(log_file_name, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
                                  stdin=subprocess.DEVNULL,
@@ -466,9 +466,9 @@ class SkyPilotInfraProvider(InfraProvider):
 
         logger.info(f'Deleting SkyPilot cluster {cluster_name}')
         cmd = ['sky', 'down', cluster_name, '-y']
-        fn = serve_utils.generate_replica_down_log_file_name(
+        log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
-        with open(fn, 'w') as f:
+        with open(log_file_name, 'w') as f:
             # pylint: disable=consider-using-with
             p = subprocess.Popen(cmd,
                                  stdin=subprocess.DEVNULL,
@@ -516,7 +516,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._teardown_cluster(name, sync_down_logs=False)
                 info = self.replica_info[name]
                 # Set to success here for correctly display as shutting down
-                info.status_property.sky_launch_status = ProcessStatus.SUCCESS
+                info.status_property.sky_launch_status = ProcessStatus.SUCCEEDED
         msg = []
         for name, info in self.replica_info.items():
             if info.status in [
@@ -573,17 +573,18 @@ class SkyPilotInfraProvider(InfraProvider):
             replica_ip = info.ip
             try:
                 msg = ''
-                readiness_suffix = f'http://{replica_ip}{self.readiness_suffix}'
+                # TODO(tian): Support HTTPS in the future.
+                readiness_path = f'http://{replica_ip}{self.readiness_suffix}'
                 if self.post_data is not None:
                     msg += 'Post'
                     response = requests.post(
-                        readiness_suffix,
+                        readiness_path,
                         json=self.post_data,
                         timeout=constants.READINESS_PROBE_TIMEOUT)
                 else:
                     msg += 'Get'
                     response = requests.get(
-                        readiness_suffix,
+                        readiness_path,
                         timeout=constants.READINESS_PROBE_TIMEOUT)
                 msg += (f' request to {replica_ip} returned status code '
                         f'{response.status_code}')
@@ -619,10 +620,10 @@ class SkyPilotInfraProvider(InfraProvider):
         logger.info(f'Replicas to probe: {replica_to_probe}')
 
         for future in futures.as_completed(probe_futures):
-            cluster_name, res = future.result()
+            cluster_name, probe_succeeded = future.result()
             info = self.replica_info[cluster_name]
-            info.status_property.service_ready_now = res
-            if res:
+            info.status_property.service_ready_now = probe_succeeded
+            if probe_succeeded:
                 info.consecutive_failure_times.clear()
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True

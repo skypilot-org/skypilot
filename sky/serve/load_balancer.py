@@ -1,7 +1,5 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
 import argparse
-import os
-import signal
 import threading
 import time
 
@@ -13,6 +11,7 @@ import uvicorn
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies
+from sky.serve import serve_utils
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.load_balancer` namespace when executed directly, so as
@@ -74,7 +73,7 @@ class SkyServeLoadBalancer:
                     if response.json().get('is_terminating'):
                         logger.info('Controller is terminating. '
                                     'Shutting down load balancer.')
-                        os.kill(os.getpid(), signal.SIGINT)
+                        serve_utils.kill_children_and_self_processes()
                     # send request num in last query interval
                     response = session.post(
                         self.controller_url + '/controller/update_num_requests',

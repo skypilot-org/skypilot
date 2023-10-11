@@ -1,13 +1,13 @@
 """User interface with the SkyServe."""
 import base64
 import collections
-import copy
 import enum
 import os
 import pickle
 import re
 import shlex
 import shutil
+import signal
 import threading
 import time
 import typing
@@ -18,7 +18,6 @@ import colorama
 import requests
 
 from sky import backends
-from sky import clouds
 from sky import global_user_state
 from sky import status_lib
 from sky.data import storage as storage_lib
@@ -26,6 +25,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -37,13 +37,6 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
-# The log information when a FastAPI APP terminates.
-_FASTAPI_APP_TERMINATE_MSGS = [
-    'Shutting down',
-    'Waiting for application shutdown.',
-    'Application shutdown complete.',
-    'Finished server process',
-]
 
 
 class ServiceComponent(enum.Enum):
@@ -90,6 +83,11 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
     def values(self):
         with self._lock:
             return self._dict.values()
+
+
+def kill_children_and_self_processes() -> None:
+    subprocess_utils.kill_children_processes()
+    os.kill(os.getpid(), signal.SIGKILL)
 
 
 def get_existing_controller_names() -> Set[str]:
@@ -276,6 +274,9 @@ def get_available_controller_name(
     and have available slots for services.
     If multiple controllers are available, choose the one with most number of
     services to decrease the number of controllers.
+    This function needs to be called within a lock, to avoid concurrency issue
+    from `existing_controllers` being staled, also, to avoid multiple
+    `sky serve up` select the same last slot on a controller.
 
     Args:
         controller_resources: The resources requested for controller.
@@ -296,15 +297,10 @@ def get_available_controller_name(
             available_controller_to_service_num[controller_name] = (
                 services_num_on_controller)
     if not available_controller_to_service_num:
-        new_controller_name = generate_controller_cluster_name(
-            existing_controllers)
-        # This check should always be true since we already checked the
-        # service name is valid in `sky.serve_up`.
-        clouds.Cloud.check_cluster_name_is_valid(new_controller_name)
-        return new_controller_name, True
+        return generate_controller_cluster_name(existing_controllers), True
     # If multiple controllers are available, choose the one with most number of
     # services.
-    return max(available_controller_to_service_num,
+    return max(available_controller_to_service_num.keys(),
                key=lambda k: available_controller_to_service_num[k]), False
 
 
@@ -645,38 +641,6 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
-def wait_until_controller_and_load_balancer_terminate(
-        service_name: str) -> None:
-
-    def wait_until_terminate_info_appear_in_log_file(log_file: str) -> bool:
-        all_terminate_information = copy.copy(_FASTAPI_APP_TERMINATE_MSGS)
-        start_time = time.time()
-        with open(os.path.expanduser(log_file), 'r', newline='') as f:
-            for line in _follow_logs(f, exit_if_stream_end=False):
-                for info in all_terminate_information:
-                    if info in line:
-                        all_terminate_information.remove(info)
-                if not all_terminate_information:
-                    return True
-                if (time.time() - start_time >
-                        constants.SERVE_TERMINATE_WAIT_TIMEOUT):
-                    break
-        return False
-
-    # Wait the load balancer to terminate first since it is the first one
-    # to terminate and the controller will wait for it to terminate.
-    load_balancer_log = generate_remote_load_balancer_log_file_name(
-        service_name)
-    if not wait_until_terminate_info_appear_in_log_file(load_balancer_log):
-        raise ValueError(
-            f'{colorama.Fore.RED}Failed to wait for load balancer to '
-            f'terminate.{colorama.Style.RESET_ALL}')
-    controller_log = generate_remote_controller_log_file_name(service_name)
-    if not wait_until_terminate_info_appear_in_log_file(controller_log):
-        raise ValueError(f'{colorama.Fore.RED}Failed to wait for controller to '
-                         f'terminate.{colorama.Style.RESET_ALL}')
-
-
 def cleanup_service_utility_files(service_name: str) -> None:
     """Cleanup utility files for a service."""
     dir_name = generate_remote_service_dir_name(service_name)
@@ -744,11 +708,10 @@ class ServeCodeGen:
         ]
         return cls._build(code)
 
+    # TODO(tian): Move this into termination of controller
     @classmethod
     def cleanup_service(cls, service_name: str) -> str:
         code = [
-            'serve_utils.wait_until_controller_and_load_balancer_terminate('
-            f'{service_name!r})',
             f'serve_utils.cleanup_service_utility_files({service_name!r})',
             f'serve_state.remove_service({service_name!r})',
         ]

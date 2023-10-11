@@ -1,8 +1,8 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
-from collections import deque
+import collections
 import logging
 import time
-from typing import Deque, Optional, Set
+from typing import Deque, List, Optional, Set
 
 import fastapi
 
@@ -17,7 +17,7 @@ class LoadBalancingPolicy:
     def __init__(self) -> None:
         self.ready_replicas: Set[str] = set()
         self.request_count: int = 0
-        self.request_timestamps: Deque[float] = deque()
+        self.request_timestamps: Deque[float] = collections.deque()
         self.query_interval: Optional[float] = None
 
     def increment_request_count(self, count: int = 1) -> None:
@@ -54,18 +54,20 @@ class RoundRobinPolicy(LoadBalancingPolicy):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.replicas_queue: Deque[str] = deque()
+        self.replicas_queue: List[str] = []
+        self.index = 0
 
     def set_ready_replicas(self, ready_replicas: Set[str]) -> None:
         if set(ready_replicas) != set(self.ready_replicas):
             self.ready_replicas = ready_replicas
-            self.replicas_queue = deque(ready_replicas)
+            self.replicas_queue = list(ready_replicas)
+            self.index = 0
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         if not self.replicas_queue:
             return None
-        replica_ip = self.replicas_queue.popleft()
-        self.replicas_queue.append(replica_ip)
+        replica_ip = self.replicas_queue[self.index]
+        self.index = (self.index + 1) % len(self.replicas_queue)
         request_repr = ('<Request '
                         f'method="{request.method}" '
                         f'url="{request.url}" '

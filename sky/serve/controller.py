@@ -6,9 +6,7 @@ import argparse
 import asyncio
 import base64
 import logging
-import os
 import pickle
-import signal
 import threading
 import time
 from typing import Optional
@@ -23,6 +21,7 @@ from sky import status_lib
 from sky.serve import autoscalers
 from sky.serve import infra_providers
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.utils import env_options
 
 # Use the explicit logger name so that the logger is under the
@@ -64,7 +63,9 @@ class SkyServeController:
                 # return of /terminate request is not ready yet.
                 time.sleep(1)
                 logger.info('Terminate controller...')
-                os.kill(os.getpid(), signal.SIGINT)
+                # TODO(tian): Directly kill all threads and cleanup using db
+                # record, instead of waiting the threads to receive signal.
+                serve_utils.kill_children_and_self_processes()
             time.sleep(10)
 
     def run(self) -> None:
