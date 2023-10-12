@@ -554,7 +554,11 @@ class SkyPilotInfraProvider(InfraProvider):
         # Terminate n replicas
         # TODO(tian): Policy to choose replica to scale down.
         infos = serve_state.get_replica_infos(self.service_name)
-        for i in range(n):
+        if len(infos) < n:
+            logger.error(f'Cannot scale down {n} replicas since there are '
+                         f'only {len(infos)} replicas. Scale down all '
+                         'replicas instead.')
+        for i in range(min(n, len(infos))):
             self._teardown_replica(infos[i].replica_id)
 
     # TODO(tian): Maybe just kill all threads and cleanup using db record
@@ -613,6 +617,16 @@ class SkyPilotInfraProvider(InfraProvider):
                     'controller and make sure the replica is released.')
             else:
                 serve_state.remove_replica(self.service_name, replica_id)
+        infos = serve_state.get_replica_infos(self.service_name)
+        for info in infos:
+            if not info.status in serve_state.ReplicaStatus.failed_statuses():
+                # This should not happen since we already teardown all
+                # replicas. Here we just add a double check.
+                msg.append(f'Replica {info.replica_id} is not deleted. '
+                           'Please login to the controller and make sure '
+                           'the replica is released.')
+            else:
+                serve_state.remove_replica(self.service_name, info.replica_id)
         if not msg:
             return None
         return '\n'.join(msg)
