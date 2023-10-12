@@ -612,8 +612,8 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.warning(f'Down process for replica {replica_id} exited '
                                f'abnormally with code {p.returncode}.')
                 msg.append(
-                    f'Down process for replica {replica_id} exited abnormally'
-                    f' with code {p.returncode}. Please login to the '
+                    f'Down process for replica {replica_id} exited abnormally '
+                    f'with code {p.returncode}. Please login to the '
                     'controller and make sure the replica is released.')
             else:
                 serve_state.remove_replica(self.service_name, replica_id)
