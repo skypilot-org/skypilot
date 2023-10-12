@@ -138,6 +138,11 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: Developer Guides
+   reference/add-gpu
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cloud Admin and Usage
 
    cloud-setup/cloud-permissions/index
