@@ -556,7 +556,7 @@ class SSHConfigHelper(object):
         cluster_config_path = os.path.expanduser(cls.ssh_cluster_path.format(cluster_name))
 
         with open(cluster_config_path, 'w') as f:
-            f.write(codegen)
+            f.write(codegen + '\n')
 
         if len(ips) > 1:
             for i, ip in enumerate(ips[1:]):
