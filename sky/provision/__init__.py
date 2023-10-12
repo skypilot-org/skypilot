@@ -4,13 +4,18 @@ This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
 import functools
-import importlib
 import inspect
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib
+# These provision.<cloud> modules should never fail even if underlying cloud SDK
+# dependencies are not installed. This is ensured by using sky.adaptors inside
+# these modules, for lazy loading of cloud SDKs.
+from sky.provision import aws
+from sky.provision import azure
 from sky.provision import common
+from sky.provision import gcp
 
 logger = sky_logging.init_logger(__name__)
 
@@ -27,8 +32,9 @@ def _route_to_cloud_impl(func):
         else:
             provider_name = kwargs.pop('provider_name')
 
-        module_name = provider_name
-        module = importlib.import_module(f'sky.provision.{module_name.lower()}')
+        module_name = provider_name.lower()
+        module = globals().get(module_name)
+        assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__)
         return impl(*args, **kwargs)
