@@ -135,6 +135,8 @@ def session():
 # object will only refresh the credentials with a fixed 15 minutes interval,
 # which can cause unexpected NoCredentialsError. By creating the resource/client
 # object every time, the credentials will be explicitly refreshed.
+# The creation of the resource/client is relatively fast (around 0.3s), so the
+# performance impact is negligible.
 # Reference: https://github.com/skypilot-org/skypilot/issues/2697
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
