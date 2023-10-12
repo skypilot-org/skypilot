@@ -130,7 +130,12 @@ def session():
 
 
 @import_package
-@_thread_local_lru_cache()
+# Avoid caching the resource/client objects. If we are using the assumed role,
+# the credentials will be automatically rotated, but the cached resource/client
+# object will only refresh the credentials with a fixed 15 minutes interval,
+# which can cause unexpected NoCredentialsError. By creating the resource/client
+# object every time, the credentials will be explicitly refreshed.
+# Reference: https://github.com/skypilot-org/skypilot/issues/2697
 def resource(service_name: str, **kwargs):
     """Create an AWS resource of a certain service.
 
@@ -155,7 +160,6 @@ def resource(service_name: str, **kwargs):
 
 
 @import_package
-@_thread_local_lru_cache()
 def client(service_name: str, **kwargs):
     """Create an AWS client of a certain service.
 
