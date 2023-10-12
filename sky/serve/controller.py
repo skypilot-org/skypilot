@@ -118,8 +118,9 @@ class SkyServeController:
         def terminate(request: fastapi.Request):
             del request
             logger.info('Terminating service...')
-            serve_state.set_status(self.infra_provider.service_name,
-                                   serve_state.ServiceStatus.SHUTTING_DOWN)
+            serve_state.set_service_status(
+                self.infra_provider.service_name,
+                serve_state.ServiceStatus.SHUTTING_DOWN)
             logger.info('Terminate autoscaler...')
             self.autoscaler.terminate()
             msg = self.infra_provider.terminate()

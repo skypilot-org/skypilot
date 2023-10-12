@@ -2,8 +2,9 @@
 from concurrent import futures
 import dataclasses
 import enum
+import functools
 import logging
-import random
+import os
 import signal
 import subprocess
 import threading
@@ -15,9 +16,11 @@ import requests
 
 from sky import backends
 from sky import global_user_state
-from sky.serve import constants
+from sky.backends import backend_utils
+from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import env_options
 
@@ -41,6 +44,16 @@ def _interrupt_process_and_children(pid: int) -> None:
         parent_process.send_signal(signal.SIGINT)
     except psutil.NoSuchProcess:
         pass
+
+
+def with_lock(func):
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self.lock:
+            return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class ProcessStatus(enum.Enum):
@@ -119,7 +132,7 @@ class ReplicaStatusProperty:
                 # sky.launch failed
                 return serve_state.ReplicaStatus.FAILED
             # This indicate it is a scale_down with correct teardown.
-            # Should have been cleaned from the replica_info.
+            # Should have been cleaned from the replica table.
             return serve_state.ReplicaStatus.UNKNOWN
         if self.sky_launch_status == ProcessStatus.FAILED:
             # sky.launch failed
@@ -143,6 +156,7 @@ class ReplicaStatusProperty:
             return serve_state.ReplicaStatus.STARTING
 
 
+# TODO(tian): Maybe rename it to Replica
 class ReplicaInfo:
     """Replica info for each replica."""
 
@@ -150,7 +164,7 @@ class ReplicaInfo:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
-        self.consecutive_failure_times: List[int] = []
+        self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
 
     @property
@@ -188,6 +202,42 @@ class ReplicaInfo:
             info_dict['handle'] = self.handle
         return info_dict
 
+    def probe(
+        self, readiness_suffix: str, post_data: Optional[Union[str, Dict[str,
+                                                                         Any]]]
+    ) -> Tuple['ReplicaInfo', bool]:
+        replica_ip = self.ip
+        try:
+            msg = ''
+            # TODO(tian): Support HTTPS in the future.
+            readiness_path = f'http://{replica_ip}{readiness_suffix}'
+            if post_data is not None:
+                msg += 'Post'
+                response = requests.post(
+                    readiness_path,
+                    json=post_data,
+                    timeout=serve_constants.READINESS_PROBE_TIMEOUT)
+            else:
+                msg += 'Get'
+                response = requests.get(
+                    readiness_path,
+                    timeout=serve_constants.READINESS_PROBE_TIMEOUT)
+            msg += (f' request to {replica_ip} returned status code '
+                    f'{response.status_code}')
+            if response.status_code == 200:
+                msg += '.'
+            else:
+                msg += f' and response {response.text}.'
+            logger.info(msg)
+            if response.status_code == 200:
+                logger.info(f'Replica {replica_ip} is ready.')
+                return self, True
+        except requests.exceptions.RequestException as e:
+            logger.info(e)
+            logger.info(f'Replica {replica_ip} is not ready.')
+            pass
+        return self, False
+
 
 class InfraProvider:
     """Each infra provider manages one service."""
@@ -198,13 +248,13 @@ class InfraProvider:
             readiness_suffix: str,
             initial_delay_seconds: int,
             post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
+        self.lock = threading.Lock()
+        self.next_replica_id: int = 1
         self.service_name: str = service_name
         self.readiness_suffix: str = readiness_suffix
         self.initial_delay_seconds: int = initial_delay_seconds
         self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
         self.uptime: Optional[float] = None
-        self.replica_info: serve_utils.ThreadSafeDict[
-            str, ReplicaInfo] = serve_utils.ThreadSafeDict()
         logger.info(f'Readiness probe suffix: {self.readiness_suffix}')
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
@@ -240,11 +290,10 @@ class SkyPilotInfraProvider(InfraProvider):
     def __init__(self, task_yaml_path: str, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.task_yaml_path: str = task_yaml_path
-        self.next_replica_id: int = 1
         self.launch_process_pool: serve_utils.ThreadSafeDict[
-            str, subprocess.Popen] = serve_utils.ThreadSafeDict()
+            int, subprocess.Popen] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
-            str, subprocess.Popen] = serve_utils.ThreadSafeDict()
+            int, subprocess.Popen] = serve_utils.ThreadSafeDict()
 
         self._start_process_pool_refresher()
         self._start_job_status_fetcher()
@@ -253,35 +302,44 @@ class SkyPilotInfraProvider(InfraProvider):
     # This process periodically checks all sky.launch and sky.down process
     # on the fly. If any of them finished, it will update the status of
     # the corresponding replica.
+    @with_lock
     def _refresh_process_pool(self) -> None:
-        for cluster_name, p in list(self.launch_process_pool.items()):
+        for replica_id, p in list(self.launch_process_pool.items()):
             if p.poll() is not None:
                 # TODO(tian): Try-catch in process, and have an enum return
                 # value to indicate which type of failure happened.
                 # Currently we only have user code failure since the
                 # retry_until_up flag is set to True, but it will be helpful
                 # when we enable user choose whether to retry or not.
-                logger.info(f'Launch process for {cluster_name} finished.')
-                del self.launch_process_pool[cluster_name]
-                info = self.replica_info[cluster_name]
+                logger.info(
+                    f'Launch process for replica {replica_id} finished.')
+                del self.launch_process_pool[replica_id]
+                info = serve_state.get_replica_info_from_id(
+                    self.service_name, replica_id)
+                assert info is not None
                 if p.returncode != 0:
-                    logger.warning(f'Launch process for {cluster_name} exited '
-                                   f'abnormally with code {p.returncode}. '
-                                   'Terminating...')
+                    logger.warning(
+                        f'Launch process for replica {replica_id} exited '
+                        f'abnormally with code {p.returncode}. Terminating...')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
-                    self._teardown_cluster(cluster_name, sync_down_logs=True)
+                    self._teardown_replica(replica_id, sync_down_logs=True)
                 else:
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCEEDED)
-        for cluster_name, p in list(self.down_process_pool.items()):
+                serve_state.add_or_update_replica(self.service_name, replica_id,
+                                                  info)
+        for replica_id, p in list(self.down_process_pool.items()):
             if p.poll() is not None:
-                logger.info(f'Down process for {cluster_name} finished.')
-                del self.down_process_pool[cluster_name]
-                info = self.replica_info[cluster_name]
+                logger.info(f'Down process for replica {replica_id} finished.')
+                del self.down_process_pool[replica_id]
+                info = serve_state.get_replica_info_from_id(
+                    self.service_name, replica_id)
+                assert info is not None
                 if p.returncode != 0:
-                    logger.error(f'Down process for {cluster_name} exited '
-                                 f'abnormally with code {p.returncode}.')
+                    logger.error(
+                        f'Down process for replica {replica_id} exited '
+                        f'abnormally with code {p.returncode}.')
                     info.status_property.sky_down_status = (
                         ProcessStatus.FAILED)
                 else:
@@ -295,13 +353,15 @@ class SkyPilotInfraProvider(InfraProvider):
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.
-                    del self.replica_info[cluster_name]
-                    logger.info(f'Cluster {cluster_name} removed from the '
-                                'replica info normally.')
+                    logger.info(f'Replica {replica_id} removed from the '
+                                'replica table normally.')
+                    serve_state.remove_replica(self.service_name, replica_id)
                 else:
-                    logger.info(f'Termination of cluster {cluster_name} '
+                    logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
                                 'failure detected.')
+                    serve_state.add_or_update_replica(self.service_name,
+                                                      replica_id, info)
 
     # TODO(tian): Maybe use decorator?
     def _process_pool_refresher(self) -> None:
@@ -325,8 +385,10 @@ class SkyPilotInfraProvider(InfraProvider):
             target=self._process_pool_refresher)
         self.process_pool_refresher_thread.start()
 
+    @with_lock
     def _fetch_job_status(self) -> None:
-        for cluster_name, info in self.replica_info.items():
+        infos = serve_state.get_replica_infos(self.service_name)
+        for info in infos:
             if not info.status_property.should_track_status():
                 continue
             # We use backend API to avoid usage collection in the
@@ -343,17 +405,21 @@ class SkyPilotInfraProvider(InfraProvider):
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
             ]:
                 info.status_property.user_app_failed = True
-                logger.warning(f'User APP for cluster {cluster_name} FAILED. '
-                               'Start streaming logs...')
-                # Always tail the logs of the first job, which represent user
-                # setup & run.
-                try:
-                    backend.tail_logs(handle, job_id=1, follow=False)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'Error in streaming logs for cluster '
-                                 f'{cluster_name}: {e}')
+                serve_state.add_or_update_replica(self.service_name,
+                                                  info.replica_id, info)
+                logger.warning(
+                    f'User APP for replica {info.replica_id} FAILED. '
+                    'Start streaming logs...')
+                replica_job_logs_dir = os.path.join(
+                    constants.SKY_LOGS_DIRECTORY, 'replica_jobs')
+                backend_utils.download_and_stream_latest_job_log(
+                    backend,
+                    handle,
+                    replica_job_logs_dir,
+                    log_position_hint='replica cluster',
+                    log_finish_hint=f'Replica: {info.replica_id}')
                 logger.info('Terminating...')
-                self._teardown_cluster(cluster_name, sync_down_logs=True)
+                self._teardown_replica(info.replica_id, sync_down_logs=True)
 
     def _job_status_fetcher(self) -> None:
         while True:
@@ -387,33 +453,33 @@ class SkyPilotInfraProvider(InfraProvider):
     def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
         return [
             info.to_info_dict(with_handle=verbose)
-            for info in self.replica_info.values()
+            for info in serve_state.get_replica_infos(self.service_name)
         ]
 
     def total_replica_num(self, count_failed_replica: bool) -> int:
+        infos = serve_state.get_replica_infos(self.service_name)
         if count_failed_replica:
-            return len(self.replica_info)
-        return len([
-            i for i in self.replica_info.values()
-            if i.status != serve_state.ReplicaStatus.FAILED
-        ])
+            return len(infos)
+        return len(
+            [i for i in infos if i.status != serve_state.ReplicaStatus.FAILED])
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
-        for info in self.replica_info.values():
+        infos = serve_state.get_replica_infos(self.service_name)
+        for info in infos:
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.ip is not None
                 ready_replicas.add(info.ip)
         return ready_replicas
 
-    def _launch_cluster(self, replica_id: int) -> None:
+    def _launch_replica(self, replica_id: int) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
-        if cluster_name in self.launch_process_pool:
-            logger.warning(f'Launch process for cluster {cluster_name} '
+        if replica_id in self.launch_process_pool:
+            logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
             return
-        logger.info(f'Creating SkyPilot cluster {cluster_name}')
+        logger.info(f'Creating replica {replica_id}')
         # TODO(tian): We should do usage_lib.messages.usage.set_internal()
         # after we change to python API.
         cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
@@ -426,30 +492,28 @@ class SkyPilotInfraProvider(InfraProvider):
                                  stdin=subprocess.DEVNULL,
                                  stdout=f,
                                  stderr=f)
-        self.launch_process_pool[cluster_name] = p
-        assert cluster_name not in self.replica_info
-        self.replica_info[cluster_name] = ReplicaInfo(replica_id, cluster_name)
-
-    def _scale_up(self, n: int) -> None:
-        # Launch n new clusters
-        for _ in range(0, n):
-            self._launch_cluster(self.next_replica_id)
-            self.next_replica_id += 1
+        self.launch_process_pool[replica_id] = p
+        info = ReplicaInfo(replica_id, cluster_name)
+        serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
     def scale_up(self, n: int) -> None:
-        self._scale_up(n)
+        # Launch n new replicas
+        for _ in range(n):
+            self._launch_replica(self.next_replica_id)
+            self.next_replica_id += 1
 
-    def _teardown_cluster(self,
-                          cluster_name: str,
+    def _teardown_replica(self,
+                          replica_id: int,
                           sync_down_logs: bool = True) -> None:
-        if cluster_name in self.down_process_pool:
-            logger.warning(f'Down process for cluster {cluster_name} already '
+        if replica_id in self.down_process_pool:
+            logger.warning(f'Down process for replica {replica_id} already '
                            'exists. Skipping.')
             return
 
-        replica_id = serve_utils.get_replica_id_from_cluster_name(cluster_name)
         if sync_down_logs:
-            logger.info(f'Syncing down logs for cluster {cluster_name}...')
+            logger.info(f'Syncing down logs for replica {replica_id}...')
+            # TODO(tian): Maybe use
+            # backend_utils.download_and_stream_latest_job_log here
             code = serve_utils.ServeCodeGen.stream_replica_logs(
                 self.service_name,
                 replica_id,
@@ -464,13 +528,16 @@ class SkyPilotInfraProvider(InfraProvider):
                 except Exception as e:  # pylint: disable=broad-except
                     # No matter what error happens, we should teardown the
                     # cluster.
-                    msg = ('Error in syncing down logs for cluster '
-                           f'{cluster_name}: {e}')
+                    msg = ('Error in syncing down logs for replica '
+                           f'{replica_id}: {e}')
                     logger.error(msg)
                     print(msg, file=f)
 
-        logger.info(f'Deleting SkyPilot cluster {cluster_name}')
-        cmd = ['sky', 'down', cluster_name, '-y']
+        logger.info(f'Deleting replica {replica_id}')
+        info = serve_state.get_replica_info_from_id(self.service_name,
+                                                    replica_id)
+        assert info is not None
+        cmd = ['sky', 'down', info.cluster_name, '-y']
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
         with open(log_file_name, 'w') as f:
@@ -479,33 +546,23 @@ class SkyPilotInfraProvider(InfraProvider):
                                  stdin=subprocess.DEVNULL,
                                  stdout=f,
                                  stderr=f)
-        self.down_process_pool[cluster_name] = p
-        info = self.replica_info[cluster_name]
+        self.down_process_pool[replica_id] = p
         info.status_property.sky_down_status = ProcessStatus.RUNNING
-
-    def _scale_down(self, n: int) -> None:
-        # Randomly delete n ready replicas
-        all_ready_replicas = self.get_ready_replicas()
-        num_replicas = len(all_ready_replicas)
-        if num_replicas > 0:
-            if n > num_replicas:
-                logger.warning(
-                    f'Trying to delete {n} replicas, but only {num_replicas} '
-                    'replicas exist. Deleting all replicas.')
-                n = num_replicas
-            cluster_to_terminate = random.sample(all_ready_replicas, n)
-            for cluster_name in cluster_to_terminate:
-                logger.info(f'Scaling down cluster {cluster_name}')
-                self._teardown_cluster(cluster_name)
+        serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
     def scale_down(self, n: int) -> None:
-        self._scale_down(n)
+        # Terminate n replicas
+        # TODO(tian): Policy to choose replica to scale down.
+        infos = serve_state.get_replica_infos(self.service_name)
+        for i in range(n):
+            self._teardown_replica(infos[i].replica_id)
 
+    # TODO(tian): Maybe just kill all threads and cleanup using db record
     def terminate(self) -> Optional[str]:
         logger.info('Terminating infra provider daemon threads...')
         self._terminate_daemon_threads()
         logger.info('Terminating all clusters...')
-        for name, p in self.launch_process_pool.items():
+        for replica_id, p in self.launch_process_pool.items():
             # Use keyboard interrupt here since sky.launch has great
             # handling for it
             # Edge case: sky.launched finished after the
@@ -516,19 +573,26 @@ class SkyPilotInfraProvider(InfraProvider):
                 # here since sky.launch has great handling for it.
                 _interrupt_process_and_children(p.pid)
                 p.wait()
-                logger.info(f'Interrupted launch process for cluster {name} '
-                            'and deleted the cluster.')
-                self._teardown_cluster(name, sync_down_logs=False)
-                info = self.replica_info[name]
+                logger.info(
+                    f'Interrupted launch process for replica {replica_id} '
+                    'and deleted the cluster.')
+                self._teardown_replica(replica_id, sync_down_logs=False)
+                info = serve_state.get_replica_info_from_id(
+                    self.service_name, replica_id)
+                assert info is not None
                 # Set to success here for correctly display as shutting down
                 info.status_property.sky_launch_status = ProcessStatus.SUCCEEDED
+                serve_state.add_or_update_replica(self.service_name, replica_id,
+                                                  info)
         msg = []
-        for name, info in self.replica_info.items():
+        infos = serve_state.get_replica_infos(self.service_name)
+        # TODO(tian): Move all cleanup to the control process
+        for info in infos:
             if info.status in [
                     serve_state.ReplicaStatus.FAILED_CLEANUP,
                     serve_state.ReplicaStatus.UNKNOWN,
             ]:
-                msg.append(f'Cluster with status {info.status} found. Please '
+                msg.append(f'Replica with status {info.status} found. Please '
                            'manually check the cloud console to make sure no '
                            'resource leak.')
             # Skip those already deleted and those are deleting
@@ -536,16 +600,19 @@ class SkyPilotInfraProvider(InfraProvider):
                     serve_state.ReplicaStatus.FAILED,
                     serve_state.ReplicaStatus.SHUTTING_DOWN
             ]:
-                self._teardown_cluster(name, sync_down_logs=False)
-        for name, p in self.down_process_pool.items():
+                self._teardown_replica(info.replica_id, sync_down_logs=False)
+        for replica_id, p in self.down_process_pool.items():
             p.wait()
-            logger.info(f'Down process for cluster {name} finished.')
+            logger.info(f'Down process for replica {replica_id} finished.')
             if p.returncode != 0:
-                logger.warning(f'Down process for cluster {name} exited '
+                logger.warning(f'Down process for replica {replica_id} exited '
                                f'abnormally with code {p.returncode}.')
-                msg.append(f'Down process for cluster {name} exited abnormally'
-                           f' with code {p.returncode}. Please login to the '
-                           'controller and make sure the cluster is released.')
+                msg.append(
+                    f'Down process for replica {replica_id} exited abnormally'
+                    f' with code {p.returncode}. Please login to the '
+                    'controller and make sure the replica is released.')
+            else:
+                serve_state.remove_replica(self.service_name, replica_id)
         if not msg:
             return None
         return '\n'.join(msg)
@@ -573,99 +640,80 @@ class SkyPilotInfraProvider(InfraProvider):
             target=self._replica_prober)
         self.replica_prober_thread.start()
 
+    @with_lock
     def _probe_all_replicas(self) -> None:
         replica_info = self.get_replica_info(
             verbose=env_options.Options.SHOW_DEBUG_INFO.get())
         logger.info(f'All replica info: {replica_info}')
 
-        def _probe_replica(info: ReplicaInfo) -> Tuple[str, bool]:
-            replica_ip = info.ip
-            try:
-                msg = ''
-                # TODO(tian): Support HTTPS in the future.
-                readiness_path = f'http://{replica_ip}{self.readiness_suffix}'
-                if self.post_data is not None:
-                    msg += 'Post'
-                    response = requests.post(
-                        readiness_path,
-                        json=self.post_data,
-                        timeout=constants.READINESS_PROBE_TIMEOUT)
-                else:
-                    msg += 'Get'
-                    response = requests.get(
-                        readiness_path,
-                        timeout=constants.READINESS_PROBE_TIMEOUT)
-                msg += (f' request to {replica_ip} returned status code '
-                        f'{response.status_code}')
-                if response.status_code == 200:
-                    msg += '.'
-                else:
-                    msg += f' and response {response.text}.'
-                logger.info(msg)
-                if response.status_code == 200:
-                    logger.info(f'Replica {replica_ip} is ready.')
-                    if self.uptime is None:
-                        self.uptime = time.time()
-                        logger.info(f'Replica {replica_ip} is the first '
-                                    'ready replica. Setting uptime to '
-                                    f'{self.uptime}.')
-                        serve_state.set_uptime(self.service_name,
-                                               int(self.uptime))
-                    return info.cluster_name, True
-            except requests.exceptions.RequestException as e:
-                logger.info(e)
-                logger.info(f'Replica {replica_ip} is not ready.')
-                pass
-            return info.cluster_name, False
-
         probe_futures = []
         replica_to_probe = []
         with futures.ThreadPoolExecutor() as executor:
-            for cluster_name, info in self.replica_info.items():
+            infos = serve_state.get_replica_infos(self.service_name)
+            for info in infos:
                 if not info.status_property.should_track_status():
                     continue
                 replica_to_probe.append((info.cluster_name, info.ip))
-                probe_futures.append(executor.submit(_probe_replica, info))
+                probe_futures.append(
+                    executor.submit(info.probe, self.readiness_suffix,
+                                    self.post_data))
         logger.info(f'Replicas to probe: {replica_to_probe}')
 
         for future in futures.as_completed(probe_futures):
-            cluster_name, probe_succeeded = future.result()
-            info = self.replica_info[cluster_name]
+            future_result: Tuple[ReplicaInfo, bool] = future.result()
+            info, probe_succeeded = future_result
             info.status_property.service_ready_now = probe_succeeded
+            should_teardown = False
             if probe_succeeded:
+                if self.uptime is None:
+                    self.uptime = time.time()
+                    logger.info(f'Replica {info.replica_id} is the first '
+                                'ready replica. Setting uptime to '
+                                f'{self.uptime}.')
+                    serve_state.set_service_uptime(self.service_name,
+                                                   int(self.uptime))
                 info.consecutive_failure_times.clear()
                 if not info.status_property.service_once_ready:
                     info.status_property.service_once_ready = True
-                continue
-            current_time = time.time()
-            if info.first_not_ready_time is None:
-                info.first_not_ready_time = current_time
-            if info.status_property.service_once_ready:
-                info.consecutive_failure_times.append(current_time)
-                consecutive_failure_time = (info.consecutive_failure_times[-1] -
-                                            info.consecutive_failure_times[0])
-                if (consecutive_failure_time >=
-                        _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
-                    logger.info(f'Replica {cluster_name} is  not ready for too '
-                                'long and exceeding consecutive failure '
-                                'threshold. Terminating the replica...')
-                    self._teardown_cluster(cluster_name)
-                else:
-                    logger.info(f'Replica {cluster_name} is not ready but '
-                                'within consecutive failure threshold '
-                                f'({consecutive_failure_time}s / '
-                                f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
-                                'Skipping.')
             else:
-                current_delay_seconds = current_time - info.first_not_ready_time
-                if current_delay_seconds > self.initial_delay_seconds:
-                    logger.info(f'Replica {cluster_name} is not ready and '
-                                'exceeding initial delay seconds. '
-                                'Terminating the replica...')
-                    self._teardown_cluster(cluster_name)
+                current_time = time.time()
+                if info.first_not_ready_time is None:
+                    info.first_not_ready_time = current_time
+                if info.status_property.service_once_ready:
+                    info.consecutive_failure_times.append(current_time)
+                    consecutive_failure_time = (
+                        info.consecutive_failure_times[-1] -
+                        info.consecutive_failure_times[0])
+                    if (consecutive_failure_time >=
+                            _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
+                        logger.info(
+                            f'Replica {info.replica_id} is  not ready for too '
+                            'long and exceeding consecutive failure '
+                            'threshold. Terminating the replica...')
+                        should_teardown = True
+                    else:
+                        logger.info(
+                            f'Replica {info.replica_id} is not ready but '
+                            'within consecutive failure threshold '
+                            f'({consecutive_failure_time}s / '
+                            f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
+                            'Skipping.')
                 else:
-                    current_delay_seconds = int(current_delay_seconds)
-                    logger.info(
-                        f'Replica {cluster_name} is not ready but within '
-                        f'initial delay seconds ({current_delay_seconds}s / '
-                        f'{self.initial_delay_seconds}s). Skipping.')
+                    current_delay_seconds = (current_time -
+                                             info.first_not_ready_time)
+                    if current_delay_seconds > self.initial_delay_seconds:
+                        logger.info(
+                            f'Replica {info.replica_id} is not ready and '
+                            'exceeding initial delay seconds. Terminating '
+                            'the replica...')
+                        should_teardown = True
+                    else:
+                        current_delay_seconds = int(current_delay_seconds)
+                        logger.info(
+                            f'Replica {info.replica_id} is not ready but within'
+                            f' initial delay seconds ({current_delay_seconds}s '
+                            f'/ {self.initial_delay_seconds}s). Skipping.')
+            serve_state.add_or_update_replica(self.service_name,
+                                              info.replica_id, info)
+            if should_teardown:
+                self._teardown_replica(info.replica_id)

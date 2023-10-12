@@ -2,13 +2,18 @@
 import collections
 import enum
 import pathlib
+import pickle
 import sqlite3
+import typing
 from typing import Any, Dict, List, Optional
 
 import colorama
 
 from sky.serve import constants
 from sky.utils import db_utils
+
+if typing.TYPE_CHECKING:
+    from sky.serve import infra_providers
 
 _DB_PATH = pathlib.Path(constants.SERVE_PREFIX) / 'services.db'
 _DB_PATH = _DB_PATH.expanduser().absolute()
@@ -27,9 +32,16 @@ _CURSOR.execute("""\
     controller_port INTEGER,
     status TEXT,
     uptime INTEGER DEFAULT NULL)""")
+_CURSOR.execute("""\
+    CREATE TABLE IF NOT EXISTS replicas (
+    service_name TEXT,
+    replica_id INTEGER,
+    replica_info BLOB,
+    PRIMARY KEY (service_name, replica_id))""")
 _CONN.commit()
 
 
+# === Statuses ===
 class ReplicaStatus(enum.Enum):
     """Replica status."""
 
@@ -137,6 +149,7 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
+# === Service functions ===
 def add_service(job_id: int, service_name: str, controller_port: int) -> None:
     """Adds a service to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -155,7 +168,7 @@ def remove_service(service_name: str) -> None:
             DELETE FROM services WHERE name=(?)""", (service_name,))
 
 
-def set_uptime(service_name: str, uptime: int) -> None:
+def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -164,7 +177,7 @@ def set_uptime(service_name: str, uptime: int) -> None:
             uptime=(?) WHERE name=(?)""", (uptime, service_name))
 
 
-def set_status(service_name: str, status: ServiceStatus) -> None:
+def set_service_status(service_name: str, status: ServiceStatus) -> None:
     """Sets the service status."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -202,3 +215,51 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
         for row in rows:
             return _get_service_from_row(row)
         return None
+
+
+# === Replica functions ===
+def add_or_update_replica(service_name: str, replica_id: int,
+                          replica_info: 'infra_providers.ReplicaInfo') -> None:
+    """Adds a replica to the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT INTO replicas
+            (service_name, replica_id, replica_info)
+            VALUES (?, ?, ?)""",
+            (service_name, replica_id, pickle.dumps(replica_info)))
+
+
+def remove_replica(service_name: str, replica_id: int) -> None:
+    """Removes a replica from the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM replicas
+            WHERE service_name=(?)
+            AND replica_id=(?)""", (service_name, replica_id))
+
+
+def get_replica_info_from_id(
+        service_name: str,
+        replica_id: int) -> Optional['infra_providers.ReplicaInfo']:
+    """Gets a replica info from the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT replica_info FROM replicas
+            WHERE service_name=(?)
+            AND replica_id=(?)""", (service_name, replica_id)).fetchall()
+        for row in rows:
+            return pickle.loads(row[0])
+        return None
+
+
+def get_replica_infos(service_name: str) -> List['infra_providers.ReplicaInfo']:
+    """Gets all replica infos of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT replica_info FROM replicas
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+        return [pickle.loads(row[0]) for row in rows]

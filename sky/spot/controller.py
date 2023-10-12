@@ -86,38 +86,12 @@ class SpotController:
         """
         spot_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                          'spot_jobs')
-        os.makedirs(spot_job_logs_dir, exist_ok=True)
-        try:
-            log_dirs = self._backend.sync_down_logs(
-                handle,
-                # Download the log of the latest job.
-                # The job_id for the spot job running on the spot cluster is not
-                # necessarily 1, as it is possible that the worker node in a
-                # multi-node cluster is preempted, and we recover the spot job
-                # on the existing cluster, which leads to a larger job_id. Those
-                # job_ids all represent the same logical spot job.
-                job_ids=None,
-                local_dir=spot_job_logs_dir)
-        except exceptions.CommandError as e:
-            logger.info(f'Failed to download the logs: '
-                        f'{common_utils.format_exception(e)}')
-        else:
-            if not log_dirs:
-                logger.error('Failed to find the logs for the user program in '
-                             'the spot cluster.')
-            else:
-                log_dir = list(log_dirs.values())[0]
-                log_file = os.path.join(log_dir, 'run.log')
-
-                # Print the logs to the console.
-                try:
-                    with open(log_file) as f:
-                        print(f.read())
-                except FileNotFoundError:
-                    logger.error('Failed to find the logs for the user '
-                                 f'program at {log_file}.')
-                else:
-                    logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
+        backend_utils.download_and_stream_latest_job_log(
+            self._backend,
+            handle,
+            spot_job_logs_dir,
+            log_position_hint='spot cluster',
+            log_finish_hint=f'ID: {self._job_id}')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.

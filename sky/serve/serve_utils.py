@@ -315,7 +315,7 @@ def set_service_status_from_replica_info(
         # terminated, the service status will still be READY, but we don't want
         # change service status to READY.
         return
-    serve_state.set_status(
+    serve_state.set_service_status(
         service_name, serve_state.ServiceStatus.from_replica_info(replica_info))
 
 
@@ -328,8 +328,8 @@ def update_service_status() -> None:
         controller_status = job_lib.get_status(record['controller_job_id'])
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
-            serve_state.set_status(record['name'],
-                                   serve_state.ServiceStatus.CONTROLLER_FAILED)
+            serve_state.set_service_status(
+                record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
 class ServiceHandle(object):
