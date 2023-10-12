@@ -45,7 +45,7 @@ logger = sky_logging.init_logger(__name__)
 # use multiple clouds. The non-AWS nodes will have neither the credential
 # file nor the ability to understand AWS IAM.
 _CREDENTIAL_FILES = [
-    # 'credentials',
+    'credentials',
 ]
 
 DEFAULT_AMI_GB = 45
