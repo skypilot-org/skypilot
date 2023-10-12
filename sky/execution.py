@@ -745,15 +745,23 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        _execute(
-            entrypoint=controller_task,
-            stream_logs=stream_logs,
-            cluster_name=controller_name,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=spot.
-            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-        )
+        try:
+            _execute(
+                entrypoint=controller_task,
+                stream_logs=stream_logs,
+                cluster_name=controller_name,
+                detach_run=detach_run,
+                idle_minutes_to_autostop=spot.
+                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                retry_until_up=True,
+            )
+        except exceptions.ResourcesMismatchError:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Modifying spot controller resources is not supported. '
+                    'Please change the spot.controller.resources in '
+                    '~/.sky/config.yaml file to the original values or remove '
+                    'it instead.') from None
 
 
 def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
