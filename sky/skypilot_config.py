@@ -162,10 +162,11 @@ def _try_load_config() -> None:
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
         if _dict is not None:
-            common_utils.validate_schema(_dict,
-                                         schemas.get_config_schema(),
-                                         'Invalid config YAML: ',
-                                         skip_none=False)
+            common_utils.validate_schema(
+                _dict,
+                schemas.get_config_schema(),
+                f'Invalid config YAML ({config_path}): ',
+                skip_none=False)
 
         for cloud in cloud_registry.CLOUD_REGISTRY:
             _syntax_check_for_ssh_proxy_command(cloud)
