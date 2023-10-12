@@ -8,7 +8,7 @@ https://json-schema.org/
 def get_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
-    from sky.clouds.service_catalog import _ALL_CLOUDS
+    from sky.clouds import service_catalog
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
@@ -17,7 +17,7 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'case_insensitive_enum': list(_ALL_CLOUDS)
+                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
             },
             'region': {
                 'type': 'string',
