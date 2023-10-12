@@ -16,5 +16,3 @@ service:
     # For install dependencies
     initial_delay_seconds: 180
   replicas: 3
-  controller_resources:
-    cloud: gcp

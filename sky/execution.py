@@ -63,6 +63,11 @@ The command can then be run as:
 
   sky.spot_launch(task, ...)
 """.strip()
+_CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
+    '{controller_type} controller resources is not valid, please check '
+    '~/.sky/config.yaml file and make sure '
+    '{controller_type}.controller.resources is a valid resources spec. '
+    'Details:\n  {err}')
 
 
 def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
@@ -737,12 +742,10 @@ def spot_launch(
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Spot controller resources is not valid, please check '
-                    '~/.sky/config.yaml file and make sure '
-                    'spot.controller.resources is a valid resources spec. '
-                    'Details:\n'
-                    f'  {common_utils.format_exception(e, use_bracket=True)}'
-                ) from e
+                    _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                        controller_type='spot',
+                        err=common_utils.format_exception(
+                            e, use_bracket=True))) from e
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
@@ -986,8 +989,12 @@ def serve_up(
             raise RuntimeError('Service section not found.')
     controller_resources_config: Dict[str, Any] = copy.copy(
         serve.CONTROLLER_RESOURCES)
-    if task.service.controller_resources is not None:
-        controller_resources_config.update(task.service.controller_resources)
+    # Override the controller resources with the ones specified in the
+    # config.
+    custom_controller_resources_config = skypilot_config.get_nested(
+        ('serve', 'controller', 'resources'), None)
+    if custom_controller_resources_config is not None:
+        controller_resources_config.update(custom_controller_resources_config)
     if 'ports' in controller_resources_config:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify ports for controller resources.')
@@ -997,7 +1004,10 @@ def serve_up(
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Encountered error when parsing controller resources') from e
+                _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type='serve',
+                    err=common_utils.format_exception(e,
+                                                      use_bracket=True))) from e
 
     assert task.service is not None, task
     assert len(task.resources) == 1, task
@@ -1021,8 +1031,7 @@ def serve_up(
         with filelock.FileLock(
                 os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH),
                 serve.CONTROLLER_FILE_LOCK_TIMEOUT):
-            controller_name, _ = serve.get_available_controller_name(
-                controller_resources)
+            controller_name, _ = serve.get_available_controller_name()
             controller_port, load_balancer_port = (
                 serve.gen_ports_for_serve_process(controller_name))
 

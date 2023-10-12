@@ -25,7 +25,6 @@ class SkyServiceSpec:
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        controller_resources: Optional[Dict[str, Any]] = None,
         auto_restart: bool = False,
     ) -> None:
         if min_replicas < 0:
@@ -54,7 +53,6 @@ class SkyServiceSpec:
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
-        self._controller_resources = controller_resources
         self._auto_restart = auto_restart
 
     @staticmethod
@@ -118,9 +116,6 @@ class SkyServiceSpec:
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', False)
 
-        service_config['controller_resources'] = config.pop(
-            'controller_resources', None)
-
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -169,8 +164,6 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
-        add_if_not_none('controller_resources', None,
-                        self._controller_resources)
 
         return config
 
@@ -231,10 +224,6 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
-
-    @property
-    def controller_resources(self) -> Optional[Dict[str, Any]]:
-        return self._controller_resources
 
     @property
     def auto_restart(self) -> bool:

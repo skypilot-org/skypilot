@@ -7,8 +7,6 @@ service:
   port: 8087
   readiness_probe: /v1/models
   replicas: 1
-  controller_resources:
-    cloud: gcp
 
 setup: |
   conda activate chatbot

@@ -15,5 +15,3 @@ service:
   replica_policy:
     min_replicas: 1
     auto_restart: true
-  controller_resources:
-    cloud: gcp

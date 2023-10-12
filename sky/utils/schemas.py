@@ -213,10 +213,6 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
-            # resources config is validated separately using RESOURCES_SCHEMA
-            'controller_resources': {
-                'type': 'object',
-            },
         }
     }
 

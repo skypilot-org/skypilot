@@ -16,6 +16,9 @@
 # Only run managed spot tests
 # > pytest tests/test_smoke.py --managed-spot
 #
+# Only run sky serve tests
+# > pytest tests/test_smoke.py --sky-serve
+#
 # Only run test for AWS + generic tests
 # > pytest tests/test_smoke.py --aws
 #
@@ -2673,6 +2676,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
 
 
 @pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_gcp_http():
     """Test skyserve on GCP"""
     name = _get_service_name()
@@ -2681,6 +2685,7 @@ def test_skyserve_gcp_http():
 
 
 @pytest.mark.aws
+@pytest.mark.sky_serve
 def test_skyserve_aws_http():
     """Test skyserve on AWS"""
     name = _get_service_name()
@@ -2689,6 +2694,7 @@ def test_skyserve_aws_http():
 
 
 @pytest.mark.azure
+@pytest.mark.sky_serve
 def test_skyserve_azure_http():
     """Test skyserve on Azure"""
     name = _get_service_name()
@@ -2697,15 +2703,7 @@ def test_skyserve_azure_http():
 
 
 @pytest.mark.gcp
-@pytest.mark.aws
-def test_skyserve_mixed_cloud_http():
-    """Test skyserve on mixed cloud"""
-    name = _get_service_name()
-    test = _get_skyserve_http_test(name, 'mixed_cloud', 20)
-    run_one_test(test)
-
-
-@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_llm():
     """Test skyserve with real LLM usecase"""
     name = _get_service_name()
@@ -2737,6 +2735,7 @@ def test_skyserve_llm():
 
 
 @pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_replica_failure():
     """Test skyserve with manually interrupting some replica"""
     name = _get_service_name()
@@ -2783,6 +2782,7 @@ def test_skyserve_replica_failure():
 
 
 @pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
