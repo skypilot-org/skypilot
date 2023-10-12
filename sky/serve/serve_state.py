@@ -224,7 +224,7 @@ def add_or_update_replica(service_name: str, replica_id: int,
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            INSERT INTO replicas
+            INSERT OR REPLACE INTO replicas
             (service_name, replica_id, replica_info)
             VALUES (?, ?, ?)""",
             (service_name, replica_id, pickle.dumps(replica_info)))
