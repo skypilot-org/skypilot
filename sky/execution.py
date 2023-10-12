@@ -755,13 +755,13 @@ def spot_launch(
                 SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                 retry_until_up=True,
             )
-        except exceptions.ResourcesMismatchError:
+        except exceptions.ResourcesMismatchError as e:
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
+                raise RuntimeError(
                     'Modifying spot controller resources is not supported. '
                     'Please change the spot.controller.resources in '
-                    '~/.sky/config.yaml file to the original values or remove '
-                    'it instead.') from None
+                    '~/.sky/config.yaml file to the original values or '
+                    'remove it instead.') from e
 
 
 def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
