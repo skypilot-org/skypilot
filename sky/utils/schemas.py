@@ -338,9 +338,9 @@ def get_config_schema():
                         'type': 'array',
                         'items': {
                             'type': 'string',
-                            'minItems': 1,
-                            'maxItems': 1,
-                        }
+                        },
+                        'minItems': 1,
+                        'maxItems': 1,
                     },
                 }
             },
