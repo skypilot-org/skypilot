@@ -87,6 +87,7 @@ def launch(name: str, instance_type: str, region: str):
         image_name="runpod/base:0.0.1",
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
+        container_disk_in_gb=100,
         min_vcpu_count=4*gpu_quantity,
         min_memory_in_gb=gpu_specs["memoryInGb"]*gpu_quantity,
         country_code=region,
