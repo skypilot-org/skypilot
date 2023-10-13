@@ -628,7 +628,8 @@ def stream_replica_logs(service_name: str,
     return ''
 
 
-def _follow_logs(file: TextIO, exit_if_stream_end: bool) -> Iterator[str]:
+def _follow_logs(file: TextIO, *, finish_stream: Callable[[], bool],
+                 exit_if_stream_end: bool) -> Iterator[str]:
     line = ''
     while True:
         tmp = file.readline()
@@ -638,7 +639,7 @@ def _follow_logs(file: TextIO, exit_if_stream_end: bool) -> Iterator[str]:
                 yield line
                 line = ''
         else:
-            if exit_if_stream_end:
+            if exit_if_stream_end or finish_stream():
                 break
             time.sleep(1)
 
@@ -652,8 +653,17 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         log_file = generate_remote_controller_log_file_name(service_name)
     else:
         log_file = generate_remote_load_balancer_log_file_name(service_name)
+
+    def _service_is_terminal() -> bool:
+        record = serve_state.get_service_from_name(service_name)
+        if record is None:
+            return True
+        return record['status'] in serve_state.ServiceStatus.failed_statuses()
+
     with open(os.path.expanduser(log_file), 'r', newline='') as f:
-        for line in _follow_logs(f, exit_if_stream_end=not follow):
+        for line in _follow_logs(f,
+                                 finish_stream=_service_is_terminal,
+                                 exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     return ''
 

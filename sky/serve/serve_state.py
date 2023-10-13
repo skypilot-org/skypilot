@@ -76,10 +76,10 @@ class ReplicaStatus(enum.Enum):
     UNKNOWN = 'UNKNOWN'
 
     @classmethod
-    def failed_statuses(cls):
+    def failed_statuses(cls) -> List['ReplicaStatus']:
         return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
-    def colored_str(self):
+    def colored_str(self) -> str:
         color = _REPLICA_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
@@ -121,7 +121,11 @@ class ServiceStatus(enum.Enum):
     # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
-    def colored_str(self):
+    @classmethod
+    def failed_statuses(cls) -> List['ServiceStatus']:
+        return [cls.CONTROLLER_FAILED, cls.UNKNOWN, cls.FAILED]
+
+    def colored_str(self) -> str:
         color = _SERVICE_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
