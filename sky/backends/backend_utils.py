@@ -2842,12 +2842,13 @@ def refresh_service_status(
 def download_and_stream_latest_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle', local_dir: str,
-        log_position_hint: str, log_finish_hint: str) -> None:
+        log_position_hint: str, log_finish_hint: str) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by spot controller and sky serve controller.
     """
     os.makedirs(local_dir, exist_ok=True)
+    log_file = None
     try:
         log_dirs = backend.sync_down_logs(
             handle,
@@ -2879,6 +2880,7 @@ def download_and_stream_latest_job_log(
                              f'program at {log_file}.')
             else:
                 logger.info(f'\n== End of logs ({log_finish_hint}) ==')
+    return log_file
 
 
 @typing.overload

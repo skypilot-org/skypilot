@@ -403,16 +403,7 @@ class SkyPilotInfraProvider(InfraProvider):
                                                   info.replica_id, info)
                 logger.warning(
                     f'User APP for replica {info.replica_id} FAILED. '
-                    'Start streaming logs...')
-                replica_job_logs_dir = os.path.join(
-                    constants.SKY_LOGS_DIRECTORY, 'replica_jobs')
-                backend_utils.download_and_stream_latest_job_log(
-                    backend,
-                    handle,
-                    replica_job_logs_dir,
-                    log_position_hint='replica cluster',
-                    log_finish_hint=f'Replica: {info.replica_id}')
-                logger.info('Terminating...')
+                    'Terminating...')
                 self._teardown_replica(info.replica_id, sync_down_logs=True)
 
     def _job_status_fetcher(self) -> None:
@@ -489,36 +480,44 @@ class SkyPilotInfraProvider(InfraProvider):
             self._launch_replica(self.next_replica_id)
             self.next_replica_id += 1
 
-    def _teardown_replica(self,
-                          replica_id: int,
-                          sync_down_logs: bool = True) -> None:
+    def _teardown_replica(self, replica_id: int, sync_down_logs: bool) -> None:
         if replica_id in self.down_process_pool:
             logger.warning(f'Down process for replica {replica_id} already '
                            'exists. Skipping.')
             return
 
-        if sync_down_logs:
+        def _sync_down_logs():
+            info = serve_state.get_replica_info_from_id(self.service_name,
+                                                        replica_id)
+            if info is None:
+                logger.error(f'Cannot find replica {replica_id} in the '
+                             'replica table. Skipping syncing down logs.')
+                return
             logger.info(f'Syncing down logs for replica {replica_id}...')
-            # TODO(tian): Maybe use
-            # backend_utils.download_and_stream_latest_job_log here
-            code = serve_utils.ServeCodeGen.stream_replica_logs(
-                self.service_name,
-                replica_id,
-                follow=False,
-                skip_local_log_file_check=True)
-            local_log_file_name = (
-                serve_utils.generate_replica_local_log_file_name(
-                    self.service_name, replica_id))
-            with open(local_log_file_name, 'w') as f:
-                try:
-                    subprocess.run(code, shell=True, check=True, stdout=f)
-                except Exception as e:  # pylint: disable=broad-except
-                    # No matter what error happens, we should teardown the
-                    # cluster.
-                    msg = ('Error in syncing down logs for replica '
-                           f'{replica_id}: {e}')
-                    logger.error(msg)
-                    print(msg, file=f)
+            backend = backends.CloudVmRayBackend()
+            handle = global_user_state.get_handle_from_cluster_name(
+                info.cluster_name)
+            if handle is None:
+                logger.error(f'Cannot find cluster {info.cluster_name} '
+                             'in the cluster table. Skipping syncing '
+                             'down logs.')
+                return
+            replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                                'replica_jobs')
+            log_file = backend_utils.download_and_stream_latest_job_log(
+                backend,
+                handle,
+                replica_job_logs_dir,
+                log_position_hint='replica cluster',
+                log_finish_hint=f'Replica: {replica_id}')
+            if log_file is not None:
+                local_log_file_name = (
+                    serve_utils.generate_replica_local_log_file_name(
+                        self.service_name, replica_id))
+                os.rename(log_file, local_log_file_name)
+
+        if sync_down_logs:
+            _sync_down_logs()
 
         logger.info(f'Deleting replica {replica_id}')
         info = serve_state.get_replica_info_from_id(self.service_name,
@@ -546,7 +545,7 @@ class SkyPilotInfraProvider(InfraProvider):
                          f'only {len(infos)} replicas. Scale down all '
                          'replicas instead.')
         for i in range(min(n, len(infos))):
-            self._teardown_replica(infos[i].replica_id)
+            self._teardown_replica(infos[i].replica_id, sync_down_logs=False)
 
     # TODO(tian): Maybe just kill all threads and cleanup using db record
     def terminate(self) -> Optional[str]:
@@ -717,4 +716,4 @@ class SkyPilotInfraProvider(InfraProvider):
             serve_state.add_or_update_replica(self.service_name,
                                               info.replica_id, info)
             if should_teardown:
-                self._teardown_replica(info.replica_id)
+                self._teardown_replica(info.replica_id, sync_down_logs=True)

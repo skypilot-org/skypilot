@@ -50,6 +50,10 @@ KeyType = TypeVar('KeyType')
 ValueType = TypeVar('ValueType')
 
 
+# Google style guide: Do not rely on the atomicity of built-in types.
+# Our launch and down process pool will be used by multiple threads,
+# therefore we need to use a thread-safe dict.
+# see https://google.github.io/styleguide/pyguide.html#218-threading
 class ThreadSafeDict(Generic[KeyType, ValueType]):
     """A thread-safe dict."""
 
@@ -616,8 +620,8 @@ def stream_replica_logs(service_name: str,
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
     backend = backends.CloudVmRayBackend()
-    # Always tail the logs of the first job, which represent user setup & run.
-    returncode = backend.tail_logs(handle, job_id=1, follow=follow)
+    # Always tail the latest logs, which represent user setup & run.
+    returncode = backend.tail_logs(handle, job_id=None, follow=follow)
     if returncode != 0:
         return (f'{colorama.Fore.RED}Failed to stream logs for replica '
                 f'{replica_id}.{colorama.Style.RESET_ALL}')
