@@ -4,15 +4,11 @@ import dataclasses
 import enum
 import logging
 import time
-import typing
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
-
-if typing.TYPE_CHECKING:
-    from sky.serve import infra_providers
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +52,9 @@ class Autoscaler:
             self, request_information: serve_utils.RequestInformation) -> None:
         raise NotImplementedError
 
-    def evaluate_scaling(
-            self,
-            infos: List['infra_providers.ReplicaInfo']) -> AutoscalerDecision:
+    def evaluate_scaling(self, infos: List[Dict[str,
+                                                Any]]) -> AutoscalerDecision:
+        """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
 
@@ -98,15 +94,15 @@ class RequestRateAutoscaler(Autoscaler):
                                    current_time - self.rps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
-    def evaluate_scaling(
-            self,
-            infos: List['infra_providers.ReplicaInfo']) -> AutoscalerDecision:
+    def evaluate_scaling(self, infos: List[Dict[str,
+                                                Any]]) -> AutoscalerDecision:
         current_time = time.time()
         if not self.auto_restart:
             num_nodes = len(infos)
         else:
             num_nodes = len([
-                i for i in infos if i.status != serve_state.ReplicaStatus.FAILED
+                i for i in infos
+                if i['status'] != serve_state.ReplicaStatus.FAILED
             ])
 
         # Check if cooldown period has passed since the last scaling operation.

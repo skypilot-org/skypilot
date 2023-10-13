@@ -107,7 +107,6 @@ class SkyServeController:
             request_data = asyncio.run(request.json())
             request_information_payload = request_data.get(
                 'request_information')
-            logger.info(request_information_payload)
             request_information = pickle.loads(
                 base64.b64decode(request_information_payload))
             logger.info(

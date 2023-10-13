@@ -623,8 +623,12 @@ class SkyPilotInfraProvider(InfraProvider):
             logger.info('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                serve_utils.set_service_status_from_replica_info(
-                    self.service_name, self.get_replica_info(verbose=True))
+                replica_statuses = [
+                    info['status']
+                    for info in self.get_replica_info(verbose=False)
+                ]
+                serve_utils.set_service_status_from_replica_statuses(
+                    self.service_name, replica_statuses)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # replica prober running.

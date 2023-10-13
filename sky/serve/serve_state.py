@@ -126,9 +126,9 @@ class ServiceStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
     @classmethod
-    def from_replica_info(
-            cls, replica_info: List[Dict[str, Any]]) -> 'ServiceStatus':
-        status2num = collections.Counter([i['status'] for i in replica_info])
+    def from_replica_statuses(
+            cls, replica_statuses: List[ReplicaStatus]) -> 'ServiceStatus':
+        status2num = collections.Counter(replica_statuses)
         # If one replica is READY, the service is READY.
         if status2num[ReplicaStatus.READY] > 0:
             return cls.READY

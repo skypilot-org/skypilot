@@ -320,8 +320,9 @@ def get_available_controller_name() -> Tuple[str, bool]:
                key=lambda k: controller2slots[k]), False
 
 
-def set_service_status_from_replica_info(
-        service_name: str, replica_info: List[Dict[str, Any]]) -> None:
+def set_service_status_from_replica_statuses(
+        service_name: str,
+        replica_statuses: List[serve_state.ReplicaStatus]) -> None:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist. '
@@ -333,7 +334,8 @@ def set_service_status_from_replica_info(
         # change service status to READY.
         return
     serve_state.set_service_status(
-        service_name, serve_state.ServiceStatus.from_replica_info(replica_info))
+        service_name,
+        serve_state.ServiceStatus.from_replica_statuses(replica_statuses))
 
 
 def update_service_status() -> None:
