@@ -1,11 +1,12 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
 import argparse
+import base64
+import pickle
 import threading
 import time
 
 import fastapi
 import requests
-from urllib3 import exceptions
 import uvicorn
 
 from sky import sky_logging
@@ -38,24 +39,8 @@ class SkyServeLoadBalancer:
         # This is the port where the replica app listens to.
         self.replica_port = replica_port
         self.load_balancing_policy = load_balancing_policy
-        self.setup_query_interval()
-
-    def setup_query_interval(self):
-        for _ in range(3):
-            try:
-                resp = requests.get(self.controller_url +
-                                    '/controller/get_autoscaler_query_interval')
-            except exceptions.MaxRetryError:
-                # Retry if cannot connect to controller
-                continue
-            if resp.status_code == 200:
-                self.load_balancing_policy.set_query_interval(
-                    resp.json()['query_interval'])
-                return
-            time.sleep(10)
-        logger.error('Failed to get autoscaler query interval. '
-                     'Use default interval instead.')
-        self.load_balancing_policy.set_query_interval(None)
+        self.request_information: serve_utils.RequestInformation = (
+            serve_utils.RequestTimestamp())
 
     def _sync_with_controller(self):
         while True:
@@ -74,14 +59,18 @@ class SkyServeLoadBalancer:
                         logger.info('Controller is terminating. '
                                     'Shutting down load balancer.')
                         serve_utils.kill_children_and_self_processes()
-                    # send request num in last query interval
+                    # send request information
                     response = session.post(
-                        self.controller_url + '/controller/update_num_requests',
+                        self.controller_url +
+                        '/controller/report_request_information',
                         json={
-                            'num_requests': self.load_balancing_policy.
-                                            deprecate_old_requests()
+                            'request_information': base64.b64encode(
+                                pickle.dumps(self.request_information)
+                            ).decode('utf-8')
                         },
                         timeout=5)
+                    # Clean up after reporting request information to avoid OOM.
+                    self.request_information.clear()
                     response.raise_for_status()
                     # get replica ips
                     response = session.get(self.controller_url +
@@ -97,7 +86,7 @@ class SkyServeLoadBalancer:
             time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
 
     async def _redirect_handler(self, request: fastapi.Request):
-        self.load_balancing_policy.increment_request_count(1)
+        self.request_information.add(request)
         replica_ip = self.load_balancing_policy.select_replica(request)
 
         if replica_ip is None:

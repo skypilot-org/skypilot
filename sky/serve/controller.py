@@ -17,6 +17,7 @@ from sky import authentication
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
+from sky.serve import constants
 from sky.serve import infra_providers
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -66,22 +67,23 @@ class SkyServeController:
 
     def run(self) -> None:
 
-        @self.app.post('/controller/update_num_requests')
-        def update_num_requests(request: fastapi.Request):
-            # await request
+        @self.app.post('/controller/report_request_information')
+        def report_request_information(request: fastapi.Request):
             request_data = asyncio.run(request.json())
-            # get request data
-            num_requests = request_data['num_requests']
-            logger.info(f'Received request: {request_data}')
+            request_information_payload = request_data.get(
+                'request_information')
+            request_information = pickle.loads(
+                base64.b64decode(request_information_payload))
+            logger.info(
+                f'Received request information: {request_information!r}')
             if isinstance(self.autoscaler, autoscalers.RequestRateAutoscaler):
-                self.autoscaler.set_num_requests(num_requests)
+                if not isinstance(request_information,
+                                  serve_utils.RequestTimestamp):
+                    raise ValueError('Request information must be of type '
+                                     'serve_utils.RequestTimestamp for '
+                                     'RequestRateAutoscaler.')
+                self.autoscaler.update_request_information(request_information)
             return {'message': 'Success'}
-
-        @self.app.get('/controller/get_autoscaler_query_interval')
-        def get_autoscaler_query_interval():
-            if isinstance(self.autoscaler, autoscalers.RequestRateAutoscaler):
-                return {'query_interval': self.autoscaler.get_query_interval()}
-            return {'query_interval': None}
 
         @self.app.get('/controller/get_ready_replicas')
         def get_ready_replicas():
@@ -183,13 +185,13 @@ if __name__ == '__main__':
     _autoscaler = autoscalers.RequestRateAutoscaler(
         _infra_provider,
         auto_restart=service_spec.auto_restart,
-        frequency=20,
+        frequency=constants.AUTOSCALER_SCALE_FREQUENCY,
         min_nodes=service_spec.min_replicas,
         max_nodes=service_spec.max_replicas,
         upper_threshold=service_spec.qps_upper_threshold,
         lower_threshold=service_spec.qps_lower_threshold,
         cooldown=60,
-        query_interval=60)
+        query_interval=constants.AUTOSCALER_QUERY_INTERVAL)
 
     # ======= SkyServeController =========
     controller = SkyServeController(args.controller_port, _infra_provider,

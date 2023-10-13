@@ -1,11 +1,13 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
+import bisect
 import logging
 import threading
 import time
-from typing import Optional
+from typing import List, Optional
 
 from sky.serve import constants
 from sky.serve import infra_providers
+from sky.serve import serve_utils
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,10 @@ class Autoscaler:
                            'controller sync interval. It might '
                            'not always got the latest information.')
 
+    def update_request_information(
+            self, request_information: serve_utils.RequestInformation) -> None:
+        raise NotImplementedError
+
     def evaluate_scaling(self) -> None:
         raise NotImplementedError
 
@@ -48,14 +54,17 @@ class Autoscaler:
 
     def run(self) -> None:
         logger.info('Starting autoscaler monitor.')
-        while not self.run_thread_stop_event.is_set():
+        while True:
             try:
                 self.evaluate_scaling()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
                 logger.error(f'Error in autoscaler: {e}')
-            time.sleep(self.frequency)
+            for _ in range(self.frequency):
+                if self.run_thread_stop_event.is_set():
+                    return
+                time.sleep(1)
 
     def start(self) -> None:
         self.run_thread_stop_event = threading.Event()
@@ -86,18 +95,24 @@ class RequestRateAutoscaler(Autoscaler):
         self.query_interval: int = query_interval
         # Time of last scale operation
         self.last_scale_operation: float = 0.
-        # Number of requests in the last `query_interval` seconds.
-        self.num_requests: int = 0
+        # All request timestamps
+        self.request_timestamps: List[float] = []
         # Upper threshold for scale up. If None, no scale up.
         self.upper_threshold: Optional[float] = upper_threshold
         # Lower threshold for scale down. If None, no scale down.
         self.lower_threshold: Optional[float] = lower_threshold
 
-    def set_num_requests(self, num_requests: int) -> None:
-        self.num_requests = num_requests
-
-    def get_query_interval(self) -> int:
-        return self.query_interval
+    def update_request_information(
+            self, request_information: serve_utils.RequestInformation) -> None:
+        if not isinstance(request_information, serve_utils.RequestTimestamp):
+            raise ValueError('Request information must be of type '
+                             'serve_utils.RequestTimestamp for '
+                             'RequestRateAutoscaler.')
+        self.request_timestamps.extend(request_information.get())
+        current_time = time.time()
+        index = bisect.bisect_left(self.request_timestamps,
+                                   current_time - self.query_interval)
+        self.request_timestamps = self.request_timestamps[index:]
 
     def evaluate_scaling(self) -> None:
         current_time = time.time()
@@ -117,7 +132,8 @@ class RequestRateAutoscaler(Autoscaler):
                 return
 
         # Convert to requests per second.
-        num_requests_per_second = float(self.num_requests) / self.query_interval
+        num_requests_per_second = float(len(
+            self.request_timestamps)) / self.query_interval
         # Edge case: num_nodes is zero.
         requests_per_node = (num_requests_per_second / num_nodes
                              if num_nodes else num_requests_per_second)

@@ -36,6 +36,13 @@ READINESS_PROBE_TIMEOUT = 15
 # Wait for 1 minutes for controller / load balancer to terminate.
 SERVE_TERMINATE_WAIT_TIMEOUT = 60
 
+# Autoscaler query interval (window size) for request per second. We calculate
+# rps by divide the number of requests in last query interval by this interval.
+AUTOSCALER_QUERY_INTERVAL = 60
+# Autoscaler scale frequency. We will try to scale up/down every
+# `scale_frequency`.
+AUTOSCALER_SCALE_FREQUENCY = 20
+
 # The default controller resources.
 # We need 200 GB disk space to enable using Azure as controller, since its image
 # size is 150 GB. Also, we need 32 GB memory to run our controller and load

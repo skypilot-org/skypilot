@@ -27,6 +27,8 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
+    import fastapi
+
     import sky
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
@@ -82,6 +84,48 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
     def values(self):
         with self._lock:
             return self._dict.values()
+
+
+class RequestInformation:
+    """Base class for request information."""
+
+    def add(self, request: 'fastapi.Request') -> None:
+        """Add a request to the request information."""
+        raise NotImplementedError
+
+    def get(self) -> List[Any]:
+        """Get all current request information."""
+        raise NotImplementedError
+
+    def clear(self) -> None:
+        """Clear all current request information."""
+        raise NotImplementedError
+
+    def __repr__(self) -> str:
+        raise NotImplementedError
+
+
+class RequestTimestamp(RequestInformation):
+    """RequestTimestamp: Request information that stores request timestamps."""
+
+    def __init__(self) -> None:
+        self.timestamps: List[float] = []
+
+    def add(self, request: 'fastapi.Request') -> None:
+        """Add a request to the request information."""
+        del request  # unused
+        self.timestamps.append(time.time())
+
+    def get(self) -> List[float]:
+        """Get all current request information."""
+        return self.timestamps
+
+    def clear(self) -> None:
+        """Clear all current request information."""
+        self.timestamps = []
+
+    def __repr__(self) -> str:
+        return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
 def kill_children_and_self_processes() -> None:
