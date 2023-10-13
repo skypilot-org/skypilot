@@ -24,6 +24,9 @@ CONTROLLER_FILE_LOCK_TIMEOUT = 20
 # for each service, also send the number of requests in last query interval.
 CONTROLLER_SYNC_INTERVAL = 20
 
+# Interval to probe replica endpoint.
+ENDPOINT_PROBE_INTERVAL = 10
+
 # The default timeout for a readiness probe request. We set the timeout to 15s
 # since using actual generation in LLM services as readiness probe is very
 # time-consuming (33B, 70B, ...).

@@ -2750,6 +2750,13 @@ def test_skyserve_replica_failure():
         return (f'gcloud compute instances delete --zone={zone}'
                 f' --quiet $({query_cmd})')
 
+    # In the worst case, the controller will first wait ENDPOINT_PROBE_INTERVAL
+    # for next probe, and wait CONTROLLER_SYNC_INTERVAL for load balancer's
+    # next sync with controller. We add 5s more for any overhead, such as
+    # database read/write.
+    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL +
+                                    serve.CONTROLLER_SYNC_INTERVAL + 5)
+
     test = Test(
         f'test-skyserve-replica-failure',
         [
@@ -2760,7 +2767,7 @@ def test_skyserve_replica_failure():
             'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
             terminate_replica(1),
-            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sleep {time_to_wait_after_terminate}',
             f'sky serve status {name} | grep 2/3',
             f'{_get_replica_line(name, 1)} | grep NOT_READY',
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
@@ -2768,7 +2775,7 @@ def test_skyserve_replica_failure():
             'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
             terminate_replica(2),
-            f'sleep {serve.CONTROLLER_SYNC_INTERVAL}',
+            f'sleep {time_to_wait_after_terminate}',
             f'sky serve status {name} | grep 1/3',
             f'{_get_replica_line(name, 2)} | grep NOT_READY',
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
@@ -2807,11 +2814,9 @@ def test_skyserve_auto_restart():
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             terminate_replica(1),
             'sleep 180',  # Wait for consecutive failure timeout passed.
-            # Currently failed replica will still count as replica num in sky serve status.
-            # TODO(tian): Fix this in the future.
             '(while true; do'
             f'    output=$(sky serve status {name});'
-            '     echo "$output" | grep -q "1/2" && break;'
+            '     echo "$output" | grep -q "1/1" && break;'
             '     sleep 10;'
             f'done); sleep {serve.CONTROLLER_SYNC_INTERVAL};',
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',

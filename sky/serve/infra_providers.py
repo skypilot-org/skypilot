@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
-_ENDPOINT_PROBE_INTERVAL = 10
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 
@@ -642,7 +641,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # replica prober running.
                 logger.error(f'Error in replica prober: {e}')
-            for _ in range(_ENDPOINT_PROBE_INTERVAL):
+            for _ in range(serve_constants.ENDPOINT_PROBE_INTERVAL):
                 if self.replica_prober_stop_event.is_set():
                     logger.info('Replica prober terminated.')
                     return
