@@ -9,6 +9,7 @@ import signal
 import subprocess
 import threading
 import time
+import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import psutil
@@ -22,6 +23,9 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+
+if typing.TYPE_CHECKING:
+    from sky.serve import service_spec
 
 logger = logging.getLogger(__name__)
 
@@ -240,18 +244,14 @@ class ReplicaInfo:
 class InfraProvider:
     """Each infra provider manages one service."""
 
-    def __init__(
-            self,
-            service_name: str,
-            readiness_suffix: str,
-            initial_delay_seconds: int,
-            post_data: Optional[Union[str, Dict[str, Any]]] = None) -> None:
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
         self.lock = threading.Lock()
         self.next_replica_id: int = 1
         self.service_name: str = service_name
-        self.readiness_suffix: str = readiness_suffix
-        self.initial_delay_seconds: int = initial_delay_seconds
-        self.post_data: Optional[Union[str, Dict[str, Any]]] = post_data
+        self.readiness_suffix: str = spec.readiness_suffix
+        self.initial_delay_seconds: int = spec.initial_delay_seconds
+        self.post_data: Optional[Union[str, Dict[str, Any]]] = spec.post_data
         self.uptime: Optional[float] = None
         logger.info(f'Readiness probe suffix: {self.readiness_suffix}')
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
@@ -268,9 +268,7 @@ class InfraProvider:
     def scale_up(self, n: int) -> None:
         raise NotImplementedError
 
-    def scale_down(self, n: int) -> None:
-        # TODO - Scale down must also pass in a list of replicas to
-        # delete or the number of replicas to delete
+    def scale_down(self, replica_ids: List[int]) -> None:
         raise NotImplementedError
 
     def terminate(self) -> Optional[str]:
@@ -281,8 +279,9 @@ class InfraProvider:
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
 
-    def __init__(self, task_yaml_path: str, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
+        super().__init__(service_name, spec)
         self.task_yaml_path: str = task_yaml_path
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             int, subprocess.Popen] = serve_utils.ThreadSafeDict()
@@ -536,16 +535,9 @@ class SkyPilotInfraProvider(InfraProvider):
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
-    def scale_down(self, n: int) -> None:
-        # Terminate n replicas
-        # TODO(tian): Policy to choose replica to scale down.
-        infos = serve_state.get_replica_infos(self.service_name)
-        if len(infos) < n:
-            logger.error(f'Cannot scale down {n} replicas since there are '
-                         f'only {len(infos)} replicas. Scale down all '
-                         'replicas instead.')
-        for i in range(min(n, len(infos))):
-            self._teardown_replica(infos[i].replica_id, sync_down_logs=False)
+    def scale_down(self, replica_ids: List[int]) -> None:
+        for replica_id in replica_ids:
+            self._teardown_replica(replica_id, sync_down_logs=False)
 
     # TODO(tian): Maybe just kill all threads and cleanup using db record
     def terminate(self) -> Optional[str]:

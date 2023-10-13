@@ -75,12 +75,14 @@ class SkyServeController:
                 scaling_option = self.autoscaler.evaluate_scaling(replica_info)
                 if (scaling_option.operator ==
                         autoscalers.AutoscalerDecisionOperator.SCALE_UP):
-                    assert scaling_option.num_replicas is not None
-                    self.infra_provider.scale_up(scaling_option.num_replicas)
+                    assert isinstance(scaling_option.target,
+                                      int), scaling_option
+                    self.infra_provider.scale_up(scaling_option.target)
                 elif (scaling_option.operator ==
                       autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
-                    assert scaling_option.num_replicas is not None
-                    self.infra_provider.scale_down(scaling_option.num_replicas)
+                    assert isinstance(scaling_option.target,
+                                      list), scaling_option
+                    self.infra_provider.scale_down(scaling_option.target)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
@@ -210,21 +212,13 @@ if __name__ == '__main__':
     # ======= Infra Provider =========
     service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
     _infra_provider = infra_providers.SkyPilotInfraProvider(
-        args.task_yaml,
-        args.service_name,
-        readiness_suffix=service_spec.readiness_suffix,
-        initial_delay_seconds=service_spec.initial_delay_seconds,
-        post_data=service_spec.post_data)
+        args.service_name, service_spec, task_yaml_path=args.task_yaml)
 
     # ======= Autoscaler =========
     _autoscaler = autoscalers.RequestRateAutoscaler(
-        auto_restart=service_spec.auto_restart,
+        service_spec,
         frequency=constants.AUTOSCALER_SCALE_FREQUENCY,
-        min_nodes=service_spec.min_replicas,
-        max_nodes=service_spec.max_replicas,
-        upper_threshold=service_spec.qps_upper_threshold,
-        lower_threshold=service_spec.qps_lower_threshold,
-        cooldown=60,
+        cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
         rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE)
 
     # ======= SkyServeController =========

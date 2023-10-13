@@ -43,6 +43,13 @@ class SkyServeLoadBalancer:
             serve_utils.RequestTimestamp())
 
     def _sync_with_controller(self):
+        """Sync with controller periodically.
+
+        Every `constants.CONTROLLER_SYNC_INTERVAL` seconds, the load balancer
+        will sync with the controller to get the latest information about
+        available replicas; also, it report the request information to the
+        controller, so that the controller can make autoscaling decisions.
+        """
         while True:
             with requests.Session() as session:
                 try:
