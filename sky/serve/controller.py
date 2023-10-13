@@ -65,6 +65,41 @@ class SkyServeController:
                 serve_utils.kill_children_and_self_processes()
             time.sleep(10)
 
+    def _run_autoscaler(self):
+        logger.info('Starting autoscaler monitor.')
+        while True:
+            try:
+                replica_info = self.infra_provider.get_replica_info(
+                    verbose=env_options.Options.SHOW_DEBUG_INFO.get())
+                logger.info(f'All replica info: {replica_info}')
+                scaling_option = self.autoscaler.evaluate_scaling(replica_info)
+                if (scaling_option.operator ==
+                        autoscalers.AutoscalerDecisionOperator.SCALE_UP):
+                    assert scaling_option.num_replicas is not None
+                    self.infra_provider.scale_up(scaling_option.num_replicas)
+                elif (scaling_option.operator ==
+                      autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                    assert scaling_option.num_replicas is not None
+                    self.infra_provider.scale_down(scaling_option.num_replicas)
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # monitor running.
+                logger.error(f'Error in autoscaler: {e}')
+            for _ in range(self.autoscaler.frequency):
+                if self.autoscaler_stop_event.is_set():
+                    logger.info('Autoscaler monitor terminated.')
+                    return
+                time.sleep(1)
+
+    def _start_autoscaler(self):
+        self.autoscaler_stop_event = threading.Event()
+        self.autoscaler_thread = threading.Thread(target=self._run_autoscaler)
+        self.autoscaler_thread.start()
+
+    def _terminate_autoscaler(self):
+        self.autoscaler_stop_event.set()
+        self.autoscaler_thread.join()
+
     def run(self) -> None:
 
         @self.app.post('/controller/report_request_information')
@@ -72,6 +107,7 @@ class SkyServeController:
             request_data = asyncio.run(request.json())
             request_information_payload = request_data.get(
                 'request_information')
+            logger.info(request_information_payload)
             request_information = pickle.loads(
                 base64.b64decode(request_information_payload))
             logger.info(
@@ -124,7 +160,7 @@ class SkyServeController:
                 self.infra_provider.service_name,
                 serve_state.ServiceStatus.SHUTTING_DOWN)
             logger.info('Terminate autoscaler...')
-            self.autoscaler.terminate()
+            self._terminate_autoscaler()
             msg = self.infra_provider.terminate()
             if msg is None:
                 # We cannot terminate the controller now because we still
@@ -132,7 +168,7 @@ class SkyServeController:
                 self.terminating = True
             return {'message': msg}
 
-        self.autoscaler.start()
+        self._start_autoscaler()
 
         # Start a daemon to check if the controller is terminating, and if so,
         # shutdown the controller so the skypilot jobs will finish, thus enable
@@ -183,7 +219,6 @@ if __name__ == '__main__':
 
     # ======= Autoscaler =========
     _autoscaler = autoscalers.RequestRateAutoscaler(
-        _infra_provider,
         auto_restart=service_spec.auto_restart,
         frequency=constants.AUTOSCALER_SCALE_FREQUENCY,
         min_nodes=service_spec.min_replicas,
@@ -191,7 +226,7 @@ if __name__ == '__main__':
         upper_threshold=service_spec.qps_upper_threshold,
         lower_threshold=service_spec.qps_lower_threshold,
         cooldown=60,
-        query_interval=constants.AUTOSCALER_QUERY_INTERVAL)
+        rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE)
 
     # ======= SkyServeController =========
     controller = SkyServeController(args.controller_port, _infra_provider,

@@ -36,9 +36,9 @@ READINESS_PROBE_TIMEOUT = 15
 # Wait for 1 minutes for controller / load balancer to terminate.
 SERVE_TERMINATE_WAIT_TIMEOUT = 60
 
-# Autoscaler query interval (window size) for request per second. We calculate
-# rps by divide the number of requests in last query interval by this interval.
-AUTOSCALER_QUERY_INTERVAL = 60
+# Autoscaler window size for request per second. We calculate rps by divide the
+# number of requests in last window size by this window size.
+AUTOSCALER_RPS_WINDOW_SIZE = 60
 # Autoscaler scale frequency. We will try to scale up/down every
 # `scale_frequency`.
 AUTOSCALER_SCALE_FREQUENCY = 20

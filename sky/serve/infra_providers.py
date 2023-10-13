@@ -22,7 +22,6 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import env_options
 
 logger = logging.getLogger(__name__)
 
@@ -262,10 +261,6 @@ class InfraProvider:
         # Get replica info for all replicas
         raise NotImplementedError
 
-    def total_replica_num(self, count_failed_replica: bool) -> int:
-        # Returns the total number of replicas
-        raise NotImplementedError
-
     def get_ready_replicas(self) -> Set[str]:
         # Returns the endpoints of all ready replicas
         raise NotImplementedError
@@ -454,13 +449,6 @@ class SkyPilotInfraProvider(InfraProvider):
             info.to_info_dict(with_handle=verbose)
             for info in serve_state.get_replica_infos(self.service_name)
         ]
-
-    def total_replica_num(self, count_failed_replica: bool) -> int:
-        infos = serve_state.get_replica_infos(self.service_name)
-        if count_failed_replica:
-            return len(infos)
-        return len(
-            [i for i in infos if i.status != serve_state.ReplicaStatus.FAILED])
 
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
@@ -655,10 +643,6 @@ class SkyPilotInfraProvider(InfraProvider):
 
     @with_lock
     def _probe_all_replicas(self) -> None:
-        replica_info = self.get_replica_info(
-            verbose=env_options.Options.SHOW_DEBUG_INFO.get())
-        logger.info(f'All replica info: {replica_info}')
-
         probe_futures = []
         replica_to_probe = []
         with futures.ThreadPoolExecutor() as executor:
