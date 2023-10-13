@@ -4272,13 +4272,12 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
                f'Replicas{colorama.Style.RESET_ALL}')
     replica_infos = []
     for service_record in service_records:
-        handle: serve_lib.ServiceHandle = service_record['handle']
         for replica_record in service_record['replica_info']:
             # Only print FAILED replicas if:
             # 1. --all is specified;
             # 2. auto_restart is not enabled (in which FAILED replica count
             #    as one replica).
-            if (all or not handle.auto_restart or
+            if (all or not service_record['auto_restart'] or
                     replica_record['status'] != serve_lib.ReplicaStatus.FAILED):
                 replica_record['service_name'] = service_record['name']
                 replica_infos.append(replica_record)

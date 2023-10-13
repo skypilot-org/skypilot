@@ -2715,9 +2715,14 @@ def _add_default_value_to_local_record(
     # NOTE(dev): Keep this align with sky.serve.controller.get_latest_info
     if record is None:
         return record
-    record['status'] = serve_lib.ServiceStatus.UNKNOWN
-    record['uptime'] = None
-    record['replica_info'] = []
+    record.update({
+        'replica_info': [],
+        'uptime': None,
+        'status': serve_lib.ServiceStatus.UNKNOWN,
+        'policy': '',
+        'auto_restart': False,
+        'requested_resources': sky.Resources(),
+    })
     return record
 
 

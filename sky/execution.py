@@ -1037,10 +1037,7 @@ def serve_up(
 
             service_handle = serve.ServiceHandle(
                 service_name=service_name,
-                policy=task.service.policy_str(),
-                requested_resources=requested_resources,
                 requested_controller_resources=controller_resources,
-                auto_restart=task.service.auto_restart,
                 controller_port=controller_port,
                 load_balancer_port=load_balancer_port)
 

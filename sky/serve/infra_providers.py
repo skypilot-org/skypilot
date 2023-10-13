@@ -14,9 +14,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import psutil
 import requests
+import yaml
 
 from sky import backends
 from sky import global_user_state
+from sky import resources
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -265,6 +267,10 @@ class InfraProvider:
         # Returns the endpoints of all ready replicas
         raise NotImplementedError
 
+    def get_requested_resources(self) -> resources.Resources:
+        # Returns the requested resources for the service
+        raise NotImplementedError
+
     def scale_up(self, n: int) -> None:
         raise NotImplementedError
 
@@ -448,6 +454,16 @@ class SkyPilotInfraProvider(InfraProvider):
                 assert info.ip is not None
                 ready_replicas.add(info.ip)
         return ready_replicas
+
+    def get_requested_resources(self) -> resources.Resources:
+        with open(self.task_yaml_path, 'r') as f:
+            config = yaml.safe_load(f)
+        resources_config = None
+        if isinstance(config, dict):
+            resources_config = config.get('resources')
+        if resources_config is None:
+            return resources.Resources()
+        return resources.Resources.from_yaml_config(resources_config)
 
     def _launch_replica(self, replica_id: int) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(

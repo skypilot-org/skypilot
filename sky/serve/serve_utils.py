@@ -377,10 +377,7 @@ class ServiceHandle(object):
         self,
         *,
         service_name: str,
-        policy: str,
-        requested_resources: 'sky.Resources',
         requested_controller_resources: 'sky.Resources',
-        auto_restart: bool,
         controller_port: int,
         load_balancer_port: int,
         endpoint_ip: Optional[str] = None,
@@ -388,10 +385,7 @@ class ServiceHandle(object):
     ) -> None:
         self._version = self._VERSION
         self.service_name = service_name
-        self.policy = policy
-        self.requested_resources = requested_resources
         self.requested_controller_resources = requested_controller_resources
-        self.auto_restart = auto_restart
         self.controller_port = controller_port
         self.load_balancer_port = load_balancer_port
         self.endpoint_ip = endpoint_ip
@@ -400,11 +394,8 @@ class ServiceHandle(object):
     def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
-                f'\n\tpolicy={self.policy},'
-                f'\n\trequested_resources={self.requested_resources},'
                 '\n\trequested_controller_resources='
                 f'{self.requested_controller_resources},'
-                f'\n\tauto_restart={self.auto_restart},'
                 f'\n\tcontroller_port={self.controller_port},'
                 f'\n\tload_balancer_port={self.load_balancer_port},'
                 f'\n\tendpoint_ip={self.endpoint_ip},'

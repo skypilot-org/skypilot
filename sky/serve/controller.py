@@ -146,6 +146,10 @@ class SkyServeController:
                 'uptime': record.get('uptime', None),
                 'status': record.get('status',
                                      serve_state.ServiceStatus.UNKNOWN),
+                'policy': self.autoscaler.policy_str,
+                'auto_restart': self.autoscaler.auto_restart,
+                'requested_resources':
+                    self.infra_provider.get_requested_resources(),
             }
             latest_info = {
                 k: base64.b64encode(pickle.dumps(v)).decode('utf-8')

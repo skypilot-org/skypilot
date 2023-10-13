@@ -390,25 +390,15 @@ _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 _get_replica_id = lambda replica_record: replica_record['replica_id']
-_get_service_name = (lambda replica_record: replica_record['service_name'])
+_get_service_name = lambda replica_record: replica_record['service_name']
+_get_controller_name = lambda replica_record: replica_record['controller_name']
+_get_policy = lambda replica_record: replica_record['policy']
+_get_requested_resources = lambda replica_record: replica_record[
+    'requested_resources']
 
 
 def _get_service_handle(service_record: _ServiceRecord) -> serve.ServiceHandle:
     return service_record['handle']
-
-
-def _get_controller_name(service_record: _ServiceRecord) -> str:
-    return service_record['controller_name']
-
-
-def _get_policy(service_record: _ServiceRecord) -> str:
-    handle = _get_service_handle(service_record)
-    return handle.policy
-
-
-def _get_requested_resources(service_record: _ServiceRecord) -> 'sky.Resources':
-    handle = _get_service_handle(service_record)
-    return handle.requested_resources
 
 
 def _get_uptime(service_record: _ServiceRecord) -> str:
@@ -420,12 +410,11 @@ def _get_uptime(service_record: _ServiceRecord) -> str:
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
     ready_replica_num, total_replica_num = 0, 0
-    auto_restart = _get_service_handle(service_record).auto_restart
     for info in service_record['replica_info']:
         if _get_status(info) == serve.ReplicaStatus.READY:
             ready_replica_num += 1
         # If auto restart enabled, not count FAILED replicas here.
-        if (not auto_restart or
+        if (not service_record['auto_restart'] or
                 _get_status(info) != serve.ReplicaStatus.FAILED):
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
