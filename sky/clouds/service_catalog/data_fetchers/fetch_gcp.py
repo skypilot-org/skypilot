@@ -513,6 +513,8 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     # Round the prices.
     df['Price'] = df['Price'].round(PRICE_ROUNDING)
     df['SpotPrice'] = df['SpotPrice'].round(PRICE_ROUNDING)
+
+    # Information from https://cloud.google.com/compute/docs/gpus
     gpu_map = {
         'L4': 24,
         'A100': 40,
@@ -523,7 +525,6 @@ def get_catalog_df(region_prefix: str) -> pd.DataFrame:
         'V100': 16,
         'P100': 16,
         'K80': 12,
-        '': ''
     }
 
     df['DeviceMemory'] = df.apply(

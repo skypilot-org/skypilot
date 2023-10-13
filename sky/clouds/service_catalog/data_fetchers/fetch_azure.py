@@ -58,10 +58,11 @@ def get_regions() -> List[str]:
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
-USEFUL_COLUMNS = {
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation', 'DeviceMemory'
-}
+USEFUL_COLUMNS = [
+    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'DeviceMemory',
+    'vCPUs', 'MemoryGiB', 'GpuInfo', 'Price', 'SpotPrice', 'Region',
+    'Generation'
+]
 
 
 def get_pricing_url(region: Optional[str] = None) -> str:
@@ -244,82 +245,37 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         axis='columns',
     )
 
-    def create_gpu_map(df):
-        # Map of Azure's machine with GPU to their corresponding memory
-        # Result is hard-coded since Azure's API to not return such info
-        # may be outdated so need to be maintained
-        gpu_map = {
-            'Standard_NC6': 12,
-            'Standard_NC12': 24,
-            'Standard_NC24': 48,
-            'Standard_NC24r*': 48,
-            'Standard_NC6s_v2': 16,
-            'Standard_NC12s_v2': 32,
-            'Standard_NC24s_v2': 64,
-            'Standard_NC24rs_v2*': 64,
-            'Standard_NC6s_v3': 16,
-            'Standard_NC12s_v3': 32,
-            'Standard_NC24s_v3': 32,
-            'Standard_NC4as_T4_v3': 16,
-            'Standard_NC8as_T4_v3': 16,
-            'Standard_NC16as_T4_v3': 16,
-            'Standard_NC64as_T4_v3': 64,
-            'Standard_NC24ads_A100_v4': 80,
-            'Standard_NC48ads_A100_v4': 160,
-            'Standard_NC96ads_A100_v4': 320,
-            'Standard_ND96asr_v4': 40,
-            'Standard_ND96amsr_A100_v4': 80,
-            'Standard_ND6s': 24,
-            'Standard_ND12s': 48,
-            'Standard_ND24s': 96,
-            'Standard_ND24rs*': 96,
-            'Standard_ND40rs_v2': 32,
-            'Standard_NG8ads_V620_v1': 8,
-            'Standard_NG16ads_V620_v1': 16,
-            'Standard_NG32ads_V620_v1': 32,
-            'Standard_NG32adms_V620_v1': 32,
-            'Standard_NV6': 8,
-            'Standard_NV12': 16,
-            'Standard_NV24': 32,
-            'Standard_NV12s_v3': 8,
-            'Standard_NV24s_v3': 16,
-            'Standard_NV48s_v3': 32,
-            'Standard_NV4as_v4': 2,
-            'Standard_NV8as_v4': 4,
-            'Standard_NV16as_v4': 8,
-            'Standard_NV32as_v4': 16,
-            'Standard_NV6ads_A10_v5': 4,
-            'Standard_NV12ads_A10_v5': 8,
-            'Standard_NV18ads_A10_v5': 12,
-            'Standard_NV36ads_A10_v5': 24,
-            'Standard_NV36adms_A10_v5': 24,
-            'Standard_NV72ads_A10_v5': 48,
-            'Standard_NV6_Promo': 16,
-            'Standard_NV12_Promo': 32,
-            'Standard_NV24_Promo': 48
-        }
-
-        all_instance = df.InstanceType.unique()
-
-        for instance in all_instance:
-            if instance not in gpu_map:
-                gpu_map[instance] = ''
-        return gpu_map
-
-    def map_device_memory(row, dic):
-        return dic[row]
-
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
     print(f'Dropped {before_drop_len - after_drop_len} duplicated rows')
 
-    df_ret['DeviceMemory'] = df_ret.InstanceType.apply(
-        map_device_memory, args=(create_gpu_map(df_ret),))
+    # Information from
+    # https://learn.microsoft.com/en-us/azure/virtual-machines/sizes-gpu
+    gpu_map = {
+        'K80': 12,
+        'P100': 16,
+        'V100': 16,
+        'T4': 16,
+        'V100-32GB': 32,
+        'A100-80GB': 80,
+        'A100': 40,
+        'M60': 8,
+        'Radeon MI25': 16,
+        'P40': 24,
+        'A10': 24
+    }
+
+    df_ret['DeviceMemory'] = df_ret.apply(
+        lambda row: gpu_map[row['AcceleratorName']] * int(row['AcceleratorCount'
+                                                             ])
+        if pd.notnull(row['AcceleratorName']) else np.nan,
+        axis=1)
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
     df_ret = df_ret[USEFUL_COLUMNS]
+
     return df_ret
 
 
