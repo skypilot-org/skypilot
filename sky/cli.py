@@ -3475,23 +3475,23 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
             storage_list = [s['name'] for s in storages]
             storage_names = ', '.join(storage_list)
             click.confirm(f'Deleting {len(storage_list)} storages: '
-                         f'{storage_names}. Proceed?',
-                         default=True,
-                         abort=True,
-                         show_default=True)
+                          f'{storage_names}. Proceed?',
+                          default=True,
+                          abort=True,
+                          show_default=True)
         else:
             if len(names) > 1:
-                click.confirm(f'Deleting {len(names)} storages: ' 
-                             f'{", ".join(names)}. Proceed?',
-                             default=True,
-                             abort=True,
-                             show_default=True)
+                click.confirm(f'Deleting {len(names)} storages: '
+                              f'{", ".join(names)}. Proceed?',
+                              default=True,
+                              abort=True,
+                              show_default=True)
             else:
                 storage_name = names[0]
                 click.confirm(f'Deleting storage: {storage_name}. Proceed?', 
-                             default=True, 
-                             abort=True, 
-                             show_default=True)
+                              default=True, 
+                              abort=True, 
+                              show_default=True)
     if all:
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
