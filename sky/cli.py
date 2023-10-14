@@ -3443,8 +3443,14 @@ def storage_ls(all: bool):
               is_flag=True,
               required=False,
               help='Delete all storage objects.')
+@click.option('--yes',
+              '-y',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip confirmation prompt.')
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3460,8 +3466,35 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
         # Delete all storage objects.
         sky storage delete -a
     """
+
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
+    if not yes:
+        if all:
+            storages = sky.storage_ls()
+            storage_list = [s['name'] for s in storages]
+            storage_names = ', '.join(storage_list)
+            click.confirm(
+                f'Deleting {len(storage_list)} storages: '
+                f'{storage_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+        else:
+            if len(names) > 1:
+                click.confirm(
+                    f'Deleting {len(names)} storages: '
+                    f'{", ".join(names)}. Proceed?',
+                    default=True,
+                    abort=True,
+                    show_default=True)
+            else:
+                storage_name = names[0]
+                click.confirm(
+                    f'Deleting storage: {storage_name}. Proceed?',
+                    default=True,
+                    abort=True,
+                    show_default=True)
     if all:
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
