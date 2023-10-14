@@ -3149,8 +3149,8 @@ class TestStorageWithCredentials:
         tmp_bulk_del_storage_obj.add_store(store_type)
 
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'])
-
+            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
+        ])
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
