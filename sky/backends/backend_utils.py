@@ -482,7 +482,6 @@ class SSHConfigHelper(object):
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         overwrite = False
-        overwrite_begin_idx = None
         ip = ips[0]
         if docker_user is not None:
             ip = 'localhost'
@@ -505,11 +504,11 @@ class SSHConfigHelper(object):
                     with open(config_path, 'w') as f:
                         config.insert(0, '\n')
                         config.insert(0, include_str + '\n')
-                        config.insert(0, "# Added by sky"+ '\n')
+                        config.insert(0, '# Added by sky' + '\n')
                         f.write(''.join(config).strip())
                         f.write('\n' * 2)
                     break
-        
+
         #For backward compatibility
         if os.path.exists(config_path):
             with open(config_path) as f:
@@ -551,9 +550,11 @@ class SSHConfigHelper(object):
 
         # Remove the old config if it exists.
         if overwrite:
-            SSHConfigHelper.remove_cluster(cluster_name)
+            SSHConfigHelper.remove_cluster(cluster_name, ip, auth_config,
+                                           docker_user)
 
-        cluster_config_path = os.path.expanduser(cls.ssh_cluster_path.format(cluster_name))
+        cluster_config_path = os.path.expanduser(
+            cls.ssh_cluster_path.format(cluster_name))
 
         with open(cluster_config_path, 'w') as f:
             f.write(codegen + '\n')
@@ -563,8 +564,11 @@ class SSHConfigHelper(object):
                 worker_name = cluster_name + f'-worker{i+1}'
                 #TODO update port numbers for workers in edge cases
                 codegen = cls._get_generated_config(sky_autogen_comment,
-                                                    worker_name, ip, username,
-                                                    key_path, proxy_command,
+                                                    worker_name, 
+                                                    ip, 
+                                                    username,
+                                                    key_path, 
+                                                    proxy_command,
                                                     ports[i + 1], #updated port numbers
                                                     docker_proxy_command)
                 with open(cluster_config_path, 'a') as f:
@@ -622,9 +626,9 @@ class SSHConfigHelper(object):
             if found:
                 start_line_idx = i - 1
                 break
-        
+
         # Ensures backward compatibility
-        if start_line_idx is not None: 
+        if start_line_idx is not None:
 
             # Scan for end of previous config.
             cursor = start_line_idx
@@ -651,7 +655,8 @@ class SSHConfigHelper(object):
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
-        cluster_config_path = os.path.expanduser(cls.ssh_cluster_path.format(cluster_name))
+        cluster_config_path = os.path.expanduser(
+            cls.ssh_cluster_path.format(cluster_name))
         if os.path.exists(cluster_config_path):
             os.remove(cluster_config_path)
 
