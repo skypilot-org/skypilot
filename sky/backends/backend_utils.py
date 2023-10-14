@@ -564,10 +564,10 @@ class SSHConfigHelper(object):
                 worker_name = cluster_name + f'-worker{i+1}'
                 #TODO update port numbers for workers in edge cases
                 codegen = cls._get_generated_config(sky_autogen_comment,
-                                                    worker_name, 
-                                                    ip, 
+                                                    worker_name,
+                                                    ip,
                                                     username,
-                                                    key_path, 
+                                                    key_path,
                                                     proxy_command,
                                                     ports[i + 1], #updated port numbers
                                                     docker_proxy_command)
