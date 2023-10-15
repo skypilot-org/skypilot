@@ -277,7 +277,7 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def delete(self, silent: bool = False) -> None:
+    def delete(self) -> None:
         """Removes the Storage object from the cloud."""
         raise NotImplementedError
 
@@ -495,7 +495,7 @@ class Storage(object):
                     (isinstance(self.source, list) or
                      not data_utils.is_cloud_store_url(self.source))):
                     msg = ' and uploading from source'
-                logger.debug(f'Verifying bucket{msg} for storage {self.name}')
+                logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
 
         else:
@@ -726,7 +726,7 @@ class Storage(object):
             store_type = StoreType(store_type)
 
         if store_type in self.stores:
-            logger.debug(f'Storage type {store_type} already exists.')
+            logger.info(f'Storage type {store_type} already exists.')
             return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
@@ -786,9 +786,7 @@ class Storage(object):
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
 
-    def delete(self,
-               store_type: Optional[StoreType] = None,
-               silent: bool = False) -> None:
+    def delete(self, store_type: Optional[StoreType] = None) -> None:
         """Deletes data for all sky-managed storage objects.
 
         If a storage is not managed by sky, it is not deleted from the cloud.
@@ -808,7 +806,7 @@ class Storage(object):
             # remove handle and return
             if is_sky_managed:
                 self.handle.remove_store(store)
-                store.delete(silent=silent)
+                store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
                 delete = all(
@@ -818,16 +816,16 @@ class Storage(object):
                 else:
                     global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
-                store.delete(silent=silent)
+                store.delete()
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
-                    store.delete(silent=silent)
+                    store.delete()
                 elif self.force_delete:
-                    store.delete(silent=silent)
+                    store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
@@ -1092,10 +1090,8 @@ class S3Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, silent: bool = False) -> None:
+    def delete(self) -> None:
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
-        if silent:
-            return
         if deleted_by_skypilot:
             msg_str = f'Deleted S3 bucket {self.name}.'
         else:
@@ -1492,10 +1488,8 @@ class GcsStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, silent: bool = False) -> None:
+    def delete(self) -> None:
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
-        if silent:
-            return
         if deleted_by_skypilot:
             msg_str = f'Deleted GCS bucket {self.name}.'
         else:
@@ -1866,10 +1860,8 @@ class R2Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, silent: bool = False) -> None:
+    def delete(self) -> None:
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
-        if silent:
-            return
         if deleted_by_skypilot:
             msg_str = f'Deleted R2 bucket {self.name}.'
         else:
@@ -2273,10 +2265,8 @@ class IBMCosStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, silent: bool = False) -> None:
+    def delete(self) -> None:
         self._delete_cos_bucket()
-        if silent:
-            return
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')
 

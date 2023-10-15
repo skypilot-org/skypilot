@@ -1145,7 +1145,6 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} not found.')
 
-    service_handle: serve.ServiceHandle = service_record['handle']
     controller_name = service_record['controller_name']
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
@@ -1165,12 +1164,8 @@ def serve_down(service_name: str, purge: bool = False) -> None:
             code = serve.ServeCodeGen.terminate_service(service_name)
 
             try:
-                (returncode, terminate_service_payload,
-                 stderr) = backend.run_on_head(handle,
-                                               code,
-                                               require_outputs=True,
-                                               stream_logs=False,
-                                               separate_stderr=True)
+                returncode, stdout, _ = backend.run_on_head(
+                    handle, code, require_outputs=True, stream_logs=False)
             except exceptions.FetchIPError as e:
                 raise RuntimeError(controller_fetch_ip_error_message) from e
 
@@ -1178,24 +1173,8 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                 returncode,
                 code, ('Failed when submit termination request to controller '
                        f'of service {service_name!r}'),
-                stderr,
+                stdout,
                 stream_logs=False)
-
-            resp = serve.load_terminate_service_result(
-                terminate_service_payload)
-            if resp.status_code != 200:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Failed to terminate replica of service '
-                                       f'{service_name!r} due to request '
-                                       f'failure: {resp.text}')
-            msg = resp.json().get('message')
-            if msg:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'Unexpected message when tearing down replica of '
-                        f'service {service_name!r}: {msg}. Please login to '
-                        'the controller by `ssh <controller-name>` and '
-                        'make sure the service is properly cleaned up.')
 
         # We want to make sure no matter what error happens, we can still
         # clean up the record if purge is True.
@@ -1209,52 +1188,9 @@ def serve_down(service_name: str, purge: bool = False) -> None:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(e) from e
 
-    try:
-        if handle is not None:
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            backend = backends.CloudVmRayBackend()
-            backend.register_info(minimize_logging=True)
-
-            # Cleanup all files on controller related to this service.
-            # We have a 10-min grace period for the controller to autostop,
-            # so it should be fine if this is the last service on the
-            # controller and its job is the only one running.
-            # Also, Cleanup the service record in controller VM
-            code = serve.ServeCodeGen.cleanup_service(service_name)
-            returncode, _, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True,
-                                                        stream_logs=False,
-                                                        separate_stderr=True)
-            subprocess_utils.handle_returncode(
-                returncode,
-                code, (f'Failed cleaning up service {service_name!r}'),
-                stderr,
-                stream_logs=False)
-
-    # same as above.
-    # pylint: disable=broad-except
-    except Exception as e:
-        if purge:
-            logger.warning(
-                f'Ignoring error when clean up service {service_name!r}: '
-                f'{common_utils.format_exception(e)}')
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(e) from e
-
     # TODO(tian): Maybe add a post_cleanup function?
     controller_yaml_path = serve.generate_controller_yaml_file_name(
         service_name)
     if os.path.exists(controller_yaml_path):
         os.remove(controller_yaml_path)
-    try:
-        service_handle.cleanup_ephemeral_storage()
-    # same as above.
-    except Exception as e:  # pylint: disable=broad-except
-        if purge:
-            logger.warning('Ignoring error when cleaning up ephemeral storage '
-                           f'of service {service_name}: {e}')
-        else:
-            raise RuntimeError(e) from e
     global_user_state.remove_service(service_name)

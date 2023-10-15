@@ -19,6 +19,12 @@ SERVE_PREFIX = '~/.sky/serve'
 CONTROLLER_FILE_LOCK_PATH = f'{SERVE_PREFIX}/controller.lock'
 CONTROLLER_FILE_LOCK_TIMEOUT = 20
 
+# Signal file path for controller to handle signals.
+SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
+
+# Timeout for `sky serve down`.
+SERVICE_TERMINATION_TIMEOUT = 180
+
 # The time interval for load balancer to sync with controller. Every time the
 # load balancer syncs with controller, it will update all available replica ips
 # for each service, also send the number of requests in last query interval.

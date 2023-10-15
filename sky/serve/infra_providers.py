@@ -9,6 +9,7 @@ import signal
 import subprocess
 import threading
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -16,6 +17,7 @@ import psutil
 import requests
 import yaml
 
+import sky
 from sky import backends
 from sky import global_user_state
 from sky import resources
@@ -25,6 +27,8 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.usage import usage_lib
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
@@ -35,6 +39,28 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
+
+
+def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+    """Terminate the sky serve replica cluster."""
+    retry_cnt = 0
+    while True:
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.down(cluster_name)
+            return
+        except ValueError:
+            # The cluster is already down.
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            retry_cnt += 1
+            if retry_cnt >= max_retry:
+                raise RuntimeError('Failed to terminate the sky serve replica '
+                                   f'cluster {cluster_name}.') from e
+            logger.error('Failed to terminate the sky serve replica '
+                         f'cluster {cluster_name}. Retrying.'
+                         f'Details: {common_utils.format_exception(e)}')
+            logger.error(f'  Traceback: {traceback.format_exc()}')
 
 
 def _interrupt_process_and_children(pid: int) -> None:
@@ -277,10 +303,6 @@ class InfraProvider:
     def scale_down(self, replica_ids: List[int]) -> None:
         raise NotImplementedError
 
-    def terminate(self) -> Optional[str]:
-        # Terminate service
-        raise NotImplementedError
-
 
 class SkyPilotInfraProvider(InfraProvider):
     """Infra provider for SkyPilot clusters."""
@@ -294,9 +316,9 @@ class SkyPilotInfraProvider(InfraProvider):
         self.down_process_pool: serve_utils.ThreadSafeDict[
             int, subprocess.Popen] = serve_utils.ThreadSafeDict()
 
-        self._start_process_pool_refresher()
-        self._start_job_status_fetcher()
-        self._start_replica_prober()
+        threading.Thread(target=self._process_pool_refresher).start()
+        threading.Thread(target=self._job_status_fetcher).start()
+        threading.Thread(target=self._replica_prober).start()
 
     # This process periodically checks all sky.launch and sky.down process
     # on the fly. If any of them finished, it will update the status of
@@ -362,7 +384,6 @@ class SkyPilotInfraProvider(InfraProvider):
                     serve_state.add_or_update_replica(self.service_name,
                                                       replica_id, info)
 
-    # TODO(tian): Maybe use decorator?
     def _process_pool_refresher(self) -> None:
         while True:
             logger.info('Refreshing process pool.')
@@ -372,17 +393,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # process pool refresher running.
                 logger.error(f'Error in process pool refresher: {e}')
-            for _ in range(_PROCESS_POOL_REFRESH_INTERVAL):
-                if self.process_pool_refresher_stop_event.is_set():
-                    logger.info('Process pool refresher terminated.')
-                    return
-                time.sleep(1)
-
-    def _start_process_pool_refresher(self) -> None:
-        self.process_pool_refresher_stop_event = threading.Event()
-        self.process_pool_refresher_thread = threading.Thread(
-            target=self._process_pool_refresher)
-        self.process_pool_refresher_thread.start()
+            time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     @with_lock
     def _fetch_job_status(self) -> None:
@@ -420,25 +431,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # job status fetcher running.
                 logger.error(f'Error in job status fetcher: {e}')
-            for _ in range(_JOB_STATUS_FETCH_INTERVAL):
-                if self.job_status_fetcher_stop_event.is_set():
-                    logger.info('Job status fetcher terminated.')
-                    return
-                time.sleep(1)
-
-    def _start_job_status_fetcher(self) -> None:
-        self.job_status_fetcher_stop_event = threading.Event()
-        self.job_status_fetcher_thread = threading.Thread(
-            target=self._job_status_fetcher)
-        self.job_status_fetcher_thread.start()
-
-    def _terminate_daemon_threads(self) -> None:
-        self.replica_prober_stop_event.set()
-        self.job_status_fetcher_stop_event.set()
-        self.process_pool_refresher_stop_event.set()
-        self.replica_prober_thread.join()
-        self.job_status_fetcher_thread.join()
-        self.process_pool_refresher_thread.join()
+            time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
     def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
         return [
@@ -555,76 +548,6 @@ class SkyPilotInfraProvider(InfraProvider):
         for replica_id in replica_ids:
             self._teardown_replica(replica_id, sync_down_logs=False)
 
-    # TODO(tian): Maybe just kill all threads and cleanup using db record
-    def terminate(self) -> Optional[str]:
-        logger.info('Terminating infra provider daemon threads...')
-        self._terminate_daemon_threads()
-        logger.info('Terminating all clusters...')
-        for replica_id, p in self.launch_process_pool.items():
-            # Use keyboard interrupt here since sky.launch has great
-            # handling for it
-            # Edge case: sky.launched finished after the
-            # process_pool_refresher terminates
-            if p.poll() is None:
-                assert p.pid is not None
-                # Interrupt the launch process and its children. We use SIGINT
-                # here since sky.launch has great handling for it.
-                _interrupt_process_and_children(p.pid)
-                p.wait()
-                logger.info(
-                    f'Interrupted launch process for replica {replica_id} '
-                    'and deleted the cluster.')
-                self._teardown_replica(replica_id, sync_down_logs=False)
-                info = serve_state.get_replica_info_from_id(
-                    self.service_name, replica_id)
-                assert info is not None
-                # Set to success here for correctly display as shutting down
-                info.status_property.sky_launch_status = ProcessStatus.SUCCEEDED
-                serve_state.add_or_update_replica(self.service_name, replica_id,
-                                                  info)
-        msg = []
-        infos = serve_state.get_replica_infos(self.service_name)
-        # TODO(tian): Move all cleanup to the control process
-        for info in infos:
-            if info.status in [
-                    serve_state.ReplicaStatus.FAILED_CLEANUP,
-                    serve_state.ReplicaStatus.UNKNOWN,
-            ]:
-                msg.append(f'Replica with status {info.status} found. Please '
-                           'manually check the cloud console to make sure no '
-                           'resource leak.')
-            # Skip those already deleted and those are deleting
-            if info.status not in [
-                    serve_state.ReplicaStatus.FAILED,
-                    serve_state.ReplicaStatus.SHUTTING_DOWN
-            ]:
-                self._teardown_replica(info.replica_id, sync_down_logs=False)
-        for replica_id, p in self.down_process_pool.items():
-            p.wait()
-            logger.info(f'Down process for replica {replica_id} finished.')
-            if p.returncode != 0:
-                logger.warning(f'Down process for replica {replica_id} exited '
-                               f'abnormally with code {p.returncode}.')
-                msg.append(
-                    f'Down process for replica {replica_id} exited abnormally '
-                    f'with code {p.returncode}. Please login to the '
-                    'controller and make sure the replica is released.')
-            else:
-                serve_state.remove_replica(self.service_name, replica_id)
-        infos = serve_state.get_replica_infos(self.service_name)
-        for info in infos:
-            if not info.status in serve_state.ReplicaStatus.failed_statuses():
-                # This should not happen since we already teardown all
-                # replicas. Here we just add a double check.
-                msg.append(f'Replica {info.replica_id} is not deleted. '
-                           'Please login to the controller and make sure '
-                           'the replica is released.')
-            else:
-                serve_state.remove_replica(self.service_name, info.replica_id)
-        if not msg:
-            return None
-        return '\n'.join(msg)
-
     def _replica_prober(self) -> None:
         while True:
             logger.info('Running replica prober.')
@@ -640,17 +563,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 # No matter what error happens, we should keep the
                 # replica prober running.
                 logger.error(f'Error in replica prober: {e}')
-            for _ in range(serve_constants.ENDPOINT_PROBE_INTERVAL):
-                if self.replica_prober_stop_event.is_set():
-                    logger.info('Replica prober terminated.')
-                    return
-                time.sleep(1)
-
-    def _start_replica_prober(self) -> None:
-        self.replica_prober_stop_event = threading.Event()
-        self.replica_prober_thread = threading.Thread(
-            target=self._replica_prober)
-        self.replica_prober_thread.start()
+            time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL)
 
     @with_lock
     def _probe_all_replicas(self) -> None:

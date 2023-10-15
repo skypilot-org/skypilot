@@ -16,20 +16,15 @@ file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
 
 run: |
-  # Create working directory for this service.
-  mkdir -p {{service_dir}}
-  # Start sky serve controller.
-  python -u -m sky.serve.controller --service-name {{service_name}} \
-    --task-yaml {{remote_task_yaml_path}} --controller-port {{controller_port}} \
-    > {{controller_log_file}} 2>&1 &
-  # Wait for controller to start.
-  sleep 10
-  # Start sky serve load balancer. We keep the load balancer running in the
-  # foreground so that the job will not finish, thus prevent our controller
-  # from auto down.
-  python -u -m sky.serve.load_balancer --load-balancer-port {{load_balancer_port}} \
-    --replica-port {{replica_port}} --controller-addr \
-    http://localhost:{{controller_port}} > {{load_balancer_log_file}} 2>&1
+  # Start sky serve service.
+  python -u -m sky.serve.service \
+    --service-name {{service_name}} \
+    --service-dir {{service_dir}} \
+    --task-yaml {{remote_task_yaml_path}} \
+    --controller-port {{controller_port}} \
+    --load-balancer-port {{load_balancer_port}} \
+    --controller-log-file {{controller_log_file}} \
+    --load-balancer-log-file {{load_balancer_log_file}}
 
 envs:
 {%- for env_name, env_value in envs.items() %}

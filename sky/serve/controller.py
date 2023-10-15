@@ -2,7 +2,6 @@
 
 Responsible for autoscaling and replica management.
 """
-import argparse
 import asyncio
 import base64
 import logging
@@ -13,7 +12,6 @@ import time
 import fastapi
 import uvicorn
 
-from sky import authentication
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -44,26 +42,20 @@ class SkyServeController:
         - Providing the HTTP Server API for SkyServe to communicate with.
     """
 
-    def __init__(self, port: int, infra_provider: infra_providers.InfraProvider,
-                 autoscaler: autoscalers.Autoscaler) -> None:
+    def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
+                 task_yaml: str, port: int) -> None:
+        self.infra_provider: infra_providers.InfraProvider = (
+            infra_providers.SkyPilotInfraProvider(service_name,
+                                                  service_spec,
+                                                  task_yaml_path=task_yaml))
+        self.autoscaler: autoscalers.Autoscaler = (
+            autoscalers.RequestRateAutoscaler(
+                service_spec,
+                frequency=constants.AUTOSCALER_SCALE_FREQUENCY,
+                cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
+                rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE))
         self.port = port
-        self.infra_provider = infra_provider
-        self.autoscaler = autoscaler
-        self.terminating = False
-        self.load_balancer_received_terminal_signal = False
         self.app = fastapi.FastAPI()
-
-    def _check_terminate(self):
-        while True:
-            if self.terminating and self.load_balancer_received_terminal_signal:
-                # 1s grace period for the rare case that terminate is set but
-                # return of /terminate request is not ready yet.
-                time.sleep(1)
-                logger.info('Terminate controller...')
-                # TODO(tian): Directly kill all threads and cleanup using db
-                # record, instead of waiting the threads to receive signal.
-                serve_utils.kill_children_and_self_processes()
-            time.sleep(10)
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler monitor.')
@@ -87,25 +79,12 @@ class SkyServeController:
                 # No matter what error happens, we should keep the
                 # monitor running.
                 logger.error(f'Error in autoscaler: {e}')
-            for _ in range(self.autoscaler.frequency):
-                if self.autoscaler_stop_event.is_set():
-                    logger.info('Autoscaler monitor terminated.')
-                    return
-                time.sleep(1)
-
-    def _start_autoscaler(self):
-        self.autoscaler_stop_event = threading.Event()
-        self.autoscaler_thread = threading.Thread(target=self._run_autoscaler)
-        self.autoscaler_thread.start()
-
-    def _terminate_autoscaler(self):
-        self.autoscaler_stop_event.set()
-        self.autoscaler_thread.join()
+            time.sleep(self.autoscaler.frequency)
 
     def run(self) -> None:
 
-        @self.app.post('/controller/report_request_information')
-        def report_request_information(request: fastapi.Request):
+        @self.app.post('/controller/load_balancer_sync')
+        def load_balancer_sync(request: fastapi.Request):
             request_data = asyncio.run(request.json())
             request_information_payload = request_data.get(
                 'request_information')
@@ -120,17 +99,7 @@ class SkyServeController:
                                      'serve_utils.RequestTimestamp for '
                                      'RequestRateAutoscaler.')
                 self.autoscaler.update_request_information(request_information)
-            return {'message': 'Success'}
-
-        @self.app.get('/controller/get_ready_replicas')
-        def get_ready_replicas():
             return {'ready_replicas': self.infra_provider.get_ready_replicas()}
-
-        @self.app.get('/controller/is_terminating')
-        def is_terminating():
-            if self.terminating:
-                self.load_balancer_received_terminal_signal = True
-            return {'is_terminating': self.terminating}
 
         @self.app.get('/controller/get_latest_info')
         def get_latest_info():
@@ -157,30 +126,7 @@ class SkyServeController:
             }
             return latest_info
 
-        @self.app.post('/controller/terminate')
-        def terminate(request: fastapi.Request):
-            del request
-            logger.info('Terminating service...')
-            serve_state.set_service_status(
-                self.infra_provider.service_name,
-                serve_state.ServiceStatus.SHUTTING_DOWN)
-            logger.info('Terminate autoscaler...')
-            self._terminate_autoscaler()
-            msg = self.infra_provider.terminate()
-            if msg is None:
-                # We cannot terminate the controller now because we still
-                # need the output of this request to be sent back.
-                self.terminating = True
-            return {'message': msg}
-
-        self._start_autoscaler()
-
-        # Start a daemon to check if the controller is terminating, and if so,
-        # shutdown the controller so the skypilot jobs will finish, thus enable
-        # the controller VM to autostop.
-        terminate_checking_daemon = threading.Thread(
-            target=self._check_terminate, daemon=True)
-        terminate_checking_daemon.start()
+        threading.Thread(target=self._run_autoscaler).start()
 
         # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflowing
         # the controller logs.
@@ -193,39 +139,8 @@ class SkyServeController:
         uvicorn.run(self.app, host='localhost', port=self.port)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SkyServe Controller')
-    parser.add_argument('--service-name',
-                        type=str,
-                        help='Name of the service',
-                        required=True)
-    parser.add_argument('--task-yaml',
-                        type=str,
-                        help='Task YAML file',
-                        required=True)
-    parser.add_argument('--controller-port',
-                        type=int,
-                        help='Port to run the controller',
-                        required=True)
-    args = parser.parse_args()
-
-    # Generate ssh key pair to avoid race condition when multiple sky.launch
-    # are executed at the same time.
-    authentication.get_or_generate_keys()
-
-    # ======= Infra Provider =========
-    service_spec = serve.SkyServiceSpec.from_yaml(args.task_yaml)
-    _infra_provider = infra_providers.SkyPilotInfraProvider(
-        args.service_name, service_spec, task_yaml_path=args.task_yaml)
-
-    # ======= Autoscaler =========
-    _autoscaler = autoscalers.RequestRateAutoscaler(
-        service_spec,
-        frequency=constants.AUTOSCALER_SCALE_FREQUENCY,
-        cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
-        rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE)
-
-    # ======= SkyServeController =========
-    controller = SkyServeController(args.controller_port, _infra_provider,
-                                    _autoscaler)
+def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
+                   task_yaml: str, controller_port: int):
+    controller = SkyServeController(service_name, service_spec, task_yaml,
+                                    controller_port)
     controller.run()

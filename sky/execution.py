@@ -1056,13 +1056,6 @@ def serve_up(
                 '`sky serve up` process hanging abnormally.') from e
 
     _maybe_translate_local_file_mounts_and_sync_up(task, prefix='serve')
-    ephemeral_storage = []
-    if task.storage_mounts is not None:
-        for storage in task.storage_mounts.values():
-            if not storage.persistent:
-                ephemeral_storage.append(storage.to_yaml_config())
-    service_handle.ephemeral_storage = ephemeral_storage
-    global_user_state.set_service_handle(service_name, service_handle)
 
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
@@ -1086,7 +1079,6 @@ def serve_up(
             'service_name': service_name,
             'controller_port': controller_port,
             'load_balancer_port': load_balancer_port,
-            'replica_port': task.service.replica_port,
             'controller_log_file': controller_log_file,
             'load_balancer_log_file': load_balancer_log_file,
             'envs': _shared_controller_env_vars(),
