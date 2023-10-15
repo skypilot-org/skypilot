@@ -197,6 +197,9 @@ class SpotStatus(enum.Enum):
     # FAILED_CONTROLLER: The job is finished with failure because of unexpected
     # error in the controller process.
     FAILED_CONTROLLER = 'FAILED_CONTROLLER'
+    # FAILED_CLEANUP: The job is finished with failure because of unexpected
+    # error in the cleanup process.
+    FAILED_CLEANUP = 'FAILED_CLEANUP'
 
     def is_terminal(self) -> bool:
         return self in self.terminal_statuses()
@@ -220,6 +223,7 @@ class SpotStatus(enum.Enum):
             cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER,
+            cls.FAILED_CLEANUP,
             cls.CANCELLING,
             cls.CANCELLED,
         ]
@@ -228,7 +232,7 @@ class SpotStatus(enum.Enum):
     def failure_statuses(cls) -> List['SpotStatus']:
         return [
             cls.FAILED, cls.FAILED_SETUP, cls.FAILED_PRECHECKS,
-            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
+            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER, cls.FAILED_CLEANUP
         ]
 
 
@@ -244,6 +248,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.FAILED_SETUP: colorama.Fore.RED,
     SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    SpotStatus.FAILED_CLEANUP: colorama.Fore.RED,
     SpotStatus.CANCELLING: colorama.Fore.YELLOW,
     SpotStatus.CANCELLED: colorama.Fore.YELLOW,
 }
