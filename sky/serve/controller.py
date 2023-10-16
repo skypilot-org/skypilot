@@ -97,7 +97,10 @@ class SkyServeController:
                                      'serve_utils.RequestTimestamp for '
                                      'RequestRateAutoscaler.')
                 self.autoscaler.update_request_information(request_information)
-            return {'ready_replicas': self.infra_provider.get_ready_replicas()}
+            return {
+                'ready_replica_ips':
+                    self.infra_provider.get_ready_replica_ips()
+            }
 
         threading.Thread(target=self._run_autoscaler).start()
 

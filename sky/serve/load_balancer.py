@@ -63,13 +63,13 @@ class SkyServeLoadBalancer:
                     # Clean up after reporting request information to avoid OOM.
                     self.request_information.clear()
                     response.raise_for_status()
-                    ready_replicas = response.json()['ready_replicas']
+                    ready_replica_ips = response.json()['ready_replica_ips']
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Replica IPs: {ready_replicas}')
+                    logger.info(f'Available Replica IPs: {ready_replica_ips}')
                     self.load_balancing_policy.set_ready_replicas(
-                        ready_replicas)
+                        ready_replica_ips)
             time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
 
     async def _redirect_handler(self, request: fastapi.Request):
