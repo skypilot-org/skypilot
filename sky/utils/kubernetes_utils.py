@@ -994,10 +994,8 @@ def check_port_forward_mode_dependencies() -> None:
     # We store the dependency list as a list of lists. Each inner list
     # contains the name of the dependency, the command to check if it is
     # installed, and the package name to install it.
-    # nc does not have a version flag and `nc -h` returns returncode 1,
-    # so we use `command -v` to check if it is installed.
     dependency_list = [['socat', ['socat', '-V'], 'socat'],
-                       ['nc', ['command', '-v', 'nc'], 'netcat']]
+                       ['nc', ['nc', '-h'], 'netcat']]
     for name, check_cmd, install_cmd in dependency_list:
         try:
             subprocess.run(check_cmd,
