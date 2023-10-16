@@ -14,7 +14,7 @@ from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky.serve import infra_providers
+    from sky.serve import replica_managers
 
 _DB_PATH = pathlib.Path(constants.SERVE_PREFIX) / 'services.db'
 _DB_PATH = _DB_PATH.expanduser().absolute()
@@ -266,7 +266,7 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
 
 # === Replica functions ===
 def add_or_update_replica(service_name: str, replica_id: int,
-                          replica_info: 'infra_providers.ReplicaInfo') -> None:
+                          replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -289,7 +289,7 @@ def remove_replica(service_name: str, replica_id: int) -> None:
 
 def get_replica_info_from_id(
         service_name: str,
-        replica_id: int) -> Optional['infra_providers.ReplicaInfo']:
+        replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
@@ -302,7 +302,8 @@ def get_replica_info_from_id(
         return None
 
 
-def get_replica_infos(service_name: str) -> List['infra_providers.ReplicaInfo']:
+def get_replica_infos(
+        service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(

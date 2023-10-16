@@ -19,8 +19,8 @@ from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
 from sky.serve import controller
-from sky.serve import infra_providers
 from sky.serve import load_balancer
+from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
@@ -62,18 +62,18 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
     """Clean up the sky serve replicas, storage, and service record."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
-    info2proc: Dict[infra_providers.ReplicaInfo,
+    info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
     for info in replica_infos:
-        p = multiprocessing.Process(target=infra_providers.terminate_cluster,
+        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
         p.start()
         info2proc[info] = p
         # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
-            infra_providers.ProcessStatus.SUCCEEDED)
+            replica_managers.ProcessStatus.SUCCEEDED)
         info.status_property.sky_down_status = (
-            infra_providers.ProcessStatus.RUNNING)
+            replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
     for info, p in info2proc.items():
@@ -84,7 +84,7 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
         else:
             # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
-                infra_providers.ProcessStatus.FAILED)
+                replica_managers.ProcessStatus.FAILED)
             serve_state.add_or_update_replica(service_name, info.replica_id,
                                               info)
             failed = True

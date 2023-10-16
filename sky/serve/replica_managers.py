@@ -1,4 +1,4 @@
-"""InfraProvider: handles the creation and deletion of endpoint replicas."""
+"""ReplicaManager: handles the creation and deletion of endpoint replicas."""
 from concurrent import futures
 import dataclasses
 import enum
@@ -320,8 +320,8 @@ class ReplicaInfo:
         return self, False
 
 
-class InfraProvider:
-    """Each infra provider manages one service."""
+class ReplicaManager:
+    """Each replica manager monitors one service."""
 
     def __init__(self, service_name: str,
                  spec: 'service_spec.SkyServiceSpec') -> None:
@@ -349,8 +349,8 @@ class InfraProvider:
         raise NotImplementedError
 
 
-class SkyPilotInfraProvider(InfraProvider):
-    """Infra provider for SkyPilot clusters."""
+class SkyPilotReplicaManager(ReplicaManager):
+    """Replica Manager for SkyPilot clusters."""
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  task_yaml_path: str) -> None:
@@ -466,9 +466,9 @@ class SkyPilotInfraProvider(InfraProvider):
         for replica_id in replica_ids:
             self._terminate_replica(replica_id, sync_down_logs=False)
 
-    ################################
-    # InfraProvider Daemon Threads #
-    ################################
+    #################################
+    # ReplicaManager Daemon Threads #
+    #################################
 
     @with_lock
     def _refresh_process_pool(self) -> None:

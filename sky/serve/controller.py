@@ -16,7 +16,7 @@ from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import constants
-from sky.serve import infra_providers
+from sky.serve import replica_managers
 from sky.serve import serve_utils
 from sky.utils import env_options
 
@@ -41,10 +41,10 @@ class SkyServeController:
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
                  task_yaml: str, port: int) -> None:
         self.service_name = service_name
-        self.infra_provider: infra_providers.InfraProvider = (
-            infra_providers.SkyPilotInfraProvider(service_name,
-                                                  service_spec,
-                                                  task_yaml_path=task_yaml))
+        self.replica_manager: replica_managers.ReplicaManager = (
+            replica_managers.SkyPilotReplicaManager(service_name,
+                                                    service_spec,
+                                                    task_yaml_path=task_yaml))
         self.autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
                 service_spec,
@@ -67,12 +67,12 @@ class SkyServeController:
                         autoscalers.AutoscalerDecisionOperator.SCALE_UP):
                     assert isinstance(scaling_option.target,
                                       int), scaling_option
-                    self.infra_provider.scale_up(scaling_option.target)
+                    self.replica_manager.scale_up(scaling_option.target)
                 elif (scaling_option.operator ==
                       autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
                     assert isinstance(scaling_option.target,
                                       list), scaling_option
-                    self.infra_provider.scale_down(scaling_option.target)
+                    self.replica_manager.scale_down(scaling_option.target)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
@@ -99,7 +99,7 @@ class SkyServeController:
                 self.autoscaler.update_request_information(request_information)
             return {
                 'ready_replica_ips':
-                    self.infra_provider.get_ready_replica_ips()
+                    self.replica_manager.get_ready_replica_ips()
             }
 
         threading.Thread(target=self._run_autoscaler).start()
