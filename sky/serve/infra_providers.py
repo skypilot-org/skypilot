@@ -3,8 +3,8 @@ from concurrent import futures
 import dataclasses
 import enum
 import functools
+import multiprocessing
 import os
-import subprocess
 import threading
 import time
 import traceback
@@ -15,6 +15,7 @@ import requests
 
 import sky
 from sky import backends
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -35,28 +36,92 @@ _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
+_RETRY_INIT_GAP_SECONDS = 60
+
+
+def launch_cluster(task: sky.Task,
+                   cluster_name: str,
+                   max_retry: int = 3) -> None:
+    """Launch a sky serve replica cluster.
+
+    This function will not wait for the job starts running. It will return
+    immediately after the job is submitted.
+
+    Raises:
+        RuntimeError: If failed to launch the cluster after max_retry retries,
+            or some error happened before provisioning and will happen again
+            if retry.
+    """
+    retry_cnt = 0
+    backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
+    while True:
+        retry_cnt += 1
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.launch(task,
+                       cluster_name,
+                       detach_setup=True,
+                       detach_run=True,
+                       retry_until_up=True)
+            logger.info(f'Replica cluster {cluster_name} launched.')
+        except (exceptions.InvalidClusterNameError,
+                exceptions.NoCloudAccessError,
+                exceptions.ResourcesMismatchError) as e:
+            logger.error('Failure happened before provisioning. '
+                         f'{common_utils.format_exception(e)}')
+            raise RuntimeError('Failed to launch the sky serve replica '
+                               f'cluster {cluster_name}.') from e
+        except exceptions.ResourcesUnavailableError as e:
+            if not any(
+                    isinstance(err, exceptions.ResourcesUnavailableError)
+                    for err in e.failover_history):
+                raise RuntimeError('Failed to launch the sky serve replica '
+                                   f'cluster {cluster_name}.') from e
+            logger.info('Failed to launch the sky serve replica cluster with '
+                        f'error: {common_utils.format_exception(e)})')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.info('Failed to launch the sky serve replica cluster with '
+                        f'error: {common_utils.format_exception(e)})')
+            logger.info(f'  Traceback: {traceback.format_exc()}')
+        else:  # No exception, the launch succeeds.
+            return
+
+        terminate_cluster(cluster_name)
+        if retry_cnt >= max_retry:
+            raise RuntimeError('Failed to launch the sky serve replica cluster '
+                               f'{cluster_name} after {max_retry} retries.')
+        gap_seconds = backoff.current_backoff()
+        logger.info('Retrying to launch the sky serve replica cluster '
+                    f'in {gap_seconds:.1f} seconds.')
+        time.sleep(gap_seconds)
 
 
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
     retry_cnt = 0
+    backoff = common_utils.Backoff()
     while True:
+        retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
             sky.down(cluster_name)
             return
         except ValueError:
-            # The cluster is already down.
+            # The cluster is already terminated.
+            logger.info(
+                f'Replica cluster {cluster_name} is already terminated.')
             return
         except Exception as e:  # pylint: disable=broad-except
-            retry_cnt += 1
             if retry_cnt >= max_retry:
                 raise RuntimeError('Failed to terminate the sky serve replica '
                                    f'cluster {cluster_name}.') from e
-            logger.error('Failed to terminate the sky serve replica '
-                         f'cluster {cluster_name}. Retrying.'
-                         f'Details: {common_utils.format_exception(e)}')
+            gap_seconds = backoff.current_backoff()
+            logger.error(
+                'Failed to terminate the sky serve replica cluster '
+                f'{cluster_name}. Retrying after {gap_seconds} seconds.'
+                f'Details: {common_utils.format_exception(e)}')
             logger.error(f'  Traceback: {traceback.format_exc()}')
+            time.sleep(gap_seconds)
 
 
 def with_lock(func):
@@ -289,11 +354,11 @@ class SkyPilotInfraProvider(InfraProvider):
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
-        self.task_yaml_path: str = task_yaml_path
+        self.task: sky.Task = sky.Task.from_yaml(task_yaml_path)
         self.launch_process_pool: serve_utils.ThreadSafeDict[
-            int, subprocess.Popen] = serve_utils.ThreadSafeDict()
+            int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
-            int, subprocess.Popen] = serve_utils.ThreadSafeDict()
+            int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -313,25 +378,23 @@ class SkyPilotInfraProvider(InfraProvider):
         return ready_replicas
 
     def _launch_replica(self, replica_id: int) -> None:
-        cluster_name = serve_utils.generate_replica_cluster_name(
-            self.service_name, replica_id)
         if replica_id in self.launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
             return
-        logger.info(f'Creating replica {replica_id}')
-        # TODO(tian): We should do usage_lib.messages.usage.set_internal()
-        # after we change to python API.
-        cmd = ['sky', 'launch', self.task_yaml_path, '-c', cluster_name, '-y']
-        cmd.extend(['--detach-setup', '--detach-run', '--retry-until-up'])
+        logger.info(f'Launching replica {replica_id}')
+        cluster_name = serve_utils.generate_replica_cluster_name(
+            self.service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self.service_name, replica_id)
-        with open(log_file_name, 'w') as f:
-            # pylint: disable=consider-using-with
-            p = subprocess.Popen(cmd,
-                                 stdin=subprocess.DEVNULL,
-                                 stdout=f,
-                                 stderr=f)
+        p = multiprocessing.Process(
+            target=serve_utils.RedirectOutputTo(
+                launch_cluster,
+                log_file_name,
+            ).run,
+            args=(self.task, cluster_name),
+        )
+        p.start()
         self.launch_process_pool[replica_id] = p
         info = ReplicaInfo(replica_id, cluster_name)
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
@@ -341,10 +404,10 @@ class SkyPilotInfraProvider(InfraProvider):
             self._launch_replica(self.next_replica_id)
             self.next_replica_id += 1
 
-    def _teardown_replica(self, replica_id: int, sync_down_logs: bool) -> None:
+    def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
         if replica_id in self.down_process_pool:
-            logger.warning(f'Down process for replica {replica_id} already '
-                           'exists. Skipping.')
+            logger.warning(f'Terminate process for replica {replica_id} '
+                           'already exists. Skipping.')
             return
 
         def _sync_down_logs():
@@ -384,22 +447,23 @@ class SkyPilotInfraProvider(InfraProvider):
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
-        cmd = ['sky', 'down', info.cluster_name, '-y']
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
-        with open(log_file_name, 'w') as f:
-            # pylint: disable=consider-using-with
-            p = subprocess.Popen(cmd,
-                                 stdin=subprocess.DEVNULL,
-                                 stdout=f,
-                                 stderr=f)
+        p = multiprocessing.Process(
+            target=serve_utils.RedirectOutputTo(
+                terminate_cluster,
+                log_file_name,
+            ).run,
+            args=(info.cluster_name,),
+        )
+        p.start()
         self.down_process_pool[replica_id] = p
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
     def scale_down(self, replica_ids: List[int]) -> None:
         for replica_id in replica_ids:
-            self._teardown_replica(replica_id, sync_down_logs=False)
+            self._terminate_replica(replica_id, sync_down_logs=False)
 
     ################################
     # InfraProvider Daemon Threads #
@@ -414,7 +478,7 @@ class SkyPilotInfraProvider(InfraProvider):
         corresponding replica.
         """
         for replica_id, p in list(self.launch_process_pool.items()):
-            if p.poll() is not None:
+            if not p.is_alive():
                 # TODO(tian): Try-catch in process, and have an enum return
                 # value to indicate which type of failure happened.
                 # Currently we only have user code failure since the
@@ -426,29 +490,29 @@ class SkyPilotInfraProvider(InfraProvider):
                 info = serve_state.get_replica_info_from_id(
                     self.service_name, replica_id)
                 assert info is not None
-                if p.returncode != 0:
+                if p.exitcode != 0:
                     logger.warning(
                         f'Launch process for replica {replica_id} exited '
-                        f'abnormally with code {p.returncode}. Terminating...')
+                        f'abnormally with code {p.exitcode}. Terminating...')
                     info.status_property.sky_launch_status = (
                         ProcessStatus.FAILED)
-                    self._teardown_replica(replica_id, sync_down_logs=True)
+                    self._terminate_replica(replica_id, sync_down_logs=True)
                 else:
                     info.status_property.sky_launch_status = (
                         ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self.service_name, replica_id,
                                                   info)
         for replica_id, p in list(self.down_process_pool.items()):
-            if p.poll() is not None:
+            if not p.is_alive():
                 logger.info(f'Down process for replica {replica_id} finished.')
                 del self.down_process_pool[replica_id]
                 info = serve_state.get_replica_info_from_id(
                     self.service_name, replica_id)
                 assert info is not None
-                if p.returncode != 0:
+                if p.exitcode != 0:
                     logger.error(
                         f'Down process for replica {replica_id} exited '
-                        f'abnormally with code {p.returncode}.')
+                        f'abnormally with code {p.exitcode}.')
                     info.status_property.sky_down_status = (
                         ProcessStatus.FAILED)
                 else:
@@ -515,7 +579,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.warning(
                     f'Service job for replica {info.replica_id} FAILED. '
                     'Terminating...')
-                self._teardown_replica(info.replica_id, sync_down_logs=True)
+                self._terminate_replica(info.replica_id, sync_down_logs=True)
 
     def _job_status_fetcher(self) -> None:
         """Periodically fetch the service job status of all replicas."""
@@ -612,7 +676,7 @@ class SkyPilotInfraProvider(InfraProvider):
             serve_state.add_or_update_replica(self.service_name,
                                               info.replica_id, info)
             if should_teardown:
-                self._teardown_replica(info.replica_id, sync_down_logs=True)
+                self._terminate_replica(info.replica_id, sync_down_logs=True)
 
     def _replica_prober(self) -> None:
         """Periodically probe replicas."""
