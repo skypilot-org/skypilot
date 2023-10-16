@@ -1027,32 +1027,17 @@ def serve_up(
     # name.
     # In the same time, generate ports for the controller and load balancer.
     # Use file lock to make sure the ports are unique to each service.
-    try:
-        with filelock.FileLock(
-                os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH),
-                serve.CONTROLLER_FILE_LOCK_TIMEOUT):
-            controller_name, _ = serve.get_available_controller_name()
+    with filelock.FileLock(os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH)):
+        controller_name = serve.get_available_controller_name()
 
-            service_handle = serve.ServiceHandle(
-                service_name=service_name,
-                requested_controller_resources=controller_resources)
-
-            global_user_state.add_or_update_service(
-                service_name,
-                launched_at=int(time.time()),
-                controller_name=controller_name,
-                handle=service_handle)
-            # TODO(tian): Probably run another sky.launch after we get
-            # the load balancer port from the controller? So we don't
-            # need to open so many ports here.
-            controller_resources = controller_resources.copy(
-                ports=[serve.LOAD_BALANCER_PORT_RANGE])
-    except filelock.Timeout as e:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                'Timeout when obtaining controller lock for service '
-                f'{service_name!r}. Please check if there are some '
-                '`sky serve up` process hanging abnormally.') from e
+        global_user_state.add_service(service_name,
+                                      launched_at=int(time.time()),
+                                      controller_name=controller_name)
+        # TODO(tian): Probably run another sky.launch after we get
+        # the load balancer port from the controller? So we don't
+        # need to open so many ports here.
+        controller_resources = controller_resources.copy(
+            ports=[serve.LOAD_BALANCER_PORT_RANGE])
 
     _maybe_translate_local_file_mounts_and_sync_up(task, prefix='serve')
 
@@ -1084,7 +1069,7 @@ def serve_up(
         # Set this to modify default ray task CPU usage to custom value
         # instead of default 0.5 vCPU. We need to set it to a smaller value
         # to support a larger number of services.
-        controller_task.service_handle = service_handle
+        controller_task.service_name = service_name
 
         fore = colorama.Fore
         style = colorama.Style
@@ -1124,8 +1109,8 @@ def serve_up(
                  f'{service_name!r}.'), stderr)
             load_balancer_port = serve.decode_load_balancer_port(
                 lb_port_payload)
-        service_handle.endpoint = f'{handle.head_ip}:{load_balancer_port}'
-        global_user_state.set_service_handle(service_name, service_handle)
+        endpoint = f'{handle.head_ip}:{load_balancer_port}'
+        global_user_state.set_service_endpoint(service_name, endpoint)
 
         print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
               f'{style.RESET_ALL}')
@@ -1151,7 +1136,7 @@ def serve_up(
               f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
         print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
               f'{style.RESET_ALL}{fore.CYAN}'
-              f'{service_handle.endpoint}{style.RESET_ALL}')
+              f'{endpoint}{style.RESET_ALL}')
         print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
         print('\nTo monitor replica status:'
               f'\t{backend_utils.BOLD}watch -n10 sky serve status '

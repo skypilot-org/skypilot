@@ -99,7 +99,7 @@ def create_table(cursor, conn):
         name TEXT PRIMARY KEY,
         launched_at INTEGER,
         controller_name TEXT,
-        handle BLOB)""")
+        endpoint TEXT DEFAULT NULL)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -280,19 +280,16 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
-def add_or_update_service(name: str, launched_at: int, controller_name: str,
-                          handle: 'serve.ServiceHandle') -> None:
+def add_service(name: str, launched_at: int, controller_name: str) -> None:
     _DB.cursor.execute(
-        'INSERT or REPLACE INTO services'
-        '(name, launched_at, controller_name, handle) '
+        'INSERT INTO services'
+        '(name, launched_at, controller_name) '
         'VALUES ('
         # name
         '?, '
         # launched_at
         '?, '
         # controller_name
-        '?, '
-        # handle
         '?'
         ')',
         (
@@ -302,8 +299,6 @@ def add_or_update_service(name: str, launched_at: int, controller_name: str,
             launched_at,
             # controller_name
             controller_name,
-            # handle
-            pickle.dumps(handle),
         ))
 
     _DB.conn.commit()
@@ -355,9 +350,9 @@ def remove_service(service_name: str):
     _DB.conn.commit()
 
 
-def set_service_handle(service_name: str, handle: 'serve.ServiceHandle'):
-    _DB.cursor.execute('UPDATE services SET handle=(?) '
-                       'WHERE name=(?)', (pickle.dumps(handle), service_name))
+def set_service_endpoint(service_name: str, endpoint: str):
+    _DB.cursor.execute('UPDATE services SET endpoint=(?) '
+                       'WHERE name=(?)', (endpoint, service_name))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -597,13 +592,13 @@ def _get_service_from_row(row) -> Dict[str, Any]:
     # Explicitly specify the number of fields to unpack, so that
     # we can add new fields to the database in the future without
     # breaking the previous code.
-    name, launched_at, controller_name, handle = row[:4]
+    name, launched_at, controller_name, endpoint = row[:4]
     # TODO: use namedtuple instead of dict
     return {
         'name': name,
         'launched_at': launched_at,
         'controller_name': controller_name,
-        'handle': pickle.loads(handle),
+        'endpoint': endpoint,
     }
 
 
@@ -613,6 +608,15 @@ def get_service_from_name(
                               (service_name,)).fetchall()
     for row in rows:
         return _get_service_from_row(row)
+    return None
+
+
+def get_service_controller_name(service_name: Optional[str]) -> Optional[str]:
+    rows = _DB.cursor.execute(
+        'SELECT controller_name FROM services WHERE name=(?)',
+        (service_name,)).fetchall()
+    for (controller_name,) in rows:
+        return controller_name
     return None
 
 
@@ -626,15 +630,6 @@ def get_services_from_controller_name(
         record = _get_service_from_row(row)
         records.append(record)
     return records
-
-
-def get_handle_from_service_name(
-        service_name: Optional[str]) -> Optional['serve.ServiceHandle']:
-    rows = _DB.cursor.execute('SELECT handle FROM services WHERE name=(?)',
-                              (service_name,)).fetchall()
-    for (handle,) in rows:
-        return pickle.loads(handle)
-    return None
 
 
 def get_clusters() -> List[Dict[str, Any]]:

@@ -1010,9 +1010,17 @@ def serve_status(
             'launched_at': (int) timestamp of creation,
             'controller_name': (str) name of the controller cluster of the
               service,
-            'handle': (serve.ServiceHandle) handle of the service,
-            'status': (sky.ServiceStatus) service status,
+            'endpoint': (str) service endpoint,
             'replica_info': (List[Dict[str, Any]]) replica information,
+            'uptime': (int) uptime in seconds,
+            'status': (sky.ServiceStatus) service status,
+            'controller_port': (Optional[int]) controller port,
+            'load_balancer_port': (Optional[int]) load balancer port,
+            'policy': (Optional[str]) load balancer policy description,
+            'auto_restart': (bool) whether the service replcia will be
+              auto-restarted,
+            'requested_resources': (sky.Resources) requested resources
+              for replica,
         }
 
     Each entry in replica_info has the following fields:
@@ -1097,13 +1105,12 @@ def serve_tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    service_record = global_user_state.get_service_from_name(service_name)
-    if service_record is None:
+    controller_name = global_user_state.get_service_controller_name(
+        service_name)
+    if controller_name is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} does not exist. '
                              'Cannot stream logs.')
-    service_handle: serve.ServiceHandle = service_record['handle']
-    controller_name = service_record['controller_name']
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
         controller_name)
     if controller_status is None:
@@ -1119,7 +1126,7 @@ def serve_tail_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,
-                            service_handle,
+                            service_name,
                             target,
                             replica_id,
                             follow=follow)
@@ -1139,13 +1146,13 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         ValueError: if the service does not exist.
         RuntimeError: if failed to terminate the service.
     """
-    service_record = global_user_state.get_service_from_name(service_name)
+    controller_name = global_user_state.get_service_controller_name(
+        service_name)
 
-    if service_record is None:
+    if controller_name is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name!r} not found.')
 
-    controller_name = service_record['controller_name']
     handle = global_user_state.get_handle_from_cluster_name(controller_name)
 
     controller_fetch_ip_error_message = (

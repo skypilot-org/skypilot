@@ -118,11 +118,11 @@ def _start(service_name: str, task_yaml: str, job_id: int):
     if isinstance(config, dict):
         resources_config = config.get('resources')
     requested_resources = resources.Resources.from_yaml_config(resources_config)
-    serve_state.add_or_update_service(service_name,
-                                      job_id,
-                                      policy=service_spec.policy_str(),
-                                      auto_restart=service_spec.auto_restart,
-                                      requested_resources=requested_resources)
+    serve_state.add_service(service_name,
+                            controller_job_id=job_id,
+                            policy=service_spec.policy_str(),
+                            auto_restart=service_spec.auto_restart,
+                            requested_resources=requested_resources)
 
     controller_process = None
     load_balancer_process = None

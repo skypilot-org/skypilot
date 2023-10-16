@@ -2721,7 +2721,7 @@ def _add_default_value_to_local_record(
         'status': serve_lib.ServiceStatus.UNKNOWN,
         'controller_port': None,
         'load_balancer_port': None,
-        'policy': '',
+        'policy': None,
         'auto_restart': False,
         'requested_resources': sky.Resources(),
     })
@@ -2749,8 +2749,7 @@ def _refresh_service_record_no_lock(
     except exceptions.NetworkError:
         return record, 'Failed to refresh replica info due to network error.'
 
-    service_handle: serve_lib.ServiceHandle = record['handle']
-    if not service_handle.endpoint:
+    if not record['endpoint']:
         # Service controller is still initializing. Skipped refresh status.
         return record, None
 
@@ -2934,7 +2933,7 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
         # We set CPU resource for sky serve controller to a smaller value
         # to support a larger number of services.
         'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
-                if task.service_handle is not None else DEFAULT_TASK_CPU_DEMAND)
+                if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
     }
     if task.best_resources is not None:
         resources = task.best_resources

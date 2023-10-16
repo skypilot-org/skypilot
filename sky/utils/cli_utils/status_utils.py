@@ -127,7 +127,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         StatusColumn('CONTROLLER_NAME',
                      _get_controller_name,
                      show_by_default=False),
-        StatusColumn('ENDPOINT', _get_display_endpoint),
+        StatusColumn('ENDPOINT', _get_endpoint),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED_RESOURCES',
                      _get_requested_resources,
@@ -397,10 +397,6 @@ _get_requested_resources = lambda replica_record: replica_record[
     'requested_resources']
 
 
-def _get_service_handle(service_record: _ServiceRecord) -> serve.ServiceHandle:
-    return service_record['handle']
-
-
 def _get_uptime(service_record: _ServiceRecord) -> str:
     uptime = service_record['uptime']
     if uptime is None:
@@ -420,13 +416,8 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def get_endpoint(service_record: _ServiceRecord) -> Optional[str]:
-    handle = _get_service_handle(service_record)
-    return handle.endpoint
-
-
-def _get_display_endpoint(service_record: _ServiceRecord) -> str:
-    endpoint = get_endpoint(service_record)
+def _get_endpoint(service_record: _ServiceRecord) -> str:
+    endpoint = service_record['endpoint']
     if endpoint is None:
         return '-'
     return endpoint

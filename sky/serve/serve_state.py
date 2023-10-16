@@ -26,13 +26,12 @@ _DB_PATH = str(_DB_PATH)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
-# TODO(tian): Probably change back to ServiceHandle...
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS services (
     name TEXT PRIMARY KEY,
     controller_job_id INTEGER,
-    controller_port INTEGER,
-    load_balancer_port INTEGER,
+    controller_port INTEGER DEFAULT NULL,
+    load_balancer_port INTEGER DEFAULT NULL,
     status TEXT,
     uptime INTEGER DEFAULT NULL,
     policy TEXT,
@@ -164,26 +163,21 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 # === Service functions ===
-def add_or_update_service(
-        name: str,
-        controller_job_id: int,
-        controller_port: Optional[int] = None,
-        load_balancer_port: Optional[int] = None,
-        status: ServiceStatus = ServiceStatus.CONTROLLER_INIT,
-        uptime: Optional[int] = None,
-        policy: Optional[str] = None,
-        auto_restart: bool = False,
-        requested_resources: Optional['sky.Resources'] = None) -> None:
+def add_service(name: str,
+                controller_job_id: int,
+                policy: str,
+                auto_restart: bool,
+                requested_resources: 'sky.Resources',
+                status: ServiceStatus = ServiceStatus.CONTROLLER_INIT) -> None:
     """Adds a service to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            INSERT OR REPLACE INTO services
-            (name, controller_job_id, controller_port, load_balancer_port,
-            status, uptime, policy, auto_restart, requested_resources)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, controller_port, load_balancer_port,
-             status.value, uptime, policy, int(auto_restart),
+            INSERT INTO services
+            (name, controller_job_id, status, policy,
+            auto_restart, requested_resources)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, status.value, policy, int(auto_restart),
              pickle.dumps(requested_resources)))
 
 

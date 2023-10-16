@@ -4253,7 +4253,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
         if record is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'\nService {service_name!r} not found.')
-        service_endpoint = status_utils.get_endpoint(record)
+        service_endpoint = record['endpoint']
         if service_endpoint is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

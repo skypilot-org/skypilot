@@ -15,7 +15,6 @@ SERVE_PREFIX = '~/.sky/serve'
 # service. In our current multi-service controller implementation, we need to
 # select a controller if there are some existing controllers.
 CONTROLLER_FILE_LOCK_PATH = f'{SERVE_PREFIX}/controller.lock'
-CONTROLLER_FILE_LOCK_TIMEOUT = 20
 
 # The filelock for selecting service ports when starting a service. We need to
 # have a filelock to avoid port collision when starting multiple services at

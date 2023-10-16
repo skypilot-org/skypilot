@@ -10,7 +10,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional, Set,
-                    TextIO, Tuple, Type, TypeVar)
+                    TextIO, Type, TypeVar)
 
 import colorama
 import filelock
@@ -180,9 +180,9 @@ def _get_existing_controller_names() -> Set[str]:
 
     There is two possible indicators for a controller:
       1. It is in the cluster database, which means it is already created;
-      2. It is in the service database, which means it will be created
-         later in the future. This usually happens when multiple `sky serve up`
-         are running simultaneously.
+      2. It is not in the cluster database but in the service database,
+         which means it will be created later in the future. This usually
+         happens when multiple `sky serve up` are running simultaneously.
 
     Returns:
         A set of existing sky serve controller names.
@@ -277,32 +277,25 @@ def _get_service_slot_on_controller(controller_name: str) -> int:
     Returns:
         Number of slots on the controller.
     """
-    memory_requirements = 0.
-    controller_record = global_user_state.get_cluster_from_name(controller_name)
-    if controller_record is not None:
-        # If controller is already created, use its launched resources.
-        handle = controller_record['handle']
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        # Determine max number of services on this controller.
-        controller_cloud = handle.launched_resources.cloud
-        _, memory_requirements = (
-            controller_cloud.get_vcpus_mem_from_instance_type(
-                handle.launched_resources.instance_type))
-    else:
-        # Corner case: Multiple `sky serve up` are running simultaneously
-        # and the controller is not created yet. We created a resources
-        # for each initializing controller, and use the minimal memory
-        # requirement among them, since any of them could be the first to
-        # launch the controller.
-        service_records = (global_user_state.get_services_from_controller_name(
-            controller_name))
-        for service_record in service_records:
-            r = service_record['handle'].requested_controller_resources
-            # Remove the '+' in memory requirement.
-            memory_requirements = min(memory_requirements,
-                                      float(r.memory.strip('+')))
+    controller_memory = 0.
+    # Wait for the controller to be created. This could happen if multiple
+    # `sky serve up` are running simultaneously.
+    while True:
+        controller_record = global_user_state.get_cluster_from_name(
+            controller_name)
+        if controller_record is not None:
+            handle = controller_record['handle']
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            # Determine max number of services on this controller.
+            controller_cloud = handle.launched_resources.cloud
+            _, controller_memory = (
+                controller_cloud.get_vcpus_mem_from_instance_type(
+                    handle.launched_resources.instance_type))
+            assert controller_memory is not None
+            break
+        time.sleep(5)
     # Determine max number of services on this controller.
-    max_services_num = int(memory_requirements /
+    max_services_num = int(controller_memory /
                            constants.SERVICES_MEMORY_USAGE_GB)
     # Get current number of services on this controller.
     services_num_on_controller = len(
@@ -310,7 +303,7 @@ def _get_service_slot_on_controller(controller_name: str) -> int:
     return max_services_num - services_num_on_controller
 
 
-def get_available_controller_name() -> Tuple[str, bool]:
+def get_available_controller_name() -> str:
     """Get available controller name to use.
 
     Only consider controllers that have available slots for services.
@@ -321,8 +314,7 @@ def get_available_controller_name() -> Tuple[str, bool]:
     `sky serve up` select the same last slot on a controller.
 
     Returns:
-        A tuple of controller name and a boolean value indicating whether the
-        controller name is newly generated.
+        Controller name to use.
     """
     # Get all existing controllers.
     existing_controllers = _get_existing_controller_names()
@@ -330,15 +322,15 @@ def get_available_controller_name() -> Tuple[str, bool]:
     # Get a mapping from controller name to number of services on it.
     for controller_name in existing_controllers:
         num_slots = _get_service_slot_on_controller(controller_name)
-        # Only consider controllers that have available slots for services.
+        # Only consider controllers that have available slot for services.
         if num_slots > 0:
             controller2slots[controller_name] = num_slots
     if not controller2slots:
-        return generate_controller_cluster_name(existing_controllers), True
+        return generate_controller_cluster_name(existing_controllers)
     # If multiple controllers are available, choose the one with least number of
-    # slots, i.e. most number of services.
-    return min(controller2slots.keys(),
-               key=lambda k: controller2slots[k]), False
+    # slots, i.e. most number of services. This helps to decrease the number of
+    # controllers.
+    return min(controller2slots.keys(), key=lambda k: controller2slots[k])
 
 
 def set_service_status_from_replica_statuses(
@@ -372,41 +364,6 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-class ServiceHandle(object):
-    """A pickle-able tuple of:
-
-    - (required) Service name.
-    - (required) Service requested controller resources.
-    - (optional) Service endpoint IP.
-
-    This class is only used as a cache for information fetched from controller.
-    """
-    _VERSION = 0
-
-    def __init__(
-        self,
-        *,
-        service_name: str,
-        requested_controller_resources: 'sky.Resources',
-        endpoint: Optional[str] = None,
-    ) -> None:
-        self._version = self._VERSION
-        self.service_name = service_name
-        self.requested_controller_resources = requested_controller_resources
-        self.endpoint = endpoint
-
-    def __repr__(self) -> str:
-        return ('ServiceHandle('
-                f'\n\tservice_name={self.service_name},'
-                '\n\trequested_controller_resources='
-                f'{self.requested_controller_resources},'
-                f'\n\tendpoint={self.endpoint})')
-
-    def __setstate__(self, state):
-        self._version = self._VERSION
-        self.__dict__.update(state)
-
-
 def get_replica_info(service_name: str,
                      with_handle: bool) -> List[Dict[str, Any]]:
     """Get the information of all replicas of the service.
@@ -424,11 +381,13 @@ def get_replica_info(service_name: str,
     ]
 
 
-def get_latest_info(service_name: str) -> Dict[str, Any]:
+def get_latest_info(service_name: str,
+                    with_replica_info: bool = True) -> Dict[str, Any]:
     """Get the latest information of the service.
 
     Args:
         service_name: The name of the service.
+        with_replica_info: Whether to include the information of all replicas.
 
     Returns:
         A dictionary of latest information of the service.
@@ -438,7 +397,9 @@ def get_latest_info(service_name: str) -> Dict[str, Any]:
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
-    record['replica_info'] = get_replica_info(service_name, with_handle=True)
+    if with_replica_info:
+        record['replica_info'] = get_replica_info(service_name,
+                                                  with_handle=True)
     return record
 
 
@@ -676,7 +637,7 @@ def wait_for_load_balancer_port(service_name: str) -> str:
     time.sleep(5)
     for _ in range(constants.SERVICE_PORT_SELECTION_TIMEOUT):
         try:
-            latest_info = get_latest_info(service_name)
+            latest_info = get_latest_info(service_name, with_replica_info=False)
         except ValueError:
             # Service is not created yet.
             time.sleep(1)
