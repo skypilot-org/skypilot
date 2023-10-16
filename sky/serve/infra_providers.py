@@ -39,7 +39,7 @@ _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
 
 
-def launch_cluster(task: sky.Task,
+def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
@@ -52,6 +52,7 @@ def launch_cluster(task: sky.Task,
             or some error happened before provisioning and will happen again
             if retry.
     """
+    task = sky.Task.from_yaml(task_yaml_path)
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
@@ -354,7 +355,7 @@ class SkyPilotInfraProvider(InfraProvider):
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
-        self.task: sky.Task = sky.Task.from_yaml(task_yaml_path)
+        self.task_yaml_path = task_yaml_path
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
@@ -392,7 +393,7 @@ class SkyPilotInfraProvider(InfraProvider):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self.task, cluster_name),
+            args=(self.task_yaml_path, cluster_name),
         )
         p.start()
         self.launch_process_pool[replica_id] = p
