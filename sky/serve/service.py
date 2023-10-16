@@ -95,7 +95,7 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
     return failed
 
 
-def _start(service_name: str, task_yaml: str):
+def _start(service_name: str, task_yaml: str, job_id: int):
     """Starts the service."""
     # Generate log file name.
     load_balancer_log_file = os.path.expanduser(
@@ -110,21 +110,19 @@ def _start(service_name: str, task_yaml: str):
     # are executed at the same time.
     authentication.get_or_generate_keys()
 
-    # Store service information in the serve state.
+    # Initialize database record for the service.
     service_spec = serve.SkyServiceSpec.from_yaml(task_yaml)
-    record = serve_state.get_service_from_name(service_name)
-    if record is None:
-        raise ValueError(f'Service {service_name} does not exist.')
-    record['policy'] = service_spec.policy_str()
-    record['auto_restart'] = service_spec.auto_restart
     with open(task_yaml, 'r') as f:
         config = yaml.safe_load(f)
     resources_config = None
     if isinstance(config, dict):
         resources_config = config.get('resources')
     requested_resources = resources.Resources.from_yaml_config(resources_config)
-    record['requested_resources'] = requested_resources
-    serve_state.add_or_update_service(**record)
+    serve_state.add_or_update_service(service_name,
+                                      job_id,
+                                      policy=service_spec.policy_str(),
+                                      auto_restart=service_spec.auto_restart,
+                                      requested_resources=requested_resources)
 
     controller_process = None
     load_balancer_process = None
@@ -181,9 +179,11 @@ def _start(service_name: str, task_yaml: str):
         if failed:
             serve_state.set_service_status(
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+            logger.error(f'Service {service_name} failed to clean up.')
         else:
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
+            logger.info(f'Service {service_name} terminated successfully.')
 
 
 if __name__ == '__main__':
@@ -196,8 +196,12 @@ if __name__ == '__main__':
                         type=str,
                         help='Task YAML file',
                         required=True)
+    parser.add_argument('--job-id',
+                        required=True,
+                        type=int,
+                        help='Job id for the service job.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml)
+    _start(args.service_name, args.task_yaml, args.job_id)

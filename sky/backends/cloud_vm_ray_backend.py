@@ -3277,7 +3277,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         executable: str,
         detach_run: bool = False,
         spot_dag: Optional['dag.Dag'] = None,
-        service_handle: Optional['serve_lib.ServiceHandle'] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3348,11 +3347,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # the controller process job, as it will stay in the job pending
                 # table and not be executed until there is an empty slot.
                 job_submit_cmd = job_submit_cmd + ' && ' + spot_code
-            if service_handle is not None:
-                # Add the service to service table on controller VM.
-                serve_code = serve_lib.ServeCodeGen.add_service(
-                    job_id, service_handle.service_name)
-                job_submit_cmd = job_submit_cmd + ' && ' + serve_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -4728,8 +4722,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag,
-                                service_handle=task.service_handle)
+                                spot_dag=task.spot_dag)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -4803,5 +4796,4 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag,
-                                service_handle=task.service_handle)
+                                spot_dag=task.spot_dag)

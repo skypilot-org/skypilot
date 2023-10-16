@@ -20,10 +20,7 @@ from sky.serve import infra_providers
 from sky.serve import serve_utils
 from sky.utils import env_options
 
-# Use the explicit logger name so that the logger is under the
-# `sky.serve.controller` namespace when executed directly, so as
-# to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.serve.controller')
+logger = sky_logging.init_logger(__name__)
 
 
 class SuppressSuccessGetAccessLogsFilter(logging.Filter):

@@ -3,7 +3,6 @@ from concurrent import futures
 import dataclasses
 import enum
 import functools
-import logging
 import os
 import signal
 import subprocess
@@ -19,6 +18,7 @@ import requests
 import sky
 from sky import backends
 from sky import global_user_state
+from sky import sky_logging
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -31,7 +31,7 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20

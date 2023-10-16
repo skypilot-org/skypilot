@@ -29,7 +29,7 @@ SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 SERVICE_TERMINATION_TIMEOUT = 180
 
 # Timeout for waiting controller to find a port for service processes.
-SERVICE_PORT_SELECTION_TIMEOUT = 20
+SERVICE_PORT_SELECTION_TIMEOUT = 60
 
 # The time interval for load balancer to sync with controller. Every time the
 # load balancer syncs with controller, it will update all available replica ips

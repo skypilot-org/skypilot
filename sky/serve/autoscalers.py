@@ -2,11 +2,11 @@
 import bisect
 import dataclasses
 import enum
-import logging
 import time
 import typing
 from typing import Any, Dict, List, Optional, Union
 
+from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -14,7 +14,7 @@ from sky.serve import serve_utils
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.

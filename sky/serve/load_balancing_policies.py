@@ -1,10 +1,11 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
-import logging
 from typing import List, Optional, Set
 
 import fastapi
 
-logger = logging.getLogger(__name__)
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
 
 
 class LoadBalancingPolicy:

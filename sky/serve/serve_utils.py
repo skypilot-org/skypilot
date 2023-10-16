@@ -29,7 +29,6 @@ if typing.TYPE_CHECKING:
 
     import sky
 
-_CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
 _FAILED_TO_FIND_REPLICA_MSG = (
@@ -472,9 +471,11 @@ def terminate_service(service_name: str) -> None:
     print(f'Service {service_name!r} is scheduled to be terminated.')
     for _ in range(constants.SERVICE_TERMINATION_TIMEOUT):
         record = serve_state.get_service_from_name(service_name)
+        replica_infos = serve_state.get_replica_infos(service_name)
         if record is None:
-            return
-        if record['status'] == serve_state.ServiceStatus.FAILED_CLEANUP:
+            if not replica_infos:
+                return
+        elif record['status'] == serve_state.ServiceStatus.FAILED_CLEANUP:
             raise RuntimeError(
                 f'Failed to terminate service {service_name!r}. Some '
                 'resources are not cleaned up properly. Please SSH to '
@@ -674,7 +675,12 @@ def wait_for_load_balancer_port(service_name: str) -> str:
     # Sleep for a while to bootstrap the load balancer.
     time.sleep(5)
     for _ in range(constants.SERVICE_PORT_SELECTION_TIMEOUT):
-        latest_info = get_latest_info(service_name)
+        try:
+            latest_info = get_latest_info(service_name)
+        except ValueError:
+            # Service is not created yet.
+            time.sleep(1)
+            continue
         load_balancer_port = latest_info['load_balancer_port']
         if load_balancer_port is not None:
             return common_utils.encode_payload(load_balancer_port)
@@ -698,13 +704,6 @@ class ServeCodeGen:
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
     ]
-
-    @classmethod
-    def add_service(cls, job_id: int, service_name: str) -> str:
-        code = [
-            f'serve_state.add_or_update_service({job_id}, {service_name!r})',
-        ]
-        return cls._build(code)
 
     @classmethod
     def get_latest_info(cls, service_name: str) -> str:

@@ -26,6 +26,7 @@ _DB_PATH = str(_DB_PATH)
 _CONN = sqlite3.connect(_DB_PATH)
 _CURSOR = _CONN.cursor()
 
+# TODO(tian): Probably change back to ServiceHandle...
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS services (
     name TEXT PRIMARY KEY,
@@ -164,8 +165,8 @@ _SERVICE_STATUS_TO_COLOR = {
 
 # === Service functions ===
 def add_or_update_service(
-        controller_job_id: int,
         name: str,
+        controller_job_id: int,
         controller_port: Optional[int] = None,
         load_balancer_port: Optional[int] = None,
         status: ServiceStatus = ServiceStatus.CONTROLLER_INIT,

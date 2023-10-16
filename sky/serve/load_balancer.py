@@ -13,10 +13,7 @@ from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
 
-# Use the explicit logger name so that the logger is under the
-# `sky.serve.load_balancer` namespace when executed directly, so as
-# to inherit the setup from the `sky` logger.
-logger = sky_logging.init_logger('sky.serve.load_balancer')
+logger = sky_logging.init_logger(__name__)
 
 
 class SkyServeLoadBalancer:

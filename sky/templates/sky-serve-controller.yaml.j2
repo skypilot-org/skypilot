@@ -20,6 +20,7 @@ run: |
   python -u -m sky.serve.service \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID \
     > {{controller_log_file}} 2>&1
 
 envs:
