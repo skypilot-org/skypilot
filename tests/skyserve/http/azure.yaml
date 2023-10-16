@@ -11,5 +11,5 @@ service:
   port: 8081
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
+    initial_delay_seconds: 200
   replicas: 2

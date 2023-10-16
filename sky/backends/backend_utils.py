@@ -2751,6 +2751,7 @@ def _refresh_service_record_no_lock(
 
     if not record['endpoint']:
         # Service controller is still initializing. Skipped refresh status.
+        record['status'] = serve_lib.ServiceStatus.CONTROLLER_INIT
         return record, None
 
     controller_name = record['controller_name']
