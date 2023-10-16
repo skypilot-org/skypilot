@@ -33,7 +33,7 @@ SERVICE_PORT_SELECTION_TIMEOUT = 60
 # The time interval for load balancer to sync with controller. Every time the
 # load balancer syncs with controller, it will update all available replica ips
 # for each service, also send the number of requests in last query interval.
-CONTROLLER_SYNC_INTERVAL = 20
+LB_CONTROLLER_SYNC_INTERVAL = 20
 
 # Interval to probe replica endpoint.
 ENDPOINT_PROBE_INTERVAL = 10

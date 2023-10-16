@@ -5,9 +5,9 @@ from sky.serve.constants import CONTROLLER_FILE_LOCK_PATH
 from sky.serve.constants import CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 from sky.serve.constants import CONTROLLER_PREFIX
 from sky.serve.constants import CONTROLLER_RESOURCES
-from sky.serve.constants import CONTROLLER_SYNC_INTERVAL
 from sky.serve.constants import CONTROLLER_TEMPLATE
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL
+from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL
 from sky.serve.constants import LOAD_BALANCER_PORT_RANGE
 from sky.serve.constants import SERVE_PREFIX
 from sky.serve.constants import SERVICES_TASK_CPU_DEMAND

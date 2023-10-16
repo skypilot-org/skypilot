@@ -173,10 +173,10 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
-    minimize_logging: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
 ) -> None:
     """Execute an entrypoint.
 
@@ -313,8 +313,7 @@ def _execute(
 
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
-                          requested_features=requested_features,
-                          minimize_logging=minimize_logging)
+                          requested_features=requested_features)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -367,14 +366,17 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        if not minimize_logging:
+        group = backend_utils.ReservedClusterGroup.get_group(cluster_name)
+        if group is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
             # because spot jobs are serverless, there can be many of them, and
             # users tend to continuously monitor spot jobs using `sky spot
             # status`. Also don't print if this job is a skyserve controller
-            # job.
+            # job or launched by a skyserve controller job, because the
+            # redirect for this subprocess.run won't success and it will
+            # pollute the controller logs.
             #
             # Disable the usage collection for this status command.
             env = dict(os.environ,
@@ -403,6 +405,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
@@ -503,6 +506,8 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         _is_launched_by_spot_controller=_is_launched_by_spot_controller,
+        _is_launched_by_sky_serve_controller=
+        _is_launched_by_sky_serve_controller,
     )
 
 
@@ -777,7 +782,6 @@ def spot_launch(
             idle_minutes_to_autostop=spot.
             SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
-            minimize_logging=True,
         )
 
 
@@ -1073,7 +1077,7 @@ def serve_up(
 
         fore = colorama.Fore
         style = colorama.Style
-        print(f'\n{fore.YELLOW}Launching controller for {service_name!r}...'
+        print(f'{fore.YELLOW}Launching controller for {service_name!r}...'
               f'{style.RESET_ALL}')
         _execute(
             entrypoint=controller_task,
@@ -1085,7 +1089,6 @@ def serve_up(
             # value and a previous controller could be reused.
             idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
-            minimize_logging=True,
         )
 
         controller_record = global_user_state.get_cluster_from_name(
@@ -1115,7 +1118,7 @@ def serve_up(
         print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
               f'{style.RESET_ALL}')
 
-        print(f'\n{fore.CYAN}Service name: '
+        print(f'{fore.CYAN}Service name: '
               f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
               '\nTo see detailed info:'
               f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
@@ -1123,6 +1126,8 @@ def serve_up(
               '\nTo see logs of one replica:'
               f'\t{backend_utils.BOLD}sky serve logs {service_name} '
               f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
+              f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
+              f'{backend_utils.RESET_BOLD} to get all valid [REPLICA_ID])'
               '\nTo see logs of load balancer:'
               f'\t{backend_utils.BOLD}sky serve logs --load-balancer '
               f'{service_name}{backend_utils.RESET_BOLD}'
@@ -1132,15 +1137,13 @@ def serve_up(
               '\nTo teardown the service:'
               f'\t{backend_utils.BOLD}sky serve down {service_name}'
               f'{backend_utils.RESET_BOLD}'
-              f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
-              f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
-        print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
-              f'{style.RESET_ALL}{fore.CYAN}'
-              f'{endpoint}{style.RESET_ALL}')
-        print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
-        print('\nTo monitor replica status:'
+              '\nTo monitor replica status:'
               f'\t{backend_utils.BOLD}watch -n10 sky serve status '
               f'{service_name}{backend_utils.RESET_BOLD}'
               '\nTo send a test request:'
               f'\t\t{backend_utils.BOLD}curl -L $(sky serve status '
-              f'{service_name} --endpoint){backend_utils.RESET_BOLD}')
+              f'{service_name} --endpoint){backend_utils.RESET_BOLD}'
+              f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
+              f'{style.RESET_ALL}{fore.CYAN}'
+              f'{endpoint}{style.RESET_ALL}'
+              f'\n{fore.GREEN}Starting replicas now...{style.RESET_ALL}')

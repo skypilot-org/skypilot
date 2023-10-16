@@ -40,7 +40,7 @@ class SkyServeLoadBalancer:
     def _sync_with_controller(self):
         """Sync with controller periodically.
 
-        Every `constants.CONTROLLER_SYNC_INTERVAL` seconds, the load balancer
+        Every `constants.LB_CONTROLLER_SYNC_INTERVAL` seconds, the load balancer
         will sync with the controller to get the latest information about
         available replicas; also, it report the request information to the
         controller, so that the controller can make autoscaling decisions.
@@ -70,7 +70,7 @@ class SkyServeLoadBalancer:
                     logger.info(f'Available Replica IPs: {ready_replica_ips}')
                     self.load_balancing_policy.set_ready_replicas(
                         ready_replica_ips)
-            time.sleep(constants.CONTROLLER_SYNC_INTERVAL)
+            time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL)
 
     async def _redirect_handler(self, request: fastapi.Request):
         self.request_information.add(request)

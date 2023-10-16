@@ -186,7 +186,7 @@ class SkyServiceSpec:
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}
+            Replica auto restart:             {self.auto_restart}\
         """)
 
     @property

@@ -55,7 +55,7 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
         self.frequency = frequency
-        if self.frequency < constants.CONTROLLER_SYNC_INTERVAL:
+        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')

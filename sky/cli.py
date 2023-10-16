@@ -4126,7 +4126,7 @@ def serve_up(
                 'Specifying ports in resources is not allowed. SkyServe will '
                 'use the port specified in the service section.')
 
-    click.secho('\nService Spec:', fg='cyan')
+    click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('Each replica will use the following resources (estimated):',
@@ -4134,7 +4134,6 @@ def serve_up(
     with sky.Dag() as dag:
         dag.add(task)
     sky.optimize(dag)
-    click.echo()
 
     if not yes:
         prompt = f'Launching a new service {service_name!r}. Proceed?'
