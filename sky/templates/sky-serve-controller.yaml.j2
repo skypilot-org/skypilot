@@ -19,12 +19,8 @@ run: |
   # Start sky serve service.
   python -u -m sky.serve.service \
     --service-name {{service_name}} \
-    --service-dir {{service_dir}} \
     --task-yaml {{remote_task_yaml_path}} \
-    --controller-port {{controller_port}} \
-    --load-balancer-port {{load_balancer_port}} \
-    --controller-log-file {{controller_log_file}} \
-    --load-balancer-log-file {{load_balancer_log_file}}
+    > {{controller_log_file}} 2>&1
 
 envs:
 {%- for env_name, env_value in envs.items() %}

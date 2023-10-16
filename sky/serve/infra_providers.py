@@ -15,12 +15,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import psutil
 import requests
-import yaml
 
 import sky
 from sky import backends
 from sky import global_user_state
-from sky import resources
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -285,16 +283,8 @@ class InfraProvider:
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data} ({type(self.post_data)})')
 
-    def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
-        # Get replica info for all replicas
-        raise NotImplementedError
-
     def get_ready_replicas(self) -> Set[str]:
         # Returns the endpoints of all ready replicas
-        raise NotImplementedError
-
-    def get_requested_resources(self) -> resources.Resources:
-        # Returns the requested resources for the service
         raise NotImplementedError
 
     def scale_up(self, n: int) -> None:
@@ -433,12 +423,6 @@ class SkyPilotInfraProvider(InfraProvider):
                 logger.error(f'Error in job status fetcher: {e}')
             time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
-    def get_replica_info(self, verbose: bool) -> List[Dict[str, Any]]:
-        return [
-            info.to_info_dict(with_handle=verbose)
-            for info in serve_state.get_replica_infos(self.service_name)
-        ]
-
     def get_ready_replicas(self) -> Set[str]:
         ready_replicas = set()
         infos = serve_state.get_replica_infos(self.service_name)
@@ -447,16 +431,6 @@ class SkyPilotInfraProvider(InfraProvider):
                 assert info.ip is not None
                 ready_replicas.add(info.ip)
         return ready_replicas
-
-    def get_requested_resources(self) -> resources.Resources:
-        with open(self.task_yaml_path, 'r') as f:
-            config = yaml.safe_load(f)
-        resources_config = None
-        if isinstance(config, dict):
-            resources_config = config.get('resources')
-        if resources_config is None:
-            return resources.Resources()
-        return resources.Resources.from_yaml_config(resources_config)
 
     def _launch_replica(self, replica_id: int) -> None:
         cluster_name = serve_utils.generate_replica_cluster_name(
@@ -555,7 +529,8 @@ class SkyPilotInfraProvider(InfraProvider):
                 self._probe_all_replicas()
                 replica_statuses = [
                     info['status']
-                    for info in self.get_replica_info(verbose=False)
+                    for info in serve_utils.get_replica_info(self.service_name,
+                                                             with_handle=False)
                 ]
                 serve_utils.set_service_status_from_replica_statuses(
                     self.service_name, replica_statuses)

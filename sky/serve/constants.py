@@ -12,18 +12,24 @@ CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 SERVE_PREFIX = '~/.sky/serve'
 
 # The filelock for selecting controller and service ports when starting a
-# service. In our current multi-service controller implementation, we need to:
-# 1. Select a controller if there are some existing controllers;
-# 2. Select ports for each service atomically to avoid port conflicts.
-# All of them are protected by this file lock from race conditions.
+# service. In our current multi-service controller implementation, we need to
+# select a controller if there are some existing controllers.
 CONTROLLER_FILE_LOCK_PATH = f'{SERVE_PREFIX}/controller.lock'
 CONTROLLER_FILE_LOCK_TIMEOUT = 20
+
+# The filelock for selecting service ports when starting a service. We need to
+# have a filelock to avoid port collision when starting multiple services at
+# the same time.
+PORT_SELECTION_FILE_LOCK_PATH = f'{SERVE_PREFIX}/port_selection.lock'
 
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
 # Timeout for `sky serve down`.
 SERVICE_TERMINATION_TIMEOUT = 180
+
+# Timeout for waiting controller to find a port for service processes.
+SERVICE_PORT_SELECTION_TIMEOUT = 20
 
 # The time interval for load balancer to sync with controller. Every time the
 # load balancer syncs with controller, it will update all available replica ips
@@ -79,3 +85,4 @@ DEFAULT_MIN_REPLICAS = 1
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
 LOAD_BALANCER_PORT_START = 30001
+LOAD_BALANCER_PORT_RANGE = '30001-30100'

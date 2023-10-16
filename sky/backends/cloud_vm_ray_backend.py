@@ -3351,7 +3351,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if service_handle is not None:
                 # Add the service to service table on controller VM.
                 serve_code = serve_lib.ServeCodeGen.add_service(
-                    job_id, service_handle)
+                    job_id, service_handle.service_name)
                 job_submit_cmd = job_submit_cmd + ' && ' + serve_code
 
         returncode, stdout, stderr = self.run_on_head(handle,

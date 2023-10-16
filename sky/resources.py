@@ -1164,7 +1164,7 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-        config['spot_recovery'] = self.spot_recovery
+        add_if_not_none('spot_recovery', self.spot_recovery)
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)

@@ -2719,6 +2719,8 @@ def _add_default_value_to_local_record(
         'replica_info': [],
         'uptime': None,
         'status': serve_lib.ServiceStatus.UNKNOWN,
+        'controller_port': None,
+        'load_balancer_port': None,
         'policy': '',
         'auto_restart': False,
         'requested_resources': sky.Resources(),
@@ -2748,9 +2750,8 @@ def _refresh_service_record_no_lock(
         return record, 'Failed to refresh replica info due to network error.'
 
     service_handle: serve_lib.ServiceHandle = record['handle']
-    if not service_handle.endpoint_ip:
+    if not service_handle.endpoint:
         # Service controller is still initializing. Skipped refresh status.
-        record['status'] = serve_lib.ServiceStatus.CONTROLLER_INIT
         return record, None
 
     controller_name = record['controller_name']

@@ -54,7 +54,6 @@ class Autoscaler:
         self.auto_restart = spec.auto_restart
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.policy_str = spec.policy_str()
         self.frequency = frequency
         if self.frequency < constants.CONTROLLER_SYNC_INTERVAL:
             logger.warning('Autoscaler frequency is less than '

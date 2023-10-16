@@ -1181,8 +1181,8 @@ def serve_down(service_name: str, purge: bool = False) -> None:
         # pylint: disable=broad-except
         except Exception as e:
             if purge:
-                logger.warning('Ignoring error when cleaning '
-                               f'replicas of {service_name!r}: '
+                logger.warning('Ignoring error when terminate '
+                               f'service {service_name!r}: '
                                f'{common_utils.format_exception(e)}')
             else:
                 with ux_utils.print_exception_no_traceback():

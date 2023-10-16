@@ -8,10 +8,13 @@ import time
 from typing import Dict, List
 
 import filelock
+import yaml
 
 from sky import authentication
 from sky import exceptions
+from sky import resources
 from sky import serve
+from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
@@ -20,7 +23,13 @@ from sky.serve import infra_providers
 from sky.serve import load_balancer
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
+
+# Use the explicit logger name so that the logger is under the
+# `sky.serve.service` namespace when executed directly, so as
+# to inherit the setup from the `sky` logger.
+logger = sky_logging.init_logger('sky.serve.service')
 
 
 def _handle_signal(service_name: str) -> None:
@@ -35,7 +44,10 @@ def _handle_signal(service_name: str) -> None:
                 user_signal_text = f.read().strip()
                 try:
                     user_signal = serve_utils.UserSignal(user_signal_text)
+                    logger.info(f'User signal received: {user_signal}')
                 except ValueError:
+                    logger.warning(
+                        f'Unknown signal received: {user_signal}. Ignoring.')
                     user_signal = None
             # Remove the signal file, after reading it.
             signal_file.unlink()
@@ -47,6 +59,7 @@ def _handle_signal(service_name: str) -> None:
 
 
 def _cleanup(service_name: str, task_yaml: str) -> bool:
+    """Clean up the sky serve replicas, storage, and service record."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[infra_providers.ReplicaInfo,
@@ -56,64 +69,95 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                     args=(info.cluster_name,))
         p.start()
         info2proc[info] = p
+        # Set replica status to `SHUTTING_DOWN`
         info.status_property.sky_launch_status = (
             infra_providers.ProcessStatus.SUCCEEDED)
         info.status_property.sky_down_status = (
             infra_providers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
+        logger.info(f'Terminating replica {info.replica_id} ...')
     for info, p in info2proc.items():
         p.join()
         if p.exitcode == 0:
             serve_state.remove_replica(service_name, info.replica_id)
+            logger.info(f'Replica {info.replica_id} terminated successfully.')
         else:
+            # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
                 infra_providers.ProcessStatus.FAILED)
             serve_state.add_or_update_replica(service_name, info.replica_id,
                                               info)
             failed = True
+            logger.error(f'Replica {info.replica_id} failed to terminate.')
     task = task_lib.Task.from_yaml(task_yaml)
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     backend.teardown_ephemeral_storage(task)
     return failed
 
 
-def _start(service_name: str, service_dir: str, task_yaml: str,
-           controller_port: int, load_balancer_port: int,
-           controller_log_file: str, load_balancer_log_file: str):
+def _start(service_name: str, task_yaml: str):
     """Starts the service."""
-    # Create the service working directory if it does not exist.
-    service_dir = os.path.expanduser(service_dir)
+    # Generate log file name.
+    load_balancer_log_file = os.path.expanduser(
+        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
+
+    # Create the service working directory.
+    service_dir = os.path.expanduser(
+        serve_utils.generate_remote_service_dir_name(service_name))
     os.makedirs(service_dir, exist_ok=True)
 
     # Generate ssh key pair to avoid race condition when multiple sky.launch
     # are executed at the same time.
     authentication.get_or_generate_keys()
 
+    # Store service information in the serve state.
     service_spec = serve.SkyServiceSpec.from_yaml(task_yaml)
+    record = serve_state.get_service_from_name(service_name)
+    if record is None:
+        raise ValueError(f'Service {service_name} does not exist.')
+    record['policy'] = service_spec.policy_str()
+    record['auto_restart'] = service_spec.auto_restart
+    with open(task_yaml, 'r') as f:
+        config = yaml.safe_load(f)
+    resources_config = None
+    if isinstance(config, dict):
+        resources_config = config.get('resources')
+    requested_resources = resources.Resources.from_yaml_config(resources_config)
+    record['requested_resources'] = requested_resources
+    serve_state.add_or_update_service(**record)
 
     controller_process = None
     load_balancer_process = None
     try:
         _handle_signal(service_name)
-        # Start the controller.
-        controller_process = multiprocessing.Process(
-            target=serve_utils.RedirectOutputTo(controller.run_controller,
-                                                controller_log_file).run,
-            args=(service_name, service_spec, task_yaml, controller_port))
-        controller_process.start()
 
-        # Sleep for a while to make sure the controller is up.
-        time.sleep(10)
+        with filelock.FileLock(
+                os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
+            controller_port = common_utils.find_free_port(
+                constants.CONTROLLER_PORT_START)
+            # Start the controller.
+            controller_process = multiprocessing.Process(
+                target=controller.run_controller,
+                args=(service_name, service_spec, task_yaml, controller_port))
+            controller_process.start()
+            serve_state.set_service_controller_port(service_name,
+                                                    controller_port)
 
-        # TODO(tian): Support HTTPS.
-        controller_addr = f'http://localhost:{controller_port}'
-        replica_port = int(service_spec.replica_port)
-        # Start the load balancer.
-        load_balancer_process = multiprocessing.Process(
-            target=serve_utils.RedirectOutputTo(load_balancer.run_load_balancer,
-                                                load_balancer_log_file).run,
-            args=(controller_addr, load_balancer_port, replica_port))
-        load_balancer_process.start()
+            # TODO(tian): Support HTTPS.
+            controller_addr = f'http://localhost:{controller_port}'
+            replica_port = int(service_spec.replica_port)
+            load_balancer_port = common_utils.find_free_port(
+                constants.LOAD_BALANCER_PORT_START)
+
+            # Start the load balancer.
+            load_balancer_process = multiprocessing.Process(
+                target=serve_utils.RedirectOutputTo(
+                    load_balancer.run_load_balancer,
+                    load_balancer_log_file).run,
+                args=(controller_addr, load_balancer_port, replica_port))
+            load_balancer_process.start()
+            serve_state.set_service_load_balancer_port(service_name,
+                                                       load_balancer_port)
 
         while True:
             _handle_signal(service_name)
@@ -135,47 +179,25 @@ def _start(service_name: str, service_dir: str, task_yaml: str,
             process.join()
         failed = _cleanup(service_name, task_yaml)
         if failed:
-            serve_state.set_service_status(service_name,
-                                           serve_state.ServiceStatus.FAILED)
+            serve_state.set_service_status(
+                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
         else:
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='SkyServe Controller')
+    parser = argparse.ArgumentParser(description='Sky Serve Service')
     parser.add_argument('--service-name',
                         type=str,
                         help='Name of the service',
-                        required=True)
-    parser.add_argument('--service-dir',
-                        type=str,
-                        help='Working directory of the service',
                         required=True)
     parser.add_argument('--task-yaml',
                         type=str,
                         help='Task YAML file',
                         required=True)
-    parser.add_argument('--controller-port',
-                        type=int,
-                        help='Port to run the controller',
-                        required=True)
-    parser.add_argument('--load-balancer-port',
-                        type=int,
-                        help='Port to run the load balancer on.',
-                        required=True)
-    parser.add_argument('--controller-log-file',
-                        type=str,
-                        help='Log file path for the controller',
-                        required=True)
-    parser.add_argument('--load-balancer-log-file',
-                        type=str,
-                        help='Log file path for the load balancer',
-                        required=True)
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.service_dir, args.task_yaml,
-           args.controller_port, args.load_balancer_port,
-           args.controller_log_file, args.load_balancer_log_file)
+    _start(args.service_name, args.task_yaml)

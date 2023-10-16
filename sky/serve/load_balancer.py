@@ -48,6 +48,9 @@ class SkyServeLoadBalancer:
         available replicas; also, it report the request information to the
         controller, so that the controller can make autoscaling decisions.
         """
+        # Sleep for a while to wait the controller bootstrap.
+        time.sleep(5)
+
         while True:
             with requests.Session() as session:
                 try:

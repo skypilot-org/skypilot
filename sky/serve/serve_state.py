@@ -13,6 +13,7 @@ from sky.serve import constants
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
+    import sky
     from sky.serve import infra_providers
 
 _DB_PATH = pathlib.Path(constants.SERVE_PREFIX) / 'services.db'
@@ -30,8 +31,12 @@ _CURSOR.execute("""\
     name TEXT PRIMARY KEY,
     controller_job_id INTEGER,
     controller_port INTEGER,
+    load_balancer_port INTEGER,
     status TEXT,
-    uptime INTEGER DEFAULT NULL)""")
+    uptime INTEGER DEFAULT NULL,
+    policy TEXT,
+    auto_restart INTEGER,
+    requested_resources BLOB)""")
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS replicas (
     service_name TEXT,
@@ -121,9 +126,12 @@ class ServiceStatus(enum.Enum):
     # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
+    # Clean up failed
+    FAILED_CLEANUP = 'FAILED_CLEANUP'
+
     @classmethod
     def failed_statuses(cls) -> List['ServiceStatus']:
-        return [cls.CONTROLLER_FAILED, cls.UNKNOWN, cls.FAILED]
+        return [cls.CONTROLLER_FAILED, cls.UNKNOWN, cls.FAILED_CLEANUP]
 
     def colored_str(self) -> str:
         color = _SERVICE_STATUS_TO_COLOR[self]
@@ -150,19 +158,32 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.UNKNOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
+    ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
 }
 
 
 # === Service functions ===
-def add_service(job_id: int, service_name: str, controller_port: int) -> None:
+def add_or_update_service(
+        controller_job_id: int,
+        name: str,
+        controller_port: Optional[int] = None,
+        load_balancer_port: Optional[int] = None,
+        status: ServiceStatus = ServiceStatus.CONTROLLER_INIT,
+        uptime: Optional[int] = None,
+        policy: Optional[str] = None,
+        auto_restart: bool = False,
+        requested_resources: Optional['sky.Resources'] = None) -> None:
     """Adds a service to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            INSERT INTO services
-            (name, controller_job_id, controller_port, status)
-            VALUES (?, ?, ?, ?)""", (service_name, job_id, controller_port,
-                                     ServiceStatus.CONTROLLER_INIT.value))
+            INSERT OR REPLACE INTO services
+            (name, controller_job_id, controller_port, load_balancer_port,
+            status, uptime, policy, auto_restart, requested_resources)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, controller_port, load_balancer_port,
+             status.value, uptime, policy, int(auto_restart),
+             pickle.dumps(requested_resources)))
 
 
 def remove_service(service_name: str) -> None:
@@ -190,14 +211,41 @@ def set_service_status(service_name: str, status: ServiceStatus) -> None:
             status=(?) WHERE name=(?)""", (status.value, service_name))
 
 
+def set_service_controller_port(service_name: str,
+                                controller_port: int) -> None:
+    """Sets the controller port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            controller_port=(?) WHERE name=(?)""",
+            (controller_port, service_name))
+
+
+def set_service_load_balancer_port(service_name: str,
+                                   load_balancer_port: int) -> None:
+    """Sets the load balancer port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            UPDATE services SET
+            load_balancer_port=(?) WHERE name=(?)""",
+            (load_balancer_port, service_name))
+
+
 def _get_service_from_row(row) -> Dict[str, Any]:
-    name, controller_job_id, controller_port, status, uptime = row[:5]
+    (name, controller_job_id, controller_port, load_balancer_port, status,
+     uptime, policy, auto_restart, requested_resources) = row[:9]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
         'controller_port': controller_port,
+        'load_balancer_port': load_balancer_port,
         'status': ServiceStatus[status],
         'uptime': uptime,
+        'policy': policy,
+        'auto_restart': bool(auto_restart),
+        'requested_resources': pickle.loads(requested_resources),
     }
 
 

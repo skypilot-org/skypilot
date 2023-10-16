@@ -1032,22 +1032,21 @@ def serve_up(
                 os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH),
                 serve.CONTROLLER_FILE_LOCK_TIMEOUT):
             controller_name, _ = serve.get_available_controller_name()
-            controller_port, load_balancer_port = (
-                serve.gen_ports_for_serve_process(controller_name))
 
             service_handle = serve.ServiceHandle(
                 service_name=service_name,
-                requested_controller_resources=controller_resources,
-                controller_port=controller_port,
-                load_balancer_port=load_balancer_port)
+                requested_controller_resources=controller_resources)
 
             global_user_state.add_or_update_service(
                 service_name,
                 launched_at=int(time.time()),
                 controller_name=controller_name,
                 handle=service_handle)
+            # TODO(tian): Probably run another sky.launch after we get
+            # the load balancer port from the controller? So we don't
+            # need to open so many ports here.
             controller_resources = controller_resources.copy(
-                ports=[load_balancer_port])
+                ports=[serve.LOAD_BALANCER_PORT_RANGE])
     except filelock.Timeout as e:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -1060,27 +1059,18 @@ def serve_up(
     with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        if ('resources' in task_config and
-                'spot_recovery' in task_config['resources']):
-            del task_config['resources']['spot_recovery']
         common_utils.dump_yaml(f.name, task_config)
         remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
             service_name)
         controller_log_file = (
             serve.generate_remote_controller_log_file_name(service_name))
-        load_balancer_log_file = (
-            serve.generate_remote_load_balancer_log_file_name(service_name))
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': f.name,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-            'service_dir': serve.generate_remote_service_dir_name(service_name),
             'service_name': service_name,
-            'controller_port': controller_port,
-            'load_balancer_port': load_balancer_port,
             'controller_log_file': controller_log_file,
-            'load_balancer_log_file': load_balancer_log_file,
             'envs': _shared_controller_env_vars(),
         }
         controller_yaml_path = serve.generate_controller_yaml_file_name(
@@ -1118,7 +1108,23 @@ def serve_up(
         assert controller_record is not None
         handle = controller_record['handle']
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        service_handle.endpoint_ip = handle.head_ip
+        with rich_utils.safe_status(
+                '[cyan]Waiting for service initialization...[/]'):
+            code = serve.ServeCodeGen.wait_for_load_balancer_port(service_name)
+            backend = backends.CloudVmRayBackend()
+            returncode, lb_port_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode, code,
+                ('Failed to get load balancer port for service '
+                 f'{service_name!r}.'), stderr)
+            load_balancer_port = serve.decode_load_balancer_port(
+                lb_port_payload)
+        service_handle.endpoint = f'{handle.head_ip}:{load_balancer_port}'
         global_user_state.set_service_handle(service_name, service_handle)
 
         print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
@@ -1145,7 +1151,7 @@ def serve_up(
               f'{backend_utils.RESET_BOLD} to get all valid REPLICA_ID)')
         print(f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
               f'{style.RESET_ALL}{fore.CYAN}'
-              f'{handle.head_ip}:{load_balancer_port}{style.RESET_ALL}')
+              f'{service_handle.endpoint}{style.RESET_ALL}')
         print(f'{fore.GREEN}Starting replicas now...{style.RESET_ALL}')
         print('\nTo monitor replica status:'
               f'\t{backend_utils.BOLD}watch -n10 sky serve status '

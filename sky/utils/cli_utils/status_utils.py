@@ -422,11 +422,7 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
 
 def get_endpoint(service_record: _ServiceRecord) -> Optional[str]:
     handle = _get_service_handle(service_record)
-    if handle.endpoint_ip is None:
-        return None
-    if handle.load_balancer_port is None:
-        return None
-    return f'{handle.endpoint_ip}:{handle.load_balancer_port}'
+    return handle.endpoint
 
 
 def _get_display_endpoint(service_record: _ServiceRecord) -> str:

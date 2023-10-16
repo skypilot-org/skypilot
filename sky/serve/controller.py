@@ -17,7 +17,6 @@ from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import infra_providers
-from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import env_options
 
@@ -44,6 +43,7 @@ class SkyServeController:
 
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
                  task_yaml: str, port: int) -> None:
+        self.service_name = service_name
         self.infra_provider: infra_providers.InfraProvider = (
             infra_providers.SkyPilotInfraProvider(service_name,
                                                   service_spec,
@@ -61,8 +61,9 @@ class SkyServeController:
         logger.info('Starting autoscaler monitor.')
         while True:
             try:
-                replica_info = self.infra_provider.get_replica_info(
-                    verbose=env_options.Options.SHOW_DEBUG_INFO.get())
+                replica_info = serve_utils.get_replica_info(
+                    self.service_name,
+                    with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
                 logger.info(f'All replica info: {replica_info}')
                 scaling_option = self.autoscaler.evaluate_scaling(replica_info)
                 if (scaling_option.operator ==
@@ -100,31 +101,6 @@ class SkyServeController:
                                      'RequestRateAutoscaler.')
                 self.autoscaler.update_request_information(request_information)
             return {'ready_replicas': self.infra_provider.get_ready_replicas()}
-
-        @self.app.get('/controller/get_latest_info')
-        def get_latest_info():
-            # NOTE(dev): Keep this align with
-            # sky.backends.backend_utils._add_default_value_to_local_record
-            record = serve_state.get_service_from_name(
-                self.infra_provider.service_name)
-            if record is None:
-                record = {}
-            latest_info = {
-                'replica_info':
-                    self.infra_provider.get_replica_info(verbose=True),
-                'uptime': record.get('uptime', None),
-                'status': record.get('status',
-                                     serve_state.ServiceStatus.UNKNOWN),
-                'policy': self.autoscaler.policy_str,
-                'auto_restart': self.autoscaler.auto_restart,
-                'requested_resources':
-                    self.infra_provider.get_requested_resources(),
-            }
-            latest_info = {
-                k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-                for k, v in latest_info.items()
-            }
-            return latest_info
 
         threading.Thread(target=self._run_autoscaler).start()
 

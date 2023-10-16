@@ -14,7 +14,6 @@ from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional, Set,
 
 import colorama
 import filelock
-import requests
 
 from sky import backends
 from sky import exceptions
@@ -159,10 +158,10 @@ class RedirectOutputTo:
         self.file = file
 
     def run(self, *args, **kwargs):
-        # pylint: disable=import-outside-toplevel
-        import sys
+        import sys  # pylint: disable=import-outside-toplevel
 
-        from sky import sky_logging
+        from sky import sky_logging  # pylint: disable=import-outside-toplevel
+
         with open(self.file, 'w') as f:
             sys.stdout = f
             sys.stderr = f
@@ -263,27 +262,6 @@ def generate_replica_local_log_file_name(service_name: str,
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
-
-
-def get_replica_id_from_cluster_name(cluster_name: str) -> int:
-    return int(cluster_name.split('-')[-1])
-
-
-def gen_ports_for_serve_process(controller_name: str) -> Tuple[int, int]:
-    services = global_user_state.get_services_from_controller_name(
-        controller_name)
-    existing_controller_ports, existing_load_balancer_ports = set(), set()
-    for service in services:
-        service_handle: ServiceHandle = service['handle']
-        existing_controller_ports.add(service_handle.controller_port)
-        existing_load_balancer_ports.add(service_handle.load_balancer_port)
-    controller_port = constants.CONTROLLER_PORT_START
-    while controller_port in existing_controller_ports:
-        controller_port += 1
-    load_balancer_port = constants.LOAD_BALANCER_PORT_START
-    while load_balancer_port in existing_load_balancer_ports:
-        load_balancer_port += 1
-    return controller_port, load_balancer_port
 
 
 def _get_service_slot_on_controller(controller_name: str) -> int:
@@ -400,8 +378,6 @@ class ServiceHandle(object):
 
     - (required) Service name.
     - (required) Service requested controller resources.
-    - (required) Controller port.
-    - (required) LoadBalancer port.
     - (optional) Service endpoint IP.
 
     This class is only used as a cache for information fetched from controller.
@@ -413,50 +389,67 @@ class ServiceHandle(object):
         *,
         service_name: str,
         requested_controller_resources: 'sky.Resources',
-        controller_port: int,
-        load_balancer_port: int,
-        endpoint_ip: Optional[str] = None,
+        endpoint: Optional[str] = None,
     ) -> None:
         self._version = self._VERSION
         self.service_name = service_name
         self.requested_controller_resources = requested_controller_resources
-        self.controller_port = controller_port
-        self.load_balancer_port = load_balancer_port
-        self.endpoint_ip = endpoint_ip
+        self.endpoint = endpoint
 
     def __repr__(self) -> str:
         return ('ServiceHandle('
                 f'\n\tservice_name={self.service_name},'
                 '\n\trequested_controller_resources='
                 f'{self.requested_controller_resources},'
-                f'\n\tcontroller_port={self.controller_port},'
-                f'\n\tload_balancer_port={self.load_balancer_port},'
-                f'\n\tendpoint_ip={self.endpoint_ip})')
+                f'\n\tendpoint={self.endpoint})')
 
     def __setstate__(self, state):
         self._version = self._VERSION
         self.__dict__.update(state)
 
 
-def _get_latest_info(service_name: str, decode: bool = True) -> Dict[str, Any]:
+def get_replica_info(service_name: str,
+                     with_handle: bool) -> List[Dict[str, Any]]:
+    """Get the information of all replicas of the service.
+
+    Args:
+        service_name: The name of the service.
+        with_handle: Whether to include the handle of the replica.
+
+    Returns:
+        A list of dictionaries of replica information.
+    """
+    return [
+        info.to_info_dict(with_handle=with_handle)
+        for info in serve_state.get_replica_infos(service_name)
+    ]
+
+
+def get_latest_info(service_name: str) -> Dict[str, Any]:
+    """Get the latest information of the service.
+
+    Args:
+        service_name: The name of the service.
+
+    Returns:
+        A dictionary of latest information of the service.
+    """
+    # NOTE(dev): Keep this align with
+    # sky.backends.backend_utils._add_default_value_to_local_record
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
-    controller_port = record['controller_port']
-    resp = requests.get(
-        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
-        '/controller/get_latest_info')
-    resp.raise_for_status()
-    if not decode:
-        return resp.json()
-    return {
-        k: pickle.loads(base64.b64decode(v)) for k, v in resp.json().items()
+    record['replica_info'] = get_replica_info(service_name, with_handle=True)
+    return record
+
+
+def get_latest_info_encoded(service_name: str) -> str:
+    latest_info = get_latest_info(service_name)
+    latest_info = {
+        k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+        for k, v in latest_info.items()
     }
-
-
-def get_latest_info(service_name: str) -> str:
-    return common_utils.encode_payload(
-        _get_latest_info(service_name, decode=False))
+    return common_utils.encode_payload(latest_info)
 
 
 def load_latest_info(payload: str) -> Dict[str, Any]:
@@ -480,8 +473,19 @@ def terminate_service(service_name: str) -> None:
     for _ in range(constants.SERVICE_TERMINATION_TIMEOUT):
         record = serve_state.get_service_from_name(service_name)
         if record is None:
-            break
+            return
+        if record['status'] == serve_state.ServiceStatus.FAILED_CLEANUP:
+            raise RuntimeError(
+                f'Failed to terminate service {service_name!r}. Some '
+                'resources are not cleaned up properly. Please SSH to '
+                'the controller and manually clean up them. Find the '
+                'replicas that not been terminated by `sky serve status '
+                f'{service_name!r}`.')
         time.sleep(1)
+    raise RuntimeError(
+        f'Failed to terminate service {service_name!r}: timeout '
+        f'after {constants.SERVICE_TERMINATION_TIMEOUT} seconds. '
+        'Please try again later.')
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -593,8 +597,7 @@ def stream_replica_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        latest_info = _get_latest_info(service_name)
-        replica_info = latest_info['replica_info']
+        replica_info = get_replica_info(service_name, with_handle=False)
         for info in replica_info:
             if info['replica_id'] == replica_id:
                 return info['status']
@@ -667,6 +670,24 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+def wait_for_load_balancer_port(service_name: str) -> str:
+    # Sleep for a while to bootstrap the load balancer.
+    time.sleep(5)
+    for _ in range(constants.SERVICE_PORT_SELECTION_TIMEOUT):
+        latest_info = get_latest_info(service_name)
+        load_balancer_port = latest_info['load_balancer_port']
+        if load_balancer_port is not None:
+            return common_utils.encode_payload(load_balancer_port)
+        time.sleep(1)
+    raise RuntimeError(
+        f'Failed to get load balancer port for service {service_name!r}: '
+        f'timeout after {constants.SERVICE_PORT_SELECTION_TIMEOUT} seconds.')
+
+
+def decode_load_balancer_port(payload: str) -> str:
+    return common_utils.decode_payload(payload)
+
+
 class ServeCodeGen:
     """Code generator for SkyServe.
 
@@ -679,18 +700,16 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def add_service(cls, job_id: int, service_handle: ServiceHandle) -> str:
+    def add_service(cls, job_id: int, service_name: str) -> str:
         code = [
-            f'serve_state.add_service({job_id}, '
-            f'{service_handle.service_name!r}, '
-            f'{service_handle.controller_port})',
+            f'serve_state.add_or_update_service({job_id}, {service_name!r})',
         ]
         return cls._build(code)
 
     @classmethod
     def get_latest_info(cls, service_name: str) -> str:
         code = [
-            f'msg = serve_utils.get_latest_info({service_name!r})',
+            f'msg = serve_utils.get_latest_info_encoded({service_name!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -720,6 +739,14 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
             f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def wait_for_load_balancer_port(cls, service_name: str) -> str:
+        code = [
+            f'msg = serve_utils.wait_for_load_balancer_port({service_name!r})',
+            'print(msg, flush=True)'
         ]
         return cls._build(code)
 
