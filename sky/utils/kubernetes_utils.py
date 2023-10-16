@@ -991,19 +991,26 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 def check_port_forward_mode_dependencies() -> None:
     """Checks if 'socat' is installed"""
-    for name, option in [('socat', '-V')]:
+    # We store the dependency list as a list of lists. Each inner list
+    # contains the name of the dependency, the command to check if it is
+    # installed, and the package name to install it.
+    # nc does not have a version flag and `nc -h` returns returncode 1,
+    # so we use `command -v` to check if it is installed.
+    dependency_list = [['socat', ['socat', '-V'], 'socat'],
+                       ['nc', ['command', '-v', 'nc'], 'netcat']]
+    for name, check_cmd, install_cmd in dependency_list:
         try:
-            subprocess.run([name, option],
+            subprocess.run(check_cmd,
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL,
                            check=True)
-        except FileNotFoundError:
+        except (FileNotFoundError, subprocess.CalledProcessError):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'`{name}` is required to setup Kubernetes cloud with '
                     f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
                     'networking mode and it is not installed. '
                     'On Debian/Ubuntu, install it with:\n'
-                    f'  $ sudo apt install {name}\n'
+                    f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
-                    f'  $ brew install {name}') from None
+                    f'  $ brew install {install_cmd}') from None
