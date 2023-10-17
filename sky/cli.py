@@ -51,6 +51,7 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import provision as provision_lib
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
@@ -111,6 +112,10 @@ _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify an existing '
     'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
+
+_STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE = (
+    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
+    'cluster to show its ports.\nUsage: `sky status --ports <cluster>`')
 
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
@@ -1675,6 +1680,12 @@ def _get_spot_jobs(
                     'clusters, the returned IP address is the internal IP '
                     'of the head pod, and may not be accessible from outside '
                     'the cluster.'))
+@click.option('--ports',
+              default=False,
+              is_flag=True,
+              required=False,
+              help=('Get the exposed ports and corresponding URLs of a'
+                    'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
               is_flag=True,
@@ -1687,8 +1698,8 @@ def _get_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
-           clusters: List[str]):
+def status(all: bool, refresh: bool, ip: bool, ports: bool,
+           show_spot_jobs: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1747,7 +1758,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip.
-        show_spot_jobs = show_spot_jobs and not clusters and not ip
+        show_spot_jobs = show_spot_jobs and not clusters and not ip and not ports
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1757,21 +1768,29 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
-        if ip:
+
+        if ip or ports:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip with --refresh is not supported for now. '
-                    'To fix, refresh first, then query the IP.')
+                    'Using --ip or --ports with --refresh is not supported for now. '
+                    'To fix, refresh first, then query the IP or port.')
+
+            if ip and ports:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify both --ip and --ports at the same time.'
+                    )
+
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
                     cluster_num = (str(len(clusters))
                                    if len(clusters) > 0 else 'No')
+                    error_message = _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE if ip else _STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE
                     raise ValueError(
-                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb='specified'))
+                        error_message.format(cluster_num=cluster_num,
+                                             plural=plural,
+                                             verb='specified'))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1780,17 +1799,18 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             query_clusters = _get_glob_clusters(clusters, silent=ip)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
-        if ip:
+        if ip or ports:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
                                    if len(clusters) > 0 else 'No')
+                    error_message = _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE if ip else _STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE
                     raise ValueError(
-                        _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb='found'))
+                        error_message.format(cluster_num=cluster_num,
+                                             plural=plural,
+                                             verb='found'))
+
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
                 with ux_utils.print_exception_no_traceback():
@@ -1801,6 +1821,28 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Querying IP address is not supported '
                                      'for local clusters.')
+
+            if ports:
+                cloud = handle.launched_resources.cloud
+                if not provision_lib.supports(repr(cloud), 'query_ports'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Querying ports is not supported '
+                                         f'for {cloud}.')
+
+                config = common_utils.read_yaml(handle.cluster_yaml)
+                port_details = provision_lib.query_ports(
+                    repr(cloud), handle.cluster_name_on_cloud,
+                    config['provider'])
+                if not port_details:
+                    click.echo('No ports exposed.')
+
+                for port, urls in port_details.items():
+                    click.echo(
+                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}{colorama.Style.RESET_ALL}: '
+                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0]}, {urls[1]}{colorama.Style.RESET_ALL}'
+                    )
+                return
+
             head_ip = handle.external_ips()[0]
             click.echo(head_ip)
             return

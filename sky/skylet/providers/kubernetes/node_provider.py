@@ -52,8 +52,7 @@ class KubernetesNodeProvider(NodeProvider):
         self.cluster_name = cluster_name
 
         # Kubernetes namespace to user
-        self.namespace = kubernetes_utils.get_current_kube_config_context_namespace(
-        )
+        self.namespace = provider_config['namespace']
 
         # Timeout for resource provisioning. If it takes longer than this
         # timeout, the resource provisioning will be considered failed.

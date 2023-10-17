@@ -4117,11 +4117,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
-            # TODO(tian): Add some API like
-            # provision_lib.supports(cloud, 'cleanup_ports')
-            # so that our backend do not need to know the specific details
-            # for different clouds.
-            if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
+            if provision_lib.supports(repr(cloud), 'cleanup_ports'):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 

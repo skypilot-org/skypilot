@@ -16,6 +16,9 @@ provider:
     type: external
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
+    # The namespace to create the Ray cluster in.
+    namespace: {{k8s_namespace}}
+
     # We use internal IPs since we set up a port-forward between the kubernetes
     # cluster and the local machine, or directly use NodePort to reach the
     # head node.
@@ -24,6 +27,18 @@ provider:
     timeout: {{timeout}}
 
     ssh_jump_image: {{k8s_ssh_jump_image}}
+
+    ingress_name: {{cluster_name_on_cloud}}-skypilot-ingress
+
+    {%- if ports is not none %}
+    ports:
+    {%- for port in ports %}
+      - port: {{port}}
+        service_name: {{cluster_name_on_cloud}}-skypilot-service--{{port}}
+        ingress_name: {{cluster_name_on_cloud}}-skypilot-ingress--{{port}}
+        path_prefix: /skypilot/{{cluster_name_on_cloud}}_{{port}}
+    {%- endfor %}
+    {%- endif %}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -346,4 +361,3 @@ cluster_synced_files: []
 file_mounts_sync_continuously: False
 initialization_commands: []
 rsync_exclude: []
-

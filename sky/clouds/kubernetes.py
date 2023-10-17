@@ -66,9 +66,6 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
                                                          'supported in '
                                                          'Kubernetes.',
-        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
-                                                       'supported in '
-                                                       'Kubernetes.'
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
@@ -233,6 +230,8 @@ class Kubernetes(clouds.Cloud):
             'memory': str(mem),
             'accelerator_count': str(acc_count),
             'timeout': str(self.TIMEOUT),
+            'k8s_namespace':
+                kubernetes_utils.get_current_kube_config_context_namespace(),
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -241,6 +240,10 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
+
+        if resources.ports:
+            deploy_vars['ports'] = resources.ports
+
         return deploy_vars
 
     def _get_feasible_launchable_resources(

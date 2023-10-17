@@ -5,7 +5,7 @@ providers supported by SkyPilot need to follow.
 """
 import functools
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
 from sky import status_lib
@@ -16,6 +16,7 @@ from sky.provision import aws
 from sky.provision import azure
 from sky.provision import common
 from sky.provision import gcp
+from sky.provision import kubernetes
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,6 +41,13 @@ def _route_to_cloud_impl(func):
         return impl(*args, **kwargs)
 
     return _wrapper
+
+
+def supports(provider_name: str, method_name: str) -> bool:
+    """Check if the provider is supported."""
+    module_name = provider_name.lower()
+    module = globals().get(module_name)
+    return module is not None and hasattr(module, method_name)
 
 
 # pylint: disable=unused-argument
@@ -126,6 +134,19 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def query_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Tuple[str, str]]:
+    """Query details about ports on a cluster.
+
+    Returns a dict with port as the key and the value as the http and https url to access the port.
+    """
     raise NotImplementedError
 
 
