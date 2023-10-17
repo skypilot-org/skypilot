@@ -940,8 +940,8 @@ def spot_cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def spot_tail_logs(name: Optional[str], job_id: Optional[int],
-                   follow: bool) -> None:
+def spot_tail_logs(name: Optional[str], job_id: Optional[int]=None,
+                   follow: bool=True) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed spot jobs.
 
