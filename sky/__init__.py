@@ -16,11 +16,15 @@ from sky.core import cancel
 from sky.core import cost_report
 from sky.core import down
 from sky.core import download_logs
+from sky.core import exec  # pylint: disable=redefined-builtin
 from sky.core import job_status
+from sky.core import launch
 from sky.core import queue
 from sky.core import spot_cancel
+from sky.core import spot_launch
 from sky.core import spot_queue
 from sky.core import spot_status
+from sky.core import spot_tail_logs
 from sky.core import start
 from sky.core import status
 from sky.core import stop
@@ -31,9 +35,6 @@ from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
-from sky.execution import exec  # pylint: disable=redefined-builtin
-from sky.execution import launch
-from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
@@ -79,11 +80,10 @@ __all__ = [
     'Dag',
     'Task',
     'Resources',
-    # execution APIs
+    # core APIs
     'launch',
     'exec',
     'spot_launch',
-    # core APIs
     'status',
     'start',
     'stop',
@@ -100,6 +100,7 @@ __all__ = [
     'spot_queue',
     'spot_status',  # Deprecated (alias for spot_queue)
     'spot_cancel',
+    'spot_tail_logs',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
