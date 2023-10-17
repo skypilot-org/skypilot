@@ -3,13 +3,14 @@
 import time
 
 from sky import sky_logging
+from sky.skylet import constants
 from sky.skylet import events
 
 # Use the explicit logger name so that the logger is under the
 # `sky.skylet.skylet` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.skylet.skylet')
-logger.info('skylet started')
+logger.info(f'skylet started with version {constants.SKYLET_VERSION}.')
 
 EVENTS = [
     events.AutostopEvent(),
