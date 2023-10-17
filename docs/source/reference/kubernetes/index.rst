@@ -1,6 +1,6 @@
 .. _kubernetes-overview:
 
-Running on Kubernetes (Alpha)
+Running on Kubernetes
 =============================
 
 .. note::

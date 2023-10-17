@@ -3,6 +3,10 @@
 Managed Spot Jobs
 ================================================
 
+.. tip::
+
+  This feature is great for scaling out: running a single job for long durations, or running many jobs.
+
 SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
@@ -184,6 +188,10 @@ cost savings from spot instances without worrying about preemption or losing pro
 .. code-block:: console
 
   $ sky spot launch -n bert-qa bert_qa.yaml
+
+.. tip::
+
+  Try copy-paste this example and adapt it to your own job.
 
 
 Useful CLIs
