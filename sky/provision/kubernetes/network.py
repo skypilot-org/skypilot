@@ -68,6 +68,9 @@ def query_ports(
     result = {}
     if 'ports' in provider_config:
         for port_details in provider_config['ports']:
-            result[port_details['port']] = os.path.join(http_url, port_details['path_prefix'].lstrip('/')), os.path.join(https_url, port_details['path_prefix'].lstrip('/'))
+            result[port_details['port']] = os.path.join(
+                http_url,
+                port_details['path_prefix'].lstrip('/')), os.path.join(
+                    https_url, port_details['path_prefix'].lstrip('/'))
 
     return result

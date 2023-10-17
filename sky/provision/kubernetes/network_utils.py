@@ -76,11 +76,15 @@ def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
 def get_base_url(namespace: str) -> Tuple[str, str]:
     """Returns the HTTP and HTTPS base url of the ingress controller for the cluster."""
     core_api = kubernetes.core_api()
-    ingress_service = [item for item in core_api.list_namespaced_service(namespace).items if item.spec.type == "LoadBalancer"][0]
+    ingress_service = [
+        item for item in core_api.list_namespaced_service(namespace).items
+        if item.spec.type == "LoadBalancer"
+    ][0]
     if ingress_service.status.load_balancer.ingress is None:
         ports = ingress_service.spec.ports
         http_port = [port for port in ports if port.name == "http"][0].node_port
-        https_port = [port for port in ports if port.name == "https"][0].node_port
+        https_port = [port for port in ports if port.name == "https"
+                     ][0].node_port
         return f'localhost:{http_port}', f'localhost:{https_port}'
 
     external_ip = ingress_service.status.load_balancer.ingress[0].ip
