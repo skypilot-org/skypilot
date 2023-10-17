@@ -35,8 +35,6 @@ logger = sky_logging.init_logger(__name__)
 # = Cluster Management =
 # ======================
 
-# pylint: disable=redefined-builtin
-
 
 @usage_lib.entrypoint
 def status(cluster_names: Optional[Union[str, List[str]]] = None,
@@ -984,7 +982,6 @@ def launch(
     )
 
 
-@usage_lib.entrypoint
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
