@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -10,10 +10,12 @@ from sky import clouds
 from sky import dag
 from sky import data
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
 from sky import status_lib
-from sky import task
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -23,6 +25,9 @@ from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+
+if typing.TYPE_CHECKING:
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -219,7 +224,7 @@ def _start(
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag.Dag():
-        dummy_task = task.Task().set_resources(handle.launched_resources)
+        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
                                to_provision=handle.launched_resources,
@@ -519,22 +524,29 @@ def queue(cluster_name: str,
 
     Please refer to the sky.cli.queue for the document.
 
+    Args:
+        cluster_name: name of the cluster.
+        skip_finished: whether to skip finished jobs.
+        all_users: whether to get jobs from all users.
+
     Returns:
-        List[dict]:
-        [
-            {
-                'job_id': (int) job id,
-                'job_name': (str) job name,
-                'username': (str) username,
-                'submitted_at': (int) timestamp of submitted,
-                'start_at': (int) timestamp of started,
-                'end_at': (int) timestamp of ended,
-                'resources': (str) resources,
-                'status': (job_lib.JobStatus) job status,
-                'log_path': (str) log path,
-            }
-        ]
-    raises:
+        .. code-block:: python
+
+            [
+                {
+                    'job_id': (int) job id,
+                    'job_name': (str) job name,
+                    'username': (str) username,
+                    'submitted_at': (int) timestamp of submitted,
+                    'start_at': (int) timestamp of started,
+                    'end_at': (int) timestamp of ended,
+                    'resources': (str) resources,
+                    'status': (sky.JobStatus) job status,
+                    'log_path': (str) log path,
+                }
+            ]
+
+    Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -587,8 +599,11 @@ def cancel(
 
     When `all` is False and `job_ids` is None, cancel the latest running job.
 
-    Additional arguments:
-        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+    Args:
+        cluster_name: name of the cluster.
+        all: whether to cancel all jobs on the cluster.
+        job_ids: a list of job ids to cancel.
+        _try_cancel_if_cluster_is_init: whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the jobs controller to cancel the job when the
             worker node is preempted in the spot cluster.
@@ -667,6 +682,11 @@ def tail_logs(cluster_name: str,
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: job id. If None, tail the last job.
+        follow: whether to follow the logs.
 
     Raises:
         ValueError: arguments are invalid or the cluster is not supported or
@@ -751,6 +771,7 @@ def job_status(cluster_name: str,
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
+        stream_logs: (bool) whether to stream logs.
     Returns:
         Dict[Optional[str], Optional[job_lib.JobStatus]]: A mapping of job_id to
         job statuses. The status will be None if the job does not exist.
@@ -832,3 +853,199 @@ def storage_delete(name: str) -> None:
                                     source=handle.source,
                                     sync_on_reconstruction=False)
         store_object.delete()
+
+
+@usage_lib.entrypoint
+def launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: Optional[str] = None,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    dryrun: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    detach_setup: bool = False,
+    detach_run: bool = False,
+    no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_jobs_controller: bool = False,
+    _is_launched_by_sky_serve_controller: bool = False,
+    _disable_controller_check: bool = False,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launch a task.
+
+    The task's setup and run commands are executed under the task's workdir
+    (when specified, it is synced to remote cluster).  The task undergoes job
+    queue scheduling on the cluster.
+
+    Currently, the first argument must be a sky.Task, or (EXPERIMENTAL advanced
+    usage) a sky.Dag. In the latter case, currently it must contain a single
+    task; support for pipelines/general DAGs are in experimental branches.
+
+    Example:
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
+
+
+    Args:
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
+        cluster_name: name of the cluster to create/reuse.  If None,
+            auto-generate a name.
+        retry_until_up: whether to retry launching the cluster until it is
+            up.
+        idle_minutes_to_autostop: automatically stop the cluster after this
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness gets reset whenever setting-up/
+            running/pending jobs are found in the job queue. Setting this
+            flag is equivalent to running
+            ``sky.launch(..., detach_run=True, ...)`` and then
+            ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
+            will not be autostopped.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually launch the cluster.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
+            OptimizeTarget.TIME.
+        detach_setup: If True, run setup in non-interactive mode as part of the
+            job itself. You can safely ctrl-c to detach from logging, and it
+            will not interrupt the setup process. To see the logs again after
+            detaching, use `sky logs`. To cancel setup, cancel the job via
+            `sky cancel`. Useful for long-running setup
+            commands.
+        detach_run: If True, as soon as a job is submitted, return from this
+            function and do not stream execution logs.
+        no_setup: if True, do not re-run setup commands.
+        clone_disk_from: [Experimental] if set, clone the disk from the
+            specified cluster. This is useful to migrate the cluster to a
+            different availability zone or region.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
+            owned by another user.
+        exceptions.InvalidClusterNameError: if the cluster name is invalid.
+        exceptions.ResourcesMismatchError: if the requested resources
+            do not match the existing cluster.
+        exceptions.NotSupportedError: if required features are not supported
+            by the backend/cloud/cluster.
+        exceptions.ResourcesUnavailableError: if the requested resources
+            cannot be satisfied. The failover_history of the exception
+            will be set as:
+                1. Empty: iff the first-ever sky.optimize() fails to
+                find a feasible resource; no pre-check or actual launch is
+                attempted.
+                2. Non-empty: iff at least 1 exception from either
+                our pre-checks (e.g., cluster name invalid) or a region/zone
+                throwing resource unavailability.
+        exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
+    Other exceptions may be raised depending on the backend.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
+        if dryrun.
+    """
+    return execution.launch(
+        task=task,
+        cluster_name=cluster_name,
+        retry_until_up=retry_until_up,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        dryrun=dryrun,
+        down=down,
+        backend=backend,
+        stream_logs=stream_logs,
+        optimize_target=optimize_target,
+        detach_setup=detach_setup,
+        detach_run=detach_run,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
+        _is_launched_by_sky_serve_controller=
+        _is_launched_by_sky_serve_controller,
+        _disable_controller_check=_disable_controller_check,
+    )
+
+
+@usage_lib.entrypoint
+@usage_lib.entrypoint
+def exec(  # pylint: disable=redefined-builtin
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: str,
+    dryrun: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+    detach_run: bool = False,
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Execute a task on an existing cluster.
+
+    This function performs two actions:
+
+    (1) workdir syncing, if the task has a workdir specified;
+    (2) executing the task's ``run`` commands.
+
+    All other steps (provisioning, setup commands, file mounts syncing) are
+    skipped.  If any of those specifications changed in the task, this function
+    will not reflect those changes.  To ensure a cluster's setup is up to date,
+    use ``sky.launch()`` instead.
+
+    Execution and scheduling behavior:
+
+    - The task will undergo job queue scheduling, respecting any specified
+      resource requirement. It can be executed on any node of the cluster with
+      enough resources.
+    - The task is run under the workdir (if specified).
+    - The task is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as ``htop`` do not work.
+      Use ``ssh my_cluster`` instead.
+
+    Args:
+        task: sky.Task, or sky.Dag (experimental; 1-task only) containing the
+          task to execute.
+        cluster_name: name of an existing cluster to execute the task.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually execute the task.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        detach_run: if True, detach from logging once the task has been
+            submitted.
+
+    Raises:
+        ValueError: if the specified cluster does not exist or is not in UP
+            status.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+            reserved cluster that does not support this operation.
+    """
+    execution.exec(
+        task=task,
+        cluster_name=cluster_name,
+        dryrun=dryrun,
+        down=down,
+        stream_logs=stream_logs,
+        backend=backend,
+        detach_run=detach_run,
+    )

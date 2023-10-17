@@ -52,6 +52,62 @@ sky.autostop
 
 .. autofunction:: sky.autostop
 
+
+Job Queue API
+-----------------
+
+sky.queue
+~~~~~~~~~~
+
+.. autofunction:: sky.queue
+
+sky.job_status
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.job_status
+
+
+sky.tail_logs
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.tail_logs
+
+
+sky.download_logs
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.download_logs
+
+sky.cancel
+~~~~~~~~~~~
+
+.. autofunction:: sky.cancel
+
+
+Managed Spot Jobs API
+-----------------------
+
+sky.spot_launch
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.spot_launch
+
+sky.spot_queue
+~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.spot_queue
+
+sky.spot_cancel
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.spot_cancel
+
+
+sky.spot_tail_logs
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: sky.spot_tail_logs
+
 .. _sky-dag-ref:
 
 Task
