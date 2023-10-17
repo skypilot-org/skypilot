@@ -106,8 +106,13 @@ Interactive nodes can be stopped, restarted, and terminated, like any other clus
 Getting multiple nodes
 ----------------------
 By default, interactive clusters are a single node. If you require a cluster
-with multiple nodes (e.g., for hyperparameter tuning or distributed training),
-use :code:`num_nodes` in a YAML spec:
+with multiple nodes, use ``sky launch`` directly:
+
+.. code-block:: console
+
+    $ sky launch -c my-cluster --num-nodes 16 --gpus V100:8
+
+The same can be achieved with a YAML spec:
 
 .. code-block:: yaml
 
@@ -120,8 +125,4 @@ use :code:`num_nodes` in a YAML spec:
 
     $ sky launch -c my-cluster multi_node.yaml
 
-To log in to the head node:
-
-.. code-block:: console
-
-    $ ssh my-cluster
+You can then :ref:`SSH into any node <ssh>` of the cluster by name.

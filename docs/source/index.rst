@@ -133,8 +133,8 @@ Documentation
    examples/ports
    reference/tpu
    reference/interactive-nodes
-   reference/faq
    reference/logging
+   reference/faq
 
 .. toctree::
    :maxdepth: 1

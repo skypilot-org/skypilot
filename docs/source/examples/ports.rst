@@ -26,13 +26,13 @@ To open a port on a SkyPilot cluster, specify :code:`ports` in the :code:`resour
 
 In this example, the :code:`run` command will start the Jupyter Lab server on port 8888. By specifying :code:`ports: 8888`, SkyPilot will expose port 8888 on the cluster, making the jupyter server publicly accessible. To launch and access the server, run:
 
-.. code-block:: bash
+.. code-block:: console
 
     $ sky launch -c jupyter jupyter_lab.yaml
 
 and look in for the logs for some output like:
 
-.. code-block:: bash
+.. code-block:: console
 
     Jupyter Server 2.7.0 is running at:
         http://127.0.0.1:8888/lab?token=<token>
@@ -40,7 +40,7 @@ and look in for the logs for some output like:
 
 To get the public IP address of the head node of the cluster, run :code:`sky status --ip jupyter`:
 
-.. code-block:: bash
+.. code-block:: console
 
     $ sky status --ip jupyter
     35.223.97.21
@@ -59,7 +59,7 @@ If you want to expose multiple ports, you can specify a list of ports or port ra
 
 SkyPilot also support opening ports through the CLI:
 
-.. code-block:: bash
+.. code-block:: console
 
     $ sky launch -c jupyter --ports 8888 jupyter_lab.yaml
 

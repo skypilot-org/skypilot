@@ -127,6 +127,8 @@ This may show multiple clusters, if you have created several:
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
 
+.. _ssh:
+
 SSH into clusters
 =================
 Simply run :code:`ssh <cluster_name>` to log into a cluster:
