@@ -157,7 +157,7 @@ class ReplicaStatusProperty:
         sky_launch_status: Process status of sky.launch.
         user_app_failed: Whether the service job failed.
         service_ready_now: Latest readiness probe result.
-        service_once_ready: Whether the service has been ready at least once.
+        first_ready_time: The first time the service is ready.
         sky_down_status: Process status of sky.down.
     """
     # Initial value is RUNNING since each `ReplicaInfo` is created
@@ -165,20 +165,36 @@ class ReplicaStatusProperty:
     sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
     user_app_failed: bool = False
     service_ready_now: bool = False
-    service_once_ready: bool = False
+    # None means readiness probe is not passed yet.
+    first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
     sky_down_status: Optional[ProcessStatus] = None
 
-    def is_scale_down_succeeded(self) -> bool:
+    def is_scale_down_succeeded(self, initial_delay_seconds: int) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
+        if (self.first_ready_time is not None and
+                time.time() - self.first_ready_time > initial_delay_seconds):
+            # If the service is up for more than `initial_delay_seconds`,
+            # we assume there is no bug in the user code and the scale down
+            # is successful, thus enabling the controller to remove the
+            # replica from the replica table and auto restart the replica.
+            # Here we assume that initial_delay_seconds is larger than
+            # consecutive_failure_threshold_seconds, so if a replica is not
+            # teardown for initial_delay_seconds, it is safe to assume that
+            # it is UP for initial_delay_seconds.
+            # For replica with a failed sky.launch, it is likely due to some
+            # misconfigured resources, so we don't want to auto restart it.
+            # For replica with a failed sky.down, we cannot restart it since
+            # otherwise we will have a resource leak.
+            return True
         if self.user_app_failed:
             return False
         if not self.service_ready_now:
             return False
-        return self.service_once_ready
+        return self.first_ready_time is not None
 
     def should_track_status(self) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
@@ -203,7 +219,7 @@ class ReplicaStatusProperty:
             if self.user_app_failed:
                 # Failed on user setup/run
                 return serve_state.ReplicaStatus.FAILED
-            if not self.service_once_ready:
+            if self.first_ready_time is None:
                 # initial delay seconds exceeded
                 return serve_state.ReplicaStatus.FAILED
             if not self.service_ready_now:
@@ -229,7 +245,7 @@ class ReplicaStatusProperty:
             # Failed on user setup/run
             # Same as above
             return serve_state.ReplicaStatus.FAILED_CLEANUP
-        if self.service_once_ready:
+        if self.first_ready_time is not None:
             # Service was ready before but not now
             return serve_state.ReplicaStatus.NOT_READY
         else:
@@ -286,9 +302,14 @@ class ReplicaInfo:
         self,
         readiness_suffix: str,
         post_data: Optional[Dict[str, Any]],
-    ) -> Tuple['ReplicaInfo', bool]:
-        """Probe the readiness of the replica."""
+    ) -> Tuple['ReplicaInfo', bool, float]:
+        """Probe the readiness of the replica.
+
+        Returns:
+            Tuple of (self, is_ready, probe_time).
+        """
         replica_ip = self.ip
+        probe_time = time.time()
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
@@ -313,12 +334,12 @@ class ReplicaInfo:
             logger.info(msg)
             if response.status_code == 200:
                 logger.info(f'Replica {replica_ip} is ready.')
-                return self, True
+                return self, True, probe_time
         except requests.exceptions.RequestException as e:
             logger.info(e)
             logger.info(f'Replica {replica_ip} is not ready.')
             pass
-        return self, False
+        return self, False, probe_time
 
 
 class ReplicaManager:
@@ -523,8 +544,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Failed replica still count as a replica. In our current
                 # design, we want to fail early if user code have any error.
                 # This will prevent infinite loop of teardown and
-                # re-provision.
-                if info.status_property.is_scale_down_succeeded():
+                # re-provision. However, there is a special case that if the
+                # replica is UP for longer than initial_delay_seconds, we
+                # assume it is just some random failure and we should restart
+                # the replica. Please refer to the implementation of
+                # `is_scale_down_succeeded` for more details.
+                if info.status_property.is_scale_down_succeeded(
+                        self.initial_delay_seconds):
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.
@@ -623,33 +649,32 @@ class SkyPilotReplicaManager(ReplicaManager):
         # object as well, so that we could update the info object in the
         # same order.
         for future in futures.as_completed(probe_futures):
-            future_result: Tuple[ReplicaInfo, bool] = future.result()
-            info, probe_succeeded = future_result
+            future_result: Tuple[ReplicaInfo, bool, float] = future.result()
+            info, probe_succeeded, probe_time = future_result
             info.status_property.service_ready_now = probe_succeeded
             should_teardown = False
             if probe_succeeded:
                 if self.uptime is None:
-                    self.uptime = time.time()
+                    self.uptime = probe_time
                     logger.info(f'Replica {info.replica_id} is the first ready '
                                 f'replica. Setting uptime to {self.uptime}.')
                     serve_state.set_service_uptime(self.service_name,
                                                    int(self.uptime))
                 info.consecutive_failure_times.clear()
-                if not info.status_property.service_once_ready:
-                    info.status_property.service_once_ready = True
+                if info.status_property.first_ready_time is None:
+                    info.status_property.first_ready_time = probe_time
             else:
-                current_time = time.time()
                 if info.first_not_ready_time is None:
-                    info.first_not_ready_time = current_time
-                if info.status_property.service_once_ready:
-                    info.consecutive_failure_times.append(current_time)
+                    info.first_not_ready_time = probe_time
+                if info.status_property.first_ready_time is not None:
+                    info.consecutive_failure_times.append(probe_time)
                     consecutive_failure_time = (
                         info.consecutive_failure_times[-1] -
                         info.consecutive_failure_times[0])
                     if (consecutive_failure_time >=
                             _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
                         logger.info(
-                            f'Replica {info.replica_id} is  not ready for '
+                            f'Replica {info.replica_id} is not ready for '
                             'too long and exceeding consecutive failure '
                             'threshold. Terminating the replica...')
                         should_teardown = True
@@ -661,7 +686,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                             'Skipping.')
                 else:
-                    current_delay_seconds = (current_time -
+                    current_delay_seconds = (probe_time -
                                              info.first_not_ready_time)
                     if current_delay_seconds > self.initial_delay_seconds:
                         logger.info(
