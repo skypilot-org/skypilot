@@ -487,27 +487,25 @@ class SSHConfigHelper(object):
             ip = 'localhost'
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
-        with open(config_path) as f:
+        with open(config_path, 'r') as f:
             config = f.readlines()
 
         ssh_dir = cls.ssh_cluster_path.format('')
-        if not os.path.exists(os.path.expanduser(ssh_dir)):
-            os.makedirs(os.path.expanduser(ssh_dir))
-            # Handle Include on top of Config file
-            include_str = f'Include {cls.ssh_cluster_path.format("*")}'
-            for i, line in enumerate(config):
-                config_str = line.strip()
-                if config_str == include_str:
-                    break
-                # Did not find Include string
-                if 'Host' in config_str:
-                    with open(config_path, 'w') as f:
-                        config.insert(0, '\n')
-                        config.insert(0, include_str + '\n')
-                        config.insert(0, '# Added by sky' + '\n')
-                        f.write(''.join(config).strip())
-                        f.write('\n' * 2)
-                    break
+        os.makedirs(os.path.expanduser(ssh_dir), exist_ok=True)
+
+        # Handle Include on top of Config file
+        include_str = f'Include {cls.ssh_cluster_path.format("*")}'
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if config_str == include_str:
+                break
+            # Did not find Include string. Insert `Include` lines.
+            if 'Host' in config_str:
+                with open(config_path, 'w') as f:
+                    config.insert(0, f'# Added by sky\n{include_str}\n')
+                    f.write(''.join(config).strip())
+                    f.write('\n' * 2)
+                break
 
         #For backward compatibility
         if os.path.exists(config_path):
@@ -596,6 +594,10 @@ class SSHConfigHelper(object):
         """
         username = auth_config['ssh_user']
         config_path = os.path.expanduser(cls.ssh_conf_path)
+        cluster_config_path = os.path.expanduser(
+            cls.ssh_cluster_path.format(cluster_name))
+        common_utils.remove_file_if_exists(cluster_config_path)
+
         if not os.path.exists(config_path):
             return
 
@@ -656,10 +658,27 @@ class SSHConfigHelper(object):
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
-        cluster_config_path = os.path.expanduser(
-            cls.ssh_cluster_path.format(cluster_name))
-        if os.path.exists(cluster_config_path):
-            os.remove(cluster_config_path)
+        # Delete include statement
+        sky_autogen_comment = ('# Added by sky (use `sky stop/down '
+                               f'{cluster_name}` to remove)')
+        with open(config_path) as f:
+            config = f.readlines()
+
+        for i, line in enumerate(config):
+            config_str = line.strip()
+            if f'Include {cluster_config_path}' in config_str:
+                with open(config_path, 'w') as f:
+                    if i < len(config) - 1 and config[i + 1] == '\n':
+                        del config[i + 1]
+                    # Delete Include string
+                    del config[i]
+                    # Delete Sky Autogen Comment
+                    if i > 0 and sky_autogen_comment in config[i - 1].strip():
+                        del config[i - 1]
+                    f.write(''.join(config))
+                break
+            if 'Host' in config_str:
+                break
 
 
 def _replace_yaml_dicts(
