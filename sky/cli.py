@@ -84,7 +84,6 @@ logger = sky_logging.init_logger(__name__)
 
 _CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
-_IGNORE_OPTION_WARNING = 'WARNING: {OPT}={VAL} is ignored.'
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
 provision a new cluster with that name. Otherwise provision a new cluster with
@@ -1069,6 +1068,25 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, result
 
 
+def _pop_and_ignore_fields_in_override_params(
+        params: Dict[str, Any], field_to_ignore: List[str]) -> None:
+    """Pops and ignores fields in override params.
+
+    Args:
+        params: Override params.
+        field_to_ignore: Fields to ignore.
+
+    Returns:
+        Override params with fields ignored.
+    """
+    if field_to_ignore is not None:
+        for field in field_to_ignore:
+            field_value = params.pop(field, None)
+            if field_value is not None:
+                click.secho(f'Override param {field}={field_value} is ignored.',
+                            fg='yellow')
+
+
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
@@ -1089,6 +1107,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
+    field_to_ignore: Optional[List[str]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
 ) -> Union[sky.Task, sky.Dag]:
@@ -1128,6 +1147,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              ports=ports)
+    if field_to_ignore is not None:
+        _pop_and_ignore_fields_in_override_params(override_params,
+                                                  field_to_ignore)
 
     if is_yaml:
         assert entrypoint is not None
@@ -1553,14 +1575,6 @@ def exec(
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
-    for opt, val in zip(['--cpus', '--memory', '--disk-size', '--disk-tier'],
-                        [cpus, memory, disk_size, disk_tier]):
-        if val is not None:
-            click.secho(_IGNORE_OPTION_WARNING.format(OPT=opt, VAL=val),
-                        fg='yellow')
-    if ports:
-        raise ValueError('`ports` is not supported by `sky exec`.')
-
     env = _merge_env_vars(env_file, env)
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
@@ -1583,13 +1597,17 @@ def exec(
         region=region,
         zone=zone,
         gpus=gpus,
-        cpus=None,
-        memory=None,
+        cpus=cpus,
+        memory=memory,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
         num_nodes=num_nodes,
         env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -4094,10 +4112,6 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
-    for opt, val in zip(['--cpus', '--memory'], [cpus, memory]):
-        if val is not None:
-            click.secho(_IGNORE_OPTION_WARNING.format(OPT=opt, VAL=val),
-                        fg='yellow')
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
@@ -4191,11 +4205,15 @@ def benchmark_launch(
                                              region=region,
                                              zone=zone,
                                              gpus=override_gpu,
+                                             cpus=cpus,
+                                             memory=memory,
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              ports=ports)
+    _pop_and_ignore_fields_in_override_params(
+        override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')
