@@ -594,7 +594,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         ctx.exit()
 
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
         click.secho(f'Shell completion installed for {value}', fg='green')
         click.echo(
             'Completion will take effect once you restart the terminal: ' +
@@ -2040,12 +2040,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                 required=True,
                 type=str,
                 **_get_shell_complete_args(_complete_cluster_name))
-@click.argument('job_ids', type=int, nargs=-1)
+@click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
 def logs(
     cluster: str,
-    job_ids: Tuple[int],
+    job_ids: Tuple[str],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2072,9 +2072,8 @@ def logs(
             '(ambiguous). To fix: specify at most one of them.')
 
     if len(job_ids) > 1 and not sync_down:
-        job_ids_str = ', '.join([str(id) for id in job_ids])
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs (IDs: {job_ids_str}).'
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
@@ -2086,9 +2085,17 @@ def logs(
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
+        # Already check that len(job_ids) <= 1. This variable is used later
+        # in core.tail_logs.
         job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
+                                   'Job ID must be integers.')
+        job_ids_to_query = [int(job_id)]
+    else:
+        job_ids_to_query = job_ids
     if status:
-        job_statuses = core.job_status(cluster, job_ids)
+        job_statuses = core.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
@@ -3244,9 +3251,6 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
-    # validation for the --cloud kubernetes
-    if cloud == 'kubernetes':
-        raise click.UsageError('Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3277,6 +3281,11 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
+
+            if len(result) == 0 and cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -3333,6 +3342,10 @@ def show_gpus(
                                                    case_sensitive=False)
 
         if len(result) == 0:
+            if cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             yield f'Resources \'{name}\'{quantity_str} not found. '

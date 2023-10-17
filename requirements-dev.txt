@@ -19,3 +19,6 @@ types-cachetools
 pytest
 pytest-xdist
 pytest-env>=0.6
+
+# memory profiler
+memory_profiler==0.61.0

@@ -90,11 +90,15 @@ install_requires = [
     'requests',
 ]
 
-local_ray = [  # Lower version of ray will cause dependency conflict for
+local_ray = [
+    # Lower version of ray will cause dependency conflict for
     # click/grpcio/protobuf.
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
+]
+
+remote = [
     # Adopted from ray's setup.py: https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard fails to start when
     # ray start is called (#2054).
@@ -152,6 +156,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [] + local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
+    'remote': remote,
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

@@ -726,7 +726,6 @@ def test_gcp_stale_job_manual_restart():
 
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # K8s does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1295,7 +1294,6 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1429,7 +1427,6 @@ def test_tpu_vm_pod():
 
 # ---------- Simple apps. ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 node yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1501,7 +1498,6 @@ def test_azure_http_server_with_custom_ports():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 node yet
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -1632,7 +1628,6 @@ def test_autostop(generic_cloud: str):
 
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet. Run test_kubernetes_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1702,41 +1697,6 @@ def test_scp_autodown():
     run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_autodown():
-    name = _get_cluster_name()
-    test = Test(
-        'kubernetes_autodown',
-        [
-            f'sky launch -y -d -c {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
-            # Ensure the cluster is not terminated early.
-            'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
-            # Ensure the cluster is terminated.
-            'sleep 200',
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} --cloud kubernetes tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 200',
-            # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud kubernetes --down tests/test_yamls/minimal.yaml',
-            f'sky autostop -y {name} --cancel',
-            'sleep 200',
-            # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
-        ],
-        f'sky down -y {name}',
-        timeout=25 * 60,
-    )
-    run_one_test(test)
-
-
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
@@ -1789,7 +1749,6 @@ def test_cancel_azure():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_kubernetes  # Kubernetes does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1798,7 +1757,11 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
-            f'sky exec {name} "nvidia-smi | grep python"',
+            f'sky exec {name} "(nvidia-smi | grep python) || '
+            # When run inside container/k8s, nvidia-smi cannot show process ids.
+            # See https://github.com/NVIDIA/nvidia-docker/issues/179
+            # To work around, we check if GPU utilization is greater than 0.
+            f'[ \$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits) -gt 0 ]"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',

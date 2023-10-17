@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register
+# TODO(skypilot): remove Local now that we're using Kubernetes.
 class Local(clouds.Cloud):
     """Local/on-premise cloud.
 
@@ -194,8 +194,9 @@ class Local(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        assert zone is None
+        if zone is not None:
+            raise ValueError('Local cloud does not support zones.')
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
-                             ' cloud region {Local.LOCAL_REGION.name!r}.')
+                             f' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone

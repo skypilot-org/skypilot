@@ -4,10 +4,12 @@ Job Queue
 =========
 
 SkyPilot's **job queue** allows multiple jobs to be scheduled on a cluster.
-This enables parallel experiments or :ref:`hyperparameter tuning <grid-search>`.
+
+Getting started
+--------------------------------
 
 Each task submitted by :code:`sky exec` is automatically queued and scheduled
-for execution:
+for execution on an existing cluster:
 
 .. code-block:: bash
 
@@ -90,10 +92,53 @@ For example, ``task.yaml`` above launches a 4-GPU task on each node that has 8
 GPUs, so the task's ``run`` commands will be invoked with
 ``CUDA_VISIBLE_DEVICES`` populated with 4 device IDs.
 
-If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``
-as the correct environment variable is made available to the container (only the
+If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``;
+the correct environment variable would be set inside the container (only the
 allocated device IDs will be set).
 
+Example: Grid Search
+----------------------
+
+To submit multiple trials with different hyperparameters to a cluster:
+
+.. code-block:: bash
+
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 3e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-4
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-2
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-6
+
+Options used:
+
+- :code:`--gpus`: specify the resource requirement for each job.
+- :code:`-d` / :code:`--detach`: detach the run and logging from the terminal, allowing multiple trials to run concurrently.
+
+If there are only 4 V100 GPUs on the cluster, SkyPilot will queue 1 job while the
+other 4 run in parallel. Once a job finishes, the next job will begin executing
+immediately.
+See :ref:`below <scheduling-behavior>` for more details on SkyPilot's scheduling behavior.
+
+.. tip::
+
+  You can also use :ref:`environment variables <env-vars>` to set different arguments for each trial.
+
+Example: Fractional GPUs
+-------------------------
+
+To run multiple trials per GPU, use *fractional GPUs* in the resource requirement.
+For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
+
+.. code-block:: bash
+
+  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 3e-3
+  ...
+
+When sharing a GPU, ensure that the GPU's memory is not oversubscribed
+(otherwise, out-of-memory errors could occur).
+
+.. _scheduling-behavior:
 
 Scheduling behavior
 --------------------------------
