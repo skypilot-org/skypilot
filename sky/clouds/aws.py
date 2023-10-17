@@ -730,7 +730,7 @@ class AWS(clouds.Cloud):
     def _get_disk_specs(
             cls,
             disk_tier: Optional[resources_utils.DiskTier]) -> Dict[str, Any]:
-        tier = cls.translate_disk_tier(disk_tier)
+        tier = cls._translate_disk_tier(disk_tier)
         tier2iops = {
             resources_utils.DiskTier.HIGH: 7000,
             resources_utils.DiskTier.MEDIUM: 3500,

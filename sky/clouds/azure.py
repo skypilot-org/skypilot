@@ -318,7 +318,7 @@ class Azure(clouds.Cloud):
             else:
                 # Start failover from the best disk tier.
                 start_index = all_tiers.index(
-                    Azure.translate_disk_tier(disk_tier))
+                    Azure._translate_disk_tier(disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
@@ -566,7 +566,7 @@ class Azure(clouds.Cloud):
     @classmethod
     def _get_disk_type(cls,
                        disk_tier: Optional[resources_utils.DiskTier]) -> str:
-        tier = cls.translate_disk_tier(disk_tier)
+        tier = cls._translate_disk_tier(disk_tier)
         # TODO(tian): Maybe use PremiumV2_LRS/UltraSSD_LRS? Notice these two
         # cannot be used as OS disks so we might need data disk support
         tier2name = {

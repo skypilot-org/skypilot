@@ -526,7 +526,7 @@ class Cloud:
                     f'{disk_tier} is not supported by {cls._REPR}.')
 
     @classmethod
-    def translate_disk_tier(
+    def _translate_disk_tier(
         cls, disk_tier: Optional[resources_utils.DiskTier]
     ) -> resources_utils.DiskTier:
         if disk_tier is None:

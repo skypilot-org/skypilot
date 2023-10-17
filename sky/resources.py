@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 13
+    _VERSION = 14
 
     def __init__(
         self,
@@ -987,6 +987,17 @@ class Resources:
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
 
+        if self.disk_tier is not None:
+            if other.disk_tier is None:
+                return False
+            # Here, BEST tier means the best we can get; for a launched
+            # cluster, the best (and only) tier we can get is the launched
+            # cluster's tier. Therefore, we don't need to check the tier
+            # if it is BEST.
+            if self.disk_tier != resources_utils.DiskTier.BEST:
+                if not self.disk_tier <= other.disk_tier:
+                    return False
+
         if check_ports:
             if self.ports is not None:
                 if other.ports is None:
@@ -995,18 +1006,6 @@ class Resources:
                 other_ports = resources_utils.port_ranges_to_set(other.ports)
                 if not self_ports <= other_ports:
                     return False
-
-        if self.disk_tier is not None:
-            if other.disk_tier is None:
-                return False
-            if other.disk_tier == resources_utils.DiskTier.BEST:
-                return True
-            # Here, BEST tier means the best we can get; for a launched
-            # cluster, the best (and only) tier we can get is the launched
-            # cluster's tier.
-            if self.disk_tier == resources_utils.DiskTier.BEST:
-                return True
-            return self.disk_tier <= other.disk_tier
 
         # self <= other
         return True
@@ -1249,5 +1248,11 @@ class Resources:
             if original_ports is not None:
                 state['_ports'] = resources_utils.simplify_ports(
                     [str(port) for port in original_ports])
+
+        if version < 14:
+            original_disk_tier = state.get('_disk_tier', None)
+            if original_disk_tier is not None:
+                state['_disk_tier'] = resources_utils.DiskTier(
+                    original_disk_tier)
 
         self.__dict__.update(state)

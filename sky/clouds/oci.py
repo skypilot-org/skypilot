@@ -526,7 +526,7 @@ class OCI(clouds.Cloud):
         # Only normalize the disk_tier if it is not None, since OCI have
         # different default disk tier according to #vCPU.
         if disk_tier is not None:
-            disk_tier = OCI.translate_disk_tier(disk_tier)
+            disk_tier = OCI._translate_disk_tier(disk_tier)
         vpu = oci_utils.oci_config.BOOT_VOLUME_VPU[disk_tier]
         if cpus is None:
             return vpu
