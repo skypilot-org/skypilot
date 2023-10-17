@@ -88,7 +88,9 @@ from sky.core import cancel
 from sky.core import cost_report
 from sky.core import down
 from sky.core import download_logs
+from sky.core import exec  # pylint: disable=redefined-builtin
 from sky.core import job_status
+from sky.core import launch
 from sky.core import queue
 from sky.core import start
 from sky.core import status
@@ -100,8 +102,6 @@ from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
-from sky.execution import exec  # pylint: disable=redefined-builtin
-from sky.execution import launch
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
 from sky.jobs.core import spot_cancel
@@ -161,11 +161,10 @@ __all__ = [
     'Dag',
     'Task',
     'Resources',
-    # execution APIs
+    # core APIs
     'launch',
     'exec',
     'spot_launch',
-    # core APIs
     'status',
     'start',
     'stop',
@@ -182,6 +181,7 @@ __all__ = [
     # core APIs Spot Job Management
     'spot_queue',
     'spot_cancel',
+    'spot_tail_logs',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',

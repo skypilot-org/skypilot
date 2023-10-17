@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -10,10 +10,12 @@ from sky import clouds
 from sky import dag
 from sky import data
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
 from sky import status_lib
-from sky import task
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -24,6 +26,9 @@ from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
+
+if typing.TYPE_CHECKING:
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -222,7 +227,7 @@ def _start(
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag.Dag():
-        dummy_task = task.Task().set_resources(handle.launched_resources)
+        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
                                to_provision=handle.launched_resources,
@@ -522,22 +527,29 @@ def queue(cluster_name: str,
 
     Please refer to the sky.cli.queue for the document.
 
+    Args:
+        cluster_name: name of the cluster.
+        skip_finished: whether to skip finished jobs.
+        all_users: whether to get jobs from all users.
+
     Returns:
-        List[dict]:
-        [
-            {
-                'job_id': (int) job id,
-                'job_name': (str) job name,
-                'username': (str) username,
-                'submitted_at': (int) timestamp of submitted,
-                'start_at': (int) timestamp of started,
-                'end_at': (int) timestamp of ended,
-                'resources': (str) resources,
-                'status': (job_lib.JobStatus) job status,
-                'log_path': (str) log path,
-            }
-        ]
-    raises:
+        .. code-block:: python
+
+            [
+                {
+                    'job_id': (int) job id,
+                    'job_name': (str) job name,
+                    'username': (str) username,
+                    'submitted_at': (int) timestamp of submitted,
+                    'start_at': (int) timestamp of started,
+                    'end_at': (int) timestamp of ended,
+                    'resources': (str) resources,
+                    'status': (sky.JobStatus) job status,
+                    'log_path': (str) log path,
+                }
+            ]
+
+    Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -590,8 +602,11 @@ def cancel(
 
     When `all` is False and `job_ids` is None, cancel the latest running job.
 
-    Additional arguments:
-        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+    Args:
+        cluster_name: name of the cluster.
+        all: whether to cancel all jobs on the cluster.
+        job_ids: a list of job ids to cancel.
+        _try_cancel_if_cluster_is_init: whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the jobs controller to cancel the job when the
             worker node is preempted in the spot cluster.
@@ -670,6 +685,11 @@ def tail_logs(cluster_name: str,
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: job id. If None, tail the last job.
+        follow: whether to follow the logs.
 
     Raises:
         ValueError: arguments are invalid or the cluster is not supported or
@@ -754,6 +774,7 @@ def job_status(cluster_name: str,
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
+        stream_logs: (bool) whether to stream logs.
     Returns:
         Dict[Optional[str], Optional[job_lib.JobStatus]]: A mapping of job_id to
         job statuses. The status will be None if the job does not exist.
