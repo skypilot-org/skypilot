@@ -2722,7 +2722,7 @@ def _add_default_value_to_local_record(
         'controller_port': None,
         'load_balancer_port': None,
         'policy': None,
-        'auto_restart': False,
+        'auto_restart': True,
         'requested_resources': sky.Resources(),
     })
     return record

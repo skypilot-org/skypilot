@@ -170,12 +170,13 @@ class ReplicaStatusProperty:
     # None means sky.down is not called yet.
     sky_down_status: Optional[ProcessStatus] = None
 
-    def is_scale_down_succeeded(self, initial_delay_seconds: int) -> bool:
+    def is_scale_down_succeeded(self, initial_delay_seconds: int,
+                                auto_restart: bool) -> bool:
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
-        if (self.first_ready_time is not None and
+        if (auto_restart and self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
             # If the service is up for more than `initial_delay_seconds`,
             # we assume there is no bug in the user code and the scale down
@@ -350,6 +351,7 @@ class ReplicaManager:
         self.lock = threading.Lock()
         self.next_replica_id: int = 1
         self.service_name: str = service_name
+        self.auto_restart = spec.auto_restart
         self.readiness_suffix: str = spec.readiness_suffix
         self.initial_delay_seconds: int = spec.initial_delay_seconds
         self.post_data: Optional[Dict[str, Any]] = spec.post_data
@@ -550,7 +552,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # the replica. Please refer to the implementation of
                 # `is_scale_down_succeeded` for more details.
                 if info.status_property.is_scale_down_succeeded(
-                        self.initial_delay_seconds):
+                        self.initial_delay_seconds, self.auto_restart):
                     # This means the cluster is deleted due to
                     # a scale down. Delete the replica info
                     # so it won't count as a replica.

@@ -25,7 +25,7 @@ class SkyServiceSpec:
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        auto_restart: bool = False,
+        auto_restart: bool = True,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -104,7 +104,7 @@ class SkyServiceSpec:
             service_config['max_replicas'] = None
             service_config['qps_upper_threshold'] = None
             service_config['qps_lower_threshold'] = None
-            service_config['auto_restart'] = False
+            service_config['auto_restart'] = True
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -114,7 +114,7 @@ class SkyServiceSpec:
             service_config['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
             service_config['auto_restart'] = policy_section.get(
-                'auto_restart', False)
+                'auto_restart', True)
 
         return SkyServiceSpec(**service_config)
 

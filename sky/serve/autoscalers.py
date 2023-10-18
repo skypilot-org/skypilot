@@ -45,13 +45,11 @@ class Autoscaler:
         """Initialize the autoscaler.
 
         Variables:
-            auto_restart: Whether to restart failed replicas.
             min_replicas: Minimum number of replicas.
             max_replicas: Maximum number of replicas. Default to fixed
                 number of replicas, i.e. min_replicas == max_replicas.
             frequency: Frequency of autoscaling in seconds.
         """
-        self.auto_restart = spec.auto_restart
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
         self.frequency = frequency
@@ -111,16 +109,12 @@ class RequestRateAutoscaler(Autoscaler):
                                    current_time - self.rps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
-    def evaluate_scaling(self, infos: List[Dict[str,
-                                                Any]]) -> AutoscalerDecision:
+    def evaluate_scaling(
+        self,
+        infos: List[Dict[str, Any]],
+    ) -> AutoscalerDecision:
         current_time = time.time()
-        if not self.auto_restart:
-            num_replicas = len(infos)
-        else:
-            num_replicas = len([
-                i for i in infos
-                if i['status'] != serve_state.ReplicaStatus.FAILED
-            ])
+        num_replicas = len(infos)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
