@@ -5,7 +5,6 @@ import typing
 from typing import Any, Dict, Optional, Tuple, Union
 
 import colorama
-from rich import console as rich_console
 
 from sky import backends
 from sky import global_user_state
@@ -14,6 +13,7 @@ from sky.adaptors import docker
 from sky.backends import backend_utils
 from sky.backends import docker_utils
 from sky.data import storage as storage_lib
+from sky.utils import rich_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -21,7 +21,6 @@ if typing.TYPE_CHECKING:
 
 Path = str
 
-console = rich_console.Console()
 logger = sky_logging.init_logger(__name__)
 
 _DOCKER_RUN_FOREVER_CMD = 'tail -f /dev/null'
@@ -160,7 +159,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         handle = LocalDockerResourceHandle(cluster_name)
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
-        with console.status('[bold cyan]Building Docker image[/]'):
+        with rich_utils.safe_status('[bold cyan]Building Docker image[/]'):
             image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = (image_tag, metadata)
         logger.info(f'Image {image_tag} built.')

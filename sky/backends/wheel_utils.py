@@ -13,6 +13,7 @@ The ray up yaml templates under sky/templates depend on the naming of the wheel.
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -63,8 +64,17 @@ def _build_sky_wheel():
         tmp_dir = pathlib.Path(tmp_dir)
         (tmp_dir / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
+
+        setup_content = (setup_files_dir / 'setup.py').read_text()
+        # Replace the package name with skypilot. This is important as the
+        # package could be installed with pip install skypilot-nightly.
+        setup_content = re.sub(r'\bname=[\'"](.*?)[\'"],',
+                               f'name=\'{_PACKAGE_WHEEL_NAME}\',',
+                               setup_content)
+        (tmp_dir / 'setup.py').write_text(setup_content)
+
         for f in setup_files_dir.iterdir():
-            if f.is_file():
+            if f.is_file() and f.name != 'setup.py':
                 shutil.copy(str(f), str(tmp_dir))
 
         # It is important to normalize the path, otherwise 'pip wheel' would
@@ -88,7 +98,9 @@ def _build_sky_wheel():
             wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
         except StopIteration:
             raise RuntimeError(
-                f'Fail to build pip wheel for SkyPilot under {tmp_dir}. '
+                f'Fail to find pip wheel for SkyPilot under {tmp_dir} with '
+                f'glob pattern {_WHEEL_PATTERN!r}. '
+                f'Found: {list(map(str, tmp_dir.glob("*")))}.'
                 'No wheel file is generated.') from None
 
         # Use a unique temporary dir per wheel hash, because there may be many

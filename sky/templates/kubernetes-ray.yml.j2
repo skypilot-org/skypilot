@@ -16,10 +16,14 @@ provider:
     type: external
     module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
 
-    # Use False if running from outside of k8s cluster
-    use_internal_ips: false
+    # We use internal IPs since we set up a port-forward between the kubernetes
+    # cluster and the local machine, or directly use NodePort to reach the
+    # head node.
+    use_internal_ips: true
 
     timeout: {{timeout}}
+
+    ssh_jump_image: {{k8s_ssh_jump_image}}
 
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
@@ -30,7 +34,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account
 
     # Role created by the autoscaler for the head node pod that it runs in.
     # If this field isn't provided, the role referenced in
@@ -41,7 +45,7 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account-role
         # TODO(romilb): This is a very permissive role - gives all access in the
         #  namespace. We should restrict this. For reference, this is required
         #  for autodown and creating more SkyPilot clusters from within the pod.
@@ -59,13 +63,13 @@ provider:
         metadata:
             labels:
                 parent: skypilot
-            name: autoscaler
+            name: skypilot-service-account-role-binding
         subjects:
         - kind: ServiceAccount
-          name: autoscaler
+          name: skypilot-service-account
         roleRef:
             kind: Role
-            name: autoscaler
+            name: skypilot-service-account-role
             apiGroup: rbac.authorization.k8s.io
 
     services:
@@ -78,7 +82,6 @@ provider:
             skypilot-cluster: {{cluster_name_on_cloud}}
           name: {{cluster_name_on_cloud}}-ray-head-ssh
         spec:
-          type: NodePort
           selector:
             component: {{cluster_name_on_cloud}}-ray-head
           ports:
@@ -126,10 +129,12 @@ available_node_types:
             parent: skypilot
             component: {{cluster_name_on_cloud}}-ray-head
             skypilot-cluster: {{cluster_name_on_cloud}}
+            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
       spec:
         # Change this if you altered the autoscaler_service_account above
         # or want to provide your own.
-        serviceAccountName: autoscaler
+        serviceAccountName: skypilot-service-account
 
         restartPolicy: Never
 
@@ -205,9 +210,26 @@ available_node_types:
         labels:
           parent: skypilot
           skypilot-cluster: {{cluster_name_on_cloud}}
+          # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+          skypilot-ssh-jump: {{k8s_ssh_jump_name}}
         # Automatically generates a name for the pod with this prefix.
         generateName: {{cluster_name_on_cloud}}-ray-worker-
       spec:
+        # For multi-node support, we put a soft-constraint to schedule worker
+        # pods on different nodes than the head pod.
+        # This is not set as a hard constraint because if different nodes are
+        # not available, we still want to be able to schedule worker pods on
+        # larger nodes which may be able to fit multiple SkyPilot "nodes".
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                matchExpressions:
+                  - key: skypilot-cluster
+                    operator: In
+                    values:
+                    - {{cluster_name_on_cloud}}
+                topologyKey: "kubernetes.io/hostname"
         serviceAccountName: skypilot-service-account
         restartPolicy: Never
         volumes:
@@ -267,7 +289,7 @@ setup_commands:
     {{ conda_installation_commands }}
     source ~/.bashrc;
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
-    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;

@@ -368,7 +368,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     return None
 
 
-def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
@@ -378,7 +378,7 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
         cluster_name,

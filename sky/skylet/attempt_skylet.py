@@ -39,5 +39,12 @@ if os.path.exists(VERSION_FILE):
         if f.read().strip() == constants.SKYLET_VERSION:
             version_match = True
 
+if not running:
+    print('Skylet is not running. Starting...')
+elif not version_match:
+    print('Skylet is staled. Restarting...')
+else:
+    print('Skylet is running with the latest version.')
+
 if not running or not version_match:
     restart_skylet()

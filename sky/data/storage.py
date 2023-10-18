@@ -26,7 +26,7 @@ from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
-from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -872,7 +872,9 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        force_delete = config.pop('_force_delete', False)
+        force_delete = config.pop('_force_delete', None)
+        if force_delete is None:
+            force_delete = False
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
@@ -880,7 +882,9 @@ class Storage(object):
         else:
             # Make sure this keeps the same as the default mode in __init__
             mode = StorageMode.MOUNT
-        persistent = config.pop('persistent', True)
+        persistent = config.pop('persistent', None)
+        if persistent is None:
+            persistent = True
 
         assert not config, f'Invalid storage args: {config.keys()}'
 
@@ -1146,7 +1150,7 @@ class S3Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
             data_utils.parallel_upload(
@@ -1290,7 +1294,7 @@ class S3Store(AbstractStore):
         # which removes the bucket by force.
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
-            with log_utils.safe_rich_status(
+            with rich_utils.safe_status(
                     f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '),
                                         stderr=subprocess.STDOUT)
@@ -1318,7 +1322,7 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    GCSFUSE_VERSION = '0.42.3'
+    GCSFUSE_VERSION = '1.0.1'
 
     def __init__(self,
                  name: str,
@@ -1529,7 +1533,7 @@ class GcsStore(AbstractStore):
         sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
                         f'cp -e -n -r -I gs://{self.name}')
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
             data_utils.run_upload_cli(sync_command,
@@ -1583,7 +1587,7 @@ class GcsStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
             data_utils.parallel_upload(
@@ -1719,7 +1723,7 @@ class GcsStore(AbstractStore):
          bool; True if bucket was deleted, False if it was deleted externally.
         """
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
             try:
                 self.client.get_bucket(bucket_name)
@@ -1927,7 +1931,7 @@ class R2Store(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]r2://{self.name}/[/]'):
             data_utils.parallel_upload(
@@ -2089,7 +2093,7 @@ class R2Store(AbstractStore):
             f'--endpoint {endpoint_url} '
             f'--profile={cloudflare.R2_PROFILE_NAME}')
         try:
-            with log_utils.safe_rich_status(
+            with rich_utils.safe_status(
                     f'[bold cyan]Deleting R2 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command,
                                         stderr=subprocess.STDOUT,
@@ -2342,7 +2346,7 @@ class IBMCosStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        with log_utils.safe_rich_status(
+        with rich_utils.safe_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to '
                 f'[green]cos://{self.region}/{self.name}/[/]'):

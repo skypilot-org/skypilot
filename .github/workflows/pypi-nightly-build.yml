@@ -11,7 +11,7 @@ jobs:
     outputs:
       should_run: ${{ steps.should_run.outputs.should_run }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: print latest_commit
         run: echo ${{ github.sha }}
       - id: should_run
@@ -42,7 +42,7 @@ jobs:
         run: |
           RELEASE_VERSION=$(date +%Y%m%d)
           sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
-          sed -i "s/__version__ = '.*'/__version__ = '1.0.0-dev${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
           sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
       - name: Build a binary wheel and a source tarball
         run: >-

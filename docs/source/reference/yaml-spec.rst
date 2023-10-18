@@ -81,11 +81,25 @@ Available fields:
       disk_tier: 'medium'
 
       # Ports to expose (optional).
+      # All ports specified here will be exposed to the public Internet. Under the hood,
+      # a firewall rule / inbound rule is automatically added to allow inbound traffic to 
+      # these ports. Applies to all VMs of a cluster created with this field set. 
       # Currently only TCP protocol is supported.
       # Could be an integer or a range.
-      ports:
-        - 8080
-        - 10022-10040
+      # Ports Lifecycle:
+      # A cluster's ports will be updated whenever `sky launch` is executed. When launch an
+      # existing cluster, any new ports specified will be opened for the cluster, and the firewall 
+      # rules for old ports will never be removed until the cluster is terminated.
+      # The following three ways are valid for specifying ports for a cluster:
+      #   To specify a single port:
+      #     ports: 8081
+      #   To specify a port range:
+      #     ports: 10052-10100
+      #   To specify multiple ports / port ranges:
+      #     ports:
+      #       - 8080
+      #       - 10022-10040
+      ports: 8081
 
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
@@ -103,8 +117,8 @@ Available fields:
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.5.0
+        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.12.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
@@ -137,7 +151,7 @@ Available fields:
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
-      # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
       # Or machine image: https://cloud.google.com/compute/docs/machine-images
       # image_id: projects/my-project/global/machineImages/my-machine-image
       #

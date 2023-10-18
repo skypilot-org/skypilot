@@ -2,19 +2,23 @@
 This script takes about 1 minute to finish.
 """
 import argparse
+import collections
 import datetime
 import itertools
 from multiprocessing import pool as mp_pool
 import os
 import subprocess
 import sys
+import textwrap
+import traceback
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
+from sky import exceptions
 from sky.adaptors import aws
-from sky.utils import common_utils
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 # Enable most of the regions. Each user's account may have a subset of these
@@ -117,7 +121,7 @@ def _get_instance_type_offerings(region: str) -> pd.DataFrame:
         columns={'Location': 'AvailabilityZoneName'})
 
 
-def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
+def _get_availability_zones(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     zones = []
     try:
@@ -130,16 +134,17 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
             # (AuthFailure) when calling the DescribeAvailabilityZones
             # operation: AWS was not able to validate the provided
             # access credentials
-            return None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.AWSAzFetchingError(
+                    region,
+                    reason=exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
+                ) from None
         elif e.response['Error']['Code'] == 'UnauthorizedOperation':
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Failed to retrieve availability zones. '
-                    'Please ensure that the `ec2:DescribeAvailabilityZones` '
-                    'action is enabled for your AWS account in IAM. '
-                    'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeAvailabilityZones.html.'  # pylint: disable=line-too-long
-                    f'{common_utils.format_exception(e, use_bracket=True)}'
-                ) from None
+                raise exceptions.AWSAzFetchingError(
+                    region,
+                    reason=exceptions.AWSAzFetchingError.Reason.
+                    AZ_PERMISSION_DENIED) from None
         else:
             raise
     for resp in response['AvailabilityZones']:
@@ -231,8 +236,6 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # Fetch the zone info first to make sure the account has access to the
         # region.
         zone_df = _get_availability_zones(region)
-        if zone_df is None:
-            raise RuntimeError(f'No access to region {region}')
 
         # Use ThreadPool instead of Pool because this function can be called
         # within a multiprocessing.Pool, and Pool cannot be nested.
@@ -263,7 +266,12 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         def get_vcpus(row) -> float:
             if not np.isnan(row['vCPU']):
                 return float(row['vCPU'])
-            return float(row['VCpuInfo']['DefaultVCpus'])
+            try:
+                return float(row['VCpuInfo']['DefaultVCpus'])
+            except Exception as e:  # pylint: disable=broad-except
+                print('Error occured for row:', row)
+                print('Error:', e)
+                raise
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
@@ -301,7 +309,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         df = df.merge(spot_pricing_df,
                       left_on=['InstanceType', 'AvailabilityZoneName'],
                       right_index=True,
-                      how='outer')
+                      how='left')
 
         # Extract vCPUs, memory, and accelerator info from the columns.
         df = pd.concat(
@@ -314,6 +322,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             df['GpuInfo'] = np.nan
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
+        print(traceback.format_exc())
         print(f'{region} failed with {e}', file=sys.stderr)
         return region
     return df
@@ -413,20 +422,46 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az2          us-east-1a
     """
     regions = list(get_enabled_regions())
+
+    errored_region_reasons = []
+
+    def _get_availability_zones_with_error_handling(
+            region: str) -> Optional[pd.DataFrame]:
+        try:
+            azs = _get_availability_zones(region)
+        except exceptions.AWSAzFetchingError as e:
+            errored_region_reasons.append(
+                (region, e.reason))  # GIL means it's thread-safe.
+            return None
+        return azs
+
     # Use ThreadPool instead of Pool because this function can be called within
     # a Pool, and Pool cannot be nested.
     with mp_pool.ThreadPool() as pool:
-        az_mappings = pool.map(_get_availability_zones, regions)
-    missing_regions = {
-        regions[i] for i, m in enumerate(az_mappings) if m is None
-    }
-    if missing_regions:
-        # This could happen if a AWS API glitch happens, it is to make sure
-        # that the availability zone does not get lost silently.
-        print('WARNING: Missing availability zone mappings for the following '
-              f'enabled regions: {missing_regions}')
+        az_mappings = pool.map(_get_availability_zones_with_error_handling,
+                               regions)
     # Remove the regions that the user does not have access to.
     az_mappings = [m for m in az_mappings if m is not None]
+    errored_regions = collections.defaultdict(set)
+    for region, reason in errored_region_reasons:
+        errored_regions[reason].add(region)
+    if errored_regions:
+        # This could happen if (1) an AWS API glitch happens, (2) permission
+        # error happens for specific availability zones. We print those zones to
+        # make sure that those zone does not get lost silently.
+        table = log_utils.create_table(['Regions', 'Reason'])
+        for reason, region_set in errored_regions.items():
+            reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
+            region_str = '\n'.join(
+                textwrap.wrap(', '.join(region_set), 60,
+                              break_on_hyphens=False))
+            table.add_row([region_str, reason_str])
+        if not az_mappings:
+            raise RuntimeError('Failed to fetch availability zone mappings for '
+                               f'all enabled regions.\n{table}')
+        else:
+            print('\rAWS: [WARNING] Missing availability zone mappings for the '
+                  f'following enabled regions:\n{table}')
     az_mappings = pd.concat(az_mappings)
     return az_mappings
 

@@ -87,11 +87,11 @@ def raise_lambda_error(response: requests.Response) -> None:
         resp_json = response.json()
         code = resp_json.get('error', {}).get('code')
         message = resp_json.get('error', {}).get('message')
-    except json.decoder.JSONDecodeError:
+    except json.decoder.JSONDecodeError as e:
         raise LambdaCloudError(
             'Response cannot be parsed into JSON. Status '
             f'code: {status_code}; reason: {response.reason}; '
-            f'content: {response.text}')
+            f'content: {response.text}') from e
     raise LambdaCloudError(f'{code}: {message}')
 
 

@@ -13,7 +13,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import status_lib
 from sky.clouds import service_catalog
-from sky.skylet.providers.scp import scp_utils
+from sky.clouds.utils import scp_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -171,8 +171,10 @@ class SCP(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources', region: 'clouds.Region',
+            self, resources: 'resources_lib.Resources',
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        del cluster_name_on_cloud  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
         r = resources
@@ -239,7 +241,8 @@ class SCP(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         # Check if the host VM satisfies the min/max disk size limits.
         is_allowed = self._is_disk_size_allowed(resources)
         if not is_allowed:

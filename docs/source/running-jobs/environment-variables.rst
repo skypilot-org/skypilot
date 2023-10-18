@@ -62,6 +62,9 @@ For example, this is useful for passing secrets (see below) or passing configura
 
 See complete examples at `llm/vllm/serve.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vllm/serve.yaml#L4-L5>`_ and `llm/vicuna/train.yaml <https://github.com/skypilot-org/skypilot/blob/596c1415b5039adec042594f45b342374e5e6a00/llm/vicuna/train.yaml#L111-L116>`_.
 
+
+.. _passing-secrets:
+
 Passing secrets
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

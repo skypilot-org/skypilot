@@ -392,7 +392,7 @@ def decode_payload(payload_str: str) -> Any:
     return payload
 
 
-def class_fullname(cls):
+def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
@@ -406,10 +406,13 @@ def class_fullname(cls):
     Returns:
         The full name of the class.
     """
+    module_name = getattr(cls, '__module__', '')
+    if not module_name or (module_name == 'builtins' and skip_builtins):
+        return cls.__name__
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit],
+def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
                      use_bracket: bool = False) -> str:
     """Format an exception to a string.
 

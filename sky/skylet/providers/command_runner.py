@@ -1,5 +1,4 @@
 """Sky's DockerCommandRunner."""
-import dataclasses
 import json
 import os
 from typing import Dict
@@ -9,23 +8,8 @@ from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 
+from sky.provision import docker_utils
 from sky.skylet import constants
-
-
-@dataclasses.dataclass
-class DockerLoginConfig:
-    """Config for docker login. Used for pulling from private registries."""
-    username: str
-    password: str
-    server: str
-
-    @classmethod
-    def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
-        return cls(
-            username=d[constants.DOCKER_USERNAME_ENV_VAR],
-            password=d[constants.DOCKER_PASSWORD_ENV_VAR],
-            server=d[constants.DOCKER_SERVER_ENV_VAR],
-        )
 
 
 def docker_start_cmds(
@@ -40,8 +24,11 @@ def docker_start_cmds(
 ):
     """Generating docker start command without --rm.
     
-    The code is borrowed from `ray.autoscaler._private.docker`. The only
-    difference is that we don't use `--rm` flag here.
+    The code is borrowed from `ray.autoscaler._private.docker`.
+
+    Changes we made:
+        1. Remove --rm flag to keep the container after `ray stop` is executed;
+        2. Add options to enable fuse.
     """
     del user  # unused
 
@@ -72,6 +59,10 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
+        # SkyPilot: Add following options to enable fuse.
+        '--cap-add=SYS_ADMIN',
+        '--device=/dev/fuse',
+        '--security-opt=apparmor:unconfined',
         image,
         'bash',
     ]
@@ -128,7 +119,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # SkyPilot: Docker login if user specified a private docker registry.
         if "docker_login_config" in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
-            docker_login_config: DockerLoginConfig = self.docker_config[
+            docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
                 "docker_login_config"]
             self.run('{} login --username {} --password {} {}'.format(
                 self.docker_cmd,
@@ -136,7 +127,6 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 docker_login_config.password,
                 docker_login_config.server,
             ))
-            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
@@ -165,7 +155,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             if requires_re_init:
                 self.run(f'{self.docker_cmd} stop {self.container_name}',
                          run_env='host')
-                # Manualy rm here since --rm is not specified
+                # Manually rm here since --rm is not specified
                 self.run(f'{self.docker_cmd} rm {self.container_name}',
                          run_env='host')
 
@@ -223,8 +213,13 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             'echo \'[ "$(whoami)" == "root" ] && alias sudo=""\' >> ~/.bashrc;'
             'echo "export DEBIAN_FRONTEND=noninteractive" >> ~/.bashrc;')
         # Install dependencies.
-        self.run('sudo apt-get update; sudo apt-get install -y rsync curl wget '
-                 'patch openssh-server python3-pip;')
+        self.run(
+            'sudo apt-get update; '
+            # Our mount script will install gcsfuse without fuse package.
+            # We need to install fuse package first to enable storage mount.
+            # The dpkg option is to suppress the prompt for fuse installation.
+            'sudo apt-get -o DPkg::Options::="--force-confnew" install '
+            '-y rsync curl wget patch openssh-server python3-pip fuse;')
 
         # Copy local authorized_keys to docker container.
         # Stop and disable jupyter service. This is to avoid port conflict on

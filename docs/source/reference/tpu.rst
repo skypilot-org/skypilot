@@ -128,7 +128,7 @@ To use a TPU Node, set the following in a task YAML's ``resources`` field:
       instance_type: n1-highmem-8
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: 2.5.0  # optional, TPU runtime version.
+         runtime_version: 2.12.0  # optional, TPU runtime version.
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
 You can modify the host instance type or the TPU type.
@@ -143,7 +143,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
    resources:
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: 2.5.0  # optional, TPU runtime version.
+         runtime_version: 2.12.0  # optional, TPU runtime version.
 
    # TPU node requires loading data from a GCS bucket.
    # We use SkyPilot Storage to mount a GCS bucket to /dataset.
@@ -162,7 +162,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
       else
          conda create -n mnist python=3.8 -y
          conda activate mnist
-         pip install tensorflow==2.5.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
+         pip install tensorflow==2.12.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
       fi
 
    run: |
