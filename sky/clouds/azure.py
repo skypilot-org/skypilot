@@ -159,8 +159,8 @@ class Azure(clouds.Cloud):
                     'image_version': '21.08.30'
                 }
 
-        # ubuntu-2004 v21.11.04, one image we used to use for V1 HyperV
-        # before we change default image to ubuntu-hpc.
+        # ubuntu-2004 v21.11.04, the previous image we used in the past for
+        # V1 HyperV instance before we change default image to ubuntu-hpc.
         if gen_version == 'V1':
             image_config = {
                 'image_publisher': 'microsoft-dsvm',
