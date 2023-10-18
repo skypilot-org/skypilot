@@ -1,8 +1,30 @@
 """The SkyPilot package."""
 import os
+import subprocess
 
 # Replaced with the current commit when building the wheels.
-__commit__ = '{{SKYPILOT_COMMIT_SHA}}'
+_SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
+
+
+def get_git_commit():
+    if 'SKYPILOT_COMMIT_SHA' not in _SKYPILOT_COMMIT_SHA:
+        return _SKYPILOT_COMMIT_SHA
+    try:
+        cwd = os.path.dirname(__file__)
+        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                              cwd=cwd,
+                                              universal_newlines=True).strip()
+        changes = subprocess.check_output(["git", "status", "--porcelain"],
+                                          cwd=cwd,
+                                          universal_newlines=True).strip()
+        if changes:
+            commit_hash += "-dirty"
+        return commit_hash
+    except Exception:
+        return _SKYPILOT_COMMIT_SHA
+
+
+__commit__ = get_git_commit()
 __version__ = '1.0.0-dev0'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 

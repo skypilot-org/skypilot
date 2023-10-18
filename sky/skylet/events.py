@@ -129,7 +129,7 @@ class AutostopEvent(SkyletEvent):
             config = common_utils.read_yaml(self._ray_yaml_path)
 
             provider_module = config['provider']['module']
-            provider_search = re.search(r'(?:providers|provision)\.(.*)(\.)?',
+            provider_search = re.search(r'(?:providers|provision)\.(.*)($|\.)',
                                         provider_module)
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
