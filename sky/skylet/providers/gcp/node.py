@@ -289,6 +289,42 @@ class GCPResource(metaclass=abc.ABCMeta):
         Returns a tuple of (result, node_name).
         """
         return
+    
+    def resize_disk(
+        self, base_config: dict, node_id: str, resources, wait_for_operation: bool = True
+    ) -> Tuple[dict, str]:
+        """Resize a Google Cloud disk based on the provided configuration."""
+        # Import required libraries
+        import google.cloud.compute_v1 as gcloud_compute
+
+        # Initialize the DisksClient for making disk operations
+        diskClient = gcloud_compute.DisksClient()
+
+        # Extract the new disk size from the configuration
+        new_size_gb = base_config['disks'][0]['initializeParams']['diskSizeGb']
+
+        # Set required parameters
+        project = self.project_id
+        zone = self.availability_zone
+        compute = self.resource.instances()
+
+        # Fetch the instance details using node_id to get the disk name
+        instance = compute.get(project=project, zone=zone, instance=node_id).execute()
+        disk_url = instance['disks'][0]['source']
+        disk_name = disk_url.split('/')[-1]
+
+        # Prepare the request for resizing the disk
+        request = gcloud_compute.ResizeDiskRequest(
+            disk=disk_name,
+            project=project,
+            zone=zone,
+            disks_resize_request_resource=gcloud_compute.types.DisksResizeRequest(size_gb=int(new_size_gb))
+        )
+
+        # Execute the resize request and return the response
+        response = diskClient.resize(request=request)
+        return response
+
 
     def create_instances(
         self,
