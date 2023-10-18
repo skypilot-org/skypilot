@@ -112,11 +112,11 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
                 return creation_fn()
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
-            time.sleep(backoff.current_backoff())
-            logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
             attempt += 1
             if attempt >= _MAX_ATTEMPT_FOR_CREATION:
                 raise
+            time.sleep(backoff.current_backoff())
+            logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
 
 
 @import_package
