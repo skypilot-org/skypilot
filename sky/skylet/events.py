@@ -129,15 +129,20 @@ class AutostopEvent(SkyletEvent):
             config = common_utils.read_yaml(self._ray_yaml_path)
 
             provider_module = config['provider']['module']
-            provider_search = re.search(r'(?:providers|provision)\.(.*)(\.)?',
+            # Examples:
+            #   'sky.skylet.providers.aws.AWSNodeProviderV2' -> 'aws'
+            #   'sky.provision.aws' -> 'aws'
+            provider_search = re.search(r'(?:providers|provision)\.(\w+)\.?',
                                         provider_module)
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
-
-            if provider_name in ['aws', 'gcp']:
+            if provider_name in ('aws', 'gcp'):
+                logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)
                 return
+            logger.info('Not using new provisioner to stop the cluster. '
+                        f'Cloud of this cluster: {provider_name}')
 
             is_cluster_multinode = config['max_workers'] > 0
 
