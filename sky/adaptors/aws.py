@@ -102,8 +102,7 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
     """
     attempt = 0
     backoff = common_utils.Backoff()
-    err = None
-    while attempt < _MAX_ATTEMPT_FOR_CREATION:
+    while True:
         try:
             # NOTE: we need the lock here to avoid thread-safety issues when
             # creating the resource, because Python module is a shared object,
@@ -115,10 +114,9 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
                 botocore_exceptions().NoCredentialsError) as e:
             time.sleep(backoff.current_backoff())
             logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
-            err = e
             attempt += 1
-    assert err is not None, 'Should not reach here.'
-    raise err
+            if attempt >= _MAX_ATTEMPT_FOR_CREATION:
+                raise
 
 
 @import_package
