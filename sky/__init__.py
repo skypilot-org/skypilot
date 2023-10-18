@@ -11,14 +11,14 @@ def get_git_commit():
         return _SKYPILOT_COMMIT_SHA
     try:
         cwd = os.path.dirname(__file__)
-        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"],
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'],
                                               cwd=cwd,
                                               universal_newlines=True).strip()
-        changes = subprocess.check_output(["git", "status", "--porcelain"],
+        changes = subprocess.check_output(['git', 'status', '--porcelain'],
                                           cwd=cwd,
                                           universal_newlines=True).strip()
         if changes:
-            commit_hash += "-dirty"
+            commit_hash += '-dirty'
         return commit_hash
     except Exception:
         return _SKYPILOT_COMMIT_SHA
@@ -29,6 +29,7 @@ __version__ = '1.0.0-dev0'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Keep this order to avoid cyclic imports
+# pylint: disable=wrong-import-position
 from sky import backends
 from sky import benchmark
 from sky import clouds
