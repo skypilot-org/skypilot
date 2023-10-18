@@ -6,9 +6,9 @@ Quickstart
 
 This guide will walk you through:
 
-- defining a task in a simple YAML format
-- provisioning a cluster and running a task
-- using the core SkyPilot CLI commands
+- Defining a task in a simple YAML format
+- Provisioning a cluster and running a task
+- Using the core SkyPilot CLI commands
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
@@ -126,6 +126,8 @@ This may show multiple clusters, if you have created several:
   gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp     STOPPED
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
+
+.. _ssh:
 
 SSH into clusters
 =================
