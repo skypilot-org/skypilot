@@ -206,7 +206,7 @@ def bootstrap_instances(
 
     _configure_project(config.provider_config, crm)
     iam_role = _configure_iam_role(config, crm, iam)
-    config.provider_config['iam_role'] = iam_role
+    config.provider_config['iam_role'] = iam_role  # temporary store
     config = _configure_subnet(region, cluster_name, config, compute)
 
     return config
