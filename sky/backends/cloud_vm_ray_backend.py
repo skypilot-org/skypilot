@@ -1453,7 +1453,7 @@ class RetryingVmProvisioner(object):
                         f'Proceeding assuming quotas are available. Error: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        if not need_provision and not dryrun:
+        if not need_provision:
             # if quota is found to be zero, raise exception and skip to
             # the next region
             if to_provision.use_spot:

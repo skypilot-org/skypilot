@@ -222,6 +222,12 @@ def enable_all_clouds(monkeypatch):
         'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
         lambda *_args, **_kwargs: [])
 
+    for cloud in enabled_clouds:
+        if hasattr(cloud, 'check_quota_available'):
+            attr = (f'{cloud.__module__}.{cloud.__class__.__name__}.'
+                    'check_quota_available')
+            monkeypatch.setattr(attr, lambda *_args, **_kwargs: True)
+
     # Monkey patch Kubernetes resource detection since it queries
     # the cluster to detect available cluster resources.
     monkeypatch.setattr(
