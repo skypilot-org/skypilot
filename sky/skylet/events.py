@@ -137,12 +137,12 @@ class AutostopEvent(SkyletEvent):
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
             if provider_name in ('aws', 'gcp'):
-                logger.debug('Using new provisioner to stop the cluster.')
+                logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)
                 return
-            logger.debug('Not using new provisioner to stop the cluster. '
-                         f'Cloud found: {provider_name}')
+            logger.info('Not using new provisioner to stop the cluster. '
+                        f'Cloud of this cluster: {provider_name}')
 
             is_cluster_multinode = config['max_workers'] > 0
 
