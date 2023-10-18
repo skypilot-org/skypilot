@@ -2812,6 +2812,9 @@ def test_skyserve_auto_restart():
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            # sleep for 20 seconds (initial delay) to make sure it will
+            # be restarted
+            f'sleep 20',
             terminate_replica(1),
             'sleep 180',  # Wait for consecutive failure timeout passed.
             '(while true; do'
