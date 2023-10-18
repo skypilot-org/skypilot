@@ -20,7 +20,7 @@ def get_git_commit():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
         return _SKYPILOT_COMMIT_SHA
 
 

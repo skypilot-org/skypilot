@@ -1214,6 +1214,12 @@ def _add_command_alias_to_group(group, command, name, hidden):
               is_eager=True,
               help='Uninstall shell completion for the specified shell.')
 @click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
+@click.version_option(sky.__commit__,
+                      '--commit',
+                      '-c',
+                      prog_name='skypilot',
+                      message='%(prog)s, commit %(version)s',
+                      help='Show the commit hash and exit')
 def cli():
     pass
 
