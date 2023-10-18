@@ -105,6 +105,10 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
     err = None
     while attempt < MAX_ATTEMPT_FOR_CREATION:
         try:
+            # NOTE: we need the lock here to avoid thread-safety issues when
+            # creating the resource, because Python module is a shared object,
+            # and we are not sure if the code inside 'session()' or
+            # 'session().xx()' is thread-safe.
             with _session_creation_lock:
                 return creation_fn()
         except (botocore_exceptions().CredentialRetrievalError,
@@ -154,9 +158,6 @@ def resource(service_name: str, **kwargs):
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
         kwargs['config'] = config
-    # NOTE: we need the lock here to avoid thread-safety issues when creating
-    # the resource, because Python module is a shared object, and we are not
-    # sure if the code inside 'session().resource()' is thread-safe.
     return _create_aws_object(
         lambda: session().resource(service_name, **kwargs))
 
@@ -174,9 +175,6 @@ def client(service_name: str, **kwargs):
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
-    # NOTE: we need the lock here to avoid thread-safety issues when creating
-    # the client, because Python module is a shared object, and we are not sure
-    # if the code inside 'session().client()' is thread-safe.
     return _create_aws_object(lambda: session().client(service_name, **kwargs))
 
 
