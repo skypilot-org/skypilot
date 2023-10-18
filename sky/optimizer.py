@@ -5,6 +5,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import colorama
+import networkx as nx
 import numpy as np
 import prettytable
 
@@ -22,8 +23,6 @@ from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import networkx as nx
-
     # pylint: disable=ungrouped-imports
     from sky import dag as dag_lib
 
@@ -57,7 +56,6 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
 
 
 def _is_dag_resources_ordered(dag: 'dag_lib.Dag') -> bool:
-    import networkx as nx  # pylint: disable=import-outside-toplevel
     graph = dag.get_graph()
     topo_order = list(nx.topological_sort(graph))
     for node in topo_order:
@@ -284,20 +282,6 @@ class Optimizer:
                 launchable_resources, cloud_candidates, fuzzy_candidates = (
                     _fill_in_launchable_resources(node, blocked_resources))
                 node_to_candidate_map[node] = cloud_candidates
-
-                # Remove candidate that is not launchable.
-                # Needed for multi resources setting.
-                launchable_resources = {
-                    k: v for k, v in launchable_resources.items() if v
-                }
-
-                if len(launchable_resources) == 0:
-                    error_msg = (
-                        f'No launchable resource found for task {node}. '
-                        'To fix: relax its resource requirements.\n'
-                        ' \'sky check\' to check the enabled clouds.')
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(error_msg)
             else:
                 # Dummy sink node.
                 launchable_resources = {
@@ -410,11 +394,11 @@ class Optimizer:
                 enabled_clouds = global_user_state.get_enabled_clouds()
                 if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
                     if any(orig_resources.cloud is None
-                           for orig_resources in list(node.resources)):
+                           for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
                     elif all(
                             isinstance(orig_resources.cloud, clouds.Kubernetes)
-                            for orig_resources in list(node.resources)):
+                            for orig_resources in node.resources):
                         source_hint = 'kubernetes cluster'
 
                 # TODO(romilb): When `sky show-gpus` supports Kubernetes,
@@ -958,8 +942,6 @@ class Optimizer:
         The optimal mapping should consider the egress cost/time so that
         the total estimated cost/time of the DAG becomes the minimum.
         """
-        import networkx as nx  # pylint: disable=import-outside-toplevel
-
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 
@@ -1001,7 +983,6 @@ class Optimizer:
         quiet: bool = False,
     ) -> Dict[task_lib.Task, resources_lib.Resources]:
 
-        import networkx as nx  # pylint: disable=import-outside-toplevel
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
 

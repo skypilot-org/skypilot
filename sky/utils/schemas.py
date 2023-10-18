@@ -64,9 +64,6 @@ def get_resources_schema():
                     }
                 }]
             },
-            'resources_ordered': {
-                'type': 'boolean',
-            },
             'instance_type': {
                 'type': 'string',
             },

@@ -1958,7 +1958,8 @@ def check_can_clone_disk_and_override_task(
                 raise exceptions.NotSupportedError(
                     f'The target cluster{target_cluster_name_str} should have a disk size '
                     f'of at least {handle.launched_resources.disk_size} GB to clone the '
-                    f'disk from {cluster_name!r}.')
+                    f'disk from {cluster_name!r}, but {task_resources} is specified.'
+                )
         override_param = {}
         original_cloud = handle.launched_resources.cloud
         assert original_cloud is not None, handle.launched_resources
@@ -1969,7 +1970,8 @@ def check_can_clone_disk_and_override_task(
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Cannot clone disk across cloud from {original_cloud} to '
-                        f'{task_resources.cloud}.')
+                        f'{task_resources.cloud} for resources {task_resources}.'
+                    )
         original_cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
@@ -1985,10 +1987,9 @@ def check_can_clone_disk_and_override_task(
         task_resources = task_resources.copy(**override_param)
         new_task_resources.append(task_resources)
 
-    if isinstance(task.resources, list):
-        task.set_resources(new_task_resources)
-    else:
-        task.set_resources(set(new_task_resources))
+    # set the new_task_resources to be the same type (list or set) as the
+    # original task.resources
+    task.set_resources(type(task.resources)(new_task_resources))
     # Reset the best_resources to triger re-optimization
     # later, so that the new task_resources will be used.
     task.best_resources = None

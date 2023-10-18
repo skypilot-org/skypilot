@@ -2697,16 +2697,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         The resources requested by the task should be smaller than the existing
         cluster.
+        If multiple resources are specified, this checking will pass when
+        at least one resource fits the cluster.
 
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
-        If multiple resources are specified, this checking will pass when
-        at least one resource fits the cluster.
         """
 
         launched_resources = handle.launched_resources
         cluster_name = handle.cluster_name
+
+        # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
         record = global_user_state.get_cluster_from_name(cluster_name)
@@ -2725,13 +2727,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 launched_resources)
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
-
-        # Usage Collection:
-        usage_lib.messages.usage.update_cluster_resources(
-            handle.launched_nodes, launched_resources)
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        if record is not None:
-            usage_lib.messages.usage.update_cluster_status(record['status'])
 
         valid_resource = None
         requested_resource_list = []
@@ -2753,8 +2748,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     example_resource.region != launched_resources.region):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in region '  # pylint: disable=line-too-long
-                        f'{example_resource.region!r}, but the existing cluster '  # pylint: disable=line-too-long
+                        'Task requested resources in region '
+                        f'{example_resource.region!r}'
+                        ', but the existing cluster '
                         f'is in region {launched_resources.region!r}.')
             if (example_resource.zone is not None and
                     example_resource.zone != launched_resources.zone):
@@ -2763,8 +2759,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             'does not have zone specified.')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in zone '  # pylint: disable=line-too-long
-                        f'{example_resource.zone!r}, but the existing cluster '  # pylint: disable=line-too-long
+                        'Task requested resources in zone '
+                        f'{example_resource.zone!r},'
+                        'but the existing cluster '
                         f'{zone_str}')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
