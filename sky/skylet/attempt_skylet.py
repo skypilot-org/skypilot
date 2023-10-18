@@ -44,7 +44,8 @@ if os.path.exists(VERSION_FILE):
 version_string = (f' (found version {found_version}, new version '
                   f'{constants.SKYLET_VERSION})')
 if not running:
-    print('Skylet is not running. Starting...')
+    print('Skylet is not running. Starting (version '
+          f'{constants.SKYLET_VERSION})...')
 elif not version_match:
     print(f'Skylet is stale{version_string}. Restarting...')
 else:
