@@ -551,6 +551,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # assume it is just some random failure and we should restart
                 # the replica. Please refer to the implementation of
                 # `is_scale_down_succeeded` for more details.
+                # TODO(tian): Currently, restart replicas that failed within
+                # initial_delay_seconds is not supported. We should add it
+                # later when we support `sky serve update`.
                 if info.status_property.is_scale_down_succeeded(
                         self.initial_delay_seconds, self.auto_restart):
                     # This means the cluster is deleted due to
