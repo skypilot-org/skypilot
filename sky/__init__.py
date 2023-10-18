@@ -11,12 +11,15 @@ def get_git_commit():
         return _SKYPILOT_COMMIT_SHA
     try:
         cwd = os.path.dirname(__file__)
-        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'],
-                                              cwd=cwd,
-                                              universal_newlines=True).strip()
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=cwd,
+            universal_newlines=True,
+            stderr=subprocess.DEVNULL).strip()
         changes = subprocess.check_output(['git', 'status', '--porcelain'],
                                           cwd=cwd,
-                                          universal_newlines=True).strip()
+                                          universal_newlines=True,
+                                          stderr=subprocess.DEVNULL).strip()
         if changes:
             commit_hash += '-dirty'
         return commit_hash

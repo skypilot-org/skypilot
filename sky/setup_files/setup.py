@@ -13,30 +13,81 @@ please join us in [this
 discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
 """
 
+import atexit
 import io
 import os
 import platform
 import re
+import subprocess
 from typing import Dict, List
-import warnings
 
 import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
+INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
 
 system = platform.system()
 
 
-def find_version(*filepath):
+def find_version():
     # Extract version information from filepath
     # Adapted from:
     #  https://github.com/ray-project/ray/blob/master/python/setup.py
-    with open(os.path.join(ROOT_DIR, *filepath)) as fp:
+    with open(INIT_FILE_PATH, 'r') as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
         if version_match:
             return version_match.group(1)
         raise RuntimeError('Unable to find version string.')
+
+
+def get_commit_hash():
+    with open(INIT_FILE_PATH, 'r') as fp:
+        commit_match = re.search(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
+                                 fp.read(), re.M)
+        if commit_match:
+            commit_hash = commit_match.group(1)
+        else:
+            raise RuntimeError('Unable to find commit string.')
+
+    if 'SKYPILOT_COMMIT_SHA' not in commit_hash:
+        return commit_hash
+    try:
+        cwd = os.path.dirname(__file__)
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=cwd,
+            universal_newlines=True,
+            stderr=subprocess.DEVNULL).strip()
+        changes = subprocess.check_output(['git', 'status', '--porcelain'],
+                                          cwd=cwd,
+                                          universal_newlines=True,
+                                          stderr=subprocess.DEVNULL).strip()
+        if changes:
+            commit_hash += '-dirty'
+        return commit_hash
+    except Exception:  # pylint: disable=broad-except
+        return commit_hash
+
+
+def replace_commit_hash():
+    with open(INIT_FILE_PATH, 'r') as fp:
+        content = fp.read()
+        content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
+                         f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                         content,
+                         flags=re.M)
+    with open(INIT_FILE_PATH, 'w') as fp:
+        fp.write(content)
+
+
+def revert_commit_hash():
+    try:
+        subprocess.check_call(['git', 'checkout', INIT_FILE_PATH],
+                              cwd=ROOT_DIR,
+                              stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        pass
 
 
 def parse_readme(readme: str) -> str:
@@ -173,12 +224,15 @@ if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
     long_description = parse_readme(long_description)
 
+atexit.register(revert_commit_hash)
+replace_commit_hash()
+
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
     # ever), you must grep for '.whl' and change all corresponding wheel paths
     # (templates/*.j2 and wheel_utils.py).
     name='skypilot',
-    version=find_version('sky', '__init__.py'),
+    version=find_version(),
     packages=setuptools.find_packages(),
     author='SkyPilot Team',
     license='Apache 2.0',
