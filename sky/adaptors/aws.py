@@ -41,7 +41,7 @@ version = 1
 # Retry 5 times by default for potential credential errors,
 # mentioned in
 # https://github.com/skypilot-org/skypilot/pull/1988
-MAX_ATTEMPT_FOR_CREATION = 5
+_MAX_ATTEMPT_FOR_CREATION = 5
 
 
 class _ThreadLocalLRUCache(threading.local):
@@ -103,7 +103,7 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
     attempt = 0
     backoff = common_utils.Backoff()
     err = None
-    while attempt < MAX_ATTEMPT_FOR_CREATION:
+    while attempt < _MAX_ATTEMPT_FOR_CREATION:
         try:
             # NOTE: we need the lock here to avoid thread-safety issues when
             # creating the resource, because Python module is a shared object,
