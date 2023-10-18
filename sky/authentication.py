@@ -268,33 +268,10 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return _replace_ssh_info_in_config(config, public_key)
 
 
-# In Azure, cloud-init script must be encoded in base64. See
-# https://learn.microsoft.com/en-us/azure/virtual-machines/custom-data
-# for more information. Here we decode it and replace the ssh user
-# and public key content, then encode it back.
-def _replace_ssh_info_in_cloud_init(config: Dict[str, Any],
-                                    public_key: str) -> Dict[str, Any]:
-    for node_type in config['available_node_types']:
-        node_config = config['available_node_types'][node_type]['node_config']
-        cloud_init = node_config['azure_arm_parameters'][
-            'cloudInitSetupCommands']
-        cloud_init = base64.b64decode(cloud_init).decode('utf-8')
-        cloud_init = cloud_init.replace('skypilot:ssh_user',
-                                        config['auth']['ssh_user'])
-        cloud_init = cloud_init.replace('skypilot:ssh_public_key_content',
-                                        public_key)
-        cloud_init = base64.b64encode(
-            cloud_init.encode('utf-8')).decode('utf-8')
-        node_config['azure_arm_parameters'][
-            'cloudInitSetupCommands'] = cloud_init
-    return config
-
-
 def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r') as f:
         public_key = f.read().strip()
-    config = _replace_ssh_info_in_cloud_init(config, public_key)
     return _replace_ssh_info_in_config(config, public_key)
 
 
