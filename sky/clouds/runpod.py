@@ -183,7 +183,7 @@ class RunPod(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type
             default_instance_type = RunPod.get_default_instance_type(
-                                        cpus=resources.cpus)
+                cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -217,7 +217,7 @@ class RunPod(clouds.Cloud):
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
                     f'        $ runpod store_api_key <YOUR_RUNPOD_API_KEY> \n'
-                    '    For more information, see https://docs.runpod.io/docs/skypilot'
+                    '    For more information, see https://docs.runpod.io/docs/skypilot'  # pylint: disable=line-too-long
                 )
 
             return True, None
@@ -225,7 +225,7 @@ class RunPod(clouds.Cloud):
         except ImportError:
             return False, (
                 'Failed to import runpod.'
-                '"To install, run: "pip install runpod" or "pip install sky[runpod]" '
+                '"To install, run: "pip install runpod" or "pip install sky[runpod]" '  # pylint: disable=line-too-long
             )
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -248,10 +248,10 @@ class RunPod(clouds.Cloud):
                     region, zone, clouds='runpod')
 
     def accelerator_in_region_or_zone(self,
-                                        accelerator: str,
-                                        acc_count: int,
-                                        region: Optional[str] = None,
-                                        zone: Optional[str] = None) -> bool:
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'runpod')
 

@@ -621,9 +621,10 @@ class SSHConfigHelper(object):
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
         if docker_user is not None:
-            def docker_proxy_command_generator(ip): return ' '.join(
-                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
-                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
+            def docker_proxy_command_generator(ip):
+                ssh_options = command_runner.ssh_options_list(key_path, None)
+                user_host = f'{auth_config["ssh_user"]}@{ip}'
+                return ' '.join(['ssh'] + ssh_options + ['-W', '%h:%p', user_host])  # pylint: disable=line-too-long
         docker_proxy_command = None
 
         # Check if ~/.ssh/config contains existing names
