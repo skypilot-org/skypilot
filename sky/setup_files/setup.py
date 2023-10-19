@@ -92,8 +92,8 @@ def revert_commit_hash():
                 fp.write(original_init_content)
         else:
             subprocess.check_call(['git', 'checkout', INIT_FILE_PATH],
-                              cwd=ROOT_DIR,
-                              stderr=subprocess.DEVNULL)
+                                  cwd=ROOT_DIR,
+                                  stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         pass
 
