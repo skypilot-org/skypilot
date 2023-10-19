@@ -2,6 +2,7 @@
 import collections
 from collections import namedtuple
 import enum
+import json
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -801,6 +802,15 @@ class Optimizer:
 
             return row
 
+        def _get_resource_group_hash(resources: 'resources_lib.Resources'):
+            return json.dumps(
+                {
+                    'cloud': f'{resources.cloud}',
+                    'accelerators': f'{resources.accelerators}',
+                    'use_spot': resources.use_spot
+                },
+                sort_keys=True)
+
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
             'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
@@ -840,9 +850,7 @@ class Optimizer:
             best_per_resource_group: Dict[str, Tuple[resources_lib.Resources,
                                                      float]] = {}
             for resources, cost in v.items():
-                resource_table_key = str(
-                    resources.cloud) + resources.get_accelerators_str(
-                    ) + resources.get_spot_str()
+                resource_table_key = _get_resource_group_hash(resources)
                 if resource_table_key in best_per_resource_group:
                     if cost < best_per_resource_group[resource_table_key][1]:
                         best_per_resource_group[resource_table_key] = (
@@ -860,9 +868,7 @@ class Optimizer:
                 ) == chosen_resources.to_yaml_config():
                     chosen_cost = cost
                     break
-            resource_table_key = str(
-                chosen_resources.cloud) + chosen_resources.get_accelerators_str(
-                ) + chosen_resources.get_spot_str()
+            resource_table_key = _get_resource_group_hash(chosen_resources)
             best_per_resource_group[resource_table_key] = (chosen_resources,
                                                            chosen_cost)
             rows = []
