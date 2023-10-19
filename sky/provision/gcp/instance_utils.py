@@ -74,7 +74,8 @@ def _retry_on_http_exception(
     return dec
 
 
-def _generate_node_name(cluster_name: str, node_suffix: str) -> str:
+def _generate_node_name(cluster_name: str, node_suffix: str,
+                        is_head: bool) -> str:
     """Generate node name from labels and suffix.
 
     This is required so that the correct resource can be selected
@@ -84,6 +85,10 @@ def _generate_node_name(cluster_name: str, node_suffix: str) -> str:
     (as in ``GCPNodeType``).
     """
     suffix = f'-{uuid.uuid4().hex[:INSTANCE_NAME_UUID_LEN]}-{node_suffix}'
+    if is_head:
+        suffix = f'-head{suffix}'
+    else:
+        suffix = f'-worker{suffix}'
     prefix = cluster_name[:INSTANCE_NAME_MAX_LEN - len(suffix)]
     return prefix + suffix
 
@@ -193,6 +198,7 @@ class GCPInstance:
                         availability_zone: str,
                         node_config: dict,
                         labels: dict,
+                        is_head_node: bool,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
         """Creates a single instance and returns result.
 
@@ -209,6 +215,7 @@ class GCPInstance:
         node_config: dict,
         labels: dict,
         count: int,
+        include_head_node: bool,
         wait_for_operation: bool = True,
     ) -> List[Tuple[dict, str]]:
         """Creates multiple instances and returns result.
@@ -221,6 +228,7 @@ class GCPInstance:
                                 zone,
                                 node_config,
                                 labels,
+                                is_head_node=include_head_node and i == 0,
                                 wait_for_operation=False) for i in range(count)
         ]
 
@@ -517,9 +525,9 @@ class GCPComputeInstance(GCPInstance):
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
-        response = (cls.load_resource().instances().list(
+        response = (cls.load_resource().instances().get(
             project=project_id,
-            filter=f'name = {node_id}',
+            instance=node_id,
             zone=availability_zone,
         ).execute())
         node = response.get('items', [])[0]
@@ -607,6 +615,76 @@ class GCPComputeInstance(GCPInstance):
 
         return configuration_dict
 
+    # @classmethod
+    # def create_instances(
+    #     cls,
+    #     cluster_name: str,
+    #     project_id: str,
+    #     zone: str,
+    #     node_config: dict,
+    #     labels: dict,
+    #     count: int,
+    #     include_head_node: bool,
+    #     wait_for_operation: bool = True,
+    # ) -> List[Tuple[dict, str]]:
+    #     config = cls._convert_resources_to_urls(project_id, zone,
+    #                                             node_config)
+    #     # removing TPU-specific default key set in config.py
+    #     config.pop("networkConfig", None)
+    #     names = []
+    #     if include_head_node:
+    #         names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=True))
+    #         for _ in range(count - 1):
+    #             names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=False))
+    #     else:
+    #         for _ in range(count):
+    #             names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=False))
+
+    #     labels = dict(config.get("labels", {}), **labels)
+
+    #     config.update({
+    #         "labels": dict(
+    #             labels, **{
+    #                 TAG_RAY_CLUSTER_NAME: cluster_name,
+    #                 TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+    #             }),
+    #     })
+    #     source_instance_template = config.pop("sourceInstanceTemplate", None)
+    #     body = {
+    #         'count': count,
+    #         'instanceProperties': config,
+    #         'sourceInstanceTemplate': source_instance_template,
+    #         'perInstanceProperties': {n: {} for n in names}
+    #     }
+
+    #     # Allow Google Compute Engine instance templates.
+    #     #
+    #     # Config example:
+    #     #
+    #     #     ...
+    #     #     node_config:
+    #     #         sourceInstanceTemplate: global/instanceTemplates/worker-16
+    #     #         machineType: e2-standard-16
+    #     #     ...
+    #     #
+    #     # node_config parameters override matching template parameters, if any.
+    #     #
+    #     # https://cloud.google.com/compute/docs/instance-templates
+    #     # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+    #     operation = (cls.load_resource().instances().bulkInsert(
+    #         project=project_id,
+    #         zone=zone,
+    #         body=body,
+    #     ).execute())
+
+    #     if wait_for_operation:
+    #         result = cls.wait_for_operation(operation, project_id,
+    #                                         zone)
+    #     else:
+    #         result = operation
+
+    #     return result, name
+
     @classmethod
     def create_instance(cls,
                         cluster_name: str,
@@ -614,23 +692,32 @@ class GCPComputeInstance(GCPInstance):
                         availability_zone: str,
                         node_config: dict,
                         labels: dict,
+                        is_head_node: bool,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
         config = cls._convert_resources_to_urls(project_id, availability_zone,
                                                 node_config)
         # removing TPU-specific default key set in config.py
         config.pop("networkConfig", None)
-        name = _generate_node_name(cluster_name, GCPNodeType.COMPUTE.value)
+        name = _generate_node_name(cluster_name, GCPNodeType.COMPUTE.value,
+                                   is_head_node)
 
         labels = dict(config.get("labels", {}), **labels)
-
-        config.update({
-            "labels": dict(
-                labels, **{
-                    TAG_RAY_CLUSTER_NAME: cluster_name,
-                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
-                }),
-            "name": name,
+        labels.update({
+            TAG_RAY_CLUSTER_NAME: cluster_name,
+            TAG_SKYPILOT_CLUSTER_NAME: cluster_name
         })
+        if is_head_node:
+            labels.update({
+                TAG_SKYPILOT_HEAD_NODE: '1',
+                TAG_RAY_NODE_KIND: 'head',
+            })
+        else:
+            labels.update({
+                TAG_SKYPILOT_HEAD_NODE: '0',
+                TAG_RAY_NODE_KIND: 'worker',
+            })
+
+        config.update({"labels": labels, "name": name})
 
         # Allow Google Compute Engine instance templates.
         #

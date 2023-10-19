@@ -6,3 +6,5 @@ from sky.provision.gcp.instance import open_ports
 from sky.provision.gcp.instance import run_instances
 from sky.provision.gcp.instance import stop_instances
 from sky.provision.gcp.instance import terminate_instances
+from sky.provision.gcp.instance import wait_instances
+from sky.provision.gcp.instance import get_cluster_info

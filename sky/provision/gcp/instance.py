@@ -96,7 +96,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
         labels = inst.get('labels', {})
         if (labels.get(TAG_RAY_NODE_KIND) == 'head' or
                 labels.get(TAG_SKYPILOT_HEAD_NODE) == '1'):
-            head_instance_id = inst['id']
+            head_instance_id = inst['name']
             break
     return head_instance_id
 
@@ -104,7 +104,8 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
 def run_instances(region: str, cluster_name: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
-    result_dict = {}
+    # NOTE: although google cloud instances have IDs, but they are
+    #  not used for indexing. Instead, we use the instance name.
     labels = config.tags  # gcp uses "labels" instead of aws "tags"
     labels = dict(sorted(copy.deepcopy(labels).items()))
     resumed_instance_ids: List[str] = []
@@ -194,11 +195,20 @@ def run_instances(region: str, cluster_name: str,
     if head_instance_id is None:
         if running_instances:
             head_instance_id = resource.create_node_tag(
-                running_instances[0]['id'])
+                cluster_name,
+                project_id,
+                availability_zone,
+                running_instances[0]['name'],
+                is_head=True,
+            )
         elif pending_instances:
             head_instance_id = resource.create_node_tag(
-                pending_instances[0]['id'])
-
+                cluster_name,
+                project_id,
+                availability_zone,
+                pending_instances[0]['name'],
+                is_head=True,
+            )
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
     if config.resume_stopped_nodes and len(exist_instances) > config.count:
@@ -214,42 +224,35 @@ def run_instances(region: str, cluster_name: str,
 
     # Try to reuse previously stopped nodes with compatible configs
     if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
-        resumed_instance_ids = [n['id'] for n in stopped_instances]
+        resumed_instance_ids = [n['name'] for n in stopped_instances]
         if resumed_instance_ids:
-            for node_id in resumed_instance_ids:
-                result = resource.start_instance(node_id, project_id,
-                                                 availability_zone)
-                result_dict[node_id] = {node_id: result}
-                resource.set_labels(project_id, availability_zone, node_id,
+            for instance_id in resumed_instance_ids:
+                resource.start_instance(instance_id, project_id,
+                                        availability_zone)
+                resource.set_labels(project_id, availability_zone, instance_id,
                                     labels)
         to_start_count -= len(resumed_instance_ids)
 
         if head_instance_id is None:
-            head_instance_id = resource.create_node_tag(resumed_instance_ids[0])
+            head_instance_id = resource.create_node_tag(
+                cluster_name,
+                project_id,
+                availability_zone,
+                resumed_instance_ids[0],
+                is_head=True,
+            )
 
     if to_start_count > 0:
         results = resource.create_instances(cluster_name, project_id,
                                             availability_zone,
                                             config.node_config, labels,
-                                            to_start_count)
-        # FIXME: it seems that success is always False.
-        for success, instance_id in results:
-            resource.set_labels(project_id, availability_zone, instance_id,
-                                labels)
-            created_instance_ids.append(instance_id)
-        result_dict.update(
-            {instance_id: result for result, instance_id in results})
-
-        # NOTE: we only create worker tags for newly started nodes, because
-        # the worker tag is a legacy feature, so we would not care about
-        # more corner cases.
+                                            to_start_count,
+                                            head_instance_id is None)
         if head_instance_id is None:
-            head_instance_id = resource.create_node_tag(created_instance_ids[0])
-            for inst in created_instance_ids[1:]:
-                resource.create_node_tag(inst, is_head=False)
-        else:
-            for inst in created_instance_ids:
-                resource.create_node_tag(inst, is_head=False)
+            head_instance_id = results[0][1]
+        # FIXME: it seems that success could be False sometimes, but the instances
+        #   are started correctly.
+        created_instance_ids = [instance_id for success, instance_id in results]
 
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
@@ -266,6 +269,15 @@ def wait_instances(region: str, cluster_name: str,
     # We already wait for the instances to be running in run_instances.
     # So we don't need to wait here.
     return
+
+
+def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
+    """See sky/provision/__init__.py"""
+    raise NotImplementedError
+    return common.ClusterInfo(
+        instances=instances,
+        head_instance_id=head_instance_id,
+    )
 
 
 def stop_instances(
