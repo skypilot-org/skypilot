@@ -238,7 +238,8 @@ class RunPod(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self, cls) -> Optional[List[str]]:
+    @classmethod
+    def get_current_user_identity(cls) -> Optional[List[str]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
