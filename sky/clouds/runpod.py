@@ -10,7 +10,7 @@ from sky.clouds import service_catalog
 import sky.skylet.providers.runpod.rp_helper as runpod_api
 
 if typing.TYPE_CHECKING:
-    from sky import resources as resources_lib  # Renaming to avoid shadowing variables.
+    from sky import resources as resources_lib
 
 _CREDENTIAL_FILES = [
     'credentials.toml',

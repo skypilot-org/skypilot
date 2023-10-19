@@ -7,13 +7,14 @@ To show debug messages, export SKYPILOT_DEBUG=1
 Class definition: https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/node_provider.py
 """
 
-import time
 import logging
 from threading import RLock
+import time
 from types import ModuleType
 from typing import Any, Dict, List, Optional
 
-from ray.autoscaler._private.command_runner import DockerCommandRunner, SSHCommandRunner
+from ray.autoscaler._private.command_runner import DockerCommandRunner
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.command_runner import CommandRunnerInterface
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
