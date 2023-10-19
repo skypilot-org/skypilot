@@ -6,7 +6,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import status_lib
-from sky.adaptors import runpod
 from sky.clouds import service_catalog
 import sky.skylet.providers.runpod.rp_helper as runpod_api
 
@@ -131,8 +130,8 @@ class RunPod(clouds.Cloud):
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(instance_type,
-                                                                   clouds='runpod')
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='runpod')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
