@@ -18,8 +18,7 @@ def import_package(func):
             except ImportError:
                 raise ImportError(
                     'Fail to import dependencies for runpod.'
-                    'Try pip install "skypilot[runpod]"'
-                ) from None
+                    'Try pip install "skypilot[runpod]"') from None
         return func(*args, **kwargs)
 
     return wrapper

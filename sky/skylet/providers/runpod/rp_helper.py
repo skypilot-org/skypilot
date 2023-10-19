@@ -8,7 +8,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky.adaptors import runpod
 
-
 GPU_NAME_MAP = {
     "A100-80GB": "NVIDIA A100 80GB PCIe",
     "A100-40GB": "NVIDIA A100-PCIE-40GB",
@@ -81,7 +80,7 @@ def list_instances():
         instance_list[instance["id"]]["status"] = instance["desiredStatus"]
         instance_list[instance["id"]]["name"] = instance["name"]
 
-        if instance["desiredStatus"] == "RUNNING" and instance.get("runtime", None):
+        if instance["desiredStatus"] == "RUNNING" and instance.get("runtime"):
             for port in instance["runtime"]["ports"]:
                 if port["privatePort"] == 22:
                     instance_list[instance["id"]]["ip"] = port["ip"]

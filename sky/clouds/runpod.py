@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import status_lib
+from sky.adaptors import runpod
 from sky.clouds import service_catalog
 import sky.skylet.providers.runpod.rp_helper as runpod_api
 
@@ -62,8 +63,8 @@ class RunPod(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(
-            instance_type, clouds='runpod')
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='runpod')
 
     @classmethod
     def zones_provision_loop(
@@ -101,7 +102,7 @@ class RunPod(clouds.Cloud):
                                     use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
-        '''Returns the hourly cost of the accelerators, in dollars/hour.'''
+        """Returns the hourly cost of the accelerators, in dollars/hour."""
         del accelerators, use_spot, region, zone  # unused
         return 0.0  # RunPod includes accelerators in the hourly cost.
 
@@ -156,8 +157,8 @@ class RunPod(clouds.Cloud):
             'region': region.name,
         }
 
-    def _get_feasible_launchable_resources(self,
-                                           resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
@@ -192,7 +193,7 @@ class RunPod(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-         ) = service_catalog.get_instance_type_for_accelerator(
+        ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
@@ -206,11 +207,9 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """
-        Verify that the user has valid credentials for RunPod.
-        """
+        """ Verify that the user has valid credentials for RunPod. """
         try:
-            import runpod
+            import runpod  # pylint: disable=import-outside-toplevel
             valid, error = runpod.check_credentials()
 
             if not valid:
@@ -226,8 +225,8 @@ class RunPod(clouds.Cloud):
 
         except ImportError:
             return False, (
-                "Failed to import runpod."
-                "'To install, run: 'pip install runpod' or 'pip install sky[runpod]' "
+                'Failed to import runpod.'
+                '"To install, run: "pip install runpod" or "pip install sky[runpod]" '
             )
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -249,13 +248,11 @@ class RunPod(clouds.Cloud):
         return service_catalog.validate_region_zone(
                     region, zone, clouds='runpod')
 
-    def accelerator_in_region_or_zone(
-        self,
-        accelerator: str,
-        acc_count: int,
-        region: Optional[str] = None,
-        zone: Optional[str] = None
-    ) -> bool:
+    def accelerator_in_region_or_zone(self,
+                                        accelerator: str,
+                                        acc_count: int,
+                                        region: Optional[str] = None,
+                                        zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'runpod')
 

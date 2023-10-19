@@ -1218,7 +1218,7 @@ class RetryingVmProvisioner(object):
 
         return definitely_no_nodes_launched
 
-    # ---------------------------------- RunPod ---------------------------------- #
+    # ---------------------------------- RunPod ---------------------------------- # pylint: disable=line-too-long
     def _update_blocklist_on_runpod_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
