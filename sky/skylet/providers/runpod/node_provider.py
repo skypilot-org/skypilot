@@ -95,7 +95,8 @@ class RunPodNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_node(node_id=node_id)['ip']
 
-    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int) -> Optional[Dict[str, Any]]:
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int
+            ) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace."""
         # Get the tags
         config_tags = node_config.get('tags', {}).copy()
@@ -124,16 +125,20 @@ class RunPodNodeProvider(NodeProvider):
 
         print(f"Instance {instance_id} is running and ready to use.")
 
+        return instance_id
+
     @synchronized
     def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
         runpod_api.set_tags(node_id, node['tags'])
+        return None
 
     def terminate_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Terminates the specified node."""
         runpod_api.remove(node_id)
+        return None
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
