@@ -129,6 +129,18 @@ def run_instances(region: str, cluster_name: str,
     PENDING_STATUS = ['PROVISIONING', 'STAGING']
     filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name}
 
+    # wait until all stopping instances are stopped/terminated
+    while True:
+        instances = resource.filter(
+            project_id=project_id,
+            zone=availability_zone,
+            label_filters=filter_labels,
+            status_filters=['STOPPING'],
+        )
+        if not instances:
+            break
+        time.sleep(POLL_INTERVAL)
+
     exist_instances = resource.filter(
         project_id=project_id,
         zone=availability_zone,
@@ -175,6 +187,10 @@ def run_instances(region: str, cluster_name: str,
     stopping_instances.sort(key=lambda n: get_order_key(n), reverse=True)
     stopped_instances.sort(key=lambda n: get_order_key(n), reverse=True)
 
+    if stopping_instances:
+        raise RuntimeError(
+            f'Some instances are being stopped during provisioning.')
+
     if head_instance_id is None:
         if running_instances:
             head_instance_id = resource.create_node_tag(
@@ -193,23 +209,13 @@ def run_instances(region: str, cluster_name: str,
                            'This is likely a resource leak. '
                            'Use "sky down" to terminate the cluster.')
 
-    # TODO: if there are running instances, use their zones instead
-
     to_start_count = (config.count - len(running_instances) -
                       len(pending_instances))
 
     # Try to reuse previously stopped nodes with compatible configs
-    if config.resume_stopped_nodes and to_start_count > 0 and (
-            stopping_instances or stopped_instances):
-        # TODO: we should wait until stopped instances are actually stopped.
-        #  However, in GCP it is hard to know whether one instance is stopping for termination.
-        #  So we need to wait and check.
-        stopped_nodes = stopping_instances + stopped_instances
-        stopped_nodes.sort(key=lambda n: get_order_key(n), reverse=True)
-        resumed_instance_ids = [n['id'] for n in stopped_nodes]
+    if config.resume_stopped_nodes and to_start_count > 0 and stopped_instances:
+        resumed_instance_ids = [n['id'] for n in stopped_instances]
         if resumed_instance_ids:
-            # TODO(suquark): Some instances could still be stopping.
-            # We may wait until these instances stop.
             for node_id in resumed_instance_ids:
                 result = resource.start_instance(node_id, project_id,
                                                  availability_zone)
@@ -244,6 +250,7 @@ def run_instances(region: str, cluster_name: str,
         else:
             for inst in created_instance_ids:
                 resource.create_node_tag(inst, is_head=False)
+
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
                                   zone=availability_zone,
