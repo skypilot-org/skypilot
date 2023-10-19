@@ -26,14 +26,14 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.', # pylint: disable=line-too-long
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.',  # pylint: disable=line-too-long
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
     @classmethod
     def _cloud_unsupported_features(
-        cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -96,13 +96,11 @@ class RunPod(clouds.Cloud):
                                                zone=zone,
                                                clouds='runpod')
 
-    def accelerators_to_hourly_cost(
-            self,
-            accelerators: Dict[str, int],
-            use_spot: bool,
-            region: Optional[str] = None,
-            zone: Optional[str] = None
-    ) -> float:
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
         '''Returns the hourly cost of the accelerators, in dollars/hour.'''
         del accelerators, use_spot, region, zone  # unused
         return 0.0  # RunPod includes accelerators in the hourly cost.
@@ -119,10 +117,10 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-        cls,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        disk_tier: Optional[str] = None) -> Optional[str]:
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for RunPod."""
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
@@ -132,8 +130,8 @@ class RunPod(clouds.Cloud):
     @classmethod
     def get_accelerators_from_instance_type(
             cls, instance_type: str) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(
-                    instance_type, clouds='runpod')
+        return service_catalog.get_accelerators_from_instance_type(instance_type,
+                                                                   clouds='runpod')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -158,8 +156,8 @@ class RunPod(clouds.Cloud):
             'region': region.name,
         }
 
-    def _get_feasible_launchable_resources(
-        self, resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(self,
+                                           resources: 'resources_lib.Resources'):
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
