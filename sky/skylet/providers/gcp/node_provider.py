@@ -287,6 +287,8 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
+                for _, instance_id in results:
+                    resource.resize_disk(base_config, instance_id, self.resources)
                 result_dict.update(
                     {instance_id: result for result, instance_id in results}
                 )
