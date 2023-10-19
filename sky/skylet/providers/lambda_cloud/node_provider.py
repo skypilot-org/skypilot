@@ -130,7 +130,8 @@ class LambdaNodeProvider(NodeProvider):
         return [node for node in vms if node.get('name') in possible_names]
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self, tag_filters: Dict[str,
+                                                    str]) -> Dict[str, Any]:
 
         def _extract_metadata(vm: Dict[str, Any]) -> Dict[str, Any]:
             metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}

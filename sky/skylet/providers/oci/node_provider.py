@@ -280,7 +280,7 @@ class OCINodeProvider(NodeProvider):
                 preemption_action=oci_adaptor.get_oci().core.models.
                 TerminatePreemptionAction(type="TERMINATE",
                                           preserve_boot_volume=False))
-                                    if node_config["Preemptible"] else None)
+                                   if node_config["Preemptible"] else None)
 
             logger.debug(f"Shape: {instance_type_str}, ocpu: {ocpu_count}")
             logger.debug(f"Shape config is {machine_shape_config}")
@@ -412,7 +412,7 @@ class OCINodeProvider(NodeProvider):
                         update_instance_details=oci_adaptor.get_oci().core.
                         models.UpdateInstanceDetails(
                             freeform_tags=combined_tags),
-                )
+                    )
                 logger.info(f"Tags are well set for node {node_id}")
                 break
             except Exception as e:

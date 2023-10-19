@@ -144,8 +144,8 @@ class RunPodNodeProvider(NodeProvider):
         return None
 
     @synchronized
-    def _get_filtered_nodes(self,
-                            tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self, tag_filters: Dict[str,
+                                                    str]) -> Dict[str, Any]:
         """SkyPilot Method
         Caches the nodes with the given tag_filters.
         """
@@ -154,7 +154,8 @@ class RunPodNodeProvider(NodeProvider):
         filtered_nodes = {}
         for instance_id, instance in instances.items():
             if instance['status'] not in [
-                'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED']:
+                'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED'
+            ]:
                 continue
             if any(tag in instance['tags'] for tag in tag_filters):
                 filtered_nodes[instance_id] = instance

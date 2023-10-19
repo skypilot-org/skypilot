@@ -1191,7 +1191,7 @@ def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
 
 def _count_healthy_nodes_from_ray(output: str,
                                   is_local_cloud: bool = False
-                                  ) -> Tuple[int, int]:
+                                 ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
 
     def get_ready_nodes_counts(pattern, output):
@@ -1364,7 +1364,6 @@ def wait_until_ray_cluster_ready(
 def ssh_credential_from_yaml(cluster_yaml: str,
                              docker_user: Optional[str] = None
                             ) -> Dict[str, Any]:
-
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
@@ -2016,7 +2015,7 @@ def _update_cluster_status_no_lock(
 
     all_nodes_up = (all(
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
-        len(node_statuses) == handle.launched_nodes)
+                   len(node_statuses) == handle.launched_nodes)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
