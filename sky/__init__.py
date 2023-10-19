@@ -8,7 +8,12 @@ _SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
 
 def get_git_commit():
     if 'SKYPILOT_COMMIT_SHA' not in _SKYPILOT_COMMIT_SHA:
+        # This is a release build, so we don't need to get the commit hash from
+        # git, as it's already been set.
         return _SKYPILOT_COMMIT_SHA
+
+    # This is a development build (pip install -e .), so we need to get the
+    # commit hash from git.
     try:
         cwd = os.path.dirname(__file__)
         commit_hash = subprocess.check_output(
