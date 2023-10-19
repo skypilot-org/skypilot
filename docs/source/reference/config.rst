@@ -114,6 +114,15 @@ Available fields and semantics:
       # specific_reservations in a single request.
       - projects/my-project/reservations/my-reservation
 
+  # Advanced Kubernetes configurations (optional).
+  kubernetes:
+    # The networking mode for accessing jump pods (optional).
+    # This must be either: 'nodeport' or 'portforward'.
+    #
+    # nodeport: Exposes a service on a static port number on each Node, allowing external access to services using <NodeIP>:<NodePort>.
+    # portforward: Forward a local port to a port on a Pod, typically used for debugging or temporary access purposes.
+    networking:  nodeport
+
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or `default` for the default configuration.
@@ -134,11 +143,3 @@ Available fields and semantics:
     us-ashburn-1:
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
-  # Advanced Kubernetes configurations (optional).
-  kubernetes:
-    # The networking mode for accessing jump pods (optional).
-    # This must be either: 'nodeport' or 'portforward'.
-    #
-    # nodeport: Exposes a service on a static port number on each Node, allowing external access to services using <NodeIP>:<NodePort>.
-    # portforward: Forward a local port to a port on a Pod, typically used for debugging or temporary access purposes.
-    networking:  nodeport
