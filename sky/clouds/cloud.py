@@ -294,6 +294,13 @@ class Cloud:
         if num_nodes > 1:
             resources_required_features.add(
                 CloudImplementationFeatures.MULTI_NODE)
+
+        if resources.accelerators is not None:
+            acc, _ = list(resources.accelerators.items())[0]
+            if acc.startswith('tpu-') and num_nodes > 1:
+                raise ValueError('Multi-node TPU cluster is not supported. '
+                                 f'Got num_nodes={num_nodes}.')
+
         try:
             self.check_features_are_supported(resources_required_features)
         except exceptions.NotSupportedError:

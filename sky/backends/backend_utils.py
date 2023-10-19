@@ -1951,15 +1951,8 @@ def check_can_clone_disk_and_override_task(
     for task_resources in task.resources:
         if handle.launched_resources.disk_size > task_resources.disk_size:
             # The target cluster's disk should be at least as large as the source.
-            with ux_utils.print_exception_no_traceback():
-                target_cluster_name_str = f' {target_cluster_name!r}'
-                if target_cluster_name is None:
-                    target_cluster_name_str = ''
-                raise exceptions.NotSupportedError(
-                    f'The target cluster{target_cluster_name_str} should have a disk size '
-                    f'of at least {handle.launched_resources.disk_size} GB to clone the '
-                    f'disk from {cluster_name!r}, but {task_resources} is specified.'
-                )
+            continue
+
         override_param = {}
         original_cloud = handle.launched_resources.cloud
         assert original_cloud is not None, handle.launched_resources
@@ -1986,6 +1979,16 @@ def check_can_clone_disk_and_override_task(
                 f'({handle.launched_resources.region}).')
         task_resources = task_resources.copy(**override_param)
         new_task_resources.append(task_resources)
+
+    if not new_task_resources:
+        with ux_utils.print_exception_no_traceback():
+            target_cluster_name_str = f' {target_cluster_name!r}'
+            if target_cluster_name is None:
+                target_cluster_name_str = ''
+            raise exceptions.NotSupportedError(
+                f'The target cluster{target_cluster_name_str} should have a disk size '
+                f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                f'disk from {cluster_name!r}.')
 
     # set the new_task_resources to be the same type (list or set) as the
     # original task.resources

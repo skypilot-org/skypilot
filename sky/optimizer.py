@@ -1,5 +1,6 @@
 """Optimizer: assigns best resources to user tasks."""
 import collections
+from collections import namedtuple
 import enum
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -127,10 +128,7 @@ class Optimizer:
                 # Take dag.tasks[0], the actual task
                 # dag can store dummy tasks.
                 resources_list = dag.tasks[0].resources
-                accelerators_str = ', '.join([
-                    r.get_accelerators_str() + r.get_spot_str()
-                    for r in resources_list
-                ])
+                accelerators_str = ', '.join([f'{r}' for r in resources_list])
                 logger.info(
                     f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
                 )
@@ -291,52 +289,6 @@ class Optimizer:
             num_resources = len(list(node.resources))
 
             for orig_resources, launchable_list in launchable_resources.items():
-                if not launchable_list:
-                    location_hint = ''
-                    source_hint = 'catalog'
-                    if list(node.resources):
-                        specified_resources = list(node.resources)[0]
-                        if specified_resources.zone is not None:
-                            location_hint = (
-                                f' Zone: {specified_resources.zone}.')
-                        elif specified_resources.region:
-                            location_hint = (
-                                f' Region: {specified_resources.region}.')
-
-                        # If Kubernetes was included in the search space, then
-                        # mention "kubernetes cluster" and/instead of "catalog"
-                        # in the error message.
-                        enabled_clouds = global_user_state.get_enabled_clouds()
-                        if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
-                            if specified_resources.cloud is None:
-                                source_hint = 'catalog and kubernetes cluster'
-                            elif specified_resources.cloud.is_same_cloud(
-                                    clouds.Kubernetes()):
-                                source_hint = 'kubernetes cluster'
-
-                    # TODO(romilb): When `sky show-gpus` supports Kubernetes,
-                    #  add a hint to run `sky show-gpus --kubernetes` to list
-                    #  available accelerators on Kubernetes.
-
-                    bold = colorama.Style.BRIGHT
-                    cyan = colorama.Fore.CYAN
-                    reset = colorama.Style.RESET_ALL
-                    fuzzy_candidates_str = ''
-                    if fuzzy_candidates:
-                        fuzzy_candidates_str = (
-                            f'\nTry one of these offered accelerators: {cyan}'
-                            f'{fuzzy_candidates}{reset}')
-                    error_msg = (
-                        f'{source_hint.capitalize()} does not contain any '
-                        f'instances satisfying the request:\n{node}.'
-                        f'{location_hint}\n\nTo fix: relax or change the '
-                        f'resource requirements.{fuzzy_candidates_str}\n\n'
-                        f'Hint: {bold}sky show-gpus{reset} '
-                        'to list available accelerators.\n'
-                        f'      {bold}sky check{reset} to check the enabled '
-                        'clouds.')
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -809,6 +761,46 @@ class Optimizer:
                 str(region_or_zone),
             ]
 
+        Row = namedtuple('Row', [
+            'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
+            'region_or_zone', 'cost_str', 'chosen_str'
+        ])
+
+        def _get_resources_named_tuple(resources: 'resources_lib.Resources',
+                                       cost_str: str, chosen: bool) -> Row:
+
+            accelerators = resources.get_accelerators_str()
+            spot = '[Spot]' if resources.use_spot else ''
+            cloud = resources.cloud
+            vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
+
+            def format_number(x):
+                if x is None:
+                    return '-'
+                elif x.is_integer():
+                    return str(int(x))
+                else:
+                    return f'{x:.1f}'
+
+            vcpus = format_number(vcpus)
+            mem = format_number(mem)
+
+            if resources.zone is None:
+                region_or_zone = resources.region
+            else:
+                region_or_zone = resources.zone
+
+            chosen_str = ''
+            if chosen:
+                chosen_str = (colorama.Fore.GREEN + '   ' + u'\u2714' +
+                              colorama.Style.RESET_ALL)
+            row = Row(cloud, resources.instance_type + spot, vcpus, mem,
+                      str(accelerators), str(region_or_zone), cost_str,
+                      chosen_str)
+
+            return row
+
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
             'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
@@ -833,7 +825,7 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
-            resources_list = [
+            accelerator_spot_list = [
                 r.get_accelerators_str() + r.get_spot_str()
                 for r in list(task.resources)
             ]
@@ -845,43 +837,50 @@ class Optimizer:
                 f'{colorama.Style.RESET_ALL}')
 
             # Only print 1 row per cloud.
-            best_per_cloud: Dict[str, Tuple[resources_lib.Resources,
-                                            float]] = {}
+            best_per_resource_group: Dict[str, Tuple[resources_lib.Resources,
+                                                     float]] = {}
             for resources, cost in v.items():
                 resource_table_key = str(
                     resources.cloud) + resources.get_accelerators_str(
                     ) + resources.get_spot_str()
-                if resource_table_key in best_per_cloud:
-                    if cost < best_per_cloud[resource_table_key][1]:
-                        best_per_cloud[resource_table_key] = (resources, cost)
+                if resource_table_key in best_per_resource_group:
+                    if cost < best_per_resource_group[resource_table_key][1]:
+                        best_per_resource_group[resource_table_key] = (
+                            resources, cost)
                 else:
-                    best_per_cloud[resource_table_key] = (resources, cost)
+                    best_per_resource_group[resource_table_key] = (resources,
+                                                                   cost)
 
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
             chosen_resources = best_plan[task]
-            chosen_cost = 0.0
-            for resources, cost in v.items():
-                if resources.to_yaml_config(
-                ) == chosen_resources.to_yaml_config():
-                    chosen_cost = cost
-                    break
             resource_table_key = str(
                 chosen_resources.cloud) + chosen_resources.get_accelerators_str(
                 ) + chosen_resources.get_spot_str()
-            best_per_cloud[resource_table_key] = (chosen_resources, chosen_cost)
+            for resources, cost in v.items():
+                for (field1, value1), (field2, value2) in zip(vars(resources).items(), vars(chosen_resources).items()):
+                    print(f"{field1}: {value1}", field1 == field2, value1 == value2, flush=True)
+                    if value1 != value2:
+                        for field, value in vars(value1).items():
+                            print(f"{field}: {value}", flush=True)
+                        for field, value in vars(value2).items():
+                            print(f"{field}: {value}", flush=True)
+                print(resources == chosen_resources)
+                break
+            
+            for field, value in vars(chosen_resources).items():
+                print(f"{field}: {value}", flush=True)
+            best_per_resource_group[resource_table_key] = (chosen_resources,
+                                                           v[chosen_resources])
             rows = []
-            for resources, cost in best_per_cloud.values():
+            for resources, cost in best_per_resource_group.values():
                 if minimize_cost:
                     cost_str = f'{cost:.2f}'
                 else:
                     cost_str = f'{cost / 3600:.2f}'
 
-                row = [*_get_resources_element_list(resources), cost_str, '']
-                if resources == best_plan[task]:
-                    # Use tick sign for the chosen resources.
-                    row[-1] = (colorama.Fore.GREEN + '   ' + u'\u2714' +
-                               colorama.Style.RESET_ALL)
+                row = _get_resources_named_tuple(resources, cost_str,
+                                                 resources == best_plan[task])
                 rows.append(row)
 
             # NOTE: we've converted the cost to a string above, so we should
@@ -890,19 +889,24 @@ class Optimizer:
             if isinstance(task.resources, list):
                 rows = sorted(
                     rows,
-                    key=lambda x: (
-                        resources_list.index(x[-4] + (  # pylint: disable=cell-var-from-loop
-                            '[Spot]' if '[Spot]' in x[1] else '')),  # pylint: disable=cell-var-from-loop
-                        x[-2]))  # pylint: disable=cell-var-from-loop
+                    key=lambda row: (
+                        accelerator_spot_list.index(row.accelerators + (  # pylint: disable=cell-var-from-loop
+                            '[Spot]' if '[Spot]' in row.instance else '')),  # pylint: disable=cell-var-from-loop
+                        row.region_or_zone))  # pylint: disable=cell-var-from-loop
             else:
-                rows = sorted(rows, key=lambda x: float(x[-2]))
+                rows = sorted(rows, key=lambda x: float(row.region_or_zone))
             # Highlight the chosen resources.
+
+            row_list = []
             for row in rows:
-                if row[-1] != '':
-                    for i, cell in enumerate(row):
-                        row[i] = (f'{colorama.Style.BRIGHT}{cell}'
-                                  f'{colorama.Style.RESET_ALL}')
-                    break
+                row_in_list = []
+                if row.chosen_str != '':
+                    for _, cell in enumerate(row):
+                        row_in_list.append((f'{colorama.Style.BRIGHT}{cell}'
+                                            f'{colorama.Style.RESET_ALL}'))
+                else:
+                    row_in_list = list(row)
+                row_list.append(row_in_list)
 
             table = _create_table(field_names)
             table.add_rows(rows)

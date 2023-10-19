@@ -3494,8 +3494,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
         self.check_resources_fit_cluster(handle, task, check_ports=True)
-        if handle.launched_resources:
-            task.set_resources(handle.launched_resources)
 
         resources_str = backend_utils.get_task_resources_str(task)
 
