@@ -5,14 +5,15 @@ Thread safety notes:
 The results of session() is cached by each thread in a thread.local() storage.
 This means using their results is completely thread-safe.
 
-Calling them is thread-safe too, since they use a lock to protect
-each object's first creation.
-
-We do not cache the resource/client objects, because the credentials will be
+We do not cache the resource/client objects, because some credentials may be
 automatically rotated, but the cached resource/client object may not refresh the
 credential quick enough, which can cause unexpected NoCredentialsError. By
-creating the resource/client object every time, the credentials will be
-explicitly refreshed.
+creating the resource/client object from the thread-local session() object every
+time, the credentials will be explicitly refreshed.
+
+Calling session(), resource(), and client() is thread-safe, since they use a
+lock to protect each object's creation.
+
 
 This is informed by the following boto3 docs:
 - Unlike Resources and Sessions, clients are generally thread-safe.
