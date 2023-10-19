@@ -52,8 +52,8 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
     # Ensure the tag file exists, create it if it doesn't.
     if not os.path.exists(tag_file_path):
         Path(os.path.dirname(tag_file_path)).mkdir(parents=True, exist_ok=True)
-        with open(tag_file_path, "w", encoding="UTF-8") as tags:
-            json.dump({}, tags)
+        with open(tag_file_path, "w", encoding="UTF-8") as tag_file:
+            json.dump({}, tag_file)
 
     # Read existing tags
     with open(tag_file_path, "r", encoding="UTF-8") as tag_file:
@@ -67,7 +67,7 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
         with open(tag_file_path, "w", encoding="UTF-8") as tag_file:
             json.dump(tags, tag_file)
 
-    return tags.get(instance_id)
+    return tags.get(instance_id, {})
 
 
 def list_instances():
