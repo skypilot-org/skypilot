@@ -154,7 +154,7 @@ class RunPodNodeProvider(NodeProvider):
         filtered_nodes = {}
         for instance_id, instance in instances.items():
             if instance['status'] not in [
-                'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED'
+                    'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED'
             ]:
                 continue
             if any(tag in instance['tags'] for tag in tag_filters):

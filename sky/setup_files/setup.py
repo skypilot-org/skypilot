@@ -156,7 +156,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [] + local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
-    'runpod': ['runpod>=1.2.5'],
+    'runpod': ['runpod>=1.3.0'],
     'remote': remote,
 }
 

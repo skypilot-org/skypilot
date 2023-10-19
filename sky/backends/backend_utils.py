@@ -2015,7 +2015,7 @@ def _update_cluster_status_no_lock(
 
     all_nodes_up = (all(
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
-                   len(node_statuses) == handle.launched_nodes)
+                    len(node_statuses) == handle.launched_nodes)
 
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
