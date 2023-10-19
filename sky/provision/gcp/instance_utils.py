@@ -20,6 +20,10 @@ TAG_RAY_CLUSTER_NAME = "ray-cluster-name"
 TAG_RAY_NODE_NAME = "ray-node-name"
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
+TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
+# Tag uniquely identifying all nodes of a cluster
+TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
+TAG_RAY_NODE_KIND = 'ray-node-type'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -245,7 +249,17 @@ class GCPInstance:
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
-        return NotImplementedError
+        raise NotImplementedError
+
+    @classmethod
+    def create_node_tag(cls,
+                        cluster_name: str,
+                        project_id: str,
+                        availability_zone: str,
+                        target_instance_id: str,
+                        is_head: bool = True,
+                        wait_for_operation: bool = True) -> str:
+        raise NotImplementedError
 
 
 class GCPComputeInstance(GCPInstance):
@@ -527,6 +541,34 @@ class GCPComputeInstance(GCPInstance):
             result = operation
 
         return result
+
+    @classmethod
+    def create_node_tag(cls,
+                        cluster_name: str,
+                        project_id: str,
+                        availability_zone: str,
+                        target_instance_id: str,
+                        is_head: bool = True,
+                        wait_for_operation: bool = True) -> str:
+        if is_head:
+            node_tag = {
+                TAG_SKYPILOT_HEAD_NODE: '1',
+                TAG_RAY_NODE_KIND: 'head',
+                'Name': f'sky-{cluster_name}-head',
+            }
+        else:
+            node_tag = {
+                TAG_SKYPILOT_HEAD_NODE: '1',
+                TAG_RAY_NODE_KIND: 'worker',
+                'Name': f'sky-{cluster_name}-worker',
+            }
+        cls.set_labels(project_id=project_id,
+                       availability_zone=availability_zone,
+                       node_id=target_instance_id,
+                       labels=node_tag,
+                       wait_for_operation=wait_for_operation)
+
+        return target_instance_id
 
     @classmethod
     def _convert_resources_to_urls(

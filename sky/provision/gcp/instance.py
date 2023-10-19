@@ -31,6 +31,7 @@ MAX_POLLS = 12
 MAX_POLLS_STOP = MAX_POLLS * 8
 POLL_INTERVAL = 5
 
+TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Tag uniquely identifying all nodes of a cluster
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
@@ -89,15 +90,27 @@ def _wait_for_operations(
                 total_polls += 1
 
 
+def _get_head_instance_id(instances: List) -> Optional[str]:
+    head_instance_id = None
+    for inst in instances:
+        labels = inst.get('labels', {})
+        if (labels.get(TAG_RAY_NODE_KIND) == 'head' or
+                labels.get(TAG_SKYPILOT_HEAD_NODE) == '1'):
+            head_instance_id = inst['id']
+            break
+    return head_instance_id
+
+
 def run_instances(region: str, cluster_name: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     result_dict = {}
     labels = config.tags  # gcp uses "labels" instead of aws "tags"
     labels = dict(sorted(copy.deepcopy(labels).items()))
+    resumed_instance_ids: List[str] = []
+    created_instance_ids: List[str] = []
 
     node_type = instance_utils.get_node_type(config.node_config)
-    count = config.count
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
@@ -123,12 +136,26 @@ def run_instances(region: str, cluster_name: str,
         status_filters=None,
     )
     exist_instances = list(exist_instances.values())
+    head_instance_id = _get_head_instance_id(exist_instances)
 
     # NOTE: We are not handling REPAIRING, SUSPENDING, SUSPENDED status.
     pending_instances = []
     running_instances = []
     stopping_instances = []
     stopped_instances = []
+
+    # SkyPilot: We try to use the instances with the same matching launch_config first. If
+    # there is not enough instances with matching launch_config, we then use all the
+    # instances with the same matching launch_config plus some instances with wrong
+    # launch_config.
+    def get_order_key(node):
+        import datetime
+
+        timestamp = node.get("lastStartTimestamp")
+        if timestamp is not None:
+            return datetime.datetime.strptime(timestamp,
+                                              "%Y-%m-%dT%H:%M:%S.%f%z")
+        return node['id']
 
     for inst in exist_instances:
         state = inst['status']
@@ -142,6 +169,19 @@ def run_instances(region: str, cluster_name: str,
             stopped_instances.append(inst)
         else:
             raise RuntimeError(f'Unsupported state "{state}".')
+
+    pending_instances.sort(key=lambda n: get_order_key(n), reverse=True)
+    running_instances.sort(key=lambda n: get_order_key(n), reverse=True)
+    stopping_instances.sort(key=lambda n: get_order_key(n), reverse=True)
+    stopped_instances.sort(key=lambda n: get_order_key(n), reverse=True)
+
+    if head_instance_id is None:
+        if running_instances:
+            head_instance_id = resource.create_node_tag(
+                running_instances[0]['id'])
+        elif pending_instances:
+            head_instance_id = resource.create_node_tag(
+                pending_instances[0]['id'])
 
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
@@ -164,72 +204,61 @@ def run_instances(region: str, cluster_name: str,
         # TODO: we should wait until stopped instances are actually stopped.
         #  However, in GCP it is hard to know whether one instance is stopping for termination.
         #  So we need to wait and check.
-
-        # SkyPilot: We try to use the instances with the same matching launch_config first. If
-        # there is not enough instances with matching launch_config, we then use all the
-        # instances with the same matching launch_config plus some instances with wrong
-        # launch_config.
-        def get_order_key(node):
-            import datetime
-
-            timestamp = node.get("lastStartTimestamp")
-            if timestamp is not None:
-                return datetime.datetime.strptime(timestamp,
-                                                  "%Y-%m-%dT%H:%M:%S.%f%z")
-            return node.id
-
-        stopped_nodes = resource.filter(
-            project_id=project_id,
-            zone=availability_zone,
-            label_filters=filter_labels,
-            status_filters=['STOPPING', STOPPED_STATUS],
-        )
-        stopped_nodes = list(stopped_nodes.values())
+        stopped_nodes = stopping_instances + stopped_instances
         stopped_nodes.sort(key=lambda n: get_order_key(n), reverse=True)
-
-        # The total number of reusable nodes can be less than the number of nodes to be created.
-        # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
-        # less nodes.
-        # FIXME: This is not correct. Use the method in AWS.
-        reuse_nodes = stopped_nodes[:count]
-
-        reuse_node_ids = [n.id for n in reuse_nodes]
-        if reuse_nodes:
+        resumed_instance_ids = [n['id'] for n in stopped_nodes]
+        if resumed_instance_ids:
             # TODO(suquark): Some instances could still be stopping.
             # We may wait until these instances stop.
-            logger.info(
-                # TODO: handle plural vs singular?
-                f"Reusing nodes {reuse_node_ids}. "
-                "To disable reuse, set `cache_stopped_nodes: False` "
-                "under `provider` in the cluster configuration.")
-            for node_id in reuse_node_ids:
+            for node_id in resumed_instance_ids:
                 result = resource.start_instance(node_id, project_id,
                                                  availability_zone)
                 result_dict[node_id] = {node_id: result}
-            for node in reuse_nodes:
-                resource.set_labels(project_id, availability_zone, node, labels)
-            count -= len(reuse_node_ids)
+                resource.set_labels(project_id, availability_zone, node_id,
+                                    labels)
+        to_start_count -= len(resumed_instance_ids)
+
+        if head_instance_id is None:
+            head_instance_id = resource.create_node_tag(resumed_instance_ids[0])
 
     if to_start_count > 0:
         results = resource.create_instances(cluster_name, project_id,
                                             availability_zone,
                                             config.node_config, labels,
                                             to_start_count)
+        # FIXME: it seems that success is always False.
         for success, instance_id in results:
             resource.set_labels(project_id, availability_zone, instance_id,
                                 labels)
+            created_instance_ids.append(instance_id)
         result_dict.update(
             {instance_id: result for result, instance_id in results})
-    return result_dict
+
+        # NOTE: we only create worker tags for newly started nodes, because
+        # the worker tag is a legacy feature, so we would not care about
+        # more corner cases.
+        if head_instance_id is None:
+            head_instance_id = resource.create_node_tag(created_instance_ids[0])
+            for inst in created_instance_ids[1:]:
+                resource.create_node_tag(inst, is_head=False)
+        else:
+            for inst in created_instance_ids:
+                resource.create_node_tag(inst, is_head=False)
+    return common.ProvisionRecord(provider_name='gcp',
+                                  region=region,
+                                  zone=availability_zone,
+                                  cluster_name=cluster_name,
+                                  head_instance_id=head_instance_id,
+                                  resumed_instance_ids=resumed_instance_ids,
+                                  created_instance_ids=created_instance_ids)
 
 
 def wait_instances(region: str, cluster_name: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
-    # TODO: maybe we just wait for the instances to be running, immediately
-    # after the instances are created, so we do not need to wait for the
-    # instances to be ready here.
-    raise NotImplementedError
+    # We already wait for the instances to be running in run_instances.
+    # So we don't need to wait here.
+    return
 
 
 def stop_instances(
