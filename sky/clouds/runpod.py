@@ -244,8 +244,9 @@ class RunPod(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type, 'runpod')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(
-                    region, zone, clouds='runpod')
+        return service_catalog.validate_region_zone(region,
+                                                    zone,
+                                                    clouds='runpod')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,

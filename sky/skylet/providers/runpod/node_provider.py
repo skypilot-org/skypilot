@@ -36,6 +36,7 @@ class RunPodError(Exception):
 
 
 def synchronized(func):
+    """Decorator for synchronizing access to a method across threads."""
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -49,7 +50,8 @@ def synchronized(func):
 class RunPodNodeProvider(NodeProvider):
     """ Node Provider for RunPod. """
 
-    def __init__(self, provider_config: Dict[str, Any], cluster_name: str) -> None:
+    def __init__(self, provider_config: Dict[str, Any],
+                 cluster_name: str) -> None:
         """ Initialize the RunPodNodeProvider.
         cached_nodes | The list of nodes that have been cached for quick access.
         ssh_key_name | The name of the SSH key to use for the pods.
@@ -95,8 +97,8 @@ class RunPodNodeProvider(NodeProvider):
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_node(node_id=node_id)['ip']
 
-    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str], count: int
-            ) -> Optional[Dict[str, Any]]:
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
+                    count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace."""
         # Get the tags
         config_tags = node_config.get('tags', {}).copy()
@@ -110,8 +112,7 @@ class RunPodNodeProvider(NodeProvider):
         for _ in range(count):
             instance_id = runpod_api.launch(name=self.cluster_name,
                                             instance_type=ttype,
-                                            region=region
-                                            )
+                                            region=region)
 
         if instance_id is None:
             raise RunPodError('Failed to launch instance.')
@@ -141,7 +142,8 @@ class RunPodNodeProvider(NodeProvider):
         return None
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters: Dict[str, str]) -> Dict[str, Any]:
+    def _get_filtered_nodes(self,
+                            tag_filters: Dict[str, str]) -> Dict[str, Any]:
         """SkyPilot Method
         Caches the nodes with the given tag_filters.
         """
@@ -149,7 +151,8 @@ class RunPodNodeProvider(NodeProvider):
 
         filtered_nodes = {}
         for instance_id, instance in instances.items():
-            if instance['status'] not in ['CREATED', 'RUNNING', 'RESTARTING', 'PAUSED']:
+            if instance['status'] not in [
+                'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED']:
                 continue
             if any(tag in instance['tags'] for tag in tag_filters):
                 filtered_nodes[instance_id] = instance

@@ -87,7 +87,8 @@ def list_instances():
                     instance_list[
                         instance["id"]]["ssh_port"] = port["publicPort"]
 
-        instance_list[instance["id"]]["tags"] = get_set_tags(instance["id"], None)
+        instance_list[instance["id"]]["tags"] = get_set_tags(
+            instance["id"], None)
 
     return instance_list
 
@@ -110,7 +111,7 @@ def launch(name: str, instance_type: str, region: str):
         cloud_type=cloud_type,
         container_disk_in_gb=50,
         min_vcpu_count=4*gpu_quantity,
-        min_memory_in_gb=gpu_specs["memoryInGb"]*gpu_quantity,
+        min_memory_in_gb=gpu_specs["memoryInGb"] * gpu_quantity,
         country_code=region,
         ports="22/tcp",
         support_public_ip=True,
