@@ -742,7 +742,8 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     instances = list(ec2.instances.filter(Filters=filters))
     logger.debug(instances)
     if not instances:
-        raise RuntimeError(f'No instances found for cluster {cluster_name_on_cloud}.')
+        raise RuntimeError(
+            f'No instances found for cluster {cluster_name_on_cloud}.')
 
     if state == status_lib.ClusterStatus.UP:
         waiter = client.get_waiter('instance_running')
@@ -756,7 +757,8 @@ def wait_instances(region: str, cluster_name_on_cloud: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_info(region: str, cluster_name_on_cloud: str) -> common.ClusterInfo:
+def get_cluster_info(region: str,
+                     cluster_name_on_cloud: str) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
     filters = [
