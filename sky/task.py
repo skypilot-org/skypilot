@@ -436,7 +436,7 @@ class Task:
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
             if isinstance(accelerators, str):
-                accelerators = [accelerators]
+                accelerators = {accelerators}
             elif isinstance(accelerators, dict):
                 accelerators = [
                     f'{k}:{v}' if v is not None else f'{k}'

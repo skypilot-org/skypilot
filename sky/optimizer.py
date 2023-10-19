@@ -854,24 +854,17 @@ class Optimizer:
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
             chosen_resources = best_plan[task]
+            chosen_cost = 0.0
+            for resources, cost in v.items():
+                if resources.to_yaml_config(
+                ) == chosen_resources.to_yaml_config():
+                    chosen_cost = cost
+                    break
             resource_table_key = str(
                 chosen_resources.cloud) + chosen_resources.get_accelerators_str(
                 ) + chosen_resources.get_spot_str()
-            for resources, cost in v.items():
-                for (field1, value1), (field2, value2) in zip(vars(resources).items(), vars(chosen_resources).items()):
-                    print(f"{field1}: {value1}", field1 == field2, value1 == value2, flush=True)
-                    if value1 != value2:
-                        for field, value in vars(value1).items():
-                            print(f"{field}: {value}", flush=True)
-                        for field, value in vars(value2).items():
-                            print(f"{field}: {value}", flush=True)
-                print(resources == chosen_resources)
-                break
-            
-            for field, value in vars(chosen_resources).items():
-                print(f"{field}: {value}", flush=True)
             best_per_resource_group[resource_table_key] = (chosen_resources,
-                                                           v[chosen_resources])
+                                                           chosen_cost)
             rows = []
             for resources, cost in best_per_resource_group.values():
                 if minimize_cost:
@@ -892,9 +885,9 @@ class Optimizer:
                     key=lambda row: (
                         accelerator_spot_list.index(row.accelerators + (  # pylint: disable=cell-var-from-loop
                             '[Spot]' if '[Spot]' in row.instance else '')),  # pylint: disable=cell-var-from-loop
-                        row.region_or_zone))  # pylint: disable=cell-var-from-loop
+                        float(row.cost_str)))  # pylint: disable=cell-var-from-loop
             else:
-                rows = sorted(rows, key=lambda x: float(row.region_or_zone))
+                rows = sorted(rows, key=lambda x: float(row.cost_str))
             # Highlight the chosen resources.
 
             row_list = []
