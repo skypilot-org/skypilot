@@ -110,7 +110,7 @@ def launch(name: str, instance_type: str, region: str):
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         container_disk_in_gb=50,
-        min_vcpu_count=4*gpu_quantity,
+        min_vcpu_count=4 * gpu_quantity,
         min_memory_in_gb=gpu_specs["memoryInGb"] * gpu_quantity,
         country_code=region,
         ports="22/tcp",

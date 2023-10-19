@@ -578,7 +578,7 @@ class SSHConfigHelper(object):
 
         overwrites = [False] * len(external_worker_ips)
         overwrite_begin_idxs: List[Optional[int]] = [None
-                                                     ] * len(external_worker_ips)
+                                                    ] * len(external_worker_ips)
         codegens: List[Optional[str]] = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
@@ -621,10 +621,12 @@ class SSHConfigHelper(object):
 
         proxy_command = auth_config.get('ssh_proxy_command', None)
         if docker_user is not None:
+
             def docker_proxy_command_generator(ip):
                 ssh_options = command_runner.ssh_options_list(key_path, None)
                 user_host = f'{auth_config["ssh_user"]}@{ip}'
                 return ' '.join(['ssh'] + ssh_options + ['-W', '%h:%p', user_host])  # pylint: disable=line-too-long
+
         docker_proxy_command = None
 
         # Check if ~/.ssh/config contains existing names

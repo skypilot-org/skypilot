@@ -280,7 +280,7 @@ class OCINodeProvider(NodeProvider):
                 preemption_action=oci_adaptor.get_oci().core.models.
                 TerminatePreemptionAction(type="TERMINATE",
                                           preserve_boot_volume=False))
-                if node_config["Preemptible"] else None)
+                                    if node_config["Preemptible"] else None)
 
             logger.debug(f"Shape: {instance_type_str}, ocpu: {ocpu_count}")
             logger.debug(f"Shape config is {machine_shape_config}")
@@ -311,7 +311,8 @@ class OCINodeProvider(NodeProvider):
                     availability_domain=node_config["AvailabilityDomain"],
                     compartment_id=compartment,
                     shape=instance_type_str,
-                    display_name=f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
+                    display_name=
+                    f"{self.cluster_name}_{node_type}_{batch_id}_{seq}",
                     freeform_tags=vm_tags,
                     metadata={
                         "ssh_authorized_keys": node_config["AuthorizedKey"]
@@ -374,7 +375,7 @@ class OCINodeProvider(NodeProvider):
                 availability_domain=inst_info["ad"],
                 compartment_id=inst_info["compartment"],
                 instance_id=inst_info["inst_id"],
-        )
+            )
 
         vnic = list_vnic_attachments_response.data[0]
         get_vnic_response = (oci_adaptor.get_net_client(

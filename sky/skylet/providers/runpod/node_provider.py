@@ -37,6 +37,7 @@ class RunPodError(Exception):
 
 def synchronized(func):
     """Decorator for synchronizing access to a method across threads."""
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -120,7 +121,8 @@ class RunPodNodeProvider(NodeProvider):
         runpod_api.set_tags(instance_id, config_tags)
 
         instance_status = runpod_api.list_instances().get(instance_id, {})
-        while not (instance_status.get('status') == "RUNNING" and instance_status.get('ssh_port')):
+        while not (instance_status.get('status') == "RUNNING" and
+                   instance_status.get('ssh_port')):
             time.sleep(3)
             instance_status = runpod_api.list_instances().get(instance_id, {})
 
