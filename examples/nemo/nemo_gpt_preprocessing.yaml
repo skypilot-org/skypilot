@@ -1,0 +1,131 @@
+# Prepares the wiki dataset for training with NeMo. Downloads the data, runs
+# preprocessing and saves the data in mmap format on a cloud bucket. This same
+# bucket can then be used for training.
+#
+# This YAML is for demonstration purposes and is not a necessary step before
+# running nemo_gpt_train.yaml. Since this preprocessing can take
+# upto 6 hours, we provide a read-only bucket with the preprocessed data (gs://sky-wiki-data)
+# that can be downloaded to your bucket (see nemo_gpt_train.yaml).
+#
+# Usage:
+#   sky launch -s -c nemo_gpt_preprocessing nemo_gpt_preprocessing.yaml
+#
+#   # Terminate cluster after you're done
+#   sky down nemo_gpt_preprocessing
+
+num_nodes: 1
+
+envs:
+  LOCAL_DATASET_ROOT: /wiki
+  DATASET_BUCKET_ROOT: /bucket
+  BUCKET_NAME: # Enter a unique bucket name here - if it doesn't exist SkyPilot will create it
+
+file_mounts:
+  ${DATASET_BUCKET_ROOT}:
+    name: ${BUCKET_NAME}
+    store: gcs  # We recommend using GCS for large datasets in mount mode - S3 based mounts may fail with "transport endpoint is not connected" error.
+    mode: MOUNT
+
+setup: |
+  conda activate nemo
+  if [ $? -eq 0 ]; then
+      echo "Nemo conda env exists"
+  else
+      echo "Setup start"
+  
+      conda create -y --name nemo python==3.10.12
+      conda activate nemo
+  
+      # Install PyTorch
+      pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+      
+      # Install nemo
+      git clone https://github.com/NVIDIA/NeMo.git
+      cd NeMo
+      git checkout b4ad7eaa7873d632391d6985aa6b359f39c20bab
+      pip install Cython
+      pip install .[all]
+      cd ..
+  
+      # Install megatron-core
+      # We install in editable mode because setup.py does not install all 
+      # required modules if we install in non-editable mode.
+      git clone https://github.com/NVIDIA/Megatron-LM
+      cd Megatron-LM
+      git checkout dc21350806361564b8ce61d4a8d247cb195cc5f0
+      pip install -e .  
+      cd ..
+      
+      # Install ninja for faster compilation
+      pip install ninja packaging
+  
+      # Install transformer engine and flash-attn (Takes ~1hr to compile)
+      MAX_JOBS=4 pip install flash-attn==2.0.4 --no-build-isolation # Version upper capped by TransformerEngine
+      MAX_JOBS=4 pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
+      
+      pip install pytorch-extension
+  
+      # Install Apex
+      git clone https://github.com/NVIDIA/apex.git
+      cd apex
+      git checkout 52e18c894223800cb611682dce27d88050edf1de
+      pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
+      cd ..
+  fi
+
+run: |
+  conda activate nemo
+  
+  # ======== Download and preprocess the wikipedia dataset ========
+  if [ -f ${LOCAL_DATASET_ROOT}/train_data.jsonl ]; then
+      echo "Dataset exists"
+  else
+      # Install axel for faster downloads
+      sudo apt-get install -y axel
+  
+      mkdir -p ${LOCAL_DATASET_ROOT}
+      cd ${LOCAL_DATASET_ROOT}
+  
+      # Download the wikipedia dataset (takes ~15 min)
+      axel -n 20 https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
+      
+      # Preprocess the wikipedia dataset (takes ~2 hours)
+      pip install wikiextractor
+      python -m wikiextractor.WikiExtractor enwiki-latest-pages-articles.xml.bz2 --json
+      find text -name 'wiki_*' -exec cat {} \; > train_data.jsonl
+  fi
+  
+  # ======== Download tokenizer files ========
+  # Check if the tokenizer files exist
+  if [ -f ${LOCAL_DATASET_ROOT}/gpt2-vocab.json ]; then
+      echo "Tokenizer files exist"
+  else
+      # Download the tokenizer files
+      cd {LOCAL_DATASET_ROOT}
+      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json
+      axel -n 20 https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt
+  fi
+  
+  # ======== Convert data to mmap format and write to bucket ========
+  # Check if the mmap files exist
+  if [ -f ${LOCAL_DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
+      echo "Mmap files exist"
+  else
+      # Convert the data to mmap format`
+      cd ${LOCAL_DATASET_ROOT}
+      python $HOME/sky_workdir/NeMo/scripts/nlp_language_modeling/preprocess_data_for_megatron.py \
+        --input=train_data.jsonl \
+        --json-keys=text \
+        --tokenizer-library=megatron \
+        --vocab gpt2-vocab.json \
+        --dataset-impl mmap \
+        --tokenizer-type GPT2BPETokenizer \
+        --merge-file gpt2-merges.txt \
+        --output-prefix=hfbpe_gpt_training_data \
+        --append-eod \
+        --workers=32
+  fi
+  
+  echo "Done preprocessing dataset, copying to mounted bucket now."
+  cp {gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_BUCKET_ROOT}
+  echo "Done copying - data is now available on ${BUCKET_NAME} bucket."

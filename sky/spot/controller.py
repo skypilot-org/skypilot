@@ -24,6 +24,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -370,7 +371,8 @@ class SpotController:
                     task_id=task_id,
                     task=self._dag.tasks[task_id]))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.error(traceback.format_exc())
+            with ux_utils.enable_traceback():
+                logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '
                    f'{common_utils.format_exception(e, use_bracket=True)}')
             logger.error(msg)

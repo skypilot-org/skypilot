@@ -42,9 +42,9 @@ For Docker images hosted on private registries, you can provide the registry aut
     # SKYPILOT_DOCKER_PASSWORD: <password>
     SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-east-1.amazonaws.com
 
-We suggest to setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
+We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable through the CLI (see :ref:`passing secrets <passing-secrets>`):
 
-.. code-block:: bash
+.. code-block:: console
 
   $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
   $ sky launch ecr_private_docker.yaml --env SKYPILOT_DOCKER_PASSWORD
@@ -89,10 +89,10 @@ The :code:`echo_app` `example <https://github.com/skypilot-org/skypilot/tree/mas
 
   run: |
     docker run --rm \
-    --volume="/inputs:/inputs:ro" \
-    --volume="/outputs:/outputs:rw" \
-    echo:v0 \
-    /inputs/README.md /outputs/output.txt
+      --volume="/inputs:/inputs:ro" \
+      --volume="/outputs:/outputs:rw" \
+      echo:v0 \
+      /inputs/README.md /outputs/output.txt
 
 In this example, the Dockerfile and build context are contained in :code:`./echo_app`.
 The :code:`setup` phase of the task builds the image, and the :code:`run` phase runs the container.

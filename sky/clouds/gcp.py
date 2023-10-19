@@ -694,7 +694,10 @@ class GCP(clouds.Cloud):
         )
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
             list_reservations_cmd,
-            retry_returncode=[255],
+            # 1: means connection aborted (although it shows 22 in the error,
+            # but the actual error code is 1)
+            # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument')) # pylint: disable=line-too-long
+            retry_returncode=[255, 1],
         )
         subprocess_utils.handle_returncode(
             returncode,
