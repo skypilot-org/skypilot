@@ -25,14 +25,15 @@ class RunPod(clouds.Cloud):
     """
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'RunPod does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the RunPod implementation yet.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.', # pylint: disable=line-too-long
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
     @classmethod
-    def _cloud_unsupported_features(cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _cloud_unsupported_features(
+        cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
@@ -61,7 +62,8 @@ class RunPod(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type, clouds='runpod')
+        return service_catalog.get_vcpus_mem_from_instance_type(
+            instance_type, clouds='runpod')
 
     @classmethod
     def zones_provision_loop(
@@ -271,9 +273,10 @@ class RunPod(clouds.Cloud):
         }
         status_list = []
         vms = runpod_api.list_instances()
-        for id in vms:
-            if vms[id]['name'] == name:
-                node_status = status_map[vms[id]['status']]
+        for instance_id, instance_property in vms.items():
+            del instance_id
+            if instance_property['name'] == name:
+                node_status = status_map[instance_property['status']]
                 if node_status is not None:
                     status_list.append(node_status)
         return status_list

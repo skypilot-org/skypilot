@@ -1,5 +1,4 @@
-"""
-RunPod | Catalog
+""" RunPod | Catalog
 
 This module loads the service catalog file and can be used to
 quarry instance types and pricing information for RunPod.
@@ -62,6 +61,7 @@ def get_vcpus_mem_from_instance_type(
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None) -> Optional[str]:
+    del disk_tier  # RunPod does not support disk tiers.
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
@@ -80,10 +80,7 @@ def get_instance_type_for_accelerator(
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """
-    Returns a list of instance types satisfying the required count of
-    accelerators with sorted prices and a list of candidates with fuzzy search.
-    """
+    """Returns a list of instance types that have the given accelerator."""
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('RunPod does not support zones.')
@@ -112,4 +109,5 @@ def list_accelerators(
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in RunPod offering GPUs."""
     return common.list_accelerators_impl(
-        'RunPodCloud', _df, gpus_only, name_filter, region_filter, quantity_filter, case_sensitive)
+        'RunPodCloud', _df, gpus_only, name_filter,
+        region_filter, quantity_filter, case_sensitive)
