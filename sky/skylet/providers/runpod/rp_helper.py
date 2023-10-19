@@ -4,6 +4,7 @@ import os
 import json
 from typing import Dict
 from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky.adaptors import runpod
 
@@ -40,7 +41,7 @@ GPU_NAME_MAP = {
 }
 
 
-def get_set_tags(instance_id: str, set_tags: Dict = None) -> Dict:
+def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
     """Gets the tags for the given instance.
     - Creates the tag file if it doesn't exist.
     - Returns the tags for the given instance.
@@ -58,10 +59,10 @@ def get_set_tags(instance_id: str, set_tags: Dict = None) -> Dict:
     with open(tag_file_path, "r", encoding="UTF-8") as tag_file:
         tags = json.load(tag_file)
 
-    # If set_tags is provided, update the tags for the instance
-    if set_tags:
+    # If new_tags is provided, update the tags for the instance
+    if new_tags:
         instance_tags = tags.get(instance_id, {})
-        instance_tags.update(set_tags)
+        instance_tags.update(new_tags)
         tags[instance_id] = instance_tags
         with open(tag_file_path, "w", encoding="UTF-8") as tag_file:
             json.dump(tags, tag_file)
