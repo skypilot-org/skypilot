@@ -136,23 +136,14 @@ class RunPod(clouds.Cloud):
                     instance_type, clouds='runpod')
 
     @classmethod
-    def get_vcpus_from_instance_type(
-        cls, instance_type: str) -> Optional[float]:
-        """Returns the number of vCPUs for the given instance type."""
-        return service_catalog.get_vcpus_from_instance_type(
-            instance_type, clouds='runpod')
-
-    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         del zones
-        if region is None:
-            region = self._get_default_region()
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -247,7 +238,7 @@ class RunPod(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[List[str]]:
+    def get_current_user_identity(self, cls) -> Optional[List[str]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
