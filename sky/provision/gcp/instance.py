@@ -95,6 +95,7 @@ def run_instances(region: str, cluster_name: str,
     result_dict = {}
     labels = config.tags  # gcp uses "labels" instead of aws "tags"
     labels = dict(sorted(copy.deepcopy(labels).items()))
+
     node_type = instance_utils.get_node_type(config.node_config)
     count = config.count
     project_id = config.provider_config['project_id']
@@ -105,27 +106,64 @@ def run_instances(region: str, cluster_name: str,
     # to be included to avoid creating a new VM.
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
-        STOPPED_STATUS = ["TERMINATED", "STOPPING"]
+        STOPPED_STATUS = 'TERMINATED'
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
-        STOPPED_STATUS = ["STOPPED", "STOPPING"]
+        STOPPED_STATUS = 'STOPPED'
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
+    PENDING_STATUS = ['PROVISIONING', 'STAGING']
+    filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name}
+
+    exist_instances = resource.filter(
+        project_id=project_id,
+        zone=availability_zone,
+        label_filters=filter_labels,
+        status_filters=None,
+    )
+    exist_instances = list(exist_instances.values())
+
+    # NOTE: We are not handling REPAIRING, SUSPENDING, SUSPENDED status.
+    pending_instances = []
+    running_instances = []
+    stopping_instances = []
+    stopped_instances = []
+
+    for inst in exist_instances:
+        state = inst['status']
+        if state in PENDING_STATUS:
+            pending_instances.append(inst)
+        elif state == 'RUNNING':
+            running_instances.append(inst)
+        elif state == 'STOPPING':
+            stopping_instances.append(inst)
+        elif state == STOPPED_STATUS:
+            stopped_instances.append(inst)
+        else:
+            raise RuntimeError(f'Unsupported state "{state}".')
+
+    # TODO(suquark): Maybe in the future, users could adjust the number
+    #  of instances dynamically. Then this case would not be an error.
+    if config.resume_stopped_nodes and len(exist_instances) > config.count:
+        raise RuntimeError('The number of running/stopped/stopping '
+                           f'instances combined ({len(exist_instances)}) in '
+                           f'cluster "{cluster_name}" is greater than the '
+                           f'number requested by the user ({config.count}). '
+                           'This is likely a resource leak. '
+                           'Use "sky down" to terminate the cluster.')
+
+    # TODO: if there are running instances, use their zones instead
+
+    to_start_count = (config.count - len(running_instances) -
+                      len(pending_instances))
+
     # Try to reuse previously stopped nodes with compatible configs
-    if config.resume_stopped_nodes:
-        filters = {
-            TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
-            # SkyPilot: removed TAG_RAY_LAUNCH_CONFIG to allow reusing nodes
-            # with different launch configs.
-            # Reference: https://github.com/skypilot-org/skypilot/pull/1671
-        }
-        # This tag may not always be present.
-        if TAG_RAY_USER_NODE_TYPE in labels:
-            filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
-        filters_with_launch_config = copy.copy(filters)
-        filters_with_launch_config[TAG_RAY_LAUNCH_CONFIG] = labels[
-            TAG_RAY_LAUNCH_CONFIG]
+    if config.resume_stopped_nodes and to_start_count > 0 and (
+            stopping_instances or stopped_instances):
+        # TODO: we should wait until stopped instances are actually stopped.
+        #  However, in GCP it is hard to know whether one instance is stopping for termination.
+        #  So we need to wait and check.
 
         # SkyPilot: We try to use the instances with the same matching launch_config first. If
         # there is not enough instances with matching launch_config, we then use all the
@@ -140,49 +178,20 @@ def run_instances(region: str, cluster_name: str,
                                                   "%Y-%m-%dT%H:%M:%S.%f%z")
             return node.id
 
-        nodes_matching_launch_config = resource.filter(
+        stopped_nodes = resource.filter(
             project_id=project_id,
             zone=availability_zone,
-            label_filters=filters_with_launch_config,
-            status_filters=STOPPED_STATUS,
+            label_filters=filter_labels,
+            status_filters=['STOPPING', STOPPED_STATUS],
         )
-        nodes_matching_launch_config = list(
-            nodes_matching_launch_config.values())
+        stopped_nodes = list(stopped_nodes.values())
+        stopped_nodes.sort(key=lambda n: get_order_key(n), reverse=True)
 
-        nodes_matching_launch_config.sort(key=lambda n: get_order_key(n),
-                                          reverse=True)
-        if len(nodes_matching_launch_config) >= count:
-            reuse_nodes = nodes_matching_launch_config[:count]
-        else:
-            nodes_all = resource.filter(
-                project_id=project_id,
-                zone=availability_zone,
-                label_filters=filters,
-                status_filters=STOPPED_STATUS,
-            )
-            nodes_all = list(nodes_all.values())
-
-            nodes_matching_launch_config_ids = set(
-                n.id for n in nodes_matching_launch_config)
-            nodes_non_matching_launch_config = [
-                n for n in nodes_all
-                if n.id not in nodes_matching_launch_config_ids
-            ]
-            # This is for backward compatibility, where the uesr already has leaked
-            # stopped nodes with the different launch config before update to #1671,
-            # and the total number of the leaked nodes is greater than the number of
-            # nodes to be created. With this, we will make sure we will reuse the
-            # most recently used nodes.
-            # This can be removed in the future when we are sure all the users
-            # have updated to #1671.
-            nodes_non_matching_launch_config.sort(
-                key=lambda n: get_order_key(n), reverse=True)
-            reuse_nodes = (nodes_matching_launch_config +
-                           nodes_non_matching_launch_config)
-            # The total number of reusable nodes can be less than the number of nodes to be created.
-            # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
-            # less nodes.
-            reuse_nodes = reuse_nodes[:count]
+        # The total number of reusable nodes can be less than the number of nodes to be created.
+        # This `[:count]` is fine, as it will get all the reusable nodes, even if there are
+        # less nodes.
+        # FIXME: This is not correct. Use the method in AWS.
+        reuse_nodes = stopped_nodes[:count]
 
         reuse_node_ids = [n.id for n in reuse_nodes]
         if reuse_nodes:
@@ -200,9 +209,15 @@ def run_instances(region: str, cluster_name: str,
             for node in reuse_nodes:
                 resource.set_labels(project_id, availability_zone, node, labels)
             count -= len(reuse_node_ids)
-    if count:
-        results = resource.create_instances(project_id, availability_zone,
-                                            config.node_config, labels, count)
+
+    if to_start_count > 0:
+        results = resource.create_instances(cluster_name, project_id,
+                                            availability_zone,
+                                            config.node_config, labels,
+                                            to_start_count)
+        for success, instance_id in results:
+            resource.set_labels(project_id, availability_zone, instance_id,
+                                labels)
         result_dict.update(
             {instance_id: result for result, instance_id in results})
     return result_dict

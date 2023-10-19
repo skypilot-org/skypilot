@@ -1,15 +1,25 @@
 """Utilities for GCP instances."""
+import copy
 import enum
 import functools
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision.gcp.constants import MAX_POLLS
 from sky.provision.gcp.constants import POLL_INTERVAL
 from sky.utils import ux_utils
+
+# Tag uniquely identifying all nodes of a cluster
+TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
+TAG_RAY_CLUSTER_NAME = "ray-cluster-name"
+# Tag for the name of the node
+TAG_RAY_NODE_NAME = "ray-node-name"
+INSTANCE_NAME_MAX_LEN = 64
+INSTANCE_NAME_UUID_LEN = 8
 
 logger = sky_logging.init_logger(__name__)
 
@@ -58,6 +68,20 @@ def _retry_on_http_exception(
         return wrapper
 
     return dec
+
+
+def _generate_node_name(cluster_name: str, node_suffix: str) -> str:
+    """Generate node name from labels and suffix.
+
+    This is required so that the correct resource can be selected
+    when the only information autoscaler has is the name of the node.
+
+    The suffix is expected to be one of 'compute' or 'tpu'
+    (as in ``GCPNodeType``).
+    """
+    suffix = f'-{uuid.uuid4().hex[:INSTANCE_NAME_UUID_LEN]}-{node_suffix}'
+    prefix = cluster_name[:INSTANCE_NAME_MAX_LEN - len(suffix)]
+    return prefix + suffix
 
 
 def instance_to_handler(instance: str):
@@ -159,7 +183,10 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def create_instance(self,
+    def create_instance(cls,
+                        cluster_name: str,
+                        project_id: str,
+                        availability_zone: str,
                         node_config: dict,
                         labels: dict,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
@@ -172,6 +199,7 @@ class GCPInstance:
     @classmethod
     def create_instances(
         cls,
+        cluster_name: str,
         project_id: str,
         zone: str,
         node_config: dict,
@@ -184,8 +212,12 @@ class GCPInstance:
         Returns a list of tuples of (result, node_name).
         """
         operations = [
-            cls.create_instance(node_config, labels, wait_for_operation=False)
-            for i in range(count)
+            cls.create_instance(cluster_name,
+                                project_id,
+                                zone,
+                                node_config,
+                                labels,
+                                wait_for_operation=False) for i in range(count)
         ]
 
         if wait_for_operation:
@@ -210,7 +242,7 @@ class GCPInstance:
     def set_labels(cls,
                    project_id: str,
                    availability_zone: str,
-                   node: dict,
+                   node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
         return NotImplementedError
@@ -468,14 +500,19 @@ class GCPComputeInstance(GCPInstance):
     def set_labels(cls,
                    project_id: str,
                    availability_zone: str,
-                   node: dict,
+                   node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
+        response = (cls.load_resource().instances().list(
+            project=project_id,
+            filter=f'name = {node_id}',
+            zone=availability_zone,
+        ).execute())
+        node = response.get('items', [])[0]
         body = {
             "labels": dict(node["labels"], **labels),
             "labelFingerprint": node["labelFingerprint"],
         }
-        node_id = node["name"]
         operation = (cls.load_resource().instances().setLabels(
             project=project_id,
             zone=availability_zone,
@@ -492,11 +529,96 @@ class GCPComputeInstance(GCPInstance):
         return result
 
     @classmethod
-    def create_instance(self,
+    def _convert_resources_to_urls(
+            cls, project_id: str, availability_zone: str,
+            configuration_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensures that resources are in their full URL form.
+
+        GCP expects machineType and accleratorType to be a full URL (e.g.
+        `zones/us-west1/machineTypes/n1-standard-2`) instead of just the
+        type (`n1-standard-2`)
+
+        Args:
+            configuration_dict: Dict of options that will be passed to GCP
+        Returns:
+            Input dictionary, but with possibly expanding `machineType` and
+                `acceleratorType`.
+        """
+        configuration_dict = copy.deepcopy(configuration_dict)
+        existing_machine_type = configuration_dict["machineType"]
+        if not re.search(".*/machineTypes/.*", existing_machine_type):
+            configuration_dict[
+                "machineType"] = "zones/{zone}/machineTypes/{machine_type}".format(
+                    zone=availability_zone,
+                    machine_type=configuration_dict["machineType"],
+                )
+
+        for accelerator in configuration_dict.get("guestAccelerators", []):
+            gpu_type = accelerator["acceleratorType"]
+            if not re.search(".*/acceleratorTypes/.*", gpu_type):
+                accelerator[
+                    "acceleratorType"] = "projects/{project}/zones/{zone}/acceleratorTypes/{accelerator}".format(  # noqa: E501
+                        project=project_id,
+                        zone=availability_zone,
+                        accelerator=gpu_type,
+                    )
+
+        return configuration_dict
+
+    @classmethod
+    def create_instance(cls,
+                        cluster_name: str,
+                        project_id: str,
+                        availability_zone: str,
                         node_config: dict,
                         labels: dict,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
-        raise NotImplementedError
+        config = cls._convert_resources_to_urls(project_id, availability_zone,
+                                                node_config)
+        # removing TPU-specific default key set in config.py
+        config.pop("networkConfig", None)
+        name = _generate_node_name(cluster_name, GCPNodeType.COMPUTE.value)
+
+        labels = dict(config.get("labels", {}), **labels)
+
+        config.update({
+            "labels": dict(
+                labels, **{
+                    TAG_RAY_CLUSTER_NAME: cluster_name,
+                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                }),
+            "name": name,
+        })
+
+        # Allow Google Compute Engine instance templates.
+        #
+        # Config example:
+        #
+        #     ...
+        #     node_config:
+        #         sourceInstanceTemplate: global/instanceTemplates/worker-16
+        #         machineType: e2-standard-16
+        #     ...
+        #
+        # node_config parameters override matching template parameters, if any.
+        #
+        # https://cloud.google.com/compute/docs/instance-templates
+        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+        source_instance_template = config.pop("sourceInstanceTemplate", None)
+        operation = (cls.load_resource().instances().insert(
+            project=project_id,
+            zone=availability_zone,
+            sourceInstanceTemplate=source_instance_template,
+            body=config,
+        ).execute())
+
+        if wait_for_operation:
+            result = cls.wait_for_operation(operation, project_id,
+                                            availability_zone)
+        else:
+            result = operation
+
+        return result, name
 
     @classmethod
     def start_instance(cls,
@@ -683,7 +805,7 @@ class GCPTPUVMInstance(GCPInstance):
     def set_labels(cls,
                    project_id: str,
                    availability_zone: str,
-                   node: dict,
+                   node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
         body = {
