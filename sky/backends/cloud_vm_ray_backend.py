@@ -1231,8 +1231,7 @@ class RetryingVmProvisioner(object):
             s.strip()
             for s in stdout_splits + stderr_splits
             if any(err in s.strip() for err in [
-                'runpod.error.QueryError:', 'RunPodError:'
-                ])
+                'runpod.error.QueryError:', 'RunPodError:'])
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -2277,7 +2276,7 @@ class RetryingVmProvisioner(object):
                 # flag; see _yield_zones(). Also, the cluster should have been
                 # terminated by _retry_zones().
                 assert (prev_cluster_status == status_lib.ClusterStatus.INIT
-                        ), prev_cluster_status
+                       ), prev_cluster_status
                 assert global_user_state.get_handle_from_cluster_name(
                     cluster_name) is None, cluster_name
                 logger.info('Retrying provisioning with requested resources '

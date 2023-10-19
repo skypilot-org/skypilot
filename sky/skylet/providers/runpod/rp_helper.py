@@ -84,9 +84,10 @@ def list_instances():
             for port in instance["runtime"]["ports"]:
                 if port["privatePort"] == 22:
                     instance_list[instance["id"]]["ip"] = port["ip"]
-                    instance_list[instance["id"]]["ssh_port"] = port["publicPort"]
+                    instance_list[
+                        instance["id"]]["ssh_port"] = port["publicPort"]
 
-        instance_list[instance["id"]]["tags"] = get_set_tags(instance["id"])
+        instance_list[instance["id"]]["tags"] = get_set_tags(instance["id"], None)
 
     return instance_list
 
