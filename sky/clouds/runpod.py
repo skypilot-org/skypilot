@@ -105,7 +105,7 @@ class RunPod(clouds.Cloud):
     ) -> float:
         '''Returns the hourly cost of the accelerators, in dollars/hour.'''
         del accelerators, use_spot, region, zone  # unused
-        return 0.0  # RunPod includes accelerators in the hourly cost of the instance type.
+        return 0.0  # RunPod includes accelerators in the hourly cost.
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
@@ -118,19 +118,24 @@ class RunPod(clouds.Cloud):
         return isinstance(other, RunPod)
 
     @classmethod
-    def get_default_instance_type(cls, cpus: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus, clouds='runpod')
+    def get_default_instance_type(
+        cls, cpus: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type for RunPod."""
+        return service_catalog.get_default_instance_type(
+                    cpus=cpus, clouds='runpod')
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls,
-        instance_type: str
-    ) -> Optional[Dict[str, int]]:
-        return service_catalog.get_accelerators_from_instance_type(instance_type, clouds='runpod')
+            cls, instance_type: str) -> Optional[Dict[str, int]]:
+        return service_catalog.get_accelerators_from_instance_type(
+                    instance_type, clouds='runpod')
 
     @classmethod
-    def get_vcpus_from_instance_type(cls, instance_type: str) -> Optional[float]:
-        return service_catalog.get_vcpus_from_instance_type(instance_type, clouds='runpod')
+    def get_vcpus_from_instance_type(
+        cls, instance_type: str) -> Optional[float]:
+        """Returns the number of vCPUs for the given instance type."""
+        return service_catalog.get_vcpus_from_instance_type(
+            instance_type, clouds='runpod')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -157,8 +162,9 @@ class RunPod(clouds.Cloud):
             'region': region.name,
         }
 
-    def _get_feasible_launchable_resources(self,
-                                           resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'):
+        """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
         if resources.instance_type is not None:
@@ -182,7 +188,8 @@ class RunPod(clouds.Cloud):
         accelerators = resources.accelerators
         if accelerators is None:
             # Return a default instance type
-            default_instance_type = RunPod.get_default_instance_type(cpus=resources.cpus)
+            default_instance_type = RunPod.get_default_instance_type(
+                                        cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -244,7 +251,8 @@ class RunPod(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type, 'runpod')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='runpod')
+        return service_catalog.validate_region_zone(
+                    region, zone, clouds='runpod')
 
     def accelerator_in_region_or_zone(
         self,
