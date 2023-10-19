@@ -119,10 +119,15 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-        cls, cpus: Optional[str] = None) -> Optional[str]:
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for RunPod."""
-        return service_catalog.get_default_instance_type(
-                    cpus=cpus, clouds='runpod')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
+                                                         disk_tier=disk_tier,
+                                                         clouds='runpod')
 
     @classmethod
     def get_accelerators_from_instance_type(
