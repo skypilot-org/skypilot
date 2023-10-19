@@ -2,12 +2,17 @@
 
 Thread safety notes:
 
-The results of session(), resource(), and client() are cached by each thread
-in a thread.local() storage. This means using their results is completely
-thread-safe.
+The results of session() is cached by each thread in a thread.local() storage.
+This means using their results is completely thread-safe.
 
 Calling them is thread-safe too, since they use a lock to protect
 each object's first creation.
+
+We do not cache the resource/client objects, because the credentials will be
+automatically rotated, but the cached resource/client object may not refresh the
+credential quick enough, which can cause unexpected NoCredentialsError. By
+creating the resource/client object every time, the credentials will be
+explicitly refreshed.
 
 This is informed by the following boto3 docs:
 - Unlike Resources and Sessions, clients are generally thread-safe.
@@ -91,7 +96,8 @@ def _assert_kwargs_builtin_type(kwargs):
         f'kwargs should not contain none built-in types: {kwargs}')
 
 
-def _create_aws_object(creation_fn: Callable[[], Any]):
+def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
+                       object_name: str) -> Any:
     """Create an AWS object.
 
     Args:
@@ -104,19 +110,24 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
     backoff = common_utils.Backoff()
     while True:
         try:
+            # Creating the boto3 objects are not thread-safe,
+            # so we add a reentrant lock to synchronize the session creation.
+            # Reference: https://github.com/boto/boto3/issues/1592
+
             # NOTE: we need the lock here to avoid thread-safety issues when
             # creating the resource, because Python module is a shared object,
             # and we are not sure if the code inside 'session()' or
             # 'session().xx()' is thread-safe.
             with _session_creation_lock:
-                return creation_fn()
+                return creation_fn_or_cls()
         except (botocore_exceptions().CredentialRetrievalError,
                 botocore_exceptions().NoCredentialsError) as e:
             attempt += 1
             if attempt >= _MAX_ATTEMPT_FOR_CREATION:
                 raise
             time.sleep(backoff.current_backoff())
-            logger.info(f'Retry creating AWS {creation_fn} due to {e}.')
+            logger.info(f'Retry creating AWS {object_name} due to '
+                        f'{common_utils.format_exception(e)}.')
 
 
 @import_package
@@ -125,10 +136,7 @@ def _create_aws_object(creation_fn: Callable[[], Any]):
 @_thread_local_lru_cache()
 def session():
     """Create an AWS session."""
-    # Creating the session object is not thread-safe for boto3,
-    # so we add a reentrant lock to synchronize the session creation.
-    # Reference: https://github.com/boto/boto3/issues/1592
-    return _create_aws_object(boto3.session.Session)
+    return _create_aws_object(boto3.session.Session, 'session')
 
 
 @import_package
@@ -156,8 +164,11 @@ def resource(service_name: str, **kwargs):
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
         kwargs['config'] = config
+    # Need to use the client retrieved from the per-thread session to avoid
+    # thread-safety issues (Directly creating the client with boto3.resource()
+    # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session().resource(service_name, **kwargs))
+        lambda: session().resource(service_name, **kwargs), 'resource')
 
 
 @import_package
@@ -173,7 +184,8 @@ def client(service_name: str, **kwargs):
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
-    return _create_aws_object(lambda: session().client(service_name, **kwargs))
+    return _create_aws_object(lambda: session().client(service_name, **kwargs),
+                              'client')
 
 
 @import_package

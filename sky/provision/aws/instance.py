@@ -708,7 +708,7 @@ def cleanup_ports(
         f'{BOTO_DELETE_MAX_ATTEMPTS} attempts. Please delete it manually.')
 
 
-def wait_instances(region: str, cluster_name: str,
+def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
     # TODO(suquark): unify state for different clouds
@@ -719,7 +719,7 @@ def wait_instances(region: str, cluster_name: str,
     filters = [
         {
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
+            'Values': [cluster_name_on_cloud],
         },
     ]
 
@@ -742,7 +742,7 @@ def wait_instances(region: str, cluster_name: str,
     instances = list(ec2.instances.filter(Filters=filters))
     logger.debug(instances)
     if not instances:
-        raise RuntimeError(f'No instances found for cluster {cluster_name}.')
+        raise RuntimeError(f'No instances found for cluster {cluster_name_on_cloud}.')
 
     if state == status_lib.ClusterStatus.UP:
         waiter = client.get_waiter('instance_running')
@@ -756,7 +756,7 @@ def wait_instances(region: str, cluster_name: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
+def get_cluster_info(region: str, cluster_name_on_cloud: str) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
     filters = [
@@ -766,7 +766,7 @@ def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
         },
         {
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
+            'Values': [cluster_name_on_cloud],
         },
     ]
     running_instances = list(ec2.instances.filter(Filters=filters))
