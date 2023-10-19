@@ -10,7 +10,7 @@ def get_resources_schema():
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
     return {
-        '$schema': 'http://json-schema.org/draft-07/schema#',
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
@@ -114,7 +114,7 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
     return {
-        '$schema': 'http://json-schema.org/draft-07/schema#',
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
