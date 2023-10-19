@@ -71,7 +71,7 @@ class RunPod(clouds.Cloud):
         *,
         region: str,
         num_nodes: int,
-        instance_type: str = None,
+        instance_type: str,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
@@ -235,7 +235,7 @@ class RunPod(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
-    def get_current_user_identity(self) -> Optional[str]:
+    def get_current_user_identity(self) -> Optional[List[str]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
