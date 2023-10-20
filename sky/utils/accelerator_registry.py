@@ -37,6 +37,7 @@ _ACCELERATORS = [
     'P40',
     'Radeon MI25',
     'P4',
+    'L4',
 ]
 
 
