@@ -225,7 +225,7 @@ class RunPod(clouds.Cloud):
         except ImportError:
             return False, (
                 'Failed to import runpod.'
-                '"To install, run: "pip install runpod" or "pip install sky[runpod]" '  # pylint: disable=line-too-long
+                'To install, run: "pip install runpod" or "pip install sky[runpod]"'  # pylint: disable=line-too-long
             )
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

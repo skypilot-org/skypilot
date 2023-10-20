@@ -1,4 +1,4 @@
-""" Module to enable a single SkyPilot key for all VMs in each cloud.
+"""Module to enable a single SkyPilot key for all VMs in each cloud.
 
 The `setup_<cloud>_authentication` functions will be called on every cluster
 provisioning request.
@@ -426,8 +426,8 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     - Generates a new SSH key pair if one does not exist.
     - Adds the public SSH key to the user's RunPod account.
     """
-    key_file = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    with open(key_file, 'r', encoding='UTF-8') as pub_key_file:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
         runpod.rp_wrapper().cli.groups.ssh.functions.add_ssh_key(public_key)
 

@@ -2,19 +2,18 @@
 
 import functools
 
-runpod = None
+_runpod_sdk = None
 
 
 def import_package(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        global runpod
-        if runpod is None:
+        global _runpod_sdk
+        if _runpod_sdk is None:
             try:
-                # pylint: disable=import-outside-toplevel
-                import runpod as _runpod
-                runpod = _runpod
+                import runpod as _runpod  # pylint: disable=import-outside-toplevel
+                _runpod_sdk = _runpod
             except ImportError:
                 raise ImportError(
                     'Fail to import dependencies for runpod.'
@@ -25,6 +24,6 @@ def import_package(func):
 
 
 @import_package
-def rp_wrapper():
+def runpod():
     """Return the runpod package."""
-    return runpod
+    return _runpod_sdk

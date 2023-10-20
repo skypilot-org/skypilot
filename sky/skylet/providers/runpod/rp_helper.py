@@ -70,7 +70,7 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
 
 def list_instances():
     """Lists instances associated with API key."""
-    instances = runpod.rp_wrapper().get_pods()
+    instances = runpod.runpod().get_pods()
 
     instance_list = {}
     for instance in instances:
@@ -101,9 +101,9 @@ def launch(name: str, instance_type: str, region: str):
     gpu_quantity = int(instance_type.split("_")[0].replace("x", ""))
     cloud_type = instance_type.split("_")[2]
 
-    gpu_specs = runpod.rp_wrapper().get_gpu(gpu_type)
+    gpu_specs = runpod.runpod().get_gpu(gpu_type)
 
-    new_instance = runpod.rp_wrapper().create_pod(
+    new_instance = runpod.runpod().create_pod(
         name=name,
         image_name="runpod/base:0.0.1",
         gpu_type_id=gpu_type,
@@ -126,4 +126,4 @@ def set_tags(instance_id: str, tags: Dict):
 
 def remove(instance_id: str):
     """Terminates the given instance."""
-    runpod.rp_wrapper().terminate_pod(instance_id)
+    runpod.runpod().terminate_pod(instance_id)

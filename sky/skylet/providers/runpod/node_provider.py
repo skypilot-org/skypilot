@@ -158,7 +158,7 @@ class RunPodNodeProvider(NodeProvider):
                     'CREATED', 'RUNNING', 'RESTARTING', 'PAUSED'
             ]:
                 continue
-            if any(tag in instance['tags'] for tag in tag_filters):
+            if all(instance['tags'].get(tag, None) == value for tag, value in tag_filters.items()):  # pylint: disable=line-too-long
                 filtered_nodes[instance_id] = instance
 
         return filtered_nodes
@@ -185,6 +185,10 @@ class RunPodNodeProvider(NodeProvider):
         docker_config: Optional[Dict[str, Any]] = None,
     ) -> CommandRunnerInterface:
         """Returns the CommandRunner class used to perform SSH commands.
+
+        NOTE: RunPod forwards internal ports to a pool of external ports.
+        The default internal port is 22, but the external port will be
+        different and needs to be read from the node's metadata.
 
         Args:
         log_prefix: stores "NodeUpdater: {}: ".format(<node_id>). Used
