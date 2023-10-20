@@ -54,6 +54,9 @@ def get_commit_hash():
     if 'SKYPILOT_COMMIT_SHA' not in commit_hash:
         return commit_hash
     try:
+        # Getting the commit hash from git, and check if there are any
+        # uncommitted changes.
+        # TODO: keep this in sync with sky/__init__.py
         cwd = os.path.dirname(__file__)
         commit_hash = subprocess.check_output(
             ['git', 'rev-parse', 'HEAD'],
@@ -86,16 +89,9 @@ def replace_commit_hash():
 
 
 def revert_commit_hash():
-    try:
-        if original_init_content is not None:
-            with open(INIT_FILE_PATH, 'w') as fp:
-                fp.write(original_init_content)
-        else:
-            subprocess.check_call(['git', 'checkout', INIT_FILE_PATH],
-                                  cwd=ROOT_DIR,
-                                  stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        pass
+    if original_init_content is not None:
+        with open(INIT_FILE_PATH, 'w') as fp:
+            fp.write(original_init_content)
 
 
 def parse_readme(readme: str) -> str:
