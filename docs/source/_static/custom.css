@@ -1,0 +1,22 @@
+#kapa-widget-container {
+  z-index: 10000 !important;
+  position: absolute !important;
+}
+
+.mantine-Modal-root {
+  z-index: 10000;
+  position: absolute;
+}
+
+#kapa-widget-container figure {
+  padding: 0 !important;
+}
+
+.mantine-Modal-root figure {
+  padding: 0 !important;
+}
+
+/* RTD Flyout */
+.rst-versions {
+    z-index: 10001 !important; /* Set to 10001 to avoid overlap with kapa */
+}

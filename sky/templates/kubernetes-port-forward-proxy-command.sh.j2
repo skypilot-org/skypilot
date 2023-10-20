@@ -7,6 +7,12 @@ if ! command -v socat > /dev/null; then
   exit
 fi
 
+# Checks if netcat is installed (may not be present in many docker images)
+if ! command -v nc > /dev/null; then
+  echo "Using 'port-forward' mode to run ssh session on Kubernetes instances requires 'nc' to be installed. Please install 'nc' (netcat)." >&2
+  exit
+fi
+
 # Establishes connection between local port and the ssh jump pod using kube port-forward
 # Instead of specifying a port, we let kubectl select a random port.
 # This is preferred because of socket re-use issues in kubectl port-forward,
