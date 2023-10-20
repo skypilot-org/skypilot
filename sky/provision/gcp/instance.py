@@ -295,9 +295,10 @@ def get_cluster_info(
         label_filters,
         lambda _: ['RUNNING'],
     )
-    all_instances = [
-        i for instances in handler_to_instances.values() for i in instances
-    ]
+    instances = {}
+    for res, insts in handler_to_instances.items():
+        for inst in insts:
+            instances[inst] = res.get_instance_info(project_id, zone, inst)
 
     head_instances = _filter_instances(
         handlers,
@@ -315,7 +316,7 @@ def get_cluster_info(
             break
 
     return common.ClusterInfo(
-        instances=all_instances,
+        instances=instances,
         head_instance_id=head_instance_id,
     )
 

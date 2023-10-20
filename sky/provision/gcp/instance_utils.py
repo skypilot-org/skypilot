@@ -9,6 +9,7 @@ import uuid
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.provision import common
 from sky.provision.gcp.constants import MAX_POLLS
 from sky.provision.gcp.constants import POLL_INTERVAL
 from sky.utils import ux_utils
@@ -269,6 +270,15 @@ class GCPInstance:
                         wait_for_operation: bool = True) -> str:
         raise NotImplementedError
 
+    @classmethod
+    def get_instance_info(
+            cls,
+            project_id: str,
+            availability_zone: str,
+            instance_id: str,
+            wait_for_operation: bool = True) -> common.InstanceInfo:
+        raise NotImplementedError
+
 
 class GCPComputeInstance(GCPInstance):
     """Instance handler for GCP compute instances."""
@@ -525,12 +535,11 @@ class GCPComputeInstance(GCPInstance):
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
-        response = (cls.load_resource().instances().get(
+        node = cls.load_resource().instances().get(
             project=project_id,
             instance=node_id,
             zone=availability_zone,
-        ).execute())
-        node = response.get('items', [])[0]
+        ).execute()
         body = {
             "labels": dict(node["labels"], **labels),
             "labelFingerprint": node["labelFingerprint"],
@@ -765,6 +774,30 @@ class GCPComputeInstance(GCPInstance):
             result = operation
 
         return result
+
+    @classmethod
+    def get_instance_info(
+            cls,
+            project_id: str,
+            availability_zone: str,
+            instance_id: str,
+            wait_for_operation: bool = True) -> common.InstanceInfo:
+        result = cls.load_resource().instances().get(
+            project=project_id,
+            zone=availability_zone,
+            instance=instance_id,
+        ).execute()
+        external_ip = (result.get("networkInterfaces",
+                                  [{}])[0].get("accessConfigs",
+                                               [{}])[0].get("natIP", None))
+        internal_ip = result.get("networkInterfaces", [{}])[0].get("networkIP")
+
+        return common.InstanceInfo(
+            instance_id=instance_id,
+            internal_ip=internal_ip,
+            external_ip=external_ip,
+            tags=result.get('labels', {}),
+        )
 
 
 class GCPTPUVMInstance(GCPInstance):
