@@ -724,7 +724,6 @@ def test_ordered_resources(enable_all_clouds, monkeypatch):
         task.set_resources([
             sky.Resources(accelerators={'V100': 1}),
             sky.Resources(accelerators={'T4': 1}),
-            sky.Resources(accelerators={'V100': 1}),
             sky.Resources(accelerators={'K80': 1}),
             sky.Resources(accelerators={'T4': 4}),
         ])
