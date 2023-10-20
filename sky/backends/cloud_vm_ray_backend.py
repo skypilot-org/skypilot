@@ -2742,35 +2742,34 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
         requested_resource_str = ', '.join(requested_resource_list)
         if valid_resource is None:
-            # Since we assume all resources are in the same zone/region.
-            example_resource = list(task.resources)[0]
-            if (example_resource.region is not None and
-                    example_resource.region != launched_resources.region):
+            for example_resource in task.resources:
+                if (example_resource.region is not None and
+                        example_resource.region != launched_resources.region):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            'Task requested resources in region '
+                            f'{example_resource.region!r}'
+                            ', but the existing cluster '
+                            f'is in region {launched_resources.region!r}.')
+                if (example_resource.zone is not None and
+                        example_resource.zone != launched_resources.zone):
+                    zone_str = (f'is in zone {launched_resources.zone!r}.'
+                                if launched_resources.zone is not None else
+                                'does not have zone specified.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            'Task requested resources in zone '
+                            f'{example_resource.zone!r},'
+                            'but the existing cluster '
+                            f'{zone_str}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in region '
-                        f'{example_resource.region!r}'
-                        ', but the existing cluster '
-                        f'is in region {launched_resources.region!r}.')
-            if (example_resource.zone is not None and
-                    example_resource.zone != launched_resources.zone):
-                zone_str = (f'is in zone {launched_resources.zone!r}.'
-                            if launched_resources.zone is not None else
-                            'does not have zone specified.')
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in zone '
-                        f'{example_resource.zone!r},'
-                        'but the existing cluster '
-                        f'{zone_str}')
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    'Requested resources do not match the existing '
-                    'cluster.\n'
-                    f'  Requested:\t{requested_resource_str}\n'
-                    f'  Existing:\t{handle.launched_nodes}x '
-                    f'{handle.launched_resources}\n'
-                    f'{mismatch_str}')
+                        'Requested resources do not match the existing '
+                        'cluster.\n'
+                        f'  Requested:\t{requested_resource_str}\n'
+                        f'  Existing:\t{handle.launched_nodes}x '
+                        f'{handle.launched_resources}\n'
+                        f'{mismatch_str}')
 
     def _provision(
             self,
@@ -3494,7 +3493,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
         self.check_resources_fit_cluster(handle, task, check_ports=True)
-
+        if handle.launched_resources:
+            # Handle multiple resources exec case.
+            task.set_resources(handle.launched_resources)
         resources_str = backend_utils.get_task_resources_str(task)
 
         if dryrun:
