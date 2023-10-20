@@ -429,6 +429,6 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     _, public_key_path = get_or_generate_keys()
     with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
         public_key = pub_key_file.read().strip()
-        runpod.rp_wrapper().cli.groups.ssh.functions.add_ssh_key(public_key)
+        runpod.runpod().cli.groups.ssh.functions.add_ssh_key(public_key)
 
     return configure_ssh_info(config)
