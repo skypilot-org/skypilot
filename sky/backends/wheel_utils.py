@@ -73,7 +73,6 @@ def _build_sky_wheel():
                                setup_content)
         (tmp_dir / 'setup.py').write_text(setup_content)
 
-
         for f in setup_files_dir.iterdir():
             if f.is_file() and f.name != 'setup.py':
                 shutil.copy(str(f), str(tmp_dir))
@@ -81,9 +80,9 @@ def _build_sky_wheel():
         init_file_path = SKY_PACKAGE_PATH / '__init__.py'
         init_file_content = init_file_path.read_text()
         # Replace the commit hash with the current commit hash.
-        init_file_content = re.sub(r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
-                                   f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'',
-                                   init_file_content)
+        init_file_content = re.sub(
+            r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
+            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
         (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
 
         # It is important to normalize the path, otherwise 'pip wheel' would
