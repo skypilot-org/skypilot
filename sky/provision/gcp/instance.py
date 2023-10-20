@@ -271,11 +271,51 @@ def wait_instances(region: str, cluster_name: str,
     return
 
 
-def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
+def get_cluster_info(
+        region: str,
+        cluster_name: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    raise NotImplementedError
+    assert provider_config is not None, cluster_name
+    zone = provider_config['availability_zone']
+    project_id = provider_config['project_id']
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+
+    handlers: List[Type[instance_utils.GCPInstance]] = [
+        instance_utils.GCPComputeInstance
+    ]
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+    if use_tpu_vms:
+        handlers.append(instance_utils.GCPTPUVMInstance)
+
+    handler_to_instances = _filter_instances(
+        handlers,
+        project_id,
+        zone,
+        label_filters,
+        lambda _: ['RUNNING'],
+    )
+    all_instances = [
+        i for instances in handler_to_instances.values() for i in instances
+    ]
+
+    head_instances = _filter_instances(
+        handlers,
+        project_id,
+        zone,
+        {
+            **label_filters, TAG_RAY_NODE_KIND: 'head'
+        },
+        lambda _: ['RUNNING'],
+    )
+    head_instance_id = None
+    for insts in head_instances.values():
+        if insts and insts[0]:
+            head_instance_id = insts[0]
+            break
+
     return common.ClusterInfo(
-        instances=instances,
+        instances=all_instances,
         head_instance_id=head_instance_id,
     )
 

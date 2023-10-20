@@ -562,13 +562,11 @@ class GCPComputeInstance(GCPInstance):
             node_tag = {
                 TAG_SKYPILOT_HEAD_NODE: '1',
                 TAG_RAY_NODE_KIND: 'head',
-                'Name': f'sky-{cluster_name}-head',
             }
         else:
             node_tag = {
                 TAG_SKYPILOT_HEAD_NODE: '1',
                 TAG_RAY_NODE_KIND: 'worker',
-                'Name': f'sky-{cluster_name}-worker',
             }
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,

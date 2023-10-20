@@ -313,9 +313,12 @@ def _post_provision_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
+    config_from_yaml = common_utils.read_yaml(cluster_yaml)
+    provider_config = config_from_yaml.get('provider')
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
-                                              cluster_name.name_on_cloud)
+                                              cluster_name.name_on_cloud,
+                                              provider_config=provider_config)
 
     if len(cluster_info.instances) > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
@@ -337,7 +340,6 @@ def _post_provision_setup(
                            'Could not find any head instance.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    config_from_yaml = common_utils.read_yaml(cluster_yaml)
     ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
