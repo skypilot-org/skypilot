@@ -717,7 +717,7 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
         in str(e))
 
 
-def test_ordered_resources():
+def test_ordered_resources(monkeypatch):
 
     with sky.Dag() as dag:
         task = sky.Task('test_task')
@@ -733,7 +733,7 @@ def test_ordered_resources():
     assert 'V100' in repr(task.best_resources)
 
 
-def test_unordered_resources():
+def test_unordered_resources(monkeypatch):
 
     with sky.Dag() as dag:
         task = sky.Task('test_task')
