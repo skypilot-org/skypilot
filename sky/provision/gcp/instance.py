@@ -273,13 +273,13 @@ def wait_instances(region: str, cluster_name: str,
 
 def get_cluster_info(
         region: str,
-        cluster_name: str,
+        cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, cluster_name
+    assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']
-    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance

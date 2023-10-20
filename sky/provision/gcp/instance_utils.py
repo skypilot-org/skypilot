@@ -968,13 +968,16 @@ class GCPTPUVMInstance(GCPInstance):
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
+        node = cls.load_resource().projects().locations().nodes().get(
+            name=node_id,
+        )
         body = {
             "labels": dict(node["labels"], **labels),
         }
         update_mask = "labels"
 
         operation = (cls.load_resource().projects().locations().nodes().patch(
-            name=node["name"],
+            name=node_id,
             updateMask=update_mask,
             body=body,
         ).execute())
@@ -989,8 +992,12 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def create_instance(cls,
+                        cluster_name: str,
+                        project_id: str,
+                        availability_zone: str,
                         node_config: dict,
                         labels: dict,
+                        is_head_node: bool,
                         wait_for_operation: bool = True) -> Tuple[dict, str]:
         raise NotImplementedError
 
