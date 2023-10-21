@@ -1264,3 +1264,11 @@ class Resources:
                     [str(port) for port in original_ports])
 
         self.__dict__.update(state)
+
+    def __eq__(self, other):
+        if not isinstance(self, type(other)):
+            return NotImplemented
+        return vars(self) == vars(other)
+
+    def __hash__(self):
+        return hash(str(vars(self)))
