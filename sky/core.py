@@ -1039,7 +1039,7 @@ def serve_status(
     sky.cli.serve_status.
 
     Args:
-        service_names: a list of service names to query. If None, query all
+        service_names: a single or a list of service names to query. If None, query all
             services.
 
     Returns:
