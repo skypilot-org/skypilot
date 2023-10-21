@@ -1757,7 +1757,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         if ip:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip with --refresh is not supported for now.')
+                    'Using --ip with --refresh is not supported for now. To fix, refresh first, then query the IP.')
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
