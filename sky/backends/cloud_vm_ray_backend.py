@@ -2692,7 +2692,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         check_ports: bool = False,
-    ):
+    ) -> resources_lib.Resources:
         """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
@@ -2770,6 +2770,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
                         f'{mismatch_str}')
+        return valid_resource
 
     def _provision(
             self,
@@ -3492,25 +3493,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
-        self.check_resources_fit_cluster(handle, task, check_ports=True)
-        if handle.launched_resources:
-            # Handle multiple resources exec case.
-            task.set_resources(handle.launched_resources)
-        resources_str = backend_utils.get_task_resources_str(task)
+        valid_resource = self.check_resources_fit_cluster(handle,
+                                                          task,
+                                                          check_ports=True)
+        task_copy = copy.deepcopy(task)
+        # Handle multiple resources exec case.
+        task_copy.set_resources(valid_resource)
+        resources_str = backend_utils.get_task_resources_str(task_copy)
 
         if dryrun:
-            logger.info(f'Dryrun complete. Would have run:\n{task}')
+            logger.info(f'Dryrun complete. Would have run:\n{task_copy}')
             return
 
-        job_id = self._add_job(handle, task.name, resources_str)
+        job_id = self._add_job(handle, task_copy.name, resources_str)
 
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if task.num_nodes > 1 or is_tpu_vm_pod:
-            self._execute_task_n_nodes(handle, task, job_id, detach_run)
+        if task_copy.num_nodes > 1 or is_tpu_vm_pod:
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
