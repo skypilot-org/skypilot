@@ -862,15 +862,9 @@ class Optimizer:
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
             chosen_resources = best_plan[task]
-            chosen_cost = 0.0
-            for resources, cost in v.items():
-                if resources.to_yaml_config(
-                ) == chosen_resources.to_yaml_config():
-                    chosen_cost = cost
-                    break
             resource_table_key = _get_resource_group_hash(chosen_resources)
             best_per_resource_group[resource_table_key] = (chosen_resources,
-                                                           chosen_cost)
+                                                           v[chosen_resources])
             rows = []
             for resources, cost in best_per_resource_group.values():
                 if minimize_cost:
