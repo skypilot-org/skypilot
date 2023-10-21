@@ -3474,7 +3474,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         # Delete all storage objects.
         sky storage delete -a
         \b
-        # Skip confirmation prompt. 
+        # Skip confirmation prompt.
         sky storage delete -y
     """
     if sum([len(names) > 0, all]) != 1:
