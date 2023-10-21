@@ -3062,7 +3062,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name], '--yes')
+            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -3130,7 +3130,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name], '--yes')
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes'])
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
