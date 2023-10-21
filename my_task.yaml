@@ -1,0 +1,20 @@
+# Commands to be run before executing the job.
+# Typical use: pip install -r requirements.txt, git clone, etc.
+file_mounts:
+  /bucket2:
+    name: sky-bucket-2
+    source: ~/Documents/bucket 2
+    store: gcs
+    persistent: True
+    mode: COPY 
+  /bucket3:
+    name: sky-bucket-3
+    source: ~/Documents/bucket3
+    store: gcs
+    persistent: True
+    mode: COPY 
+
+  
+# Commands to run as a job.
+# Typical use: launch the main program.
+
