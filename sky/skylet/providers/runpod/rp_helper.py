@@ -80,7 +80,9 @@ def list_instances():
         instance_list[instance["id"]]["name"] = instance["name"]
 
         if instance["desiredStatus"] == "RUNNING" and instance.get("runtime"):
+            instance_list[instance["id"]]["port_list"] = []
             for port in instance["runtime"]["ports"]:
+                instance_list[instance["id"]]["port_list"].append(port["publicPort"])
                 if port["privatePort"] == 22:
                     instance_list[instance["id"]]["ip"] = port["ip"]
                     instance_list[
@@ -105,7 +107,7 @@ def launch(name: str, instance_type: str, region: str):
 
     new_instance = runpod.runpod().create_pod(
         name=name,
-        image_name="runpod/base:0.0.1",
+        image_name="runpod/base:0.0.2",
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
         container_disk_in_gb=50,
