@@ -1,6 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import enum
+import json
 import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
@@ -679,3 +680,11 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __eq__(self, other):
+        if not isinstance(self, type(other)):
+            return NotImplemented
+        return vars(self) == vars(other)
+
+    def __hash__(self):
+        return hash(json.dumps(vars(self)))

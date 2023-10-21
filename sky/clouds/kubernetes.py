@@ -398,11 +398,3 @@ class Kubernetes(clouds.Cloud):
             return [f'{cluster}_{user}_{namespace}']
         except k8s.config.config_exception.ConfigException:
             return None
-
-    def __eq__(self, other):
-        if not isinstance(self, type(other)):
-            return NotImplemented
-        return vars(self) == vars(other)
-
-    def __hash__(self):
-        return hash(json.dumps(vars(self)))
