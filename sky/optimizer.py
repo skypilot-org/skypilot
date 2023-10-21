@@ -128,9 +128,6 @@ class Optimizer:
                 # Honor the user's choice.
                 # Take dag.tasks[0], the actual task
                 # dag can store dummy tasks.
-                assert len(
-                    dag.tasks
-                ) == 1, 'Multi-accelerators only supports one task for the dag'
                 resources_list = dag.tasks[0].resources
                 accelerators_str = ', '.join([f'{r}' for r in resources_list])
                 logger.info(
