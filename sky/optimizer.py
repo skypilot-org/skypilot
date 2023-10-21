@@ -45,6 +45,7 @@ _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
+    USER = 2
 
 
 # For logging purposes.
@@ -126,19 +127,25 @@ class Optimizer:
         try:
             if _is_dag_resources_ordered(dag):
                 # Honor the user's choice.
-                # Take dag.tasks[0], the actual task
-                # dag can store dummy tasks.
-                resources_list = dag.tasks[0].resources
-                accelerators_str = ', '.join([f'{r}' for r in resources_list])
-                logger.info(
-                    f'{colorama.Fore.YELLOW}Using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
-                )
-                _ = Optimizer._set_resources_by_user_order(
-                    dag=dag, blocked_resources=blocked_resources, quiet=quiet)
+                # The actual task dag can store dummy tasks.
+                for task_id, task in enumerate(dag.tasks):
+                    if isinstance(task.resources, list):
+                        resources_list = task.resources
+                        accelerators_str = ', '.join(
+                            [f'{r}' for r in resources_list])
+                        logger.info(
+                            f'{colorama.Fore.YELLOW}{task_id + 1}-th task is using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
+                        )
+                _ = Optimizer._optimize_objective(
+                    dag=dag,
+                    optimize_target=OptimizeTarget.USER,
+                    blocked_resources=blocked_resources,
+                    quiet=quiet)
             else:
                 _ = Optimizer._optimize_objective(
                     dag=dag,
-                    minimize_cost=minimize == OptimizeTarget.COST,
+                    optimize_target=OptimizeTarget.COST
+                    if minimize else OptimizeTarget.TIME,
                     blocked_resources=blocked_resources,
                     quiet=quiet)
         finally:
@@ -929,7 +936,7 @@ class Optimizer:
     @staticmethod
     def _optimize_objective(
         dag: 'dag_lib.Dag',
-        minimize_cost: bool = True,
+        optimize_target: OptimizeTarget = OptimizeTarget.COST,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False,
     ) -> Dict[task_lib.Task, resources_lib.Resources]:
@@ -943,27 +950,32 @@ class Optimizer:
 
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
+        minimize_cost = optimize_target in [
+            OptimizeTarget.COST, OptimizeTarget.USER
+        ]
 
         node_to_cost_map, node_to_candidate_map = (
             Optimizer._estimate_nodes_cost_or_time(topo_order, minimize_cost,
                                                    blocked_resources))
-
-        if dag.is_chain():
-            best_plan, best_total_objective = Optimizer._optimize_by_dp(
-                topo_order, node_to_cost_map, minimize_cost)
+        if optimize_target == OptimizeTarget.USER:
+            best_plan, total_time, total_cost = Optimizer._optimize_by_user(
+                graph, topo_order, blocked_resources)
         else:
-            best_plan, best_total_objective = Optimizer._optimize_by_ilp(
-                graph, topo_order, node_to_cost_map, minimize_cost)
+            if dag.is_chain():
+                best_plan, best_total_objective = Optimizer._optimize_by_dp(
+                    topo_order, node_to_cost_map, minimize_cost)
+            else:
+                best_plan, best_total_objective = Optimizer._optimize_by_ilp(
+                    graph, topo_order, node_to_cost_map, minimize_cost)
 
-        if minimize_cost:
-            total_time = Optimizer._compute_total_time(graph, topo_order,
-                                                       best_plan)
-            total_cost = best_total_objective
-        else:
-            total_time = best_total_objective
-            total_cost = Optimizer._compute_total_cost(graph, topo_order,
-                                                       best_plan)
-
+            if minimize_cost:
+                total_time = Optimizer._compute_total_time(
+                    graph, topo_order, best_plan)
+                total_cost = best_total_objective
+            else:
+                total_time = best_total_objective
+                total_cost = Optimizer._compute_total_cost(
+                    graph, topo_order, best_plan)
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
@@ -973,20 +985,11 @@ class Optimizer:
         return best_plan
 
     @staticmethod
-    def _set_resources_by_user_order(
-        dag: 'dag_lib.Dag',
+    def _optimize_by_user(
+        graph,
+        topo_order,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
-        quiet: bool = False,
-    ) -> Dict[task_lib.Task, resources_lib.Resources]:
-
-        graph = dag.get_graph()
-        topo_order = list(nx.topological_sort(graph))
-
-        node_to_cost_map, node_to_candidate_map = \
-            Optimizer._estimate_nodes_cost_or_time(
-                topo_order=topo_order,
-                minimize_cost=True,
-                blocked_resources=blocked_resources)
+    ):
 
         best_plan = {}
         best_plan[topo_order[0]] = DummyResources(DummyCloud(), None)
@@ -1032,14 +1035,8 @@ class Optimizer:
 
         total_time = Optimizer._compute_total_time(graph, topo_order, best_plan)
         total_cost = Optimizer._compute_total_cost(graph, topo_order, best_plan)
-        if not quiet:
-            Optimizer.print_optimized_plan(graph, topo_order, best_plan,
-                                           total_time, total_cost,
-                                           node_to_cost_map, True)
-        if not env_options.Options.MINIMIZE_LOGGING.get():
-            Optimizer._print_candidates(node_to_candidate_map)
 
-        return best_plan
+        return best_plan, total_time, total_cost
 
 
 class DummyResources(resources_lib.Resources):

@@ -1267,8 +1267,8 @@ class Resources:
 
     def __eq__(self, other):
         if not isinstance(self, type(other)):
-            return NotImplemented
-        return vars(self) == vars(other)
+            return False
+        return str(vars(self)) == str(vars(other))
 
     def __hash__(self):
         return hash(str(vars(self)))
