@@ -1023,11 +1023,11 @@ class Task:
             tmp_resource_config['accelerators'] = accelerators_list
         elif len(self.resources) > 1:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
-            accelerators_dict = {}
+            accelerators_dict: Dict[str, Optional[int]] = {}
             for r in list(self.resources):
                 if r.accelerators is not None:
                     k, v = r.accelerators.popitem()
-                    accelerators_dict[k] = v
+                    accelerators_dict[f'{k}:{v}'] = None
                     r.accelerators[k] = v
             tmp_resource_config['accelerators'] = accelerators_dict
         else:

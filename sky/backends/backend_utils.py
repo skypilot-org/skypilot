@@ -2699,27 +2699,39 @@ def get_backend_from_handle(
 def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
+    accelerator_dict = None
     if task.best_resources is not None:
         resources = task.best_resources
-    elif len(list(task.resources)) == 1:
+    else:
         # Task may (e.g., sky launch) or may not (e.g., sky exec) have undergone
         # sky.optimize(), so best_resources may be None.
+        assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    else:
-        # Multiple resources specified.
-        accelerator_dict = {}
-        for resource in task.resources:
-            accelerator_dict.update(resource.accelerators)
-        return accelerator_dict
-    return resources.accelerators
+    if resources is not None:
+        accelerator_dict = resources.accelerators
+    return accelerator_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
-    resources_dict = get_task_demands_dict(task)
-    if resources_dict is None:
-        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+    if len(task.resources) == 1:
+        resources_dict = get_task_demands_dict(task)
+        if resources_dict is None:
+            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in resources_dict.items())
     else:
-        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+        resource_accelerators = []
+        for resource in task.resources:
+            if resource.accelerators is None:
+                continue
+            for k, v in resource.accelerators.items():
+                resource_accelerators.append(f'{k}:{v}')
+
+        if resource_accelerators:
+            resources_str = ', '.join(resource_accelerators)
+        else:
+            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
 
