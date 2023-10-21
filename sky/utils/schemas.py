@@ -21,14 +21,7 @@ def get_resources_schema():
                     cloud_registry.CLOUD_REGISTRY.keys())
             },
             'region': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'type': 'string',
-                    }
-                }]
+                'type': 'string',
             },
             'zone': {
                 'type': 'string',

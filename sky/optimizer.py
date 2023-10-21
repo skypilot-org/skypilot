@@ -893,8 +893,7 @@ class Optimizer:
                             '[Spot]' if '[Spot]' in row.instance else '')),  # pylint: disable=cell-var-from-loop
                         float(row.cost_str)))  # pylint: disable=cell-var-from-loop
             else:
-                rows = sorted(rows, key=lambda x: float(row.cost_str))
-            # Highlight the chosen resources.
+                rows = sorted(rows, key=lambda row: float(row.cost_str))
 
             row_list = []
             for row in rows:
@@ -1071,8 +1070,7 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
 
 
 def _make_launchables_for_valid_region_zones(
-    launchable_resources: resources_lib.Resources,
-    allowed_region: Optional[List[str]] = None,
+    launchable_resources: resources_lib.Resources
 ) -> List[resources_lib.Resources]:
     assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
@@ -1100,12 +1098,7 @@ def _make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     filtered_regions = []
-    if allowed_region is not None:
-        for region in regions:
-            if region.name in allowed_region:
-                filtered_regions.append(region)
-    else:
-        filtered_regions = regions
+    filtered_regions = regions
     for region in filtered_regions:
         if (launchable_resources.use_spot and region.zones is not None or
                 isinstance(launchable_resources.cloud, clouds.GCP)):
@@ -1196,8 +1189,7 @@ def _fill_in_launchable_resources(
                     cheapest = feasible_resources[0]
                     # Generate region/zone-specified resources.
                     launchable[resources].extend(
-                        _make_launchables_for_valid_region_zones(
-                            cheapest, resources.region_list))
+                        _make_launchables_for_valid_region_zones(cheapest))
                     cloud_candidates[cloud] = feasible_resources
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)

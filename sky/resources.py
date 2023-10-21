@@ -56,7 +56,7 @@ class Resources:
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
-        region: Optional[Union[str, List[str]]] = None,
+        region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
         disk_size: Optional[int] = None,
@@ -136,15 +136,6 @@ class Resources:
         self._cloud = cloud
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
-        self._region_list = None
-        if isinstance(region, list):
-            if len(region) > 1:
-                self._region_list = region
-                region = None
-            elif len(region) == 1:
-                region = region[0]
-            else:  # len(region) == 0
-                region = None
         self._validate_and_set_region_zone(region, zone)
 
         self._instance_type = instance_type
@@ -324,10 +315,6 @@ class Resources:
     @property
     def region(self):
         return self._region
-
-    @property
-    def region_list(self):
-        return self._region_list
 
     @property
     def zone(self):
@@ -1091,9 +1078,7 @@ class Resources:
             use_spot=override.pop('use_spot', use_spot),
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
-            region=override.pop(
-                'region',
-                self.region if self.region_list is None else self.region_list),
+            region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
@@ -1193,10 +1178,7 @@ class Resources:
             add_if_not_none('use_spot', self.use_spot)
             add_if_not_none('spot_recovery', self.spot_recovery)
         add_if_not_none('disk_size', self.disk_size)
-        if self.region is not None:
-            add_if_not_none('region', self.region)
-        elif self.region_list is not None:
-            add_if_not_none('region', self.region_list)
+        add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
