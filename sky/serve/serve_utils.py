@@ -9,11 +9,12 @@ import shlex
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional, Set,
+from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
                     TextIO, Type, TypeVar)
 
 import colorama
 import filelock
+import psutil
 
 from sky import backends
 from sky import exceptions
@@ -27,7 +28,10 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import fastapi
 
-    import sky
+SKY_SERVE_CONTROLLER_NAME = (
+    f'sky-serve-controller-{common_utils.get_user_hash()}')
+_SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
+NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
@@ -175,46 +179,6 @@ class RedirectOutputTo:
             self.func(*args, **kwargs)
 
 
-def _get_existing_controller_names() -> Set[str]:
-    """Get existing sky serve controller names.
-
-    There is two possible indicators for a controller:
-      1. It is in the cluster database, which means it is already created;
-      2. It is not in the cluster database but in the service database,
-         which means it will be created later in the future. This usually
-         happens when multiple `sky serve up` are running simultaneously.
-
-    Returns:
-        A set of existing sky serve controller names.
-    """
-    controller_in_service_db = {
-        record['controller_name']
-        for record in global_user_state.get_services()
-    }
-    controller_in_cluster_db = {
-        record['name']
-        for record in global_user_state.get_clusters()
-        if record['name'].startswith(constants.CONTROLLER_PREFIX)
-    }
-    return controller_in_service_db | controller_in_cluster_db
-
-
-def generate_controller_cluster_name(existing_controllers: Set[str]) -> str:
-    index = 0
-    while True:
-        controller_name = (f'{constants.CONTROLLER_PREFIX}'
-                           f'{common_utils.get_user_hash()}-{index}')
-        if controller_name not in existing_controllers:
-            return controller_name
-        index += 1
-
-
-def generate_controller_yaml_file_name(service_name: str) -> str:
-    service_name = service_name.replace('-', '_')
-    prefix = os.path.expanduser(constants.SERVE_PREFIX)
-    return os.path.join(prefix, f'{service_name}_controller.yaml')
-
-
 def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
     return os.path.join(constants.SERVE_PREFIX, service_name)
@@ -261,76 +225,6 @@ def generate_replica_local_log_file_name(service_name: str,
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
-
-
-def _get_service_slot_on_controller(controller_name: str) -> int:
-    """Get the number of slots to run services on the controller.
-
-    A controller only have limited available slots for a new services.
-    Max number of slots on a controller is determined by the memory of
-    the controller, since ray job and our skypilot code is very memory
-    demanding (~1GB/service).
-
-    Args:
-        controller_name: The name of the controller.
-
-    Returns:
-        Number of slots on the controller.
-    """
-    controller_memory = 0.
-    # Wait for the controller to be created. This could happen if multiple
-    # `sky serve up` are running simultaneously.
-    while True:
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        if controller_record is not None:
-            handle = controller_record['handle']
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
-            # Determine max number of services on this controller.
-            controller_cloud = handle.launched_resources.cloud
-            _, controller_memory = (
-                controller_cloud.get_vcpus_mem_from_instance_type(
-                    handle.launched_resources.instance_type))
-            assert controller_memory is not None
-            break
-        time.sleep(5)
-    # Determine max number of services on this controller.
-    max_services_num = int(controller_memory /
-                           constants.SERVICES_MEMORY_USAGE_GB)
-    # Get current number of services on this controller.
-    services_num_on_controller = len(
-        global_user_state.get_services_from_controller_name(controller_name))
-    return max_services_num - services_num_on_controller
-
-
-def get_available_controller_name() -> str:
-    """Get available controller name to use.
-
-    Only consider controllers that have available slots for services.
-    If multiple controllers are available, choose the one with most number of
-    services to decrease the number of controllers.
-    This function needs to be called within a lock, to avoid concurrency issue
-    from `existing_controllers` being staled, also, to avoid multiple
-    `sky serve up` select the same last slot on a controller.
-
-    Returns:
-        Controller name to use.
-    """
-    # Get all existing controllers.
-    existing_controllers = _get_existing_controller_names()
-    controller2slots = dict()
-    # Get a mapping from controller name to number of services on it.
-    for controller_name in existing_controllers:
-        num_slots = _get_service_slot_on_controller(controller_name)
-        # Only consider controllers that have available slot for services.
-        if num_slots > 0:
-            controller2slots[controller_name] = num_slots
-    if not controller2slots:
-        return generate_controller_cluster_name(existing_controllers)
-    # If multiple controllers are available, choose the one with least number of
-    # slots, i.e. most number of services. This helps to decrease the number of
-    # controllers.
-    return min(controller2slots.keys(), key=lambda k: controller2slots[k])
 
 
 def set_service_status_from_replica_statuses(
@@ -392,8 +286,6 @@ def get_latest_info(service_name: str,
     Returns:
         A dictionary of latest information of the service.
     """
-    # NOTE(dev): Keep this align with
-    # sky.backends.backend_utils._add_default_value_to_local_record
     record = serve_state.get_service_from_name(service_name)
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
@@ -403,51 +295,60 @@ def get_latest_info(service_name: str,
     return record
 
 
-def get_latest_info_encoded(service_name: str) -> str:
-    latest_info = get_latest_info(service_name)
-    latest_info = {
-        k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-        for k, v in latest_info.items()
-    }
-    return common_utils.encode_payload(latest_info)
+def get_latest_info_encoded(service_names: Optional[List[str]]) -> str:
+    latest_infos = []
+    if service_names is None:
+        # Get all service names
+        service_names = serve_state.get_glob_service_names(None)
+    for service_name in service_names:
+        latest_info = get_latest_info(service_name)
+        latest_infos.append({
+            k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
+            for k, v in latest_info.items()
+        })
+    return common_utils.encode_payload(latest_infos)
 
 
-def load_latest_info(payload: str) -> Dict[str, Any]:
-    latest_info = common_utils.decode_payload(payload)
-    latest_info = {
-        k: pickle.loads(base64.b64decode(v)) for k, v in latest_info.items()
-    }
-    return latest_info
+def load_latest_info(payload: str) -> List[Dict[str, Any]]:
+    latest_infos_encoded = common_utils.decode_payload(payload)
+    latest_infos = []
+    for latest_info in latest_infos_encoded:
+        latest_infos.append({
+            k: pickle.loads(base64.b64decode(v))
+            for k, v in latest_info.items()
+        })
+    return latest_infos
 
 
-def terminate_service(service_name: str) -> None:
-    # Send the terminate signal to controller.
-    signal_file = pathlib.Path(constants.SIGNAL_FILE_PATH.format(service_name))
-    # Filelock is needed to prevent race condition between signal
-    # check/removal and signal writing.
-    with filelock.FileLock(str(signal_file) + '.lock'):
-        with signal_file.open(mode='w') as f:
-            f.write(UserSignal.TERMINATE.value)
-            f.flush()
-    print(f'Service {service_name!r} is scheduled to be terminated.')
-    for _ in range(constants.SERVICE_TERMINATION_TIMEOUT):
-        record = serve_state.get_service_from_name(service_name)
-        replica_infos = serve_state.get_replica_infos(service_name)
-        if record is None:
-            if not replica_infos:
-                return
-        elif record['status'] == serve_state.ServiceStatus.FAILED_CLEANUP:
-            raise RuntimeError(
-                f'Failed to terminate service {service_name!r}. Some '
-                'resources are not cleaned up properly. Please SSH to '
-                'the controller and manually clean up them. Find the '
-                'replicas that not been terminated by `sky serve status '
-                f'{service_name!r}`.')
-        time.sleep(1)
-    raise RuntimeError(
-        f'Failed to terminate service {service_name!r}: timeout '
-        f'after {constants.SERVICE_TERMINATION_TIMEOUT} seconds. '
-        'Please try again later.')
+def terminate_services(service_names: Optional[List[str]]) -> str:
+    service_names = serve_state.get_glob_service_names(service_names)
+    terminated_service_names = []
+    for service_name in service_names:
+        latest_info = get_latest_info(service_name, with_replica_info=False)
+        if (latest_info['status']
+                in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
+            # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
+            # like spot doesn't implement this yet?
+            continue
+        # Send the terminate signal to controller.
+        signal_file = pathlib.Path(
+            constants.SIGNAL_FILE_PATH.format(service_name))
+        # Filelock is needed to prevent race condition between signal
+        # check/removal and signal writing.
+        with filelock.FileLock(str(signal_file) + '.lock'):
+            with signal_file.open(mode='w') as f:
+                # TODO(tian): Probably write a dict instead of bare string
+                # to the file? It will be helpful for update cases.
+                f.write(UserSignal.TERMINATE.value)
+                f.flush()
+        terminated_service_names.append(service_name)
+    if len(terminated_service_names) == 0:
+        return 'No service to terminate.'
+    identity_str = f'Service with name {terminated_service_names[0]} is'
+    if len(terminated_service_names) > 1:
+        terminated_service_names_str = ', '.join(terminated_service_names)
+        identity_str = f'Services with names {terminated_service_names_str} are'
+    return f'{identity_str} scheduled to be terminated.'
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -632,29 +533,6 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
-def wait_for_load_balancer_port(service_name: str) -> str:
-    # Sleep for a while to bootstrap the load balancer.
-    time.sleep(5)
-    for _ in range(constants.SERVICE_PORT_SELECTION_TIMEOUT):
-        try:
-            latest_info = get_latest_info(service_name, with_replica_info=False)
-        except ValueError:
-            # Service is not created yet.
-            time.sleep(1)
-            continue
-        load_balancer_port = latest_info['load_balancer_port']
-        if load_balancer_port is not None:
-            return common_utils.encode_payload(load_balancer_port)
-        time.sleep(1)
-    raise RuntimeError(
-        f'Failed to get load balancer port for service {service_name!r}: '
-        f'timeout after {constants.SERVICE_PORT_SELECTION_TIMEOUT} seconds.')
-
-
-def decode_load_balancer_port(payload: str) -> str:
-    return common_utils.decode_payload(payload)
-
-
 class ServeCodeGen:
     """Code generator for SkyServe.
 
@@ -667,16 +545,19 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def get_latest_info(cls, service_name: str) -> str:
+    def get_latest_info(cls, service_names: Optional[List[str]]) -> str:
         code = [
-            f'msg = serve_utils.get_latest_info_encoded({service_name!r})',
+            f'msg = serve_utils.get_latest_info_encoded({service_names!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
     @classmethod
-    def terminate_service(cls, service_name: str) -> str:
-        code = [f'serve_utils.terminate_service({service_name!r})']
+    def terminate_services(cls, service_names: Optional[List[str]]) -> str:
+        code = [
+            f'msg = serve_utils.terminate_services({service_names!r})',
+            'print(msg, end="", flush=True)'
+        ]
         return cls._build(code)
 
     @classmethod
@@ -699,14 +580,6 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
             f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def wait_for_load_balancer_port(cls, service_name: str) -> str:
-        code = [
-            f'msg = serve_utils.wait_for_load_balancer_port({service_name!r})',
-            'print(msg, flush=True)'
         ]
         return cls._build(code)
 

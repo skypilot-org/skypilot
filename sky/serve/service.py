@@ -118,16 +118,30 @@ def _start(service_name: str, task_yaml: str, job_id: int):
     if isinstance(config, dict):
         resources_config = config.get('resources')
     requested_resources = resources.Resources.from_yaml_config(resources_config)
+    status = serve_state.ServiceStatus.CONTROLLER_INIT
+    if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+        status = serve_state.ServiceStatus.PENDING
+    # TODO(tian): Use id as identifier instead of name.
     serve_state.add_service(service_name,
                             controller_job_id=job_id,
                             policy=service_spec.policy_str(),
                             auto_restart=service_spec.auto_restart,
-                            requested_resources=requested_resources)
+                            requested_resources=requested_resources,
+                            status=status)
 
     controller_process = None
     load_balancer_process = None
     try:
-        _handle_signal(service_name)
+        # Wait until there is a service slot available.
+        while True:
+            _handle_signal(service_name)
+            # Use <= here since we already add this service to database.
+            if (len(serve_state.get_services()) <=
+                    serve_utils.NUM_SERVICE_THRESHOLD):
+                serve_state.set_service_status(
+                    service_name, serve_state.ServiceStatus.CONTROLLER_INIT)
+                break
+            time.sleep(1)
 
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):

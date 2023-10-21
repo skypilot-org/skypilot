@@ -2,11 +2,6 @@
 
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
-# A prefix for all controller clusters. We use this prefix to identify a
-# skyserve controller cluster. We will append a user hash and an incremental
-# id to this prefix to generate a unique controller cluster name every time.
-CONTROLLER_PREFIX = 'sky-serve-controller-'
-
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SERVE_PREFIX = '~/.sky/serve'
@@ -23,12 +18,6 @@ PORT_SELECTION_FILE_LOCK_PATH = f'{SERVE_PREFIX}/port_selection.lock'
 
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
-
-# Timeout for `sky serve down`.
-SERVICE_TERMINATION_TIMEOUT = 180
-
-# Timeout for waiting controller to find a port for service processes.
-SERVICE_PORT_SELECTION_TIMEOUT = 60
 
 # The time interval for load balancer to sync with controller. Every time the
 # load balancer syncs with controller, it will update all available replica ips
@@ -72,7 +61,9 @@ CONTROLLER_RESOURCES = {'disk_size': 200, 'memory': '32+'}
 # set the memory usage to 2 GB to be safe.
 # In this setup, a default highmem controller with 4 vCPU and 32 GB memory can
 # run 16 services.
-SERVICES_MEMORY_USAGE_GB = 2.0
+# TODO(tian): Since now we only have one job, we set this to 1 GB. Should do
+# some benchmark to make sure this is safe.
+SERVICES_MEMORY_USAGE_GB = 1.0
 SERVICES_TASK_CPU_DEMAND = 0.125
 
 # A period of time to initialize your service. Any readiness probe failures

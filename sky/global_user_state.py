@@ -25,7 +25,6 @@ from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
-    from sky import serve
     from sky.data import Storage
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
@@ -93,13 +92,6 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
-    # Table for Services
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS services (
-        name TEXT PRIMARY KEY,
-        launched_at INTEGER,
-        controller_name TEXT,
-        endpoint TEXT DEFAULT NULL)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -280,30 +272,6 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
-def add_service(name: str, launched_at: int, controller_name: str) -> None:
-    _DB.cursor.execute(
-        'INSERT INTO services'
-        '(name, launched_at, controller_name) '
-        'VALUES ('
-        # name
-        '?, '
-        # launched_at
-        '?, '
-        # controller_name
-        '?'
-        ')',
-        (
-            # name
-            name,
-            # launched_at
-            launched_at,
-            # controller_name
-            controller_name,
-        ))
-
-    _DB.conn.commit()
-
-
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
@@ -345,21 +313,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
     _DB.conn.commit()
 
 
-def remove_service(service_name: str):
-    _DB.cursor.execute('DELETE FROM services WHERE name=(?)', (service_name,))
-    _DB.conn.commit()
-
-
-def set_service_endpoint(service_name: str, endpoint: str):
-    _DB.cursor.execute('UPDATE services SET endpoint=(?) '
-                       'WHERE name=(?)', (endpoint, service_name))
-    count = _DB.cursor.rowcount
-    _DB.conn.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Service {service_name} not found.')
-
-
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
@@ -374,13 +327,6 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name GLOB (?)',
                               (cluster_name,))
-    return [row[0] for row in rows]
-
-
-def get_glob_service_names(service_name: str) -> List[str]:
-    assert service_name is not None, 'service_name cannot be None'
-    rows = _DB.cursor.execute('SELECT name FROM services WHERE name GLOB (?)',
-                              (service_name,))
     return [row[0] for row in rows]
 
 
@@ -588,50 +534,6 @@ def get_cluster_from_name(
     return None
 
 
-def _get_service_from_row(row) -> Dict[str, Any]:
-    # Explicitly specify the number of fields to unpack, so that
-    # we can add new fields to the database in the future without
-    # breaking the previous code.
-    name, launched_at, controller_name, endpoint = row[:4]
-    # TODO: use namedtuple instead of dict
-    return {
-        'name': name,
-        'launched_at': launched_at,
-        'controller_name': controller_name,
-        'endpoint': endpoint,
-    }
-
-
-def get_service_from_name(
-        service_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
-                              (service_name,)).fetchall()
-    for row in rows:
-        return _get_service_from_row(row)
-    return None
-
-
-def get_service_controller_name(service_name: Optional[str]) -> Optional[str]:
-    rows = _DB.cursor.execute(
-        'SELECT controller_name FROM services WHERE name=(?)',
-        (service_name,)).fetchall()
-    for (controller_name,) in rows:
-        return controller_name
-    return None
-
-
-def get_services_from_controller_name(
-        controller_name: str) -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute(
-        'SELECT * FROM services WHERE controller_name=(?)',
-        (controller_name,)).fetchall()
-    records = []
-    for row in rows:
-        record = _get_service_from_row(row)
-        records.append(record)
-    return records
-
-
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc').fetchall()
@@ -654,16 +556,6 @@ def get_clusters() -> List[Dict[str, Any]]:
             'cluster_hash': cluster_hash,
         }
 
-        records.append(record)
-    return records
-
-
-def get_services() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute(
-        'select * from services order by launched_at desc').fetchall()
-    records = []
-    for row in rows:
-        record = _get_service_from_row(row)
         records.append(record)
     return records
 

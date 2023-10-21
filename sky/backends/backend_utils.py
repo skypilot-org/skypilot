@@ -133,14 +133,14 @@ class ReservedClusterGroup(enum.Enum):
             'managed spot controller. '))
     SKY_SERVE_CONTROLLER = ReservedClusterRecord(
         group_name='Sky Serve controller',
-        check=lambda name: name.startswith(serve_lib.CONTROLLER_PREFIX),
+        check=lambda name: name == serve_lib.SKY_SERVE_CONTROLLER_NAME,
         sky_status_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         check_cluster_name_hint=(
-            f'Cluster prefix {serve_lib.CONTROLLER_PREFIX} is reserved for '
+            f'Cluster {serve_lib.SKY_SERVE_CONTROLLER_NAME} is reserved for '
             'sky serve controller. '))
 
     @classmethod
@@ -161,10 +161,6 @@ class ReservedClusterGroup(enum.Enum):
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
-
-# Filelocks for the service status change.
-SERVICE_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.service.{}.lock')
-SERVICE_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -2558,6 +2554,84 @@ def check_cluster_available(
     return handle
 
 
+# TODO(tian): Probably use ReservedClusterGroup and add some attr for the msg?
+def is_controller_up(
+    is_spot: bool,
+    stopped_message: str,
+    non_existent_message: Optional[str] = None,
+) -> Tuple[Optional[status_lib.ClusterStatus],
+           Optional['backends.CloudVmRayResourceHandle']]:
+    """Check if the spot/serve controller is up.
+
+    It can be used to check the actual controller status (since the autostop is
+    set for the controller) before the spot/serve commands interact with the
+    controller.
+
+    Args:
+        is_spot: Whether the type of the controller is spot.
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
+
+    Returns:
+        controller_status: The status of the controller. If it fails during
+          refreshing the status, it will be the cached status. None if the
+          controller does not exist.
+        handle: The ResourceHandle of the controller. None if the
+          controller is not UP or does not exist.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
+          the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+    """
+    if is_spot:
+        controller_name = spot_lib.SPOT_CONTROLLER_NAME
+        controller_hint = 'spot'
+        if non_existent_message is None:
+            non_existent_message = 'No managed spot jobs are found.'
+    else:
+        controller_name = serve_lib.SKY_SERVE_CONTROLLER_NAME
+        controller_hint = 'sky serve'
+        if non_existent_message is None:
+            non_existent_message = 'No service is found.'
+    try:
+        # Set force_refresh_statuses=None to make sure the refresh only happens
+        # when the controller is INIT/UP (triggered in these statuses as the
+        # autostop is always set for the controller). This optimization avoids
+        # unnecessary costly refresh when the controller is already stopped.
+        # This optimization is based on the assumption that the user will not
+        # start the controller manually from the cloud console.
+        controller_status, handle = refresh_cluster_status_handle(
+            controller_name, force_refresh_statuses=None)
+    except exceptions.ClusterStatusFetchingError as e:
+        # We do not catch the exceptions related to the cluster owner identity
+        # mismatch, please refer to the comment in
+        # `backend_utils.check_cluster_available`.
+        logger.warning(
+            'Failed to get the status of the controller. It is not '
+            f'fatal, but {controller_hint} commands/calls may hang or return '
+            'stale information, when the controller is not up.\n'
+            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
+        record = global_user_state.get_cluster_from_name(controller_name)
+        controller_status, handle = None, None
+        if record is not None:
+            controller_status, handle = record['status'], record['handle']
+
+    if controller_status is None:
+        sky_logging.print(non_existent_message)
+    elif controller_status != status_lib.ClusterStatus.UP:
+        msg = (f'{controller_hint.capitalize()} controller {controller_name} '
+               f'is {controller_status.value}.')
+        if controller_status == status_lib.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        sky_logging.print(msg)
+        handle = None
+    return controller_status, handle
+
+
 class CloudFilter(enum.Enum):
     # Filter for all types of clouds.
     ALL = 'all'
@@ -2710,138 +2784,59 @@ def get_clusters(
     return kept_records
 
 
-def _add_default_value_to_local_record(
-        record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    # NOTE(dev): Keep this align with sky.serve.controller.get_latest_info
-    if record is None:
-        return record
-    record.update({
-        'replica_info': [],
-        'uptime': None,
-        'status': serve_lib.ServiceStatus.UNKNOWN,
-        'controller_port': None,
-        'load_balancer_port': None,
-        'policy': None,
-        'auto_restart': True,
-        'requested_resources': sky.Resources(),
-    })
-    return record
-
-
-def _refresh_service_record_no_lock(
-        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Refresh the service, and return the possibly updated record.
+def refresh_service_status(
+        service_names: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Refresh the status of the services.
 
     Args:
-        service_name: The name of the service.
+        service_names: If provided, only refresh the status of the specified
+            services. Otherwise, refresh the status of all services.
 
     Returns:
-        A tuple of a possibly updated record and an error message if any error
-        occurred when refreshing the service.
+        A list of updated service records.
     """
-    record = global_user_state.get_service_from_name(service_name)
-    if record is None:
-        return None, None
-    _add_default_value_to_local_record(record)
-
     try:
         check_network_connection()
     except exceptions.NetworkError:
-        return record, 'Failed to refresh replica info due to network error.'
+        logger.warning('Failed to refresh service status due to network error.')
+        return []
 
-    if not record['endpoint']:
-        # Service controller is still initializing. Skipped refresh status.
-        record['status'] = serve_lib.ServiceStatus.CONTROLLER_INIT
-        return record, None
+    # TODO(tian): This is so slow... It will take ~10s to refresh the status
+    # of controller. Can we optimize this?
+    controller_status, handle = is_controller_up(
+        is_spot=False, stopped_message='No service is found.')
 
-    controller_name = record['controller_name']
-    status, handle = refresh_cluster_status_handle(controller_name)
-    if status is None or status == status_lib.ClusterStatus.STOPPED:
-        return record, None
+    if handle is None or handle.head_ip is None:
+        # When the controller is STOPPED, the head_ip will be None, as
+        # it will be set in global_user_state.remove_cluster().
+        # We do not directly check for UP because the controller may be
+        # in INIT state during another spot launch, but still have
+        # head_ip available. In this case, we can still try to ssh
+        # into the controller and fetch the job table.
+        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
+                                           cluster_status=controller_status)
 
     backend = get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve_lib.ServeCodeGen.get_latest_info(service_name)
+    code = serve_lib.ServeCodeGen.get_latest_info(service_names)
     returncode, latest_info_payload, stderr = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
         stream_logs=False,
         separate_stderr=True)
-    if returncode != 0:
-        return record, stderr
 
-    latest_info = serve_lib.load_latest_info(latest_info_payload)
-    record.update(latest_info)
-    return record, None
-
-
-def _refresh_service_record(
-        service_name: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     try:
-        with filelock.FileLock(SERVICE_STATUS_LOCK_PATH.format(service_name),
-                               SERVICE_STATUS_LOCK_TIMEOUT_SECONDS):
-            return _refresh_service_record_no_lock(service_name)
-    except filelock.Timeout:
-        msg = ('Failed get the lock for service '
-               f'{service_name!r}. Using the cached record.')
-        return _add_default_value_to_local_record(
-            global_user_state.get_service_from_name(service_name)), msg
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch services',
+                                           stderr,
+                                           stream_logs=False)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
 
-
-# TODO(tian): We can optimize the number of ssh connections, by querying the
-# statuses of multiple services in a single ssh
-def refresh_service_status(
-        service_names: Optional[Union[str, List[str]]]) -> List[Dict[str, Any]]:
-    yellow = colorama.Fore.YELLOW
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
-
-    records = global_user_state.get_services()
-    if service_names is not None:
-        if isinstance(service_names, str):
-            service_names = [service_names]
-        new_records = []
-        not_exist_service_names = []
-        for service_name in service_names:
-            for record in records:
-                if record['name'] == service_name:
-                    new_records.append(record)
-                    break
-            else:
-                not_exist_service_names.append(service_name)
-        if not_exist_service_names:
-            services_str = ', '.join(not_exist_service_names)
-            logger.info(f'Service(s) not found: {bright}{services_str}{reset}.')
-        records = new_records
-
-    service_names = [record['name'] for record in records]
-
-    plural = 's' if len(service_names) > 1 else ''
-    progress = rich_progress.Progress(transient=True,
-                                      redirect_stdout=False,
-                                      redirect_stderr=False)
-    task = progress.add_task(
-        (f'[bold cyan]Refreshing status for {len(service_names)} '
-         f'service{plural}[/]'),
-        total=len(service_names))
-
-    def _refresh_service(service_name: str) -> Optional[Dict[str, Any]]:
-        record, msg = _refresh_service_record(service_name)
-        if msg is not None:
-            progress.stop()
-            print(f'{yellow}Error occurred when refreshing service '
-                  f'{service_name}: {msg}{reset}')
-            progress.start()
-        progress.update(task, advance=1)
-        return record
-
-    with progress:
-        updated_records = subprocess_utils.run_in_parallel(
-            _refresh_service, service_names)
-
-    return [record for record in updated_records if record is not None]
+    return serve_lib.load_latest_info(latest_info_payload)
 
 
 # Internal only:

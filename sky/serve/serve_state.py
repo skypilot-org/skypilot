@@ -120,18 +120,22 @@ class ServiceStatus(enum.Enum):
     # Service is being shutting down
     SHUTTING_DOWN = 'SHUTTING_DOWN'
 
-    # Cannot connect to controller
-    UNKNOWN = 'UNKNOWN'
-
     # At least one replica is failed and no replica is ready
     FAILED = 'FAILED'
 
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
+    # Max service number is reached and the service is pending
+    PENDING = 'PENDING'
+
     @classmethod
     def failed_statuses(cls) -> List['ServiceStatus']:
-        return [cls.CONTROLLER_FAILED, cls.UNKNOWN, cls.FAILED_CLEANUP]
+        return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP]
+
+    @classmethod
+    def refuse_to_terminate_statuses(cls) -> List['ServiceStatus']:
+        return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP, cls.SHUTTING_DOWN]
 
     def colored_str(self) -> str:
         color = _SERVICE_STATUS_TO_COLOR[self]
@@ -156,19 +160,16 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
-    ServiceStatus.UNKNOWN: colorama.Fore.YELLOW,
+    ServiceStatus.PENDING: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
 }
 
 
 # === Service functions ===
-def add_service(name: str,
-                controller_job_id: int,
-                policy: str,
-                auto_restart: bool,
-                requested_resources: 'sky.Resources',
-                status: ServiceStatus = ServiceStatus.CONTROLLER_INIT) -> None:
+def add_service(name: str, controller_job_id: int, policy: str,
+                auto_restart: bool, requested_resources: 'sky.Resources',
+                status: ServiceStatus) -> None:
     """Adds a service to the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
@@ -262,6 +263,30 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
         for row in rows:
             return _get_service_from_row(row)
         return None
+
+
+def get_glob_service_names(
+        service_names: Optional[List[str]] = None) -> List[str]:
+    """Get service names matching the glob patterns.
+
+    Args:
+        service_names: A list of glob patterns. If None, return all service
+            names.
+
+    Returns:
+        A list of non-duplicated service names.
+    """
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        if service_names is None:
+            rows = cursor.execute('SELECT name FROM services').fetchall()
+        else:
+            rows = []
+            for service_name in service_names:
+                rows.extend(
+                    cursor.execute(
+                        'SELECT name FROM services WHERE name GLOB (?)',
+                        (service_name,)).fetchall())
+        return list({row[0] for row in rows})
 
 
 # === Replica functions ===

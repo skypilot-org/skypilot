@@ -8,12 +8,10 @@ import getpass
 import os
 import re
 import tempfile
-import time
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
-import filelock
 
 import sky
 from sky import backends
@@ -983,11 +981,6 @@ def serve_up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    if global_user_state.get_service_from_name(service_name) is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service name {service_name!r} is already '
-                             'taken. Please use a different name.')
-
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
@@ -1010,8 +1003,8 @@ def serve_up(
             raise ValueError(
                 _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
                     controller_type='serve',
-                    err=common_utils.format_exception(e,
-                                                      use_bracket=True))) from e
+                    err=common_utils.format_exception(e, use_bracket=True),
+                )) from e
 
     assert task.service is not None, task
     assert len(task.resources) == 1, task
@@ -1025,49 +1018,43 @@ def serve_up(
     task.set_resources(
         requested_resources.copy(ports=[task.service.replica_port]))
 
-    # Use filelock here to make sure only one process can write to database
-    # at the same time. Then we generate available controller name again to
-    # make sure even in race condition, we can still get the correct controller
-    # name.
-    # In the same time, generate ports for the controller and load balancer.
-    # Use file lock to make sure the ports are unique to each service.
-    with filelock.FileLock(os.path.expanduser(serve.CONTROLLER_FILE_LOCK_PATH)):
-        controller_name = serve.get_available_controller_name()
-
-        global_user_state.add_service(service_name,
-                                      launched_at=int(time.time()),
-                                      controller_name=controller_name)
-        # TODO(tian): Probably run another sky.launch after we get
-        # the load balancer port from the controller? So we don't
-        # need to open so many ports here.
-        controller_resources = controller_resources.copy(
-            ports=[serve.LOAD_BALANCER_PORT_RANGE])
+    controller_name = serve.SKY_SERVE_CONTROLLER_NAME
+    # TODO(tian): Probably run another sky.launch after we get the load balancer
+    # port from the controller? So we don't need to open so many ports here. Or,
+    # we should have a nginx traffic control to refuse any connection to the
+    # unregistered ports.
+    # TODO(tian): Probably choose the same cloud if replica cloud is specified?
+    controller_resources = controller_resources.copy(
+        ports=[serve.LOAD_BALANCER_PORT_RANGE])
 
     _maybe_translate_local_file_mounts_and_sync_up(task, prefix='serve')
 
-    with tempfile.NamedTemporaryFile(prefix=f'serve-task-{service_name}-',
-                                     mode='w') as f:
+    with tempfile.NamedTemporaryFile(
+            prefix=f'service-task-{service_name}-',
+            mode='w',
+    ) as service_file, tempfile.NamedTemporaryFile(
+            prefix=f'controller-task-{service_name}-',
+            mode='w',
+    ) as controller_file:
         task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
-        remote_task_yaml_path = serve.generate_remote_task_yaml_file_name(
-            service_name)
+        common_utils.dump_yaml(service_file.name, task_config)
+        remote_task_yaml_path = (
+            serve.generate_remote_task_yaml_file_name(service_name))
         controller_log_file = (
             serve.generate_remote_controller_log_file_name(service_name))
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
-            'local_task_yaml_path': f.name,
+            'local_task_yaml_path': service_file.name,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'envs': _shared_controller_env_vars(),
         }
-        controller_yaml_path = serve.generate_controller_yaml_file_name(
-            service_name)
         backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
-                                    output_path=controller_yaml_path)
-        controller_task = task_lib.Task.from_yaml(controller_yaml_path)
+                                    output_path=controller_file.name)
+        controller_task = task_lib.Task.from_yaml(controller_file.name)
         controller_task.set_resources(controller_resources)
 
         # Set this to modify default ray task CPU usage to custom value
@@ -1075,10 +1062,8 @@ def serve_up(
         # to support a larger number of services.
         controller_task.service_name = service_name
 
-        fore = colorama.Fore
-        style = colorama.Style
-        print(f'{fore.YELLOW}Launching controller for {service_name!r}...'
-              f'{style.RESET_ALL}')
+        print(f'{colorama.Fore.YELLOW}Launching controller for '
+              f'{service_name!r}...{colorama.Style.RESET_ALL}')
         _execute(
             entrypoint=controller_task,
             stream_logs=False,
@@ -1090,60 +1075,3 @@ def serve_up(
             idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
-
-        controller_record = global_user_state.get_cluster_from_name(
-            controller_name)
-        assert controller_record is not None
-        handle = controller_record['handle']
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        with rich_utils.safe_status(
-                '[cyan]Waiting for service initialization...[/]'):
-            code = serve.ServeCodeGen.wait_for_load_balancer_port(service_name)
-            backend = backends.CloudVmRayBackend()
-            returncode, lb_port_payload, stderr = backend.run_on_head(
-                handle,
-                code,
-                require_outputs=True,
-                stream_logs=False,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(
-                returncode, code,
-                ('Failed to get load balancer port for service '
-                 f'{service_name!r}.'), stderr)
-            load_balancer_port = serve.decode_load_balancer_port(
-                lb_port_payload)
-        endpoint = f'{handle.head_ip}:{load_balancer_port}'
-        global_user_state.set_service_endpoint(service_name, endpoint)
-
-        print(f'{fore.GREEN}Launching controller for {service_name!r}...done.'
-              f'{style.RESET_ALL}')
-
-        print(f'{fore.CYAN}Service name: '
-              f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
-              '\nTo see detailed info:'
-              f'\t\t{backend_utils.BOLD}sky serve status {service_name} (-a)'
-              f'{backend_utils.RESET_BOLD}'
-              '\nTo see logs of one replica:'
-              f'\t{backend_utils.BOLD}sky serve logs {service_name} '
-              f'[REPLICA_ID]{backend_utils.RESET_BOLD}'
-              f'\n(use {backend_utils.BOLD}sky serve status {service_name}'
-              f'{backend_utils.RESET_BOLD} to get all valid [REPLICA_ID])'
-              '\nTo see logs of load balancer:'
-              f'\t{backend_utils.BOLD}sky serve logs --load-balancer '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo see logs of controller:'
-              f'\t{backend_utils.BOLD}sky serve logs --controller '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo teardown the service:'
-              f'\t{backend_utils.BOLD}sky serve down {service_name}'
-              f'{backend_utils.RESET_BOLD}'
-              '\nTo monitor replica status:'
-              f'\t{backend_utils.BOLD}watch -n10 sky serve status '
-              f'{service_name}{backend_utils.RESET_BOLD}'
-              '\nTo send a test request:'
-              f'\t\t{backend_utils.BOLD}curl -L $(sky serve status '
-              f'{service_name} --endpoint){backend_utils.RESET_BOLD}'
-              f'\n{style.BRIGHT}{fore.CYAN}Endpoint URL: '
-              f'{style.RESET_ALL}{fore.CYAN}'
-              f'{endpoint}{style.RESET_ALL}'
-              f'\n{fore.GREEN}Starting replicas now...{style.RESET_ALL}')

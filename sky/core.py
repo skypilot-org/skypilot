@@ -1,6 +1,5 @@
 """SDK functions for cluster/job management."""
 import getpass
-import os
 import sys
 from typing import Any, Dict, List, Optional, Union
 
@@ -21,7 +20,6 @@ from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
@@ -795,7 +793,8 @@ def spot_queue(refresh: bool,
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = spot.is_spot_controller_up(stop_msg)
+    controller_status, handle = backend_utils.is_controller_up(
+        is_spot=True, stopped_message=stop_msg)
 
     if (refresh and controller_status in [
             status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.INIT
@@ -866,10 +865,11 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    cluster_status, handle = spot.is_spot_controller_up(
-        'All managed spot jobs should have finished.')
+    cluster_status, handle = backend_utils.is_controller_up(
+        is_spot=True,
+        stopped_message='All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
-        # The error message is already printed in spot.is_spot_controller_up.
+        # The error message is already printed in backend_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError('',
@@ -924,9 +924,10 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    controller_status, handle = spot.is_spot_controller_up(
-        'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
+    controller_status, handle = backend_utils.is_controller_up(
+        is_spot=True,
+        stopped_message=('Please restart the spot controller with '
+                         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.'))
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == status_lib.ClusterStatus.INIT:
@@ -1045,6 +1046,9 @@ def serve_status(
         A list of dicts, with each dict containing the information of a service.
         If a service is not found, it will be omitted from the returned list.
     """
+    if service_names is not None:
+        if isinstance(service_names, str):
+            service_names = [service_names]
     return backend_utils.refresh_service_status(service_names)
 
 
@@ -1105,24 +1109,14 @@ def serve_tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_name = global_user_state.get_service_controller_name(
-        service_name)
-    if controller_name is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} does not exist. '
-                             'Cannot stream logs.')
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        controller_name)
-    if controller_status is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Cannot find controller for service {service_name}.')
-    if controller_status == status_lib.ClusterStatus.STOPPED:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
-                f'Controller for service {service_name} is auto-stopped.',
-                cluster_status=controller_status)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+    controller_status, handle = backend_utils.is_controller_up(
+        is_spot=False, stopped_message='No service is found.')
+    if handle is None or handle.head_ip is None:
+        msg = 'No service is found.'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg = ''
+        raise exceptions.ClusterNotUpError(msg,
+                                           cluster_status=controller_status)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     backend.tail_serve_logs(handle,
@@ -1133,71 +1127,65 @@ def serve_tail_logs(
 
 
 @usage_lib.entrypoint
-def serve_down(service_name: str, purge: bool = False) -> None:
+# pylint: disable=redefined-builtin
+def serve_down(service_names: Optional[Union[str, List[str]]] = None,
+               all: bool = False) -> None:
     """Teardown a service.
 
     Please refer to the sky.cli.serve_down for the document.
 
     Args:
-        service_name: Name of the service.
-        purge: If true, ignore errors when cleaning up the controller.
+        service_names: Name of the service(s).
 
     Raises:
-        ValueError: if the service does not exist.
+        sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
+        ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
-    controller_name = global_user_state.get_service_controller_name(
-        service_name)
-
-    if controller_name is None:
+    if service_names is None:
+        service_names = []
+    if isinstance(service_names, str):
+        service_names = [service_names]
+    cluster_status, handle = backend_utils.is_controller_up(
+        is_spot=False, stopped_message='All services should have terminated.')
+    if handle is None or handle.head_ip is None:
+        # The error message is already printed in backend_utils.is_controller_up
+        # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name!r} not found.')
+            raise exceptions.ClusterNotUpError('',
+                                               cluster_status=cluster_status)
 
-    handle = global_user_state.get_handle_from_cluster_name(controller_name)
+    service_names_str = ','.join(service_names)
+    if sum([len(service_names) > 0, all]) != 1:
+        argument_str = f'service_names={service_names_str}' if len(
+            service_names) > 0 else ''
+        argument_str += ' all' if all else ''
+        raise ValueError('Can only specify one of service_names or all. '
+                         f'Provided {argument_str!r}.')
 
-    controller_fetch_ip_error_message = (
-        'Failed to fetch controller IP. Please  refresh controller status by '
-        '`sky status -r <controller-name>` and try again.')
-
-    if handle is None:
-        if not purge:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Cannot find controller of service {service_name!r}.')
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    if all:
+        code = serve.ServeCodeGen.terminate_services(None)
     else:
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
-        try:
-            code = serve.ServeCodeGen.terminate_service(service_name)
+        code = serve.ServeCodeGen.terminate_services(service_names)
 
-            try:
-                returncode, stdout, _ = backend.run_on_head(
-                    handle, code, require_outputs=True, stream_logs=False)
-            except exceptions.FetchIPError as e:
-                raise RuntimeError(controller_fetch_ip_error_message) from e
+    try:
+        returncode, stdout, _ = backend.run_on_head(handle,
+                                                    code,
+                                                    require_outputs=True,
+                                                    stream_logs=False)
+    except exceptions.FetchIPError as e:
+        raise RuntimeError(
+            'Failed to fetch controller IP. Please refresh controller '
+            f'status by `sky status -r {serve.SKY_SERVE_CONTROLLER_NAME}` '
+            'and try again.') from e
 
-            subprocess_utils.handle_returncode(
-                returncode,
-                code, ('Failed when submit termination request to controller '
-                       f'of service {service_name!r}'),
-                stdout,
-                stream_logs=False)
+    try:
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to terminate service',
+                                           stdout)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
 
-        # We want to make sure no matter what error happens, we can still
-        # clean up the record if purge is True.
-        # pylint: disable=broad-except
-        except Exception as e:
-            if purge:
-                logger.warning('Ignoring error when terminate '
-                               f'service {service_name!r}: '
-                               f'{common_utils.format_exception(e)}')
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(e) from e
-
-    # TODO(tian): Maybe add a post_cleanup function?
-    controller_yaml_path = serve.generate_controller_yaml_file_name(
-        service_name)
-    if os.path.exists(controller_yaml_path):
-        os.remove(controller_yaml_path)
-    global_user_state.remove_service(service_name)
+    sky_logging.print(stdout)

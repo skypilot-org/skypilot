@@ -148,18 +148,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     return list(set(glob_storages))
 
 
-def _get_glob_services(service_names: List[str]) -> List[str]:
-    """Returns a list of service names that match the glob pattern."""
-    glob_service_names = []
-    for service_name in service_names:
-        glob_service_name = global_user_state.get_glob_service_names(
-            service_name)
-        if not glob_service_name:
-            click.echo(f'Service {service_name} not found.')
-        glob_service_names.extend(glob_service_name)
-    return list(set(glob_service_names))
-
-
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
                            message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
@@ -497,13 +485,6 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     """Handle shell completion for cluster names."""
     del ctx, param  # Unused.
     return global_user_state.get_cluster_names_start_with(incomplete)
-
-
-def _complete_service_name(ctx: click.Context, param: click.Parameter,
-                           incomplete: str) -> List[str]:
-    """Handle shell completion for service names."""
-    del ctx, param  # Unused.
-    return global_user_state.get_glob_service_names(f'{incomplete}*')
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
@@ -2744,24 +2725,46 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
-    services = global_user_state.get_services_from_controller_name(
+    cluster_status, _ = backend_utils.refresh_cluster_status_handle(
         controller_name)
-    if services:
-        # TODO(tian): When we switch to database for storing replica
-        # information, we could check total replicas of each service and
-        # allow terminating the controller if there is no existing replicas.
-        service_names = [service['name'] for service in services]
+    if cluster_status is None:
+        click.echo('Sky serve controller has already been torn down.')
+        return
+
+    if cluster_status == status_lib.ClusterStatus.INIT:
+        # TODO(tian): Refactor to reserved group record.
         with ux_utils.print_exception_no_traceback():
-            plural = '' if len(service_names) == 1 else 's'
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.RED}Tearing down the sky serve controller '
-                f'is not supported, as it is currently serving the following '
-                f'service{plural}: {", ".join(service_names)}. Please teardown '
-                f'the service{plural} first with {colorama.Style.BRIGHT}sky '
-                f'serve down {" ".join(service_names)}'
+                'while it is in INIT state is not supported (this means a sky '
+                'serve up is in progress or the previous launch failed), as we '
+                'cannot guarantee that all the services are terminated. Please '
+                'wait until the sky serve controller is UP or fix it with '
+                f'{colorama.Style.BRIGHT}sky start '
+                f'{serve_lib.SKY_SERVE_CONTROLLER_NAME}'
                 f'{colorama.Style.RESET_ALL}.')
-    msg = f'Tearing down sky serve controller: {controller_name}.'
-    click.echo(msg)
+    elif cluster_status == status_lib.ClusterStatus.UP:
+        with rich_utils.safe_status(
+                '[bold cyan]Checking for running services[/]'):
+            try:
+                services = core.serve_status()
+            except exceptions.ClusterNotUpError:
+                cluster_status = backend_utils.refresh_cluster_status_handle(
+                    controller_name)
+                services = []
+        if services:
+            service_names = [service['name'] for service in services]
+            with ux_utils.print_exception_no_traceback():
+                plural = '' if len(service_names) == 1 else 's'
+                raise exceptions.NotSupportedError(
+                    f'{colorama.Fore.RED}Tearing down the sky serve controller '
+                    f'is not supported, as it is currently serving the '
+                    f'following service{plural}: {", ".join(service_names)}. '
+                    f'Please terminate the service{plural} first with '
+                    f'{colorama.Style.BRIGHT}sky serve down '
+                    f'{" ".join(service_names)}{colorama.Style.RESET_ALL}.')
+    # Do nothing for STOPPED state, as it is safe to terminate the cluster.
+    click.echo(f'Terminate sky serve controller: {controller_name}.')
 
 
 _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE = {
@@ -3932,8 +3935,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed spot jobs with IDs 1, 2, 3
       $ sky spot cancel 1 2 3
     """
-    _, handle = spot_lib.is_spot_controller_up(
-        'All managed spot jobs should have finished.')
+    _, handle = backend_utils.is_controller_up(
+        is_spot=True,
+        stopped_message='All managed spot jobs should have finished.')
     if handle is None:
         # Hint messages already printed by the call above.
         sys.exit(1)
@@ -4016,7 +4020,8 @@ def spot_dashboard(port: Optional[int]):
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
         'job first.')
-    _, handle = spot_lib.is_spot_controller_up(stopped_message=hint,
+    _, handle = backend_utils.is_controller_up(is_spot=True,
+                                               stopped_message=hint,
                                                non_existent_message=hint)
     if handle is None:
         sys.exit(1)
@@ -4095,16 +4100,6 @@ def serve_up(
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
-    previous_service_record = global_user_state.get_service_from_name(
-        service_name)
-    if previous_service_record is not None:
-        prompt = (f'Service {service_name!r} already exists. '
-                  'Updating a service will be supported in the future. '
-                  'For now, clean up the service and restart: '
-                  f'sky serve down {service_name}')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(prompt)
-
     is_yaml, _ = _check_yaml(''.join(entrypoint))
     if not is_yaml:
         raise click.UsageError(
@@ -4155,11 +4150,7 @@ def serve_up(
               is_flag=True,
               required=False,
               help='Show service endpoint.')
-@click.argument('service_names',
-                required=False,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_service_name))
+@click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_status(all: bool, endpoint: bool, service_names: List[str]):
@@ -4238,32 +4229,47 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       # Only show status of my-service
       sky serve status my-service
     """
+    # This won't pollute the output of --endpoint.
+    with rich_utils.safe_status('[cyan]Checking services[/]'):
+        # TODO(tian): Add this to `sky status` as well.
+        msg = None
+        try:
+            with sky_logging.silent():
+                if not service_names:
+                    service_records = core.serve_status(None)
+                else:
+                    service_records = core.serve_status(service_names)
+        except exceptions.ClusterNotUpError as e:
+            controller_status = e.cluster_status
+            if controller_status == status_lib.ClusterStatus.INIT:
+                msg = 'Controller is initializing. Please wait for a while.'
+            else:
+                assert controller_status in [
+                    None, status_lib.ClusterStatus.STOPPED
+                ]
+                msg = 'No existing services.'
+        except RuntimeError as e:
+            msg = ('Failed to fetch service statuses due to connection issues. '
+                   'Please try again later. Details: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+        except Exception as e:  # pylint: disable=broad-except
+            msg = ('Failed to fetch service statuses: '
+                   f'{common_utils.format_exception(e, use_bracket=True)}')
+    if msg is not None:
+        click.echo(msg)
+        return
+
     if endpoint:
-        if len(service_names) != 1:
+        if len(service_records) != 1:
             plural = 's' if len(service_names) > 1 else ''
             service_num = (str(len(service_names))
                            if len(service_names) > 0 else 'No')
             raise click.UsageError(
-                f'{service_num} service{plural} specified. Please specify an'
+                f'{service_num} service{plural} found. Please specify an'
                 ' existing service to show its endpoint. Usage: '
                 '`sky serve status --endpoint <service-name>`')
-        service_name = service_names[0]
-        record = global_user_state.get_service_from_name(service_name)
-        if record is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'\nService {service_name!r} not found.')
-        service_endpoint = record['endpoint']
-        if service_endpoint is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Endpoint not found for service {service_name!r}. '
-                    'Please check whether the service is ready.')
-        click.echo(service_endpoint)
+        click.echo(status_utils.get_endpoint(service_records[0]))
         return
-    query_services: Optional[List[str]] = None
-    if service_names:
-        query_services = _get_glob_services(service_names)
-    service_records = core.serve_status(query_services)
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
                f'{colorama.Style.RESET_ALL}')
     status_utils.show_service_table(service_records, all)
@@ -4272,26 +4278,16 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     replica_infos = []
     for service_record in service_records:
         for replica_record in service_record['replica_info']:
-            # Only print FAILED replicas if:
-            # 1. --all is specified;
-            # 2. auto_restart is not enabled (in which FAILED replica count
-            #    as one replica).
-            if (all or not service_record['auto_restart'] or
-                    replica_record['status'] != serve_lib.ReplicaStatus.FAILED):
-                replica_record['service_name'] = service_record['name']
-                replica_infos.append(replica_record)
+            replica_record['service_name'] = service_record['name']
+            replica_infos.append(replica_record)
     status_utils.show_replica_table(replica_infos, all)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
-@click.argument('service_names',
-                required=False,
-                type=str,
-                nargs=-1,
-                **_get_shell_complete_args(_complete_service_name))
+@click.argument('service_names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
               help='Stop all existing clusters.')
 @click.option('--yes',
@@ -4300,18 +4296,8 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option('--purge',
-              '-p',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Ignore errors (if any). ')
-def serve_down(
-    service_names: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
-    yes: bool,
-    purge: bool,
-):
+# pylint: disable=redefined-builtin
+def serve_down(service_names: List[str], all: bool, yes: bool):
     """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
@@ -4337,65 +4323,32 @@ def serve_down(
         sky serve down -a
 
     """
-    if not service_names and not all:
+    service_names_str = ','.join(service_names)
+    if sum([len(service_names) > 0, all]) != 1:
+        argument_str = f'SERVICE_NAMES={service_names_str}' if len(
+            service_names) > 0 else ''
+        argument_str += ' --all' if all else ''
         raise click.UsageError(
-            '`sky serve down` requires either a service name (see '
-            '`sky serve status`) or --all to be specified.')
-    if all:
-        service_names = [
-            record['name'] for record in global_user_state.get_services()
-        ]
-    else:
-        service_names = _get_glob_services(service_names)
+            'Can only specify one of SERVICE_NAMES or --all. '
+            f'Provided {argument_str!r}.')
 
-    if not service_names:
-        click.echo('\nService(s) not found (tip: see `sky serve status`).')
-        return
+    _, handle = backend_utils.is_controller_up(
+        is_spot=False,
+        stopped_message='All services should have been terminated.')
+    if handle is None:
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
-    plural = '' if len(service_names) == 1 else 's'
     if not yes:
-        service_name_list = ', '.join(service_names)
-        click.confirm(
-            f'Tearing down {len(service_names)} service{plural}: '
-            f'{service_name_list}. Proceed?',
-            default=True,
-            abort=True,
-            show_default=True)
+        service_identity_str = f'services with name {service_names_str}'
+        if all:
+            service_identity_str = 'all services'
+        click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
 
-    progress = rich_progress.Progress(transient=True,
-                                      redirect_stdout=False,
-                                      redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Tearing down {len(service_names)} service{plural}[/]',
-        total=len(service_names))
-
-    def _down_service(name: str):
-        success_progress = False
-        try:
-            sky.serve_down(name, purge)
-        except RuntimeError as e:
-            message = (
-                f'{colorama.Fore.RED}Tearing down service {name!r}...failed. '
-                'Please manually clean up the replicas and then use --purge '
-                f'to clean up the controller.{colorama.Style.RESET_ALL}'
-                f'\nReason: {common_utils.format_exception(e)}.')
-        else:
-            message = (
-                f'{colorama.Fore.GREEN}Tearing down service {name!r}...done.'
-                f'{colorama.Style.RESET_ALL}')
-            success_progress = True
-
-        progress.stop()
-        click.echo(message)
-        if success_progress:
-            progress.update(task, advance=1)
-        progress.start()
-
-    with progress:
-        subprocess_utils.run_in_parallel(_down_service, service_names)
-        progress.live.transient = False
-        # Make sure the progress bar not mess up the terminal.
-        progress.refresh()
+    sky.serve_down(service_names=service_names, all=all)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4421,10 +4374,7 @@ def serve_down(
                                 case_sensitive=False),
               required=False,
               help='Target to stream logs.')
-@click.argument('service_name',
-                required=True,
-                type=str,
-                **_get_shell_complete_args(_complete_service_name))
+@click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
 def serve_logs(
@@ -4460,6 +4410,7 @@ def serve_logs(
         # Tail the controller logs of a service:
         sky serve logs --controller --target load-balancer [SERVICE_ID]
     """
+    # TODO(tian): nit: use sum([...])
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:
@@ -4489,10 +4440,14 @@ def serve_logs(
                 'REPLICA_ID must be specified when using --target replica.')
     else:
         target_component = sky.ServiceComponent.REPLICA
-    core.serve_tail_logs(service_name,
-                         target=target_component,
-                         replica_id=replica_id,
-                         follow=follow)
+    try:
+        core.serve_tail_logs(service_name,
+                             target=target_component,
+                             replica_id=replica_id,
+                             follow=follow)
+    except exceptions.ClusterNotUpError:
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
 
 # ==============================

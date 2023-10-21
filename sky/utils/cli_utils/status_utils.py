@@ -1,21 +1,18 @@
 """Utilities for sky status."""
 import re
-import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
+from sky import global_user_state
 from sky import serve
 from sky import spot
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
-
-if typing.TYPE_CHECKING:
-    import sky
 
 COMMAND_TRUNC_LENGTH = 25
 REPLICA_TRUNC_NUM = 10
@@ -124,10 +121,7 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         StatusColumn('UPTIME', _get_uptime),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('REPLICAS', _get_replicas),
-        StatusColumn('CONTROLLER_NAME',
-                     _get_controller_name,
-                     show_by_default=False),
-        StatusColumn('ENDPOINT', _get_endpoint),
+        StatusColumn('ENDPOINT', get_endpoint),
         StatusColumn('POLICY', _get_policy, show_by_default=False),
         StatusColumn('REQUESTED_RESOURCES',
                      _get_requested_resources,
@@ -391,7 +385,6 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 _get_replica_id = lambda replica_record: replica_record['replica_id']
 _get_service_name = lambda replica_record: replica_record['service_name']
-_get_controller_name = lambda replica_record: replica_record['controller_name']
 _get_policy = lambda replica_record: replica_record['policy']
 _get_requested_resources = lambda replica_record: replica_record[
     'requested_resources']
@@ -416,11 +409,17 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def _get_endpoint(service_record: _ServiceRecord) -> str:
-    endpoint = service_record['endpoint']
-    if endpoint is None:
+def get_endpoint(service_record: _ServiceRecord) -> str:
+    # Don't use backend_utils.is_controller_up since it is too slow.
+    handle = global_user_state.get_handle_from_cluster_name(
+        serve.SKY_SERVE_CONTROLLER_NAME)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    if handle is None or handle.head_ip is None:
         return '-'
-    return endpoint
+    load_balancer_port = service_record['load_balancer_port']
+    if load_balancer_port is None:
+        return '-'
+    return f'{handle.head_ip}:{load_balancer_port}'
 
 
 def _get_service_status(service_record: _ServiceRecord) -> serve.ServiceStatus:
