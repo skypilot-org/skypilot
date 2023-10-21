@@ -89,7 +89,7 @@ class SkyServeController:
             request_information = pickle.loads(
                 base64.b64decode(request_information_payload))
             logger.info(
-                f'Received request information: {request_information!r}')
+                f'Received inflight request information: {request_information}')
             if isinstance(self.autoscaler, autoscalers.RequestRateAutoscaler):
                 if not isinstance(request_information,
                                   serve_utils.RequestTimestamp):

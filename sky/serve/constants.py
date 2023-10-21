@@ -4,17 +4,12 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
-SERVE_PREFIX = '~/.sky/serve'
-
-# The filelock for selecting controller and service ports when starting a
-# service. In our current multi-service controller implementation, we need to
-# select a controller if there are some existing controllers.
-CONTROLLER_FILE_LOCK_PATH = f'{SERVE_PREFIX}/controller.lock'
+SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
 # The filelock for selecting service ports when starting a service. We need to
 # have a filelock to avoid port collision when starting multiple services at
 # the same time.
-PORT_SELECTION_FILE_LOCK_PATH = f'{SERVE_PREFIX}/port_selection.lock'
+PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'

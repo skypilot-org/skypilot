@@ -364,7 +364,8 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        group = backend_utils.ReservedClusterGroup.get_group(cluster_name)
+        group = backend_utils.ReservedClusterGroup.check_cluster_name(
+            cluster_name)
         if group is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #

@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
     import sky
     from sky.serve import replica_managers
 
-_DB_PATH = pathlib.Path(constants.SERVE_PREFIX) / 'services.db'
+_DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
 _DB_PATH = _DB_PATH.expanduser().absolute()
 _DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
 _DB_PATH = str(_DB_PATH)
@@ -73,8 +73,10 @@ class ReplicaStatus(enum.Enum):
     # The replica VM is once failed and has been deleted.
     FAILED = 'FAILED'
 
-    # `sky.down` failed during service teardown. This could mean resource
-    # leakage.
+    # `sky.down` failed during service teardown.
+    # This could mean resource leakage.
+    # TODO(tian): This status should be removed in the future, at which point
+    # we should guarantee no resource leakage like regular sky.
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
     # Unknown status. This should never happen.

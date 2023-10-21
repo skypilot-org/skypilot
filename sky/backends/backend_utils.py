@@ -144,12 +144,13 @@ class ReservedClusterGroup(enum.Enum):
             'sky serve controller. '))
 
     @classmethod
-    def get_group(cls, name: Optional[str]) -> Optional['ReservedClusterGroup']:
-        """Get the reserved group of a cluster with its name.
+    def check_cluster_name(
+            cls, name: Optional[str]) -> Optional['ReservedClusterGroup']:
+        """Check if the cluster name is reserved.
 
         Returns:
-            the group name if the cluster name is reserved. Otherwise,
-            returns None.
+            The group name if the cluster name is reserved.
+            Otherwise, returns None.
         """
         if name is None:
             return None
@@ -2675,7 +2676,7 @@ def get_clusters(
     if not include_reserved:
         records = [
             record for record in records
-            if ReservedClusterGroup.get_group(record['name']) is None
+            if ReservedClusterGroup.check_cluster_name(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2965,7 +2966,7 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
-    group = ReservedClusterGroup.get_group(cluster_name)
+    group = ReservedClusterGroup.check_cluster_name(cluster_name)
     if group is not None:
         msg = group.value.check_cluster_name_hint
         if operation_str is not None:

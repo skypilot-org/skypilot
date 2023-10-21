@@ -181,7 +181,7 @@ class RedirectOutputTo:
 
 def generate_remote_service_dir_name(service_name: str) -> str:
     service_name = service_name.replace('-', '_')
-    return os.path.join(constants.SERVE_PREFIX, service_name)
+    return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
 
 
 def generate_remote_task_yaml_file_name(service_name: str) -> str:

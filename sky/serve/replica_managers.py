@@ -316,13 +316,13 @@ class ReplicaInfo:
             # TODO(tian): Support HTTPS in the future.
             readiness_path = f'http://{replica_ip}{readiness_suffix}'
             if post_data is not None:
-                msg += 'Post'
+                msg += 'POST'
                 response = requests.post(
                     readiness_path,
                     json=post_data,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT)
             else:
-                msg += 'Get'
+                msg += 'GET'
                 response = requests.get(
                     readiness_path,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT)
@@ -334,7 +334,7 @@ class ReplicaInfo:
                 msg += f' and response {response.text}.'
             logger.info(msg)
             if response.status_code == 200:
-                logger.info(f'Replica {replica_ip} is ready.')
+                logger.debug(f'Replica {replica_ip} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
             logger.info(e)
@@ -572,7 +572,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     def _process_pool_refresher(self) -> None:
         """Periodically refresh the launch/down process pool."""
         while True:
-            logger.info('Refreshing process pool.')
+            logger.debug('Refreshing process pool.')
             try:
                 self._refresh_process_pool()
             except Exception as e:  # pylint: disable=broad-except
@@ -617,7 +617,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     def _job_status_fetcher(self) -> None:
         """Periodically fetch the service job status of all replicas."""
         while True:
-            logger.info('Refreshing job status.')
+            logger.debug('Refreshing job status.')
             try:
                 self._fetch_job_status()
             except Exception as e:  # pylint: disable=broad-except
@@ -713,7 +713,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     def _replica_prober(self) -> None:
         """Periodically probe replicas."""
         while True:
-            logger.info('Running replica prober.')
+            logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
                 replica_statuses = [

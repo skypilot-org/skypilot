@@ -114,8 +114,8 @@ _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
     'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
-                            '`sky spot launch`. `{command}` supports a '
-                            'single task only.')
+                              '`sky spot launch`. `{command}` supports a '
+                              'single task only.')
 
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
@@ -1431,7 +1431,7 @@ def launch(
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
-            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky launch'))
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky launch'))
     task = task_or_dag
 
     backend: backends.Backend
@@ -1815,7 +1815,8 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         reserved_clusters = []
         for cluster_record in cluster_records:
             cluster_name = cluster_record['name']
-            group = backend_utils.ReservedClusterGroup.get_group(cluster_name)
+            group = backend_utils.ReservedClusterGroup.check_cluster_name(
+                cluster_name)
             if group is not None:
                 reserved_clusters.append(cluster_record)
                 hints.append(group.value.sky_status_hint)
@@ -1921,7 +1922,8 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     reserved_clusters = dict()
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
-        group = backend_utils.ReservedClusterGroup.get_group(cluster_name)
+        group = backend_utils.ReservedClusterGroup.check_cluster_name(
+            cluster_name)
         if group is not None:
             cluster_group_name = group.value.group_name
             # to display most recent entry for each reserved cluster
@@ -2189,7 +2191,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
-        group = backend_utils.ReservedClusterGroup.get_group(cluster)
+        group = backend_utils.ReservedClusterGroup.check_cluster_name(cluster)
         assert group is not None, cluster
         click.echo(group.value.decline_cancel_hint)
         sys.exit(1)
@@ -2483,8 +2485,8 @@ def start(
         clusters = [
             cluster['name']
             for cluster in global_user_state.get_clusters()
-            if backend_utils.ReservedClusterGroup.get_group(cluster['name']) is
-            None
+            if backend_utils.ReservedClusterGroup.check_cluster_name(
+                cluster['name']) is None
         ]
 
     if not clusters:
@@ -2552,16 +2554,16 @@ def start(
     # Checks for reserved clusters (spot controller).
     reserved, non_reserved = [], []
     for name in to_start:
-        if backend_utils.ReservedClusterGroup.get_group(name) is not None:
+        if backend_utils.ReservedClusterGroup.check_cluster_name(
+                name) is not None:
             reserved.append(name)
         else:
             non_reserved.append(name)
     if reserved and non_reserved:
         # Keep this behavior the same as _down_or_stop_clusters().
-        raise click.UsageError(
-            'Starting controllers with other cluster(s) '
-            'is currently not supported.\n'
-            'Please start the former independently.')
+        raise click.UsageError('Starting controllers with other cluster(s) '
+                               'is currently not supported.\n'
+                               'Please start the former independently.')
     if reserved:
         bold = backend_utils.BOLD
         reset_bold = backend_utils.RESET_BOLD
@@ -2818,12 +2820,13 @@ def _down_or_stop_clusters(
     if len(names) > 0:
         reserved_clusters = [
             name for name in names
-            if backend_utils.ReservedClusterGroup.get_group(name) is not None
+            if backend_utils.ReservedClusterGroup.check_cluster_name(name)
+            is not None
         ]
         reserved_clusters_str = ', '.join(map(repr, reserved_clusters))
         names = [
-            name for name in _get_glob_clusters(names)
-            if backend_utils.ReservedClusterGroup.get_group(name) is None
+            name for name in _get_glob_clusters(names) if
+            backend_utils.ReservedClusterGroup.check_cluster_name(name) is None
         ]
         if not down:
             local_clusters = onprem_utils.check_and_get_local_clusters()
@@ -2857,17 +2860,16 @@ def _down_or_stop_clusters(
                     f'{operation} reserved cluster(s) '
                     f'{reserved_clusters_str} is currently not supported.')
             else:
-                reserved_group = backend_utils.ReservedClusterGroup.get_group(
-                    reserved_cluster)
+                reserved_group = (backend_utils.ReservedClusterGroup.
+                                  check_cluster_name(reserved_cluster))
                 assert reserved_group is not None
                 hint_or_raise = _RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE[
                     reserved_group]
                 hint_or_raise(reserved_cluster)
                 confirm_str = 'delete'
                 user_input = click.prompt(
-                    f'To proceed, please check the information above and type '
-                    f'{colorama.Style.BRIGHT}{confirm_str!r}'
-                    f'{colorama.Style.RESET_ALL}',
+                    f'To proceed, please type {colorama.Style.BRIGHT}'
+                    f'{confirm_str!r}{colorama.Style.RESET_ALL}',
                     type=str)
                 if user_input != confirm_str:
                     raise click.Abort()
@@ -2884,8 +2886,10 @@ def _down_or_stop_clusters(
         # Otherwise, it would be very easy to accidentally delete a reserved
         # cluster.
         names = [
-            record['name'] for record in all_clusters if
-            backend_utils.ReservedClusterGroup.get_group(record['name']) is None
+            record['name']
+            for record in all_clusters
+            if backend_utils.ReservedClusterGroup.check_cluster_name(
+                record['name']) is None
         ]
 
     clusters = []
@@ -4064,7 +4068,7 @@ def serve():
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint',
+@click.argument('service_yaml',
                 required=True,
                 type=str,
                 nargs=-1,
@@ -4083,13 +4087,13 @@ def serve():
               help='Skip confirmation prompt.')
 # TODO(tian): Support the task_option overrides for the service.
 def serve_up(
-    entrypoint: List[str],
+    service_yaml: List[str],
     service_name: Optional[str],
     yes: bool,
 ):
     """Launch a SkyServe service.
 
-    ENTRYPOINT must point to a valid YAML file.
+    SERVICE_YAML must point to a valid YAML file.
 
     Example:
 
@@ -4100,26 +4104,27 @@ def serve_up(
     if service_name is None:
         service_name = backend_utils.generate_service_name()
 
-    is_yaml, _ = _check_yaml(''.join(entrypoint))
+    is_yaml, _ = _check_yaml(''.join(service_yaml))
     if not is_yaml:
-        raise click.UsageError(
-            'For `sky serve up`, the entrypoint must be a YAML file.')
+        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
+    # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint, entrypoint_name='Service')
+        service_yaml, entrypoint_name='Service')
     if isinstance(task, sky.Dag):
         raise click.UsageError(
-            _DAG_NOT_SUPPORT_MESSAGE.format(command='sky serve up'))
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
 
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the YAML file. To fix, add a valid `service` field.')
+            raise ValueError('Service section not found in the YAML file. '
+                             'To fix, add a valid `service` field.')
     assert len(task.resources) == 1
     requested_resources = list(task.resources)[0]
     if requested_resources.ports is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Specifying ports in resources is not allowed. Each replica will '
-                'use the port specified in the service section.')
+                'Specifying ports in resources is not allowed. Each replica '
+                'will use the port specified in the service section.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
@@ -4156,25 +4161,26 @@ def serve_up(
 def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe services.
 
-    Show detailed statuses of one or more services. If SERVICE_NAME is not provided,
-    show all services' status. If --endpoint is specified, output the endpoint
-    of the service only.
+    Show detailed statuses of one or more services. If SERVICE_NAME is not
+    provided, show all services' status. If --endpoint is specified, output
+    the endpoint of the service only.
 
     Each service can have one of the following statuses:
 
     - ``CONTROLLER_INIT``: The controller is initializing.
 
-    - ``REPLICA_INIT``: The controller provisioning has succeeded; controller
-      and load balancer processes are alive, and there are no available replicas
-      for now. This also indicates that no replica failure has been detected.
+    - ``REPLICA_INIT``: The controller has finished initializing, and there are
+      no available replicas for now. This also indicates that no replica failure
+      has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or is in an abnormal
       state; or the controller and load balancer processes are not alive.
 
-    - ``READY``: The service is ready to serve requests. At least one replica is in READY state (i.e., has passed the readiness probe).
+    - ``READY``: The service is ready to serve requests. At least one replica is
+      in READY state (i.e., has passed the readiness probe).
 
-    - ``SHUTTING_DOWN``: The controller is being shut down. This usually
-      happens when the `sky serve down` command is called.
+    - ``SHUTTING_DOWN``: The service is being shut down. This usually happens
+      when the `sky serve down` command is called.
 
     - ``FAILED``: At least one replica failed and no replica is ready. This
       could be caused by several reasons:
@@ -4195,24 +4201,26 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       initializing, e.g., installing dependencies or loading model
       weights.
 
-    - ``READY``: The replica is ready to serve requests (i.e., has passed the readiness probe).
+    - ``READY``: The replica is ready to serve requests (i.e., has passed the
+      readiness probe).
 
-    - ``NOT_READY``: The replica failed a readiness probe, but has not failed the probe for a continuous period of time (otherwise it'd be marked as XXXX). This usually happens when the replica
-      is suffering from a bad network connection or there are too many requests
-      overwhelming the replica.
+    - ``NOT_READY``: The replica failed a readiness probe, but has not failed
+      the probe for a continuous period of time (otherwise it'd be shut down).
+      This usually happens when the replica is suffering from a bad network
+      connection or there are too many requests overwhelming the replica.
 
-    - ``SHUTTING_DOWN``: The replica is being shutting down. This usually
-      happens when the replica is being scaled down or some error occurred.
-      SkyServe will terminate all replicas that have some error occurred.
+    - ``SHUTTING_DOWN``: The replica is being shut down. This usually happens
+      when the replica is being scaled down or some error occurred. SkyServe
+      will terminate all replicas that errored.
 
     - ``FAILED``: Some error occurred when the replica is serving requests.
       This indicates that the replica is already shut down. (Otherwise, it is
       ``SHUTTING_DOWN``.)
 
-    - ``FAILED_CLEANUP``: Some error occurred while the replica was being shut down.
-      This usually indicates resource leakages since the
-      termination did not finish correctly. When seeing this status, please login
-      to the cloud console and check whether there are some leaked VMs/resources.
+    - ``FAILED_CLEANUP``: Some error occurred while the replica was being shut
+      down. This usually indicates resource leakages since the termination
+      did not finish correctly. When seeing this status, please login to the
+      cloud console and check whether there are some leaked VMs/resources.
 
     Examples:
 
@@ -4301,7 +4309,8 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
 
-    Tearing down a service will delete all of its replicas and associated resources.
+    Tearing down a service will delete all of its replicas and associated
+    resources.
 
     Example:
 

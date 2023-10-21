@@ -3373,7 +3373,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            group = backend_utils.ReservedClusterGroup.get_group(name)
+            group = backend_utils.ReservedClusterGroup.check_cluster_name(name)
             if group == backend_utils.ReservedClusterGroup.SPOT_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Spot Job ID: '
@@ -3542,7 +3542,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        group = backend_utils.ReservedClusterGroup.get_group(name)
+        group = backend_utils.ReservedClusterGroup.check_cluster_name(name)
         if group is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'

@@ -183,7 +183,8 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
+    if backend_utils.ReservedClusterGroup.check_cluster_name(
+            cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
                              'supported for skypilot controllers. Pass '
@@ -301,7 +302,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed spot controller.
     """
-    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
+    if backend_utils.ReservedClusterGroup.check_cluster_name(
+            cluster_name) is not None:
         raise exceptions.NotSupportedError(
             f'Stopping sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -424,7 +426,8 @@ def autostop(
     if is_cancel:
         option_str = '{stop,down}'
     operation = f'{verb} auto{option_str}'
-    if backend_utils.ReservedClusterGroup.get_group(cluster_name) is not None:
+    if backend_utils.ReservedClusterGroup.check_cluster_name(
+            cluster_name) is not None:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -1008,11 +1011,7 @@ def serve_status(
 
         {
             'name': (str) service name,
-            'launched_at': (int) timestamp of creation,
-            'controller_name': (str) name of the controller cluster of the
-              service,
-            'endpoint': (str) service endpoint,
-            'replica_info': (List[Dict[str, Any]]) replica information,
+            'controller_job_id': (int) the job id of the controller,
             'uptime': (int) uptime in seconds,
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
@@ -1022,6 +1021,7 @@ def serve_status(
               auto-restarted,
             'requested_resources': (sky.Resources) requested resources
               for replica,
+            'replica_info': (List[Dict[str, Any]]) replica information,
         }
 
     Each entry in replica_info has the following fields:
@@ -1039,8 +1039,8 @@ def serve_status(
     sky.cli.serve_status.
 
     Args:
-        service_names: a single or a list of service names to query. If None, query all
-            services.
+        service_names: a single or a list of service names to query. If None,
+            query all services.
 
     Returns:
         A list of dicts, with each dict containing the information of a service.
