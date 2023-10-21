@@ -128,6 +128,7 @@ class Optimizer:
             if _is_dag_resources_ordered(dag):
                 # Honor the user's choice.
                 # The actual task dag can store dummy tasks.
+                assert minimize, 'Multiple Accelerators only support optimize by cost.'  # pylint: disable=line-too-long
                 for task_id, task in enumerate(dag.tasks):
                     if isinstance(task.resources, list):
                         resources_list = task.resources
@@ -990,11 +991,9 @@ class Optimizer:
         topo_order,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
     ):
-
         best_plan = {}
         best_plan[topo_order[0]] = DummyResources(DummyCloud(), None)
         best_plan[topo_order[-1]] = DummyResources(DummyCloud(), None)
-
         for node_i, node in enumerate(topo_order):
             if 0 < node_i < len(topo_order) - 1:
 
