@@ -2933,7 +2933,8 @@ class TestStorageWithCredentials:
                 storage_obj.delete()
 
     @pytest.fixture
-    def tmp_multiple_custom_source_storage_obj(self, tmp_source):
+    def tmp_multiple_custom_source_storage_obj(self):
+        # List of four different source paths that should be tested
         custom_source_names = [
             'pathWithoutSpaces', '\"path With Spaces\"',
             '\"pathWithoutSpaces\"', 'path With Spaces'
@@ -2941,6 +2942,10 @@ class TestStorageWithCredentials:
         # Creates a list of 4 storage objects with custom source names to
         # create multiple scratch storages.
         # Stores for each object in the list must be added in the test.
+
+        # Adds paths to home directory in order to test if uploaded properly.
+        # Specifies source in new storage object.
+        # Otherwise, mostly identical to tmp_multiple_scratch_storage_obj.
         storage_mult_obj = []
         for name in custom_source_names:
             pathlib.Path(f'~/{name}').expanduser().mkdir(exist_ok=True)
@@ -3141,9 +3146,9 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
     ])
-    def test_upload_with_custom_source_name(
-            self, store_type, tmp_multiple_custom_source_storage_obj):
-
+    def test_upload_source_with_spaces(self, store_type,
+                                       tmp_multiple_custom_source_storage_obj):
+        # Creates four buckets with specified local source paths and deletes them
         storage_obj_name = []
         for store_obj in tmp_multiple_custom_source_storage_obj:
             store_obj.add_store(store_type)
