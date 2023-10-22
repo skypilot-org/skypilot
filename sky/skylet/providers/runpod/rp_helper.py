@@ -131,16 +131,18 @@ def remove(instance_id: str):
 
 def get_ssh_ports(cluster_name):
     """Gets the SSH ports for the given cluster."""
+    print(f"Getting SSH ports for cluster {cluster_name}.")
+
     with open(os.path.expanduser("~/.runpod/skypilot_tags.json"), "r",
               encoding="UTF-8") as tag_file:
-        tags = json.load(tag_file)
+        instance_tags = json.load(tag_file)
 
     instances = list_instances()
 
     ssh_ports = []
 
-    for instance_id, tags in tags.items():
-        if tags.get("ray_cluster_name") == cluster_name:
+    for instance_id, tags in instance_tags.items():
+        if tags.get("ray-cluster-name") == cluster_name:
             ssh_ports.append(instances[instance_id]["ssh_port"])
 
     return ssh_ports
