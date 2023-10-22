@@ -48,6 +48,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.skylet.providers.runpod import rp_helper
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -2451,9 +2452,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
 
         if isinstance(self.launched_resources.cloud, clouds.RunPod):
-            print('TEST HERE')
-            print(self.cluster_name_on_cloud)
-            print(self.local_handle)
+            self.stable_ssh_ports = rp_helper.get_ssh_ports(
+                self.cluster_name_on_cloud)
+            return
 
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *

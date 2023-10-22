@@ -51,7 +51,7 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
     if not os.path.exists(tag_file_path):
         Path(os.path.dirname(tag_file_path)).mkdir(parents=True, exist_ok=True)
         with open(tag_file_path, "w", encoding="UTF-8") as tag_file:
-            json.dump({}, tag_file)
+            json.dump({}, tag_file, indent=4)
 
     # Read existing tags
     with open(tag_file_path, "r", encoding="UTF-8") as tag_file:
@@ -63,7 +63,7 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
         instance_tags.update(new_tags)
         tags[instance_id] = instance_tags
         with open(tag_file_path, "w", encoding="UTF-8") as tag_file:
-            json.dump(tags, tag_file)
+            json.dump(tags, tag_file, indent=4)
 
     return tags.get(instance_id, {})
 
@@ -127,3 +127,20 @@ def set_tags(instance_id: str, tags: Dict):
 def remove(instance_id: str):
     """Terminates the given instance."""
     runpod.runpod().terminate_pod(instance_id)
+
+
+def get_ssh_ports(cluster_name):
+    """Gets the SSH ports for the given cluster."""
+    with open(os.path.expanduser("~/.runpod/skypilot_tags.json"), "r",
+              encoding="UTF-8") as tag_file:
+        tags = json.load(tag_file)
+
+    instances = list_instances()
+
+    ssh_ports = []
+
+    for instance_id, tags in tags.items():
+        if tags.get("ray_cluster_name") == cluster_name:
+            ssh_ports.append(instances[instance_id]["ssh_port"])
+
+    return ssh_ports
