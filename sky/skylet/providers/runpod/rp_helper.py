@@ -112,7 +112,7 @@ def launch(name: str, instance_type: str, region: str):
         min_vcpu_count=4 * gpu_quantity,
         min_memory_in_gb=gpu_specs["memoryInGb"] * gpu_quantity,
         country_code=region,
-        ports="22/tcp",
+        ports="22/tcp,8076/http,6379/tcp",
         support_public_ip=True,
     )
 
