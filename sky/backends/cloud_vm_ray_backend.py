@@ -2452,8 +2452,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
 
         if isinstance(self.launched_resources.cloud, clouds.RunPod):
-            self.stable_ssh_ports = (rp_helper.get_ssh_ports(
-                self.cluster_name_on_cloud) + [22] * (self.num_node_ips - 1))
+            self.stable_ssh_ports = rp_helper.get_ssh_ports(
+                self.cluster_name_on_cloud)
             print(f"SSH ports: {self.stable_ssh_ports}")
             return
 
