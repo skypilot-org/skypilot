@@ -3489,8 +3489,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
             f'{storage_names}. Proceed?',
             default=True,
             abort=True,
-            show_default=True
-        )
+            show_default=True)
     if all:
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
