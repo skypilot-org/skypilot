@@ -2933,6 +2933,34 @@ class TestStorageWithCredentials:
                 storage_obj.delete()
 
     @pytest.fixture
+    def tmp_multiple_custom_source_storage_obj(self, tmp_source):
+        custom_source_names = [
+            'pathWithoutSpaces', '\"path With Spaces\"',
+            '\"pathWithoutSpaces\"', 'path With Spaces'
+        ]
+        # Creates a list of 4 storage objects with custom source names to
+        # create multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        storage_mult_obj = []
+        for name in custom_source_names:
+            pathlib.Path(f'~/{name}').expanduser().mkdir(exist_ok=True)
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=f'~/{name}')
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                # bugs, this can cause resource leaks. Ideally we should manually
+                # eject storage from global_user_state and delete the bucket using
+                # boto3 directly.
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -2976,7 +3004,7 @@ class TestStorageWithCredentials:
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
         # Creates a temporary storage object for testing .gitignore filter.
         # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
-        # foramt. Created storage object will contain the file structure along
+        # format. Created storage object will contain the file structure along
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3080,6 +3108,44 @@ class TestStorageWithCredentials:
         # and deletes them.
         storage_obj_name = []
         for store_obj in tmp_multiple_scratch_storage_obj:
+            store_obj.add_store(store_type)
+            storage_obj_name.append(store_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_name])
+
+        # Run sky storage delete all to delete all storage objects
+        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd += storage_obj_name
+        subprocess.check_output(delete_cmd)
+
+        # Run sky storage ls to check if all storage objects filtered by store
+        # type are deleted
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item not in out for item in storage_obj_name])
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_upload_with_custom_source_name(
+            self, store_type, tmp_multiple_custom_source_storage_obj):
+
+        storage_obj_name = []
+        for store_obj in tmp_multiple_custom_source_storage_obj:
             store_obj.add_store(store_type)
             storage_obj_name.append(store_obj.name)
 
