@@ -1,5 +1,6 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
 import base64
+import logging
 import pickle
 import threading
 import time
@@ -26,11 +27,16 @@ class SkyServeLoadBalancer:
 
     def __init__(self, controller_url: str, load_balancer_port: int,
                  replica_port: int) -> None:
+        """Initialize the load balancer.
+
+        Args:
+            controller_url: The URL of the controller.
+            load_balancer_port: The port where the load balancer listens to.
+            replica_port: The port where the replica app listens to.
+        """
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
-        # This is the port where the load balancer listens to.
         self.load_balancer_port = load_balancer_port
-        # This is the port where the replica app listens to.
         self.replica_port = replica_port
         self.load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
@@ -63,7 +69,7 @@ class SkyServeLoadBalancer:
                     # Clean up after reporting request information to avoid OOM.
                     self.request_information.clear()
                     response.raise_for_status()
-                    ready_replica_ips = response.json()['ready_replica_ips']
+                    ready_replica_ips = response.json().get('ready_replica_ips')
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
@@ -91,9 +97,13 @@ class SkyServeLoadBalancer:
                                self._redirect_handler,
                                methods=['GET', 'POST', 'PUT', 'DELETE'])
 
-        sync_controller_thread = threading.Thread(
-            target=self._sync_with_controller, daemon=True)
-        sync_controller_thread.start()
+        @self.app.on_event('startup')
+        def configure_logger():
+            uvicorn_access_logger = logging.getLogger('uvicorn.access')
+            for handler in uvicorn_access_logger.handlers:
+                handler.setFormatter(sky_logging.FORMATTER)
+
+        threading.Thread(target=self._sync_with_controller, daemon=True).start()
 
         logger.info('SkyServe Load Balancer started on '
                     f'http://0.0.0.0:{self.load_balancer_port}')

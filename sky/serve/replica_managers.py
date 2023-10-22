@@ -285,8 +285,8 @@ class ReplicaInfo:
     def status(self) -> serve_state.ReplicaStatus:
         replica_status = self.status_property.to_replica_status()
         if replica_status == serve_state.ReplicaStatus.UNKNOWN:
-            logger.error('Detecting UNKNOWN replica status for cluster '
-                         f'{self.cluster_name}')
+            logger.error('Detecting UNKNOWN replica status for '
+                         f'replica {self.replica_id}.')
         return replica_status
 
     def to_info_dict(self, with_handle: bool) -> Dict[str, Any]:
@@ -309,12 +309,12 @@ class ReplicaInfo:
         Returns:
             Tuple of (self, is_ready, probe_time).
         """
-        replica_ip = self.ip
+        replica_identity = f'replica {self.replica_id} with ip {self.ip}'
         probe_time = time.time()
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
-            readiness_path = f'http://{replica_ip}{readiness_suffix}'
+            readiness_path = f'http://{self.ip}{readiness_suffix}'
             if post_data is not None:
                 msg += 'POST'
                 response = requests.post(
@@ -326,19 +326,19 @@ class ReplicaInfo:
                 response = requests.get(
                     readiness_path,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT)
-            msg += (f' request to {replica_ip} returned status code '
-                    f'{response.status_code}')
+            msg += (f' request to {replica_identity} returned status '
+                    f'code {response.status_code}')
             if response.status_code == 200:
                 msg += '.'
             else:
                 msg += f' and response {response.text}.'
             logger.info(msg)
             if response.status_code == 200:
-                logger.debug(f'Replica {replica_ip} is ready.')
+                logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
             logger.info(e)
-            logger.info(f'Replica {replica_ip} is not ready.')
+            logger.info(f'{replica_identity.capitalize()} is not ready.')
             pass
         return self, False, probe_time
 
@@ -407,7 +407,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
             return
-        logger.info(f'Launching replica {replica_id}')
+        logger.info(f'Launching replica {replica_id}...')
         cluster_name = serve_utils.generate_replica_cluster_name(
             self.service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
@@ -447,9 +447,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             handle = global_user_state.get_handle_from_cluster_name(
                 info.cluster_name)
             if handle is None:
-                logger.error(f'Cannot find cluster {info.cluster_name} '
-                             'in the cluster table. Skipping syncing '
-                             'down logs.')
+                logger.error(f'Cannot find cluster {info.cluster_name} for '
+                             f'replica {replica_id} in the cluster table. '
+                             'Skipping syncing down logs.')
                 return
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
@@ -468,7 +468,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         if sync_down_logs:
             _sync_down_logs()
 
-        logger.info(f'Deleting replica {replica_id}')
+        logger.info(f'Terminating replica {replica_id}...')
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
@@ -529,15 +529,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                   info)
         for replica_id, p in list(self.down_process_pool.items()):
             if not p.is_alive():
-                logger.info(f'Down process for replica {replica_id} finished.')
+                logger.info(
+                    f'Terminate process for replica {replica_id} finished.')
                 del self.down_process_pool[replica_id]
                 info = serve_state.get_replica_info_from_id(
                     self.service_name, replica_id)
                 assert info is not None
                 if p.exitcode != 0:
-                    logger.error(
-                        f'Down process for replica {replica_id} exited '
-                        f'abnormally with code {p.exitcode}.')
+                    logger.error(f'Down process for replica {replica_id} '
+                                 f'exited abnormally with code {p.exitcode}.')
                     info.status_property.sky_down_status = (
                         ProcessStatus.FAILED)
                 else:
@@ -643,11 +643,15 @@ class SkyPilotReplicaManager(ReplicaManager):
             for info in infos:
                 if not info.status_property.should_track_status():
                     continue
-                replica_to_probe.append((info.cluster_name, info.ip))
+                replica_to_probe.append(
+                    f'replica_{info.replica_id}(ip={info.ip})')
                 probe_futures.append(
-                    executor.submit(info.probe, self.readiness_suffix,
-                                    self.post_data))
-        logger.info(f'Replicas to probe: {replica_to_probe}')
+                    executor.submit(
+                        info.probe,
+                        self.readiness_suffix,
+                        self.post_data,
+                    ))
+        logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
         # Since futures.as_completed will return futures in the order of
         # completion, we need the info.probe function to return the info

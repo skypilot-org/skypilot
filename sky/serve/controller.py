@@ -102,16 +102,17 @@ class SkyServeController:
                     self.replica_manager.get_ready_replica_ips()
             }
 
+        @self.app.on_event('startup')
+        def configure_logger():
+            uvicorn_access_logger = logging.getLogger('uvicorn.access')
+            for handler in uvicorn_access_logger.handlers:
+                handler.setFormatter(sky_logging.FORMATTER)
+
         threading.Thread(target=self._run_autoscaler).start()
 
-        # Disable all GET logs if SKYPILOT_DEBUG is not set to avoid overflowing
-        # the controller logs.
-        if not env_options.Options.SHOW_DEBUG_INFO.get():
-            logging.getLogger('uvicorn.access').addFilter(
-                SuppressSuccessGetAccessLogsFilter())
+        logger.info('SkyServe Controller started on '
+                    f'http://localhost:{self.port}')
 
-        logger.info(
-            f'SkyServe Controller started on http://localhost:{self.port}')
         uvicorn.run(self.app, host='localhost', port=self.port)
 
 
