@@ -248,8 +248,8 @@ class StrategyExecutor:
 
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
-            raise_on_max_retry: Whether to raise an exception if the launch
-                fails after reaching the maximum number of retries.
+            raise_on_max_retry_reached: Whether to raise an exception if the launch
+                fails after reaching the maximum number of retries. Note that if non-retryable errors happened (e.g., precheck errors), we directly raise rather than retry them.
 
         Returns:
             The job's submit timestamp, or None if failed to submit the job
