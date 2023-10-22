@@ -3480,8 +3480,10 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if not yes:
-        storages = sky.storage_ls()
-        storage_list = [s['name'] for s in storages]
+        if len(names) > 0:
+            storage_list = names
+        else:
+            storage_list = [s['name'] for s in sky.storage_ls()]
         storage_names = ', '.join(storage_list)
         storage_str = 'storages' if len(storage_list) > 1 else 'storage'
         click.confirm(
