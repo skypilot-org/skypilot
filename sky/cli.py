@@ -1915,6 +1915,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                     raise
             return success, result
 
+        spot_jobs_success = True
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
