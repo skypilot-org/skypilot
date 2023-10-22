@@ -329,7 +329,7 @@ class StrategyExecutor:
                         f'reasons: {reasons_str}')
                     raise exceptions.ProvisionPrechecksError(reasons=reasons)
                 logger.info('Failed to launch the spot cluster with error: '
-                            f'{common_utils.format_exception(e)})')
+                            f'{common_utils.format_exception(e)}')
             except exceptions.FileMountSyncError as e:
                 # If file mounting fails, the failure can be due to:
                 # 1. Errors before the job submission, e.g., invalid file mounts
