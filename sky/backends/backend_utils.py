@@ -1428,7 +1428,7 @@ def parallel_data_transfer_to_nodes(
                     backoff_seconds = backoff.current_backoff()
                     logger.warning(
                         f'{action_message}: connection error on {runner.ip}. '
-                        f'Retrying in {backoff_seconds:.2f}s...\n'
+                        f'Retrying in {backoff_seconds:.1f}s...\n'
                         f'  Details: {stdout + stderr}')
                     time.sleep(backoff_seconds)
                     continue
