@@ -143,6 +143,7 @@ def get_ssh_ports(cluster_name):
 
     for instance_id, tags in instance_tags.items():
         if tags.get("ray-cluster-name") == cluster_name:
-            ssh_ports.append(instances[instance_id]["ssh_port"])
+            if instances.get(instance_id):
+                ssh_ports.append(instances[instance_id]["ssh_port"])
 
     return ssh_ports
