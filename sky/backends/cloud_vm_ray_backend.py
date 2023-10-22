@@ -2449,6 +2449,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         Use this method to use any cloud-specific port fetching logic.
         """
         del max_attempts  # Unused.
+
+        if isinstance(self.launched_resources.cloud, clouds.RunPod):
+            print('TEST HERE')
+            print(self.cluster_name_on_cloud)
+            print(self.local_handle)
+
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))

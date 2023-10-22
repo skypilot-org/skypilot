@@ -80,9 +80,7 @@ def list_instances():
         instance_list[instance["id"]]["name"] = instance["name"]
 
         if instance["desiredStatus"] == "RUNNING" and instance.get("runtime"):
-            instance_list[instance["id"]]["port_list"] = []
             for port in instance["runtime"]["ports"]:
-                instance_list[instance["id"]]["port_list"].append(port["publicPort"])
                 if port["privatePort"] == 22:
                     instance_list[instance["id"]]["ip"] = port["ip"]
                     instance_list[
