@@ -3475,7 +3475,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         sky storage delete -a
         \b
         # Skip confirmation prompt.
-        sky storage delete -y
+        sky storage delete imagenet -y
     """
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
