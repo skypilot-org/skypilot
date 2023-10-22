@@ -114,10 +114,13 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     return num_pending_autostop
 
 
-def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
+def format_service_table(service_records: List[_ServiceRecord],
+                         show_all: bool) -> str:
+    if not service_records:
+        return 'No existing services.'
+
     status_columns = [
         StatusColumn('NAME', _get_name),
-        StatusColumn('LAUNCHED', _get_launched, show_by_default=False),
         StatusColumn('UPTIME', _get_uptime),
         StatusColumn('STATUS', _get_service_status_colored),
         StatusColumn('REPLICAS', _get_replicas),
@@ -133,19 +136,29 @@ def show_service_table(service_records: List[_ServiceRecord], show_all: bool):
         if status_column.show_by_default or show_all:
             columns.append(status_column.name)
     service_table = log_utils.create_table(columns)
+    replica_infos = []
     for record in service_records:
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:
                 row.append(status_column.calc(record))
         service_table.add_row(row)
-    if service_records:
-        click.echo(service_table)
-    else:
-        click.echo('No existing services.')
+        for replica in record['replica_info']:
+            replica['service_name'] = record['name']
+            replica_infos.append(replica)
+
+    replica_table = format_replica_table(replica_infos, show_all)
+    return (f'{service_table}\n'
+            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+            f'Replicas{colorama.Style.RESET_ALL}\n'
+            f'{replica_table}')
 
 
-def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
+def format_replica_table(replica_records: List[_ReplicaRecord],
+                         show_all: bool) -> str:
+    if not replica_records:
+        return 'No existing replicas.'
+
     status_columns = [
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
@@ -176,11 +189,8 @@ def show_replica_table(replica_records: List[_ReplicaRecord], show_all: bool):
             if status_column.show_by_default or show_all:
                 row.append(status_column.calc(record))
         replica_table.add_row(row)
-    if replica_records:
-        click.echo(replica_table)
-    else:
-        click.echo('No existing replicas.')
-    click.echo(truncate_hint, nl=False)
+
+    return f'{replica_table}\n{truncate_hint}'
 
 
 def get_total_cost_of_displayed_records(

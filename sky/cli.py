@@ -1665,6 +1665,52 @@ def _get_spot_jobs(
     return num_in_progress_jobs, msg
 
 
+def _get_services(service_names: Optional[List[str]],
+                  show_all: bool,
+                  show_endpoint: bool,
+                  is_called_by_user: bool = False) -> str:
+    msg = None
+    try:
+        if not is_called_by_user:
+            usage_lib.messages.usage.set_internal()
+        with sky_logging.silent():
+            if not service_names:
+                # Change empty list to None
+                service_names = None
+            service_records = core.serve_status(service_names)
+    except exceptions.ClusterNotUpError as e:
+        controller_status = e.cluster_status
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg = 'Controller is initializing. Please wait for a while.'
+        else:
+            assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
+            msg = 'No existing services.'
+            if controller_status is None:
+                msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
+                        f'{colorama.Style.RESET_ALL})')
+    except RuntimeError as e:
+        msg = ('Failed to fetch service statuses due to connection issues. '
+               'Please try again later. Details: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
+    except Exception as e:  # pylint: disable=broad-except
+        msg = ('Failed to fetch service statuses: '
+               f'{common_utils.format_exception(e, use_bracket=True)}')
+    else:
+        if show_endpoint:
+            if len(service_records) != 1:
+                plural = 's' if len(service_records) > 1 else ''
+                service_num = (str(len(service_records))
+                               if len(service_records) > 0 else 'No')
+                raise click.UsageError(
+                    f'{service_num} service{plural} found. Please specify '
+                    'an existing service to show its endpoint. Usage: '
+                    'sky serve status --endpoint <service-name>')
+            msg = status_utils.get_endpoint(service_records[0])
+        else:
+            msg = status_utils.format_service_table(service_records, show_all)
+    return msg
+
+
 @cli.command()
 @click.option('--all',
               '-a',
@@ -1693,6 +1739,11 @@ def _get_spot_jobs(
               is_flag=True,
               required=False,
               help='Also show recent in-progress spot jobs, if any.')
+@click.option('--show-services/--no-show-services',
+              default=True,
+              is_flag=True,
+              required=False,
+              help='Also show sky serve services, if any.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1701,7 +1752,7 @@ def _get_spot_jobs(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
-           clusters: List[str]):
+           show_services: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1751,10 +1802,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    # Using a pool with 1 worker to run the spot job query in parallel to speed
-    # up. The pool provides a AsyncResult object that can be used as a future.
-    # TODO(tian): Show service as well.
-    with multiprocessing.Pool(1) as pool:
+    # Using a pool with 2 worker to run the spot job query and sky serve service
+    # query in parallel to speed up. The pool provides a AsyncResult object that
+    # can be used as a future.
+    with multiprocessing.Pool(2) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip.
         show_spot_jobs = show_spot_jobs and not clusters and not ip
@@ -1767,6 +1818,16 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           show_all=False,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
+        show_services = show_services and not clusters and not ip
+        if show_services:
+            # Run the sky serve service query in parallel to speed up the
+            # status query.
+            services_future = pool.apply_async(_get_services,
+                                               kwds=dict(
+                                                   service_names=None,
+                                                   show_all=False,
+                                                   show_endpoint=False,
+                                                   is_called_by_user=False))
         if ip:
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
@@ -1830,30 +1891,41 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             nonreserved_cluster_records + reserved_clusters, all)
         status_utils.show_local_status_table(local_clusters)
 
+        def _try_get_future_result(future) -> Tuple[bool, Any]:
+            result = None
+            success = True
+            try:
+                result = future.get()
+            except KeyboardInterrupt:
+                pool.terminate()
+                # Set to -1, so that the controller is not considered
+                # down, and the hint for showing sky spot queue
+                # will still be shown.
+                success = False
+
+            try:
+                pool.close()
+                pool.join()
+            except SystemExit as e:
+                # This is to avoid a "Exception ignored" problem caused by
+                # ray worker setting the sigterm handler to sys.exit(15)
+                # (see ray/_private/worker.py).
+                # TODO (zhwu): Remove any importing of ray in SkyPilot.
+                if e.code != 15:
+                    raise
+            return success, result
+
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
-                try:
-                    num_in_progress_jobs, msg = spot_jobs_future.get()
-                except KeyboardInterrupt:
-                    pool.terminate()
-                    # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky spot queue
-                    # will still be shown.
+                spot_jobs_success, result = _try_get_future_result(
+                    spot_jobs_future)
+                if spot_jobs_success:
+                    num_in_progress_jobs, msg = result
+                else:
                     num_in_progress_jobs = -1
                     msg = 'KeyboardInterrupt'
-
-                try:
-                    pool.close()
-                    pool.join()
-                except SystemExit as e:
-                    # This is to avoid a "Exception ignored" problem caused by
-                    # ray worker setting the sigterm handler to sys.exit(15)
-                    # (see ray/_private/worker.py).
-                    # TODO (zhwu): Remove any importing of ray in SkyPilot.
-                    if e.code != 15:
-                        raise
 
             click.echo(msg)
             if num_in_progress_jobs is not None:
@@ -1874,6 +1946,20 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 hints.append(
                     f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
                     f'sky spot queue{colorama.Style.RESET_ALL}')
+
+        if show_services:
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'Services{colorama.Style.RESET_ALL}')
+            if not spot_jobs_success:
+                # The pool is terminated, so we cannot run the service query.
+                click.secho('Failed to query services. Please try again later.',
+                            fg='yellow')
+            else:
+                with rich_utils.safe_status('[cyan]Checking services[/]'):
+                    success, msg = _try_get_future_result(services_future)
+                    if not success:
+                        msg = 'KeyboardInterrupt'
+                    click.echo(msg)
 
         if num_pending_autostop > 0 and not refresh:
             # Don't print this hint if there's no pending autostop or user has
@@ -4237,56 +4323,15 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     """
     # This won't pollute the output of --endpoint.
     with rich_utils.safe_status('[cyan]Checking services[/]'):
-        # TODO(tian): Add this to `sky status` as well.
-        msg = None
-        try:
-            with sky_logging.silent():
-                if not service_names:
-                    service_records = core.serve_status(None)
-                else:
-                    service_records = core.serve_status(service_names)
-        except exceptions.ClusterNotUpError as e:
-            controller_status = e.cluster_status
-            if controller_status == status_lib.ClusterStatus.INIT:
-                msg = 'Controller is initializing. Please wait for a while.'
-            else:
-                assert controller_status in [
-                    None, status_lib.ClusterStatus.STOPPED
-                ]
-                msg = 'No existing services.'
-        except RuntimeError as e:
-            msg = ('Failed to fetch service statuses due to connection issues. '
-                   'Please try again later. Details: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-        except Exception as e:  # pylint: disable=broad-except
-            msg = ('Failed to fetch service statuses: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-    if msg is not None:
-        click.echo(msg)
-        return
+        msg = _get_services(service_names,
+                            show_all=all,
+                            show_endpoint=endpoint,
+                            is_called_by_user=True)
 
-    if endpoint:
-        if len(service_records) != 1:
-            plural = 's' if len(service_names) > 1 else ''
-            service_num = (str(len(service_names))
-                           if len(service_names) > 0 else 'No')
-            raise click.UsageError(
-                f'{service_num} service{plural} found. Please specify an'
-                ' existing service to show its endpoint. Usage: '
-                'sky serve status --endpoint <service-name>')
-        click.echo(status_utils.get_endpoint(service_records[0]))
-        return
-    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Services'
-               f'{colorama.Style.RESET_ALL}')
-    status_utils.show_service_table(service_records, all)
-    click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-               f'Replicas{colorama.Style.RESET_ALL}')
-    replica_infos = []
-    for service_record in service_records:
-        for replica_record in service_record['replica_info']:
-            replica_record['service_name'] = service_record['name']
-            replica_infos.append(replica_record)
-    status_utils.show_replica_table(replica_infos, all)
+    if not endpoint:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Services{colorama.Style.RESET_ALL}')
+    click.echo(msg)
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
