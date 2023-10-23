@@ -109,13 +109,9 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 # command.
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
-_STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE = (
+_STATUS_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify an existing '
-    'cluster to show its IP address.\nUsage: `sky status --ip <cluster>`')
-
-_STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE = (
-    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
-    'cluster to show its ports.\nUsage: `sky status --ports <cluster>`')
+    'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
 
 
 def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
@@ -1786,11 +1782,13 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                     plural = 's' if len(clusters) > 1 else ''
                     cluster_num = (str(len(clusters))
                                    if len(clusters) > 0 else 'No')
-                    error_message = _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE if ip else _STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE
                     raise ValueError(
-                        error_message.format(cluster_num=cluster_num,
-                                             plural=plural,
-                                             verb='specified'))
+                        _STATUS_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=cluster_num,
+                            plural=plural,
+                            verb='specified',
+                            property='IP address' if ip else 'ports',
+                            flag='ip' if ip else 'ports'))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1805,11 +1803,13 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
                                    if len(clusters) > 0 else 'No')
-                    error_message = _STATUS_IP_CLUSTER_NUM_ERROR_MESSAGE if ip else _STATUS_PORTS_CLUSTER_NUM_ERROR_MESSAGE
                     raise ValueError(
-                        error_message.format(cluster_num=cluster_num,
-                                             plural=plural,
-                                             verb='found'))
+                        _STATUS_CLUSTER_NUM_ERROR_MESSAGE.format(
+                            cluster_num=cluster_num,
+                            plural=plural,
+                            verb='found',
+                            property='IP address' if ip else 'ports',
+                            flag='ip' if ip else 'ports'))
 
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
