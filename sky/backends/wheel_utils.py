@@ -62,7 +62,15 @@ def _build_sky_wheel():
     with tempfile.TemporaryDirectory() as tmp_dir:
         # prepare files
         tmp_dir = pathlib.Path(tmp_dir)
-        (tmp_dir / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
+        sky_tmp_dir = tmp_dir / 'sky'
+        sky_tmp_dir.mkdir()
+        for item in SKY_PACKAGE_PATH.iterdir():
+            target = sky_tmp_dir / item.name
+            if item.name != '__init__.py':
+                # We do not symlink `sky/__init__.py` as we need to
+                # modify the commit hash in the file later.
+                # Symlink other files/folders.
+                target.symlink_to(item, target_is_directory=item.is_dir())
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
         setup_content = (setup_files_dir / 'setup.py').read_text()
