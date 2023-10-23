@@ -69,7 +69,7 @@ def _build_sky_wheel():
             if item.name != '__init__.py':
                 # We do not symlink `sky/__init__.py` as we need to
                 # modify the commit hash in the file later.
-                # Symlink other files.
+                # Symlink other files/folders.
                 target.symlink_to(item, target_is_directory=item.is_dir())
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
