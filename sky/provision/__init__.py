@@ -64,7 +64,7 @@ def query_instances(
 
 @_route_to_cloud_impl
 def bootstrap_instances(
-        provider_name: str, region: str, cluster_name: str,
+        provider_name: str, region: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionConfig:
     """Bootstrap configurations for a cluster.
 
@@ -80,7 +80,7 @@ def bootstrap_instances(
 
 
 @_route_to_cloud_impl
-def run_instances(provider_name: str, region: str, cluster_name: str,
+def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Start instances with bootstrapped configuration."""
     raise NotImplementedError
@@ -130,7 +130,7 @@ def cleanup_ports(
 
 
 @_route_to_cloud_impl
-def wait_instances(provider_name: str, region: str, cluster_name: str,
+def wait_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """Wait instances until they ends up in the given state."""
     raise NotImplementedError
@@ -138,6 +138,6 @@ def wait_instances(provider_name: str, region: str, cluster_name: str,
 
 @_route_to_cloud_impl
 def get_cluster_info(provider_name: str, region: str,
-                     cluster_name: str) -> common.ClusterInfo:
+                     cluster_name_on_cloud: str) -> common.ClusterInfo:
     """Get the metadata of instances in a cluster."""
     raise NotImplementedError
