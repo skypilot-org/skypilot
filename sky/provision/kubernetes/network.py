@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky.provision.kubernetes import network_utils
 
+PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
+
 
 def open_ports(
     cluster_name_on_cloud: str,
@@ -19,7 +21,8 @@ def open_ports(
     for port in ports:
         service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
         ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
-        path_prefix = f"/skypilot/{cluster_name_on_cloud}/{port}"
+        path_prefix = PATH_PREFIX.format(
+            cluster_name_on_cloud=cluster_name_on_cloud, port=port)
         network_utils.create_namespaced_service(
             namespace=provider_config["namespace"],
             service_name=service_name,
@@ -67,7 +70,8 @@ def query_ports(
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
     result = {}
     for port in ports:
-        path_prefix = f"/skypilot/{cluster_name_on_cloud}/{port}"
+        path_prefix = PATH_PREFIX.format(
+            cluster_name_on_cloud=cluster_name_on_cloud, port=port)
         result[port] = os.path.join(http_url,
                                     path_prefix.lstrip('/')), os.path.join(
                                         https_url, path_prefix.lstrip('/'))
