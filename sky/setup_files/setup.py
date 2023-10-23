@@ -19,6 +19,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 from typing import Dict, List
 
 import setuptools
@@ -70,7 +71,10 @@ def get_commit_hash():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
+        print('WARNING: SkyPilot fail to get the commit hash in '
+              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+              file=sys.stderr)
         return commit_hash
 
 
@@ -87,8 +91,12 @@ def replace_commit_hash():
                             flags=re.M)
         with open(INIT_FILE_PATH, 'w') as fp:
             fp.write(content)
-    except Exception: # pylint: disable=broad-except
-        # Avoid breaking the installation.
+    except Exception as e: # pylint: disable=broad-except
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print('WARNING: SkyPilot fail to replace the commit hash in '
+              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+              file=sys.stderr)
         pass
 
 
@@ -98,7 +106,11 @@ def revert_commit_hash():
             with open(INIT_FILE_PATH, 'w') as fp:
                 fp.write(original_init_content)
     except Exception: # pylint: disable=broad-except
-        # Avoid breaking the installation.
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print('WARNING: SkyPilot fail to replace the commit hash in '
+              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+              file=sys.stderr)
         pass
 
 
