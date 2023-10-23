@@ -3479,25 +3479,21 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     """
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
-    if not yes:
-        if len(names) > 0:
-            storage_list = names
-        else:
-            storage_list = [s['name'] for s in sky.storage_ls()]
-        storage_names = ', '.join(storage_list)
-        storage_str = 'storages' if len(storage_list) > 1 else 'storage'
-        click.confirm(
-            f'Deleting {len(storage_list)} {storage_str}: '
-            f'{storage_names}. Proceed?',
-            default=True,
-            abort=True,
-            show_default=True)
     if all:
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
+    if not yes:
+        storage_names = ', '.join(names)
+        storage_str = 'storages' if len(names) > 1 else 'storage'
+        click.confirm(
+            f'Deleting {len(names)} {storage_str}: '
+            f'{storage_names}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
 
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
