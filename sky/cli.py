@@ -51,7 +51,6 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
@@ -2760,17 +2759,13 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
+    group = backend_utils.ReservedClusterGroup.check_cluster_name(
+        controller_name)
+    assert group is not None, controller_name
     if cluster_status == status_lib.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                f'{colorama.Fore.RED}Tearing down the spot controller while '
-                'it is in INIT state is not supported (this means a spot '
-                'launch is in progress or the previous launch failed), as we '
-                'cannot '
-                'guarantee that all the spot jobs are finished. Please wait '
-                'until the spot controller is UP or fix it with '
-                f'{colorama.Style.BRIGHT}sky start '
-                f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.')
+                group.value.decline_down_in_init_status_hint)
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
@@ -2799,10 +2794,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
                 non_terminal_jobs):
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
-            msg = (f'{colorama.Fore.RED}In-progress spot jobs found. '
-                   'To avoid resource leakage, cancel all jobs first: '
-                   f'{colorama.Style.BRIGHT}sky spot cancel -a'
-                   f'{colorama.Style.RESET_ALL}\n')
+            msg = group.value.decline_down_for_dirty_controller_hint
             # Add prefix to each line to align with the bullet point.
             msg += '\n'.join(
                 ['   ' + line for line in job_table.split('\n') if line != ''])
@@ -2820,18 +2812,13 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         click.echo('Sky serve controller has already been torn down.')
         return
 
+    group = backend_utils.ReservedClusterGroup.check_cluster_name(
+        controller_name)
+    assert group is not None, controller_name
     if cluster_status == status_lib.ClusterStatus.INIT:
-        # TODO(tian): Refactor to reserved group record.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                f'{colorama.Fore.RED}Tearing down the sky serve controller '
-                'while it is in INIT state is not supported (this means a sky '
-                'serve up is in progress or the previous launch failed), as we '
-                'cannot guarantee that all the services are terminated. Please '
-                'wait until the sky serve controller is UP or fix it with '
-                f'{colorama.Style.BRIGHT}sky start '
-                f'{serve_lib.SKY_SERVE_CONTROLLER_NAME}'
-                f'{colorama.Style.RESET_ALL}.')
+                group.value.decline_down_in_init_status_hint)
     elif cluster_status == status_lib.ClusterStatus.UP:
         with rich_utils.safe_status(
                 '[bold cyan]Checking for running services[/]'):
@@ -2844,14 +2831,9 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         if services:
             service_names = [service['name'] for service in services]
             with ux_utils.print_exception_no_traceback():
-                plural = '' if len(service_names) == 1 else 's'
-                raise exceptions.NotSupportedError(
-                    f'{colorama.Fore.RED}Tearing down the sky serve controller '
-                    f'is not supported, as it is currently serving the '
-                    f'following service{plural}: {", ".join(service_names)}. '
-                    f'Please terminate the service{plural} first with '
-                    f'{colorama.Style.BRIGHT}sky serve down '
-                    f'{" ".join(service_names)}{colorama.Style.RESET_ALL}.')
+                msg = group.value.decline_down_for_dirty_controller_hint.format(
+                    service_names=', '.join(service_names))
+                raise exceptions.NotSupportedError(msg)
     # Do nothing for STOPPED state, as it is safe to terminate the cluster.
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 
@@ -4462,7 +4444,6 @@ def serve_logs(
         # Tail the controller logs of a service:
         sky serve logs --controller --target load-balancer [SERVICE_ID]
     """
-    # TODO(tian): nit: use sum([...])
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
     if num_flags > 1:

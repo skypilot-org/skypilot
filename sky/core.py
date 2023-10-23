@@ -195,10 +195,8 @@ def _start(
                 'supported when starting skypilot controllers. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
-        # TODO(tian): Maybe we should merge the two MINUTES_TO_AUTOSTOP
-        # together. Currently, the two value is the same so we just use spot
-        # constant here.
-        idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        idle_minutes_to_autostop = (
+            backend_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.

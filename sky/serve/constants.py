@@ -1,7 +1,5 @@
 """Constants used for SkyServe."""
 
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'

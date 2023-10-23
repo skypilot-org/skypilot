@@ -103,6 +103,10 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
+# The default idle timeout for skypilot controllers. This include spot
+# controller and sky serve controller.
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
+
 
 @dataclasses.dataclass
 class ReservedClusterRecord:
@@ -111,6 +115,8 @@ class ReservedClusterRecord:
     check: Callable[[str], bool]
     sky_status_hint: str
     decline_cancel_hint: str
+    decline_down_in_init_status_hint: str
+    decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
 
 
@@ -128,6 +134,18 @@ class ReservedClusterGroup(enum.Enum):
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
             f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
+        decline_down_in_init_status_hint=(
+            f'{colorama.Fore.RED}Tearing down the spot controller while '
+            'it is in INIT state is not supported (this means a spot launch '
+            'is in progress or the previous launch failed), as we cannot '
+            'guarantee that all the spot jobs are finished. Please wait '
+            'until the spot controller is UP or fix it with '
+            f'{colorama.Style.BRIGHT}sky start '
+            f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
+        decline_down_for_dirty_controller_hint=(
+            f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
+            f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
+            f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller. '))
@@ -139,6 +157,21 @@ class ReservedClusterGroup(enum.Enum):
             f'sky serve status{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
+        decline_down_in_init_status_hint=(
+            f'{colorama.Fore.RED}Tearing down the sky serve controller '
+            'while it is in INIT state is not supported (this means a sky '
+            'serve up is in progress or the previous launch failed), as we '
+            'cannot guarantee that all the services are terminated. Please '
+            'wait until the sky serve controller is UP or fix it with '
+            f'{colorama.Style.BRIGHT}sky start '
+            f'{serve_lib.SKY_SERVE_CONTROLLER_NAME}'
+            f'{colorama.Style.RESET_ALL}.'),
+        decline_down_for_dirty_controller_hint=(
+            f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
+            'supported, as it is currently serving the following services: '
+            '{service_names}. Please terminate the services first with '
+            f'{colorama.Style.BRIGHT}sky serve down -a'
+            f'{colorama.Style.RESET_ALL}.'),
         check_cluster_name_hint=(
             f'Cluster {serve_lib.SKY_SERVE_CONTROLLER_NAME} is reserved for '
             'sky serve controller. '))

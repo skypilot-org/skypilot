@@ -779,8 +779,8 @@ def spot_launch(
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
-            idle_minutes_to_autostop=spot.
-            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            idle_minutes_to_autostop=backend_utils.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
 
@@ -1074,6 +1074,7 @@ def serve_up(
             # We use autostop here to reduce cold start time, since in most
             # cases the controller resources requirement will be the default
             # value and a previous controller could be reused.
-            idle_minutes_to_autostop=serve.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            idle_minutes_to_autostop=backend_utils.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )

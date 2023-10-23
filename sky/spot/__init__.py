@@ -2,7 +2,6 @@
 import pathlib
 
 from sky.spot.constants import SPOT_CLUSTER_NAME_PREFIX_LENGTH
-from sky.spot.constants import SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 from sky.spot.constants import SPOT_CONTROLLER_TEMPLATE
 from sky.spot.constants import SPOT_CONTROLLER_YAML_PREFIX
 from sky.spot.constants import SPOT_TASK_YAML_PREFIX
@@ -23,7 +22,6 @@ __all__ = [
     'SPOT_DEFAULT_STRATEGY',
     'SPOT_CONTROLLER_NAME',
     # Constants
-    'SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP',
     'SPOT_CONTROLLER_TEMPLATE',
     'SPOT_CONTROLLER_YAML_PREFIX',
     'SPOT_TASK_YAML_PREFIX',

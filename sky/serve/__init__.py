@@ -1,7 +1,6 @@
 """Modules for SkyServe services."""
 import os
 
-from sky.serve.constants import CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_TEMPLATE
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL
