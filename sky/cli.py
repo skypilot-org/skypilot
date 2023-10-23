@@ -1758,7 +1758,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
         # specifies --ip.
-        show_spot_jobs = show_spot_jobs and not clusters and not ip and not ports
+        show_spot_jobs = show_spot_jobs and not any([clusters, ip, ports])
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(

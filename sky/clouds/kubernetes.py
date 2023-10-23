@@ -241,7 +241,7 @@ class Kubernetes(clouds.Cloud):
             'image_id': image_id,
         }
 
-        if resources.ports:
+        if resources.ports is not None:
             deploy_vars['ports'] = resources.ports
 
         return deploy_vars
