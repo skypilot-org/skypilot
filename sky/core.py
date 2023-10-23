@@ -1130,7 +1130,7 @@ def serve_down(service_names: Optional[Union[str, List[str]]] = None,
                all: bool = False) -> None:
     """Teardown a service.
 
-    Please refer to the sky.cli.serve_down for the document.
+    Please refer to the sky.cli.serve_down for the docs.
 
     Args:
         service_names: Name of the service(s).
