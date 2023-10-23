@@ -145,6 +145,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [],
     'oci': ['oci'],
     'kubernetes': ['kubernetes'],
+    'ovhcloud': ['apache-libcloud']
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

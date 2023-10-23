@@ -51,6 +51,7 @@ SCP = clouds.SCP
 Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+OVHCloud = clouds.OVHCloud
 optimize = Optimizer.optimize
 
 __all__ = [

@@ -447,3 +447,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_proxy_command'] = ssh_proxy_cmd
 
     return config
+
+
+def setup_ovhcloud_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    print(config)
+    with open(public_key_path, 'r') as f:
+        public_key = f.read().strip()
+    return _replace_ssh_info_in_config(config, public_key)

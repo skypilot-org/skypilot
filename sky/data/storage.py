@@ -98,6 +98,8 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif isinstance(cloud, clouds.IBM):
             return StoreType.IBM
+        elif isinstance(cloud, clouds.OVHCloud):
+            return StoreType.S3
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -137,6 +139,8 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.SCP):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('SCP does not provide cloud storage.')
+    elif isinstance(cloud, clouds.OVHCloud):
+        return StoreType.S3
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
@@ -976,6 +980,7 @@ class S3Store(AbstractStore):
 
         # Check if the storage is enabled
         if not _is_storage_cloud_enabled(str(clouds.AWS())):
+            return
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: s3\' specified, but ' \

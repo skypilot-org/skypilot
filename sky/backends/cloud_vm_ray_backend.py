@@ -78,6 +78,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.Local: 90,
     clouds.OCI: 300,
+    clouds.OVHCloud: 600
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -143,6 +144,7 @@ def _get_cluster_config_template(cloud):
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.OVHCloud: 'ovhcloud-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -1124,6 +1126,12 @@ class RetryingVmProvisioner(object):
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
 
+    def _update_blocklist_on_ovhcloud_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+        pass
+
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -1163,6 +1171,7 @@ class RetryingVmProvisioner(object):
             clouds.Local: self._update_blocklist_on_local_error,
             clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
+            clouds.OVHCloud: self._update_blocklist_on_ovhcloud_error
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
