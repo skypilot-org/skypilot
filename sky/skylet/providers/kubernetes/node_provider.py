@@ -10,6 +10,7 @@ from ray.autoscaler.tags import NODE_KIND_HEAD
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
+from sky import exceptions
 from sky.adaptors import kubernetes
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
@@ -314,7 +315,33 @@ class KubernetesNodeProvider(NodeProvider):
                  pod.status.container_statuses]):
                 break
             time.sleep(1)
-
+        
+        # Checks if the default user has sufficient privilege to set up
+        # the kubernetes instance pod.
+        check_k8s_user_sudo_cmd = [
+            '/bin/sh', '-c',
+            ('if [ $(id -u) -eq 0 ]; '
+             'then alias sudo=''; '
+             'else command -v sudo >/dev/null 2>&1 || '
+             f'( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); fi')
+        ]
+        for new_node in new_nodes:
+            privilege_check = kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=check_k8s_user_sudo_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+                raise config.KubernetesError(
+                    'Insufficient system privileges detected. '
+                    'Ensure the default user has root access or '
+                    '"sudo" is installed in the image.')
+        
         # Once all containers are ready, we can exec into them and set env vars.
         # Kubernetes automatically populates containers with critical
         # environment variables, such as those for discovering services running
@@ -343,6 +370,31 @@ class KubernetesNodeProvider(NodeProvider):
                 stdout=True,
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
+        
+        # Setting up ssh for the pod instance. This is already setup for
+        # the jump pod so it does not need to be run for it.
+        set_k8s_ssh_cmd = ['/bin/sh', '-c',
+                           ('sudo apt install openssh-server -y && '
+                            'sudo mkdir -p /var/run/sshd && '
+                            'sudo sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config && '
+                            'sudo sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd && '
+                            'cd /etc/ssh/ && sudo ssh-keygen -A && '
+                            'sudo mkdir -p ~/.ssh && '
+                            'sudo cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && '
+                            'sudo service ssh restart')
+        ]
+        for new_node in new_nodes:
+            kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_ssh_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')

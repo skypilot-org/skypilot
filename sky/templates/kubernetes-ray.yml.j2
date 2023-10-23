@@ -184,10 +184,6 @@ available_node_types:
             name: dev-fuse
           securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
             privileged: true
-          lifecycle:
-            postStart:
-              exec:
-                command: ["/bin/bash", "-c", "sudo apt install openssh-server -y && mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
           resources:
             requests:
               cpu: {{cpus}}
@@ -248,10 +244,6 @@ available_node_types:
           image: {{image_id}}
           command: ["/bin/bash", "-c", "--"]
           args: ["trap : TERM INT; sleep infinity & wait;"]
-          lifecycle:
-            postStart:
-              exec:
-                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
           ports:
           - containerPort: 22  # Used for SSH
           # This volume allocates shared memory for Ray to use for its plasma
@@ -284,7 +276,6 @@ setup_commands:
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   - {{ conda_installation_commands }}
     sudo apt install gcc patch pciutils nano fuse python3 python3-pip -y && rm -rf /var/lib/apt/lists/*;
-    sudo mkdir -p /var/run/sshd && sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && sudo sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && cd /etc/ssh/ && sudo ssh-keygen -A; 
     pip3 install wheel Click colorama cryptography jinja2 jsonschema && pip3 install networkx oauth2client pandas pendulum PrettyTable && pip3 install rich tabulate filelock && pip3 install packaging 'protobuf<4.0.0' pulp && pip3 install awscli boto3 pycryptodome==3.12.0 && pip3 install docker kubernetes;
     pip3 install "skypilot[aws]";
     mkdir -p ~/.ssh; touch ~/.ssh/config;
