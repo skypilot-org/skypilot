@@ -62,7 +62,16 @@ def _build_sky_wheel():
     with tempfile.TemporaryDirectory() as tmp_dir:
         # prepare files
         tmp_dir = pathlib.Path(tmp_dir)
-        (tmp_dir / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
+        sky_tmp_dir = tmp_dir / 'sky'
+        sky_tmp_dir.mkdir()
+        for item in SKY_PACKAGE_PATH.iterdir():
+            target = sky_tmp_dir / item.name
+            if item.name == '__init__.py':
+                # Copy __init__.py since we need to modify it.
+                shutil.copy(item, target)
+            else:
+                # Symlink other files.
+                target.symlink_to(item, target_is_directory=item.is_dir())
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
 
         setup_content = (setup_files_dir / 'setup.py').read_text()
@@ -78,12 +87,11 @@ def _build_sky_wheel():
                 shutil.copy(str(f), str(tmp_dir))
 
         init_file_path = SKY_PACKAGE_PATH / '__init__.py'
-        original_init_file_content = init_file_path.read_text()
+        init_file_content = init_file_path.read_text()
         # Replace the commit hash with the current commit hash.
         init_file_content = re.sub(
             r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
-            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'',
-            original_init_file_content)
+            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
         (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
 
         # It is important to normalize the path, otherwise 'pip wheel' would
@@ -122,7 +130,6 @@ def _build_sky_wheel():
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(wheel_path), wheel_dir)
-        (tmp_dir / 'sky' / '__init__.py').write_text(original_init_file_content)
 
 
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
