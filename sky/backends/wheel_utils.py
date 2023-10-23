@@ -78,11 +78,12 @@ def _build_sky_wheel():
                 shutil.copy(str(f), str(tmp_dir))
 
         init_file_path = SKY_PACKAGE_PATH / '__init__.py'
-        init_file_content = init_file_path.read_text()
+        original_init_file_content = init_file_path.read_text()
         # Replace the commit hash with the current commit hash.
         init_file_content = re.sub(
             r'_SKYPILOT_COMMIT_SHA = [\'"](.*?)[\'"]',
-            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'', init_file_content)
+            f'_SKYPILOT_COMMIT_SHA = \'{sky.__commit__}\'',
+            original_init_file_content)
         (tmp_dir / 'sky' / '__init__.py').write_text(init_file_content)
 
         # It is important to normalize the path, otherwise 'pip wheel' would
@@ -121,6 +122,7 @@ def _build_sky_wheel():
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(wheel_path), wheel_dir)
+        (tmp_dir / 'sky' / '__init__.py').write_text(original_init_file_content)
 
 
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
