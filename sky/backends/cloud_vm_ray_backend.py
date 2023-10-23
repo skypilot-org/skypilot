@@ -4119,6 +4119,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             config = common_utils.read_yaml(handle.cluster_yaml)
             if provision_lib.supports(repr(cloud), 'cleanup_ports'):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
+                                            handle.launched_resources.ports,
                                             config['provider'])
 
         # The cluster file must exist because the cluster_yaml will only

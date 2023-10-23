@@ -676,9 +676,11 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del ports
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)

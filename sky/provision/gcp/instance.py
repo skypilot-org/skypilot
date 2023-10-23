@@ -228,9 +228,11 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    del ports
     assert provider_config is not None, cluster_name_on_cloud
     project_id = provider_config['project_id']
     if 'ports' in provider_config:

@@ -1832,7 +1832,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 port_details = provision_lib.query_ports(
                     repr(cloud), handle.cluster_name_on_cloud,
-                    config['provider'])
+                    handle.launched_resources.ports, config['provider'])
                 if not port_details:
                     click.echo('No ports exposed.')
 

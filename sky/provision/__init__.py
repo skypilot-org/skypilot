@@ -131,6 +131,7 @@ def open_ports(
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
@@ -141,6 +142,7 @@ def cleanup_ports(
 def query_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:
     """Query details about ports on a cluster.

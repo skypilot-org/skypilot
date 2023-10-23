@@ -16,11 +16,10 @@ def open_ports(
         )
 
     assert provider_config, 'provider_config is required'
-    for port_details in provider_config['ports']:
-        service_name = port_details['service_name']
-        ingress_name = port_details['ingress_name']
-        path_prefix = port_details['path_prefix']
-        port = port_details['port']
+    for port in ports:
+        service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
+        ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
+        path_prefix = f"/skypilot/{cluster_name_on_cloud}/{port}"
         network_utils.create_namespaced_service(
             namespace=provider_config["namespace"],
             service_name=service_name,
@@ -38,26 +37,27 @@ def open_ports(
 
 def cleanup_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, cluster_name_on_cloud
-    if 'ports' in provider_config:
-        for port_details in provider_config['ports']:
-            service_name = port_details['service_name']
-            ingress_name = port_details['ingress_name']
-            network_utils.delete_namespaced_service(
-                namespace=provider_config["namespace"],
-                service_name=service_name,
-            )
-            network_utils.delete_namespaced_ingress(
-                namespace=provider_config['namespace'],
-                ingress_name=ingress_name,
-            )
+    for port in ports:
+        service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
+        ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
+        network_utils.delete_namespaced_service(
+            namespace=provider_config["namespace"],
+            service_name=service_name,
+        )
+        network_utils.delete_namespaced_ingress(
+            namespace=provider_config['namespace'],
+            ingress_name=ingress_name,
+        )
 
 
 def query_ports(
     cluster_name_on_cloud: str,
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:
     """See sky/provision/__init__.py"""
@@ -66,11 +66,10 @@ def query_ports(
 
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
     result = {}
-    if 'ports' in provider_config:
-        for port_details in provider_config['ports']:
-            result[port_details['port']] = os.path.join(
-                http_url,
-                port_details['path_prefix'].lstrip('/')), os.path.join(
-                    https_url, port_details['path_prefix'].lstrip('/'))
+    for port in ports:
+        path_prefix = f"/skypilot/{cluster_name_on_cloud}/{port}"
+        result[port] = os.path.join(http_url,
+                                    path_prefix.lstrip('/')), os.path.join(
+                                        https_url, path_prefix.lstrip('/'))
 
     return result
