@@ -61,6 +61,8 @@ The command can then be run as:
 
   sky.spot_launch(task, ...)
 """.strip()
+
+# ...
 _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
     '~/.sky/config.yaml file and make sure '
