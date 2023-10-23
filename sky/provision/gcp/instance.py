@@ -232,7 +232,7 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del ports
+    del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     project_id = provider_config['project_id']
     if 'ports' in provider_config:

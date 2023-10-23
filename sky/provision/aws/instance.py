@@ -680,7 +680,7 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del ports
+    del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)

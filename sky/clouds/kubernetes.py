@@ -222,7 +222,7 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-        deploy_vars = {
+        return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
@@ -240,11 +240,6 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
-
-        if resources.ports is not None:
-            deploy_vars['ports'] = resources.ports
-
-        return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

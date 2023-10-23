@@ -3,12 +3,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky.provision.kubernetes import network_utils
 
-PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
+_PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
 
 
 def open_ports(
     cluster_name_on_cloud: str,
-    ports: List[str],  # pylint: disable=unused-argument
+    ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
@@ -17,11 +17,11 @@ def open_ports(
             "Ingress controller not found. Please install ingress controller first."
         )
 
-    assert provider_config, 'provider_config is required'
+    assert provider_config is not None, 'provider_config is required'
     for port in ports:
         service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
         ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
-        path_prefix = PATH_PREFIX.format(
+        path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
         network_utils.create_namespaced_service(
             namespace=provider_config["namespace"],
@@ -64,13 +64,12 @@ def query_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:
     """See sky/provision/__init__.py"""
-    if provider_config is None:
-        return {}
+    assert provider_config is not None, 'provider_config is required'
 
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
     result = {}
     for port in ports:
-        path_prefix = PATH_PREFIX.format(
+        path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
         result[port] = os.path.join(http_url,
                                     path_prefix.lstrip('/')), os.path.join(

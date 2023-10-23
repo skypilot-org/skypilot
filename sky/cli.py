@@ -109,7 +109,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 # command.
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
-_STATUS_CLUSTER_NUM_ERROR_MESSAGE = (
+_STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify an existing '
     'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
 
@@ -1783,7 +1783,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                     cluster_num = (str(len(clusters))
                                    if len(clusters) > 0 else 'No')
                     raise ValueError(
-                        _STATUS_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='specified',
@@ -1804,7 +1804,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                     cluster_num = (str(len(cluster_records))
                                    if len(clusters) > 0 else 'No')
                     raise ValueError(
-                        _STATUS_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='found',
