@@ -26,6 +26,11 @@ import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
+_COMMIT_FAILURE_MESSAGE = (
+    'WARNING: SkyPilot fail to {verb} the commit hash in '
+    f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): '
+    '{error}')
+
 original_init_content = None
 
 system = platform.system()
@@ -72,10 +77,8 @@ def get_commit_hash():
             commit_hash += '-dirty'
         return commit_hash
     except Exception as e:  # pylint: disable=broad-except
-        print(
-            'WARNING: SkyPilot fail to get the commit hash in '
-            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-            file=sys.stderr)
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='get', error=str(e)),
+              file=sys.stderr)
         return commit_hash
 
 
@@ -95,10 +98,8 @@ def replace_commit_hash():
     except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
         # the file.
-        print(
-            'WARNING: SkyPilot fail to replace the commit hash in '
-            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-            file=sys.stderr)
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
         pass
 
 
@@ -107,14 +108,11 @@ def revert_commit_hash():
         if original_init_content is not None:
             with open(INIT_FILE_PATH, 'w') as fp:
                 fp.write(original_init_content)
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
         # the file.
-        print(
-            'WARNING: SkyPilot fail to replace the commit hash in '
-            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-            file=sys.stderr)
-        pass
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
 
 
 def parse_readme(readme: str) -> str:
