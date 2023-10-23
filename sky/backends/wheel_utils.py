@@ -66,10 +66,9 @@ def _build_sky_wheel():
         sky_tmp_dir.mkdir()
         for item in SKY_PACKAGE_PATH.iterdir():
             target = sky_tmp_dir / item.name
-            if item.name == '__init__.py':
-                # Copy __init__.py since we need to modify it.
-                shutil.copy(item, target)
-            else:
+            if item.name != '__init__.py':
+                # We do not symlink `sky/__init__.py` as we need to
+                # modify the commit hash in the file later.
                 # Symlink other files.
                 target.symlink_to(item, target_is_directory=item.is_dir())
         setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
