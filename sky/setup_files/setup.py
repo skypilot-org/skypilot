@@ -76,22 +76,30 @@ def get_commit_hash():
 
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
-    with open(INIT_FILE_PATH, 'r') as fp:
-        content = fp.read()
-        global original_init_content
-        original_init_content = content
-        content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
-                         f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
-                         content,
-                         flags=re.M)
-    with open(INIT_FILE_PATH, 'w') as fp:
-        fp.write(content)
+    try:
+        with open(INIT_FILE_PATH, 'r') as fp:
+            content = fp.read()
+            global original_init_content
+            original_init_content = content
+            content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
+                            f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                            content,
+                            flags=re.M)
+        with open(INIT_FILE_PATH, 'w') as fp:
+            fp.write(content)
+    except Exception: # pylint: disable=broad-except
+        # Avoid breaking the installation.
+        pass
 
 
 def revert_commit_hash():
-    if original_init_content is not None:
-        with open(INIT_FILE_PATH, 'w') as fp:
-            fp.write(original_init_content)
+    try:
+        if original_init_content is not None:
+            with open(INIT_FILE_PATH, 'w') as fp:
+                fp.write(original_init_content)
+    except Exception: # pylint: disable=broad-except
+        # Avoid breaking the installation.
+        pass
 
 
 def parse_readme(readme: str) -> str:
