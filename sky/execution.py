@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 import uuid
 
 import colorama
+import filelock
 
 import sky
 from sky import backends
@@ -69,6 +70,8 @@ _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
+
+_SERVE_UP_NAME_LOCK_PATH = '/tmp/sky_serve_up_{}.lock'
 
 
 def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
@@ -959,33 +962,39 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
             storage_obj.force_delete = True
 
 
-@usage_lib.entrypoint
-def serve_up(
-    task: 'sky.Task',
-    service_name: Optional[str] = None,
-) -> None:
-    """Spin up a service.
+def _register_service_name(service_name: str) -> bool:
+    """Register a service name on the controller if it is running.
 
-    Please refer to the sky.cli.serve_up for the document.
-
-    Args:
-        task: sky.Task to serve up.
-        service_name: Name of the service.
+    Returns:
+        True if the service name is registered successfully, False otherwise.
     """
-    if service_name is None:
-        service_name = backend_utils.generate_service_name()
+    with sky_logging.silent():
+        _, handle = backend_utils.is_controller_up(is_spot=False,
+                                                   stopped_message='')
+    if handle is None or handle.head_ip is None:
+        # The sky serve controller is STOPPED, or it is the first time
+        # provisioning either after an AUTOSTOP, or the first time the
+        # controller is created, which means there is no service on the
+        # controller. We will create the service database record in
+        # sky.serve.service._start once the controller is running.
+        logger.info('The sky serve controller is not running. '
+                    'Will register the service once the controller is up.')
+        return True
+    # The sky serve controller is UP, check if the service exists.
+    code = serve.ServeCodeGen.add_service_if_not_exist(service_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+    returncode, stdout, _ = backend.run_on_head(handle,
+                                                code,
+                                                require_outputs=True,
+                                                stream_logs=False)
+    subprocess_utils.handle_returncode(
+        returncode, code, 'Failed to register service name on controller',
+        stdout)
+    return serve.load_add_service_result(stdout)
 
-    # The service name will be used as:
-    # 1. controller cluster name: 'sky-serve-controller-<service_name>'
-    # 2. replica cluster name: '<service_name>-<replica_id>'
-    # In both cases, service name shares the same regex with cluster name.
-    if re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service name {service_name!r} is invalid: '
-                             f'ensure it is fully matched by regex (e.g., '
-                             'only contains lower letters, numbers and dash): '
-                             f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
+def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
@@ -1022,6 +1031,16 @@ def serve_up(
 
     task.set_resources(
         requested_resources.copy(ports=[task.service.replica_port]))
+
+    with rich_utils.safe_status(
+            '[cyan]Registering service on the controller[/]'):
+        success = _register_service_name(service_name)
+        if not success:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'The service {service_name!r} is already running. '
+                    'Update service will be supported in the future. For now, '
+                    '`sky serve down` and then `sky serve up` again.')
 
     controller_name = serve.SKY_SERVE_CONTROLLER_NAME
     # TODO(tian): Probably run another sky.launch after we get the load balancer
@@ -1074,10 +1093,42 @@ def serve_up(
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
-            # We use autostop here to reduce cold start time, since in most
-            # cases the controller resources requirement will be the default
-            # value and a previous controller could be reused.
             idle_minutes_to_autostop=backend_utils.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
+
+
+@usage_lib.entrypoint
+def serve_up(
+    task: 'sky.Task',
+    service_name: Optional[str] = None,
+) -> None:
+    """Spin up a service.
+
+    Please refer to the sky.cli.serve_up for the document.
+
+    Args:
+        task: sky.Task to serve up.
+        service_name: Name of the service.
+    """
+    if service_name is None:
+        service_name = backend_utils.generate_service_name()
+
+    # The service name will be used as:
+    # 1. controller cluster name: 'sky-serve-controller-<service_name>'
+    # 2. replica cluster name: '<service_name>-<replica_id>'
+    # In both cases, service name shares the same regex with cluster name.
+    if re.fullmatch(constants.CLUSTER_NAME_VALID_REGEX, service_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service name {service_name!r} is invalid: '
+                             f'ensure it is fully matched by regex (e.g., '
+                             'only contains lower letters, numbers and dash): '
+                             f'{constants.CLUSTER_NAME_VALID_REGEX}')
+
+    # We need this lock to make sure no two sky.serve_up() with same service
+    # name are running at the same time. It is for the race condition that
+    # two of them are trying to create a record in controller services database
+    # but the controller is not up yet.
+    with filelock.FileLock(_SERVE_UP_NAME_LOCK_PATH.format(service_name)):
+        _serve_up_no_lock(task, service_name)

@@ -121,13 +121,16 @@ def _start(service_name: str, task_yaml: str, job_id: int):
     status = serve_state.ServiceStatus.CONTROLLER_INIT
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
         status = serve_state.ServiceStatus.PENDING
-    # TODO(tian): Use id as identifier instead of name.
-    serve_state.add_service(service_name,
-                            controller_job_id=job_id,
-                            policy=service_spec.policy_str(),
-                            auto_restart=service_spec.auto_restart,
-                            requested_resources=requested_resources,
-                            status=status)
+    # Here, the service record might already registered in the database if the
+    # controller is UP, but also might not if the controller is STOPPED or not
+    # created yet before this service. So we use add_or_update_service here.
+    # See sky.execution._register_service_name for more details.
+    serve_state.add_or_update_service(service_name,
+                                      controller_job_id=job_id,
+                                      policy=service_spec.policy_str(),
+                                      auto_restart=service_spec.auto_restart,
+                                      requested_resources=requested_resources,
+                                      status=status)
 
     controller_process = None
     load_balancer_process = None

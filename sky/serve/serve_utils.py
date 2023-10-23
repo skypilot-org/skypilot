@@ -251,11 +251,25 @@ def update_service_status() -> None:
         if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
             # Skip services that is shutting down.
             continue
-        controller_status = job_lib.get_status(record['controller_job_id'])
+        controller_job_id = record['controller_job_id']
+        if controller_job_id is None:
+            # The service just registered and the controller job is not
+            # scheduled yet.
+            continue
+        controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
             serve_state.set_service_status(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+
+
+def add_service_if_not_exist(service_name: str) -> str:
+    return common_utils.encode_payload(
+        serve_state.add_service_if_not_exist(service_name))
+
+
+def load_add_service_result(payload: str) -> bool:
+    return common_utils.decode_payload(payload)
 
 
 def get_replica_info(service_name: str,
@@ -543,6 +557,14 @@ class ServeCodeGen:
         'from sky.serve import serve_state',
         'from sky.serve import serve_utils',
     ]
+
+    @classmethod
+    def add_service_if_not_exist(cls, service_name: str) -> str:
+        code = [
+            f'msg = serve_utils.add_service_if_not_exist({service_name!r})',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
 
     @classmethod
     def get_latest_info(cls, service_names: Optional[List[str]]) -> str:

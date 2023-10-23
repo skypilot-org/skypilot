@@ -13,6 +13,7 @@ from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import generate_remote_controller_log_file_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name
 from sky.serve.serve_utils import generate_replica_cluster_name
+from sky.serve.serve_utils import load_add_service_result
 from sky.serve.serve_utils import load_latest_info
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent

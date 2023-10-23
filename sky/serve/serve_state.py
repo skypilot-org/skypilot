@@ -29,14 +29,14 @@ _CURSOR = _CONN.cursor()
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS services (
     name TEXT PRIMARY KEY,
-    controller_job_id INTEGER,
+    controller_job_id INTEGER DEFAULT NULL,
     controller_port INTEGER DEFAULT NULL,
     load_balancer_port INTEGER DEFAULT NULL,
     status TEXT,
     uptime INTEGER DEFAULT NULL,
-    policy TEXT,
-    auto_restart INTEGER,
-    requested_resources BLOB)""")
+    policy TEXT DEFAULT NULL,
+    auto_restart INTEGER DEFAULT NULL,
+    requested_resources BLOB DEFAULT NULL)""")
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS replicas (
     service_name TEXT,
@@ -44,6 +44,8 @@ _CURSOR.execute("""\
     replica_info BLOB,
     PRIMARY KEY (service_name, replica_id))""")
 _CONN.commit()
+
+_UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
 # === Statuses ===
@@ -169,14 +171,30 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 # === Service functions ===
-def add_service(name: str, controller_job_id: int, policy: str,
-                auto_restart: bool, requested_resources: 'sky.Resources',
-                status: ServiceStatus) -> None:
+def add_service_if_not_exist(name: str) -> bool:
     """Adds a service to the database."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        try:
+            cursor.execute(
+                """\
+                INSERT INTO services (name, status)
+                VALUES (?, ?)""", (name, ServiceStatus.CONTROLLER_INIT.value))
+        except sqlite3.IntegrityError as e:
+            if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
+                raise RuntimeError('Unexpected database error') from e
+            return False
+        return True
+
+
+def add_or_update_service(name: str, controller_job_id: int, policy: str,
+                          auto_restart: bool,
+                          requested_resources: 'sky.Resources',
+                          status: ServiceStatus) -> None:
+    """Updates a service in the database."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(
             """\
-            INSERT INTO services
+            INSERT OR REPLACE INTO services
             (name, controller_job_id, status, policy,
             auto_restart, requested_resources)
             VALUES (?, ?, ?, ?, ?, ?)""",
@@ -243,7 +261,8 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'uptime': uptime,
         'policy': policy,
         'auto_restart': bool(auto_restart),
-        'requested_resources': pickle.loads(requested_resources),
+        'requested_resources': pickle.loads(requested_resources)
+                               if requested_resources is not None else None,
     }
 
 
