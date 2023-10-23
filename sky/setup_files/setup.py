@@ -72,9 +72,10 @@ def get_commit_hash():
             commit_hash += '-dirty'
         return commit_hash
     except Exception as e:  # pylint: disable=broad-except
-        print('WARNING: SkyPilot fail to get the commit hash in '
-              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-              file=sys.stderr)
+        print(
+            'WARNING: SkyPilot fail to get the commit hash in '
+            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+            file=sys.stderr)
         return commit_hash
 
 
@@ -86,17 +87,18 @@ def replace_commit_hash():
             global original_init_content
             original_init_content = content
             content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
-                            f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
-                            content,
-                            flags=re.M)
+                             f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                             content,
+                             flags=re.M)
         with open(INIT_FILE_PATH, 'w') as fp:
             fp.write(content)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
         # the file.
-        print('WARNING: SkyPilot fail to replace the commit hash in '
-              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-              file=sys.stderr)
+        print(
+            'WARNING: SkyPilot fail to replace the commit hash in '
+            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+            file=sys.stderr)
         pass
 
 
@@ -105,12 +107,13 @@ def revert_commit_hash():
         if original_init_content is not None:
             with open(INIT_FILE_PATH, 'w') as fp:
                 fp.write(original_init_content)
-    except Exception: # pylint: disable=broad-except
+    except Exception:  # pylint: disable=broad-except
         # Avoid breaking the installation when there is no permission to write
         # the file.
-        print('WARNING: SkyPilot fail to replace the commit hash in '
-              f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
-              file=sys.stderr)
+        print(
+            'WARNING: SkyPilot fail to replace the commit hash in '
+            f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): {e}',
+            file=sys.stderr)
         pass
 
 
