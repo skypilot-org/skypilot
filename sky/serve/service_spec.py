@@ -6,8 +6,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from sky.backends import backend_utils
 from sky.serve import constants
+from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -57,8 +57,8 @@ class SkyServiceSpec:
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
-        backend_utils.validate_schema(config, schemas.get_service_schema(),
-                                      'Invalid service YAML: ')
+        common_utils.validate_schema(config, schemas.get_service_schema(),
+                                     'Invalid service YAML: ')
         if 'replicas' in config and 'replica_policy' in config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

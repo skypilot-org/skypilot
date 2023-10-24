@@ -157,7 +157,7 @@ def get_storage_schema():
 
 def get_service_schema():
     return {
-        '$schema': 'http://json-schema.org/draft-07/schema#',
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': ['port', 'readiness_probe'],
         'additionalProperties': False,
@@ -333,32 +333,34 @@ def get_cluster_schema():
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
+    controller_resources_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': {
+                        k: v
+                        for k, v in get_resources_schema().items()
+                        # Validation may fail if $schema is included.
+                        if k != '$schema'
+                    },
+                }
+            },
+        }
+    }
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'spot': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'controller': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': False,
-                        'properties': {
-                            'resources': {
-                                k: v
-                                for k, v in get_resources_schema().items()
-                                # Validation may fail if $schema is included.
-                                if k != '$schema'
-                            },
-                        }
-                    },
-                }
-            },
+            'spot': controller_resources_schema,
+            'serve': controller_resources_schema,
             'aws': {
                 'type': 'object',
                 'required': [],
