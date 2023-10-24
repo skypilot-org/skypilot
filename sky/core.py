@@ -676,10 +676,10 @@ def download_logs(
     """Download the logs of jobs.
 
     Args:
-        cluster_name: (str) name of the cluster.
-        job_ids: (List[str]) job ids.
+        cluster_name: name of the cluster.
+        job_ids: job ids.
     Returns:
-        Dict[str, str]: a mapping of job_id to local log path.
+        A mapping of job_id to local log path.
     Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
@@ -718,14 +718,13 @@ def job_status(cluster_name: str,
     """Get the status of jobs.
 
     Args:
-        cluster_name: (str) name of the cluster.
-        job_ids: (List[str]) job ids. If None, get the status of the last job.
-        stream_logs: (bool) whether to stream logs.
+        cluster_name: name of the cluster.
+        job_ids: job ids. If None, get the status of the last job.
+        stream_logs: whether to stream logs.
     Returns:
-        Dict[Optional[int], Optional[sky.JobStatus]]: A mapping of job_id to
-        job statuses. The status will be None if the job does not exist.
-        If job_ids is None and there is no job on the cluster, it will return
-        {None: None}.
+        A mapping of job_id to job statuses. The status will be None if the job
+        does not exist. If job_ids is None and there is no job on the cluster,
+        it will return {None: None}.
     Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
