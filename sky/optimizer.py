@@ -135,8 +135,8 @@ class Optimizer:
                         try_fix_with_sky_check = True,
                         check_resource_satisfying = False
                 )
-                if len(launchable_resources_map[resources]) == 0:
-                    continue
+                if len(launchable_resources_map[resources]) != 0:
+                    break
 
         if task_id == len(dag.tasks) - 1:
             plan = Optimizer._optimize_objective(
