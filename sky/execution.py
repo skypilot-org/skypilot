@@ -370,9 +370,8 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        group = backend_utils.ReservedClusterGroup.check_cluster_name(
-            cluster_name)
-        if group is None and not _is_launched_by_sky_serve_controller:
+        controller = backend_utils.Controllers.check_cluster_name(cluster_name)
+        if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
@@ -969,8 +968,9 @@ def _register_service_name(service_name: str) -> bool:
         True if the service name is registered successfully, False otherwise.
     """
     with sky_logging.silent():
-        _, handle = backend_utils.is_controller_up(is_spot=False,
-                                                   stopped_message='')
+        _, handle = backend_utils.is_controller_up(
+            controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
+            stopped_message='')
     if handle is None or handle.head_ip is None:
         # The sky serve controller is STOPPED, or it is the first time
         # provisioning either after an AUTOSTOP, or the first time the

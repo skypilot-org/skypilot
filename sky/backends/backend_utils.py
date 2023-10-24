@@ -14,8 +14,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Sequence, Set, Tuple,
-                    Union)
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -109,24 +108,25 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 
 @dataclasses.dataclass
-class ReservedClusterRecord:
-    """Record for reserved cluster group."""
-    group_name: str
-    check: Callable[[str], bool]
+class ControllerSpec:
+    """Spec for skypilot controllers."""
+    name: str
+    cluster_name: str
     sky_status_hint: str
     decline_cancel_hint: str
     decline_down_in_init_status_hint: str
     decline_down_for_dirty_controller_hint: str
     check_cluster_name_hint: str
+    default_hint_if_non_existent: str
 
 
-class ReservedClusterGroup(enum.Enum):
-    """Reserved cluster groups for skypilot."""
+class Controllers(enum.Enum):
+    """Skypilot controllers."""
     # NOTE(dev): Keep this align with
-    # sky/cli.py::_RESERVED_CLUSTER_GROUP_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = ReservedClusterRecord(
-        group_name='Managed spot controller',
-        check=lambda name: name == spot_lib.SPOT_CONTROLLER_NAME,
+    # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
+    SPOT_CONTROLLER = ControllerSpec(
+        name='managed spot controller',
+        cluster_name=spot_lib.SPOT_CONTROLLER_NAME,
         sky_status_hint=(
             f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
             f'sky spot queue{colorama.Style.RESET_ALL}'),
@@ -148,10 +148,11 @@ class ReservedClusterGroup(enum.Enum):
             f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
         check_cluster_name_hint=(
             f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller. '))
-    SKY_SERVE_CONTROLLER = ReservedClusterRecord(
-        group_name='Sky Serve controller',
-        check=lambda name: name == serve_lib.SKY_SERVE_CONTROLLER_NAME,
+            'managed spot controller. '),
+        default_hint_if_non_existent='No managed spot jobs are found.')
+    SKY_SERVE_CONTROLLER = ControllerSpec(
+        name='sky serve controller',
+        cluster_name=serve_lib.SKY_SERVE_CONTROLLER_NAME,
         sky_status_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status{colorama.Style.RESET_ALL}'),
@@ -174,22 +175,20 @@ class ReservedClusterGroup(enum.Enum):
             f'{colorama.Style.RESET_ALL}.'),
         check_cluster_name_hint=(
             f'Cluster {serve_lib.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller. '))
+            'sky serve controller. '),
+        default_hint_if_non_existent='No service is found.')
 
     @classmethod
-    def check_cluster_name(
-            cls, name: Optional[str]) -> Optional['ReservedClusterGroup']:
-        """Check if the cluster name is reserved.
+    def check_cluster_name(cls, name: Optional[str]) -> Optional['Controllers']:
+        """Check if the cluster name is a controller name.
 
         Returns:
-            The group name if the cluster name is reserved.
+            The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        if name is None:
-            return None
-        for group in cls:
-            if group.value.check(name):
-                return group
+        for controller in cls:
+            if controller.value.cluster_name == name:
+                return controller
         return None
 
 
@@ -2589,9 +2588,8 @@ def check_cluster_available(
     return handle
 
 
-# TODO(tian): Probably use ReservedClusterGroup and add some attr for the msg?
 def is_controller_up(
-    is_spot: bool,
+    controller_type: Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
@@ -2603,7 +2601,7 @@ def is_controller_up(
     controller.
 
     Args:
-        is_spot: Whether the type of the controller is spot.
+        type: Type of the controller.
         stopped_message: Message to print if the controller is STOPPED.
         non_existent_message: Message to show if the controller does not exist.
 
@@ -2620,16 +2618,10 @@ def is_controller_up(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
-    if is_spot:
-        controller_name = spot_lib.SPOT_CONTROLLER_NAME
-        controller_hint = 'spot'
-        if non_existent_message is None:
-            non_existent_message = 'No managed spot jobs are found.'
-    else:
-        controller_name = serve_lib.SKY_SERVE_CONTROLLER_NAME
-        controller_hint = 'sky serve'
-        if non_existent_message is None:
-            non_existent_message = 'No service is found.'
+    if non_existent_message is None:
+        non_existent_message = controller_type.value.default_hint_if_non_existent
+    cluster_name = controller_type.value.cluster_name
+    controller_name = controller_type.value.name.replace(' controller', '')
     try:
         # Set force_refresh_statuses=None to make sure the refresh only happens
         # when the controller is INIT/UP (triggered in these statuses as the
@@ -2638,17 +2630,17 @@ def is_controller_up(
         # This optimization is based on the assumption that the user will not
         # start the controller manually from the cloud console.
         controller_status, handle = refresh_cluster_status_handle(
-            controller_name, force_refresh_statuses=None)
+            cluster_name, force_refresh_statuses=None)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
         # `backend_utils.check_cluster_available`.
         logger.warning(
             'Failed to get the status of the controller. It is not '
-            f'fatal, but {controller_hint} commands/calls may hang or return '
+            f'fatal, but {controller_name} commands/calls may hang or return '
             'stale information, when the controller is not up.\n'
             f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
-        record = global_user_state.get_cluster_from_name(controller_name)
+        record = global_user_state.get_cluster_from_name(cluster_name)
         controller_status, handle = None, None
         if record is not None:
             controller_status, handle = record['status'], record['handle']
@@ -2656,7 +2648,7 @@ def is_controller_up(
     if controller_status is None:
         sky_logging.print(non_existent_message)
     elif controller_status != status_lib.ClusterStatus.UP:
-        msg = (f'{controller_hint.capitalize()} controller {controller_name} '
+        msg = (f'{controller_name.capitalize()} controller {cluster_name} '
                f'is {controller_status.value}.')
         if controller_status == status_lib.ClusterStatus.STOPPED:
             msg += f'\n{stopped_message}'
@@ -2709,7 +2701,7 @@ def get_clusters(
     if not include_reserved:
         records = [
             record for record in records
-            if ReservedClusterGroup.check_cluster_name(record['name']) is None
+            if Controllers.check_cluster_name(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2817,61 +2809,6 @@ def get_clusters(
         for cluster_name, e in failed_clusters:
             logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
     return kept_records
-
-
-def refresh_service_status(
-        service_names: Optional[List[str]]) -> List[Dict[str, Any]]:
-    """Refresh the status of the services.
-
-    Args:
-        service_names: If provided, only refresh the status of the specified
-            services. Otherwise, refresh the status of all services.
-
-    Returns:
-        A list of updated service records.
-    """
-    try:
-        check_network_connection()
-    except exceptions.NetworkError:
-        logger.warning('Failed to refresh service status due to network error.')
-        return []
-
-    # TODO(tian): This is so slow... It will take ~10s to refresh the status
-    # of controller. Can we optimize this?
-    controller_status, handle = is_controller_up(
-        is_spot=False, stopped_message='No service is found.')
-
-    if handle is None or handle.head_ip is None:
-        # When the controller is STOPPED, the head_ip will be None, as
-        # it will be set in global_user_state.remove_cluster().
-        # We do not directly check for UP because the controller may be
-        # in INIT state during another spot launch, but still have
-        # head_ip available. In this case, we can still try to ssh
-        # into the controller and fetch the job table.
-        raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
-                                           cluster_status=controller_status)
-
-    backend = get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
-    code = serve_lib.ServeCodeGen.get_latest_info(service_names)
-    returncode, latest_info_payload, stderr = backend.run_on_head(
-        handle,
-        code,
-        require_outputs=True,
-        stream_logs=False,
-        separate_stderr=True)
-
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch services',
-                                           stderr,
-                                           stream_logs=False)
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
-
-    return serve_lib.load_latest_info(latest_info_payload)
 
 
 # Internal only:
@@ -2990,7 +2927,10 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster name is reserved (e.g., spot/serve controller).
+    """Errors out if the cluster name is reserved.
+
+    Currently, all reserved cluster names are skypilot controller, i.e.
+    spot controller/sky serve controller.
 
     Raises:
       sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
@@ -2999,9 +2939,9 @@ def check_cluster_name_not_reserved(
     Returns:
       None, if the cluster name is not reserved.
     """
-    group = ReservedClusterGroup.check_cluster_name(cluster_name)
-    if group is not None:
-        msg = group.value.check_cluster_name_hint
+    controller = Controllers.check_cluster_name(cluster_name)
+    if controller is not None:
+        msg = controller.value.check_cluster_name_hint
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():

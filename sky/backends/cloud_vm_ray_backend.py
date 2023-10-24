@@ -3373,8 +3373,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            group = backend_utils.ReservedClusterGroup.check_cluster_name(name)
-            if group == backend_utils.ReservedClusterGroup.SPOT_CONTROLLER:
+            controller = backend_utils.Controllers.check_cluster_name(name)
+            if controller == backend_utils.Controllers.SPOT_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Spot Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
@@ -3393,8 +3393,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            elif (group ==
-                  backend_utils.ReservedClusterGroup.SKY_SERVE_CONTROLLER):
+            elif controller == backend_utils.Controllers.SKY_SERVE_CONTROLLER:
                 sn = service_name
                 logger.info(
                     f'{fore.CYAN}Service name: '
@@ -3543,8 +3542,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        group = backend_utils.ReservedClusterGroup.check_cluster_name(name)
-        if group is not None or down:
+        controller = backend_utils.Controllers.check_cluster_name(name)
+        if controller is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
