@@ -14,7 +14,6 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
@@ -382,7 +381,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         # preempted.)
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
-        self._launched_resources: Optional[resources_lib.Resources] = None
+        self._launched_resources: Optional['sky.resources.Resources'] = None
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
