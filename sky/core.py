@@ -12,7 +12,6 @@ from sky import data
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib

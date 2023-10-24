@@ -88,9 +88,7 @@ from sky.core import cancel
 from sky.core import cost_report
 from sky.core import down
 from sky.core import download_logs
-from sky.core import exec  # pylint: disable=redefined-builtin
 from sky.core import job_status
-from sky.core import launch
 from sky.core import queue
 from sky.core import start
 from sky.core import status
