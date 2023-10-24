@@ -2741,13 +2741,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
         requested_resource_str = ', '.join(requested_resource_list)
+        if isinstance(task.resources, list):
+            requested_resource_str = f'[{requested_resource_str}]'
+        elif isinstance(task.resources, set):
+            requested_resource_str = f'{{{requested_resource_str}}}'
         if valid_resource is None:
             for example_resource in task.resources:
                 if (example_resource.region is not None and
                         example_resource.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in region '
+                            f'Task requested resources {example_resource} in region '  # pylint: disable=line-too-long
                             f'{example_resource.region!r}'
                             ', but the existing cluster '
                             f'is in region {launched_resources.region!r}.')
@@ -2758,7 +2762,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 'does not have zone specified.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
-                            'Task requested resources in zone '
+                            f'Task requested resources {example_resource} in zone '  # pylint: disable=line-too-long
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
                             f'{zone_str}')
@@ -3496,7 +3500,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         valid_resource = self.check_resources_fit_cluster(handle,
                                                           task,
                                                           check_ports=True)
-        task_copy = copy.deepcopy(task)
+        task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
         resources_str = backend_utils.get_task_resources_str(task_copy)

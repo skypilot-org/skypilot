@@ -1948,13 +1948,16 @@ def check_can_clone_disk_and_override_task(
                     'a new target cluster name.')
 
     new_task_resources = []
+    original_cloud = handle.launched_resources.cloud
+    original_cloud.check_features_are_supported(
+        {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
+
     for task_resources in task.resources:
         if handle.launched_resources.disk_size > task_resources.disk_size:
             # The target cluster's disk should be at least as large as the source.
             continue
 
         override_param = {}
-        original_cloud = handle.launched_resources.cloud
         assert original_cloud is not None, handle.launched_resources
         if task_resources.cloud is None:
             override_param['cloud'] = original_cloud
@@ -1965,9 +1968,6 @@ def check_can_clone_disk_and_override_task(
                         f'Cannot clone disk across cloud from {original_cloud} to '
                         f'{task_resources.cloud} for resources {task_resources}.'
                     )
-        original_cloud.check_features_are_supported(
-            {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
-
         if task_resources.region is None:
             override_param['region'] = handle.launched_resources.region
 
@@ -2713,8 +2713,15 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
-    if len(task.resources) == 1:
-        resources_dict = get_task_demands_dict(task)
+    if task.best_resources is not None:
+        accelerator_dict = task.best_resources.accelerators
+        if accelerator_dict is None:
+            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in accelerator_dict.items())
+    elif len(task.resources) == 1:
+        resources_dict = list(task.resources)[0].accelerators
         if resources_dict is None:
             resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
         else:
@@ -2729,7 +2736,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
                 resource_accelerators.append(f'{k}:{v}')
 
         if resource_accelerators:
-            resources_str = ', '.join(resource_accelerators)
+            resources_str = ', '.join(set(resource_accelerators))
         else:
             resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'

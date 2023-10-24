@@ -159,10 +159,7 @@ def _with_docker_login_config(
     new_resources = []
     for r in resources:
         new_resources.append(_add_docker_login_config(r))
-    if isinstance(resources, list):
-        return new_resources
-    else:
-        return set(new_resources)
+    return type(resources)(new_resources)
 
 
 class Task:
@@ -636,10 +633,7 @@ class Task:
             new_resources = res.copy(**override_params)
             new_resources_list.append(new_resources)
 
-        if isinstance(self.resources, list):
-            self.set_resources(new_resources_list)
-        else:
-            self.set_resources(set(new_resources_list))
+        self.set_resources(type(self.resources)(new_resources_list))
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],

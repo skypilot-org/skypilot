@@ -14,6 +14,7 @@ import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import status_lib
 from sky.backends import backend_utils
@@ -381,7 +382,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         # preempted.)
         self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
                                                     'sky.clouds.Region']] = None
-        self._launched_accelerators: Optional[str] = None
+        self._launched_resources: Optional[resources_lib.Resources] = None
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
@@ -396,10 +397,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
-            self._launched_accelerators = launched_resources.get_accelerators_str()  # pylint: disable=line-too-long
+            self._launched_resources = launched_resources  # pylint: disable=line-too-long
         else:
             self._launched_cloud_region = None
-            self._launched_accelerators = None
+            self._launched_resources = None
         return job_submitted_at
 
     def recover(self) -> float:
@@ -416,36 +417,17 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             # Add region constraint to the task, to retry on the same region
             # first (if valid).
             if self._launched_cloud_region is not None:
+                assert self._launched_resources is not None
                 task = self.dag.tasks[0]
+                original_resources = task.resources
                 launched_cloud, launched_region = self._launched_cloud_region
-                original_resources = list(task.resources)
-                is_resources_list = isinstance(task.resources, list)
-                # Remove the spot_recovery field from the resources, as
-                # the strategy will be handled by the strategy class.
-                new_resources_list = []
-                for r in original_resources:
-                    if r.get_accelerators_str() == self._launched_accelerators:
-                        # Copy launched_cloud and launched_region to the
-                        # previously picked resource.
-                        new_resources_list.append(
-                            r.copy(cloud=launched_cloud,
-                                   region=launched_region))
-                    else:
-                        new_resources_list.append(r.copy())
-
-                if is_resources_list:
-                    task.set_resources(new_resources_list)
-                else:
-                    task.set_resources(set(new_resources_list))
-
+                new_resources = self._launched_resources.copy(
+                    cloud=launched_cloud, region=launched_region)
+                task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
-
-                if is_resources_list:
-                    task.set_resources(original_resources)
-                else:
-                    task.set_resources(set(original_resources))
+                task.set_resources(original_resources)
                 if job_submitted_at is not None:
                     return job_submitted_at
 
@@ -522,10 +504,9 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         logger.debug('Relaunch the cluster skipping the previously launched '
                      'cloud/region.')
         if self._launched_cloud_region is not None:
+            assert self._launched_resources is not None
             task = self.dag.tasks[0]
-            requested_resources = list(task.resources)[0]
-            if task.best_resources is not None:
-                requested_resources = task.best_resources
+            requested_resources = self._launched_resources
             if (requested_resources.region is None and
                     requested_resources.zone is None):
                 # Optimization: We only block the previously launched region,

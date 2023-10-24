@@ -1,6 +1,5 @@
 """Optimizer: assigns best resources to user tasks."""
 import collections
-from collections import namedtuple
 import enum
 import json
 import typing
@@ -770,7 +769,7 @@ class Optimizer:
                 str(region_or_zone),
             ]
 
-        Row = namedtuple('Row', [
+        Row = collections.namedtuple('Row', [
             'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
             'region_or_zone', 'cost_str', 'chosen_str'
         ])
@@ -886,7 +885,6 @@ class Optimizer:
 
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
-            # x[-4] region, x[1] instance_type, x[-2] cost
             if isinstance(task.resources, list):
                 rows = sorted(
                     rows,
@@ -1087,9 +1085,7 @@ def _make_launchables_for_valid_region_zones(
     # (e.g., in provisioner or optimizer), not here.
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
-    filtered_regions = []
-    filtered_regions = regions
-    for region in filtered_regions:
+    for region in regions:
         if (launchable_resources.use_spot and region.zones is not None or
                 isinstance(launchable_resources.cloud, clouds.GCP)):
             # Spot instances.
