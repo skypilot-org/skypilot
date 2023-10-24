@@ -8,16 +8,16 @@ import colorama
 
 from sky import clouds
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
-from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
+    from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -254,10 +254,10 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,

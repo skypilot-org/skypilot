@@ -36,7 +36,6 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
@@ -60,6 +59,7 @@ from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils

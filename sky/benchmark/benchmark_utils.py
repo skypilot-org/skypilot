@@ -24,7 +24,6 @@ from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.data import storage as storage_lib
@@ -34,6 +33,7 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

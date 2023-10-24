@@ -12,7 +12,6 @@ import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
@@ -24,6 +23,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 

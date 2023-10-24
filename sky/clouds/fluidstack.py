@@ -7,10 +7,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [

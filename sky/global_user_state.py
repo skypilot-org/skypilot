@@ -17,9 +17,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 from sky import clouds
-from sky import status_lib
 from sky.utils import common_utils
 from sky.utils import db_utils
+from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky import backends

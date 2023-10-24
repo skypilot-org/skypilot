@@ -13,12 +13,12 @@ from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -155,7 +155,7 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
