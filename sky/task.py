@@ -428,8 +428,18 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources_config = config.pop('resources', None)
+        if resources_config and resources_config.get('any_of') is not None:
+            resources_set = set()
+            for resource in resources_config['any_of']:
+                resources_set.add(sky.Resources.from_yaml_config(resource))
+            task.set_resources(resources_set)
+        elif resources_config and resources_config.get('ordered') is not None:
+            resources_list = []
+            for resource in resources_config['ordered']:
+                resources_list.append(sky.Resources.from_yaml_config(resource))
+            task.set_resources(resources_list)
         # Translate accelerators field to potential multiple resources.
-        if resources_config and resources_config.get(
+        elif resources_config and resources_config.get(
                 'accelerators') is not None:
             accelerators = resources_config.get('accelerators')
             if isinstance(accelerators, str):
@@ -1005,28 +1015,19 @@ class Task:
 
         add_if_not_none('name', self.name)
 
+        tmp_resource_config = {}
         if isinstance(self.resources, list):
-            tmp_resource_config = list(self.resources)[0].to_yaml_config()
-            accelerators_list = []
+            resource_list = []
             for r in self.resources:
-                if r.accelerators is not None:
-                    k, v = r.accelerators.popitem()
-                    if f'{k}:{v}' not in accelerators_list:
-                        accelerators_list.append(f'{k}:{v}')
-                    r.accelerators[k] = v
-            tmp_resource_config['accelerators'] = accelerators_list
+                resource_list.append(r.to_yaml_config())
+            tmp_resource_config['ordered'] = resource_list
         elif len(self.resources) > 1:
-            tmp_resource_config = list(self.resources)[0].to_yaml_config()
-            accelerators_dict: Dict[str, Optional[int]] = {}
-            for r in list(self.resources):
-                if r.accelerators is not None:
-                    k, v = r.accelerators.popitem()
-                    accelerators_dict[f'{k}:{v}'] = None
-                    r.accelerators[k] = v
-            tmp_resource_config['accelerators'] = accelerators_dict
+            resource_list = []
+            for r in self.resources:
+                resource_list.append(r.to_yaml_config())
+            tmp_resource_config['any_of'] = resource_list
         else:
-            resources = list(self.resources)[0]
-            tmp_resource_config = resources.to_yaml_config()
+            tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
         add_if_not_none('resources', tmp_resource_config)
         add_if_not_none('num_nodes', self.num_nodes)

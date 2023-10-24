@@ -111,6 +111,18 @@ def get_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
+            },
+            'any_of': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                },
+            },
+            'ordered': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                },
             }
         }
     }
