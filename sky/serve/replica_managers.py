@@ -17,10 +17,10 @@ import requests
 
 import sky
 from sky import backends
-from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.api import sdk
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -431,8 +431,7 @@ class ReplicaInfo:
             return None
         replica_port_int = int(self.replica_port)
         try:
-            endpoint_dict = core.endpoints(handle.cluster_name,
-                                           replica_port_int)
+            endpoint_dict = sdk.endpoints(handle.cluster_name, replica_port_int)
         except exceptions.ClusterNotUpError:
             return None
         endpoint = endpoint_dict.get(replica_port_int, None)
@@ -969,7 +968,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             if not info.status_property.should_track_service_status():
                 continue
             # We use backend API to avoid usage collection in the
-            # core.job_status.
+            # sdk.job_status.
             backend = backends.CloudVmRayBackend()
             handle = info.handle()
             assert handle is not None, info
