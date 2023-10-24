@@ -11,9 +11,7 @@ from sky import clouds
 from sky import dag
 from sky import data
 from sky import exceptions
-from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky import status_lib
@@ -948,7 +946,7 @@ def spot_tail_logs(name: Optional[str],
 
     Args:
         name: name of the job to tail.
-        job_id: job id to tail.
+        job_id: job id to tail. If None, tail the last job.
         follow: whether to follow the logs.
 
     Raises:
@@ -1017,4 +1015,3 @@ def storage_delete(name: str) -> None:
                                     source=handle.source,
                                     sync_on_reconstruction=False)
         store_object.delete()
-
