@@ -3515,8 +3515,8 @@ def admin_deploy(clusterspec_yaml: str):
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
     is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                  'Invalid cluster YAML: ')
+    common_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                 'Invalid cluster YAML: ')
     if not is_yaml:
         raise ValueError('Must specify cluster config')
     assert yaml_config is not None, (is_yaml, yaml_config)
