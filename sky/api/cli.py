@@ -48,6 +48,7 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky.api import sdk
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
@@ -801,7 +802,7 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
-    @usage_lib.entrypoint('sky.cli', fallback=True)
+    @usage_lib.entrypoint('sky.api.cli', fallback=True)
     def invoke(self, ctx):
         return super().invoke(ctx)
 
