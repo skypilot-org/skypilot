@@ -16,7 +16,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
@@ -29,6 +28,7 @@ from sky.data.data_utils import Rclone
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

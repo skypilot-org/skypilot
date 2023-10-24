@@ -21,7 +21,6 @@ from sky import core
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -33,6 +32,7 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

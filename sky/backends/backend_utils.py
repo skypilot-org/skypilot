@@ -37,7 +37,6 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.clouds import cloud_registry
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -51,6 +50,7 @@ from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils

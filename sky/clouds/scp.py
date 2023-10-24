@@ -11,14 +11,14 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
-from sky.utils import resources_utils
+from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.utils import resources_utils
 
 _CREDENTIAL_FILES = [
     'scp_credential',
@@ -146,10 +146,10 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,

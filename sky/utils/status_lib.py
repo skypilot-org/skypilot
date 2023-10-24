@@ -6,22 +6,27 @@ import colorama
 
 
 class ClusterStatus(enum.Enum):
-    """Cluster status as recorded in table 'clusters'."""
+    """Cluster status as recorded in local cache.
+
+    This can be different from the actual cluster status, and can be refreshed
+    by running ``sky status --refresh``.
+    """
     # NOTE: these statuses are as recorded in our local cache, the table
     # 'clusters'.  The actual cluster state may be different (e.g., an UP
     # cluster getting killed manually by the user or the cloud provider).
 
-    # Initializing.  This means a backend.provision() call has started but has
-    # not successfully finished. The cluster may be undergoing setup, may have
-    # failed setup, may be live or down.
     INIT = 'INIT'
+    """Initializing.
 
-    # The cluster is recorded as up.  This means a backend.provision() has
-    # previously succeeded.
+    This means a provisioning has started but has not successfully finished. The
+    cluster may be undergoing setup, may have failed setup, may be live or down.
+    """
+
     UP = 'UP'
+    """The cluster is up. This means a provisioning has previously succeeded."""
 
-    # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
+    """The cluster is stopped."""
 
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]

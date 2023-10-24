@@ -6,14 +6,14 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import requests
 
 from sky import clouds
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
-from sky.utils import resources_utils
+from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+    from sky.utils import resources_utils
 
 # Minimum set of files under ~/.lambda_cloud that grant Lambda Cloud access.
 _CREDENTIAL_FILES = [
@@ -123,10 +123,10 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,

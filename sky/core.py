@@ -12,14 +12,15 @@ from sky import data
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
