@@ -250,3 +250,8 @@ class AWSAzFetchingError(Exception):
         self.reason = reason
 
         super().__init__(reason.message)
+
+
+class PortDoesNotExistError(Exception):
+    """Raised when the port does not exist."""
+    pass

@@ -1,5 +1,6 @@
 from typing import Dict, Tuple
 
+from sky import exceptions
 from sky.adaptors import kubernetes
 
 
@@ -39,7 +40,13 @@ def create_namespaced_ingress(namespace: str, ingress_name: str,
 def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
     """Deletes an ingress resource."""
     networking_api = kubernetes.networking_api()
-    networking_api.delete_namespaced_ingress(ingress_name, namespace)
+    try:
+        networking_api.delete_namespaced_ingress(ingress_name, namespace)
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        if e.status == 404:
+            raise exceptions.PortDoesNotExistError(
+                f'Port {ingress_name.split("--")[-1]} does not exist.')
+        raise e
 
 
 def create_namespaced_service(namespace: str, service_name: str, port: int,
@@ -61,7 +68,14 @@ def create_namespaced_service(namespace: str, service_name: str, port: int,
 def delete_namespaced_service(namespace: str, service_name: str) -> None:
     """Deletes a service resource."""
     core_api = kubernetes.core_api()
-    core_api.delete_namespaced_service(service_name, namespace)
+
+    try:
+        core_api.delete_namespaced_service(service_name, namespace)
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        if e.status == 404:
+            raise exceptions.PortDoesNotExistError(
+                f'Port {service_name.split("--")[-1]} does not exist.')
+        raise e
 
 
 def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
