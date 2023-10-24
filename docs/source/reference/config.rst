@@ -116,12 +116,12 @@ Available fields and semantics:
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
-    # The networking mode for accessing jump pods (optional).
-    # This must be either: 'nodeport' or 'portforward'.
+    # The networking mode for accessing SSH jump pod (optional).
+    # This must be either: 'nodeport' or 'portforward'. If not specified, defaults to 'portforward'.
     #
-    # nodeport: Exposes a service on a static port number on each Node, allowing external access to services using <NodeIP>:<NodePort>.
-    # portforward: Forward a local port to a port on a Pod, typically used for debugging or temporary access purposes.
-    networking:  nodeport
+    # nodeport: Exposes the jump pod SSH service on a static port number on each Node, allowing external access to using <NodeIP>:<NodePort>. Using this mode requires opening multiple ports on nodes in the Kubernetes cluster.
+    # portforward: Uses `kubectl port-forward` to create a tunnel and directly access the jump pod SSH service in the Kubernetes cluster. Does not require opening ports the cluster nodes and is more secure. 'portforward' is used as default if 'networking' is not specified.
+    networking: portforward
 
   # Advanced OCI configurations (optional).
   oci:
