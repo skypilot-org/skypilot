@@ -142,6 +142,7 @@ def cleanup_ports(
 def query_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:

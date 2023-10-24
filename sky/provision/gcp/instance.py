@@ -2,7 +2,7 @@
 import collections
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
@@ -246,3 +246,19 @@ def cleanup_ports(
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(
             project_id, firewall_rule_name)
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ip: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Tuple[str, str]]:
+    """See sky/provision/__init__.py"""
+    del cluster_name_on_cloud, provider_config  # Unused.
+
+    result = {}
+    for port in ports:
+        result[port] = f'{ip}:{port}', f'{ip}:{port}'
+
+    return result

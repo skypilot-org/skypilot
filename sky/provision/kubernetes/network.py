@@ -60,11 +60,12 @@ def cleanup_ports(
 
 def query_ports(
     cluster_name_on_cloud: str,
+    ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, 'provider_config is required'
+    del ip, provider_config  # Unused.
 
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
     result = {}

@@ -1822,6 +1822,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                     raise ValueError('Querying IP address is not supported '
                                      'for local clusters.')
 
+            head_ip = handle.external_ips()[0]
             if ports:
                 cloud = handle.launched_resources.cloud
                 if not provision_lib.supports(repr(cloud), 'query_ports'):
@@ -1831,7 +1832,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
 
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 port_details = provision_lib.query_ports(
-                    repr(cloud), handle.cluster_name_on_cloud,
+                    repr(cloud), handle.cluster_name_on_cloud, head_ip,
                     handle.launched_resources.ports, config['provider'])
                 if not port_details:
                     click.echo('No ports exposed.')
@@ -1839,11 +1840,10 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                 for port, urls in port_details.items():
                     click.echo(
                         f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}{colorama.Style.RESET_ALL}: '
-                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0]}, {urls[1]}{colorama.Style.RESET_ALL}'
+                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0]}{colorama.Style.RESET_ALL}'
                     )
                 return
 
-            head_ip = handle.external_ips()[0]
             click.echo(head_ip)
             return
         nonreserved_cluster_records = []

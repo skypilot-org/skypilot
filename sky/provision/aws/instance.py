@@ -7,7 +7,7 @@ _default_ec2_resource() to avoid version mismatch issues.
 import copy
 import re
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import sky_logging
 from sky import status_lib
@@ -793,3 +793,19 @@ def get_cluster_info(region: str,
         instances=instances,
         head_instance_id=head_instance_id,
     )
+
+
+def query_ports(
+    cluster_name_on_cloud: str,
+    ip: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Tuple[str, str]]:
+    """See sky/provision/__init__.py"""
+    del cluster_name_on_cloud, provider_config  # Unused.
+
+    result = {}
+    for port in ports:
+        result[port] = f'{ip}:{port}', f'{ip}:{port}'
+
+    return result
