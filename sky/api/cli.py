@@ -47,14 +47,14 @@ import yaml
 import sky
 from sky import backends
 from sky import check as sky_check
-from sky import clouds as sky_clouds
-from sky import core
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.api import sdk
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -479,7 +479,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -1636,7 +1636,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters, silent=ip)
-        cluster_records = core.status(cluster_names=query_clusters,
+        cluster_records = sdk.status(cluster_names=query_clusters,
                                       refresh=refresh)
         if ip or show_endpoints:
             if len(cluster_records) != 1:
@@ -1672,7 +1672,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             head_ip = handle.external_ips()[0]
             if show_endpoints:
                 if endpoint:
-                    cluster_endpoint = core.endpoints(cluster_record['name'],
+                    cluster_endpoint = sdk.endpoints(cluster_record['name'],
                                                       endpoint).get(
                                                           endpoint, None)
                     if not cluster_endpoint:
@@ -1681,7 +1681,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             f'{cluster_record["name"]!r}.')
                     click.echo(cluster_endpoint)
                 else:
-                    cluster_endpoints = core.endpoints(cluster_record['name'])
+                    cluster_endpoints = sdk.endpoints(cluster_record['name'])
                     assert isinstance(cluster_endpoints, dict)
                     if not cluster_endpoints:
                         raise click.Abort(f'No endpoint found for cluster '
@@ -1831,7 +1831,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = core.cost_report()
+    cluster_records = sdk.cost_report()
 
     normal_cluster_records = []
     controllers = dict()
@@ -1906,8 +1906,8 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     for cluster in clusters:
         try:
-            job_table = core.queue(cluster, skip_finished, all_users)
-        except (exceptions.CommandError, ValueError,
+            job_table = sdk.queue(cluster, skip_finished, all_users)
+        except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
@@ -1991,7 +1991,7 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if sync_down:
-        core.download_logs(cluster, job_ids)
+        sdk.download_logs(cluster, job_ids)
         return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
@@ -1999,7 +1999,7 @@ def logs(
     job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
-        # in core.tail_logs.
+        # in sdk.tail_logs.
         job_id = job_ids[0]
         if not job_id.isdigit():
             raise click.UsageError(f'Invalid job ID {job_id}. '
@@ -2009,7 +2009,7 @@ def logs(
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
     if status:
-        job_statuses = core.job_status(cluster, job_ids_to_query)
+        job_statuses = sdk.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
@@ -2027,7 +2027,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    sdk.tail_logs(cluster, job_id, follow)
 
 
 @cli.command()
@@ -2095,7 +2095,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                       show_default=True)
 
     try:
-        core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
+        sdk.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
@@ -2485,7 +2485,7 @@ def start(
 
     for name in to_start:
         try:
-            core.start(name,
+            sdk.start(name,
                        idle_minutes_to_autostop,
                        retry_until_up,
                        down=down,
@@ -2827,7 +2827,7 @@ def _down_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                core.autostop(name, idle_minutes_to_autostop, down)
+                sdk.autostop(name, idle_minutes_to_autostop, down)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -2850,9 +2850,9 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    core.down(name, purge=purge)
+                    sdk.down(name, purge=purge)
                 else:
-                    core.stop(name, purge=purge)
+                    sdk.stop(name, purge=purge)
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -3008,17 +3008,17 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     # Kubernetes specific bools
-    cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
+    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
-        sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
+    kubernetes_is_enabled = clouds.cloud_in_iterable(
+        clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
 
     if cloud_is_kubernetes and region is not None:
         raise click.UsageError(
