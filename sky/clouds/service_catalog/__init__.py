@@ -14,18 +14,19 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-_ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci')
+ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+              'kubernetes')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
-        clouds = list(_ALL_CLOUDS)
+        clouds = list(ALL_CLOUDS)
 
         # TODO(hemil): Remove this once the common service catalog
         # functions are refactored from clouds/kubernetes.py to
-        # kubernetes_catalog.py and add kubernetes to _ALL_CLOUDS
-        if method_name == 'list_accelerators':
-            clouds.append('kubernetes')
+        # kubernetes_catalog.py
+        if method_name != 'list_accelerators':
+            clouds.remove('kubernetes')
 
     single = isinstance(clouds, str)
     if single:

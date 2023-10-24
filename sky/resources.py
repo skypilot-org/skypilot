@@ -11,11 +11,11 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -1109,8 +1109,8 @@ class Resources:
         if config is None:
             return Resources()
 
-        backend_utils.validate_schema(config, schemas.get_resources_schema(),
-                                      'Invalid resources YAML: ')
+        common_utils.validate_schema(config, schemas.get_resources_schema(),
+                                     'Invalid resources YAML: ')
 
         resources_fields = {}
         resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
