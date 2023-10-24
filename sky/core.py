@@ -685,7 +685,7 @@ def tail_logs(cluster_name: str,
 
     Args:
         cluster_name: name of the cluster.
-        job_id: job id. If None, tail the last job.
+        job_id: job id. If None, tail logs of the last job.
         follow: whether to follow the logs.
 
     Raises:
@@ -728,7 +728,8 @@ def download_logs(
 
     Args:
         cluster_name: name of the cluster.
-        job_ids: job ids.
+        job_ids: job ids. If None, download the logs for the last job.
+        local_dir: local directory to download the logs to.
     Returns:
         A mapping of job_id to local log path.
     Raises:
