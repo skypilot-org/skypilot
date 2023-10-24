@@ -792,14 +792,14 @@ def spot_queue(refresh: bool,
 
             [
                 {
-                    'job_id': int,
-                    'job_name': str,
-                    'resources': str,
+                    'job_id': (int),
+                    'job_name': (str),
+                    'resources': (str),
                     'submitted_at': (float) timestamp of submission,
                     'end_at': (float) timestamp of end,
                     'duration': (float) duration in seconds,
                     'retry_count': int Number of retries,
-                    'status': sky.JobStatus status of the job,
+                    'status': (sky.JobStatus) status of the job,
                     'cluster_resources': (str) resources of the cluster,
                     'region': (str) region of the cluster,
                 }
