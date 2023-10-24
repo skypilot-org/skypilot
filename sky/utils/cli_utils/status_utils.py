@@ -7,10 +7,10 @@ import colorama
 
 from sky import backends
 from sky import spot
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import status_lib
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5

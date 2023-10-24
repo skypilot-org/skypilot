@@ -8,10 +8,10 @@ import colorama
 
 from sky import clouds
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

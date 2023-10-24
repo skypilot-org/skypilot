@@ -126,3 +126,13 @@ Resources
 .. autoclass:: sky.Resources
   
   .. automethod:: __init__
+
+
+Enums
+-----------------
+
+.. autoclass:: sky.ClusterStatus
+  :members:
+
+.. autoclass:: sky.JobStatus
+  :members:                                        

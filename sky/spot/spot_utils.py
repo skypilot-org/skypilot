@@ -17,7 +17,6 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -27,6 +26,7 @@ from sky.spot import spot_state
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:

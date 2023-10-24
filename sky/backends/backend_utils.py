@@ -39,7 +39,6 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
-from sky import status_lib
 from sky.backends import onprem_utils
 from sky.provision import instance_setup
 from sky.skylet import constants
@@ -49,6 +48,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils

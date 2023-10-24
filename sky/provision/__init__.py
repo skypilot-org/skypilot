@@ -8,7 +8,6 @@ import inspect
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky import status_lib
 # These provision.<cloud> modules should never fail even if underlying cloud SDK
 # dependencies are not installed. This is ensured by using sky.adaptors inside
 # these modules, for lazy loading of cloud SDKs.
@@ -16,6 +15,7 @@ from sky.provision import aws
 from sky.provision import azure
 from sky.provision import common
 from sky.provision import gcp
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
