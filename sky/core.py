@@ -1,7 +1,6 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
-import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -31,18 +30,19 @@ try:
 except ImportError:
     app_router = None
 
-
 logger = sky_logging.init_logger(__name__)
 
 # ======================
 # = Cluster Management =
 # ======================
 
+
 def router(name, *args, **kwargs):
     """Decorator for adding a function to the API router."""
     if app_router is None:
         return lambda func: func
     return getattr(app_router, name)(*args, **kwargs)
+
 
 @usage_lib.entrypoint
 def status(cluster_names: Optional[Union[str, List[str]]] = None,
