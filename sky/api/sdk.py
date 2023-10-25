@@ -22,7 +22,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:8000'
-API_SERVER_CMD = 'uvicorn sky.api.rest:app'
+API_SERVER_CMD = 'python -m sky.api.rest'
 
 
 def _get_server_url():

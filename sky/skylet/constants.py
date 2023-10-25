@@ -221,7 +221,7 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
 # The log for SkyPilot API server.
-API_SERVER_LOGS = '~/.sky/api_server.log'
+API_SERVER_LOGS = '~/.sky/api_server/server.log'
 
 # The name for the environment variable that stores the URL of the SkyPilot
 # API server.

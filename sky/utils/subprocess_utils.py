@@ -92,9 +92,9 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(
-        first_pid_to_kill: Optional[Union[int, List[Optional[int]]]] = None,
-        force: bool = False):
+def kill_children_processes(first_pid_to_kill: Optional[int] = None,
+                            force: bool = False,
+                            parent_pid: Optional[int] = None):
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -110,35 +110,36 @@ def kill_children_processes(
          This is for guaranteeing the order of cleaning up and suppress
          flaky errors.
     """
-    pid_to_proc = dict()
-    child_processes = []
-    if isinstance(first_pid_to_kill, int):
-        first_pid_to_kill = [first_pid_to_kill]
-    elif first_pid_to_kill is None:
-        first_pid_to_kill = []
 
-    def _kill_processes(processes: List[psutil.Process]) -> None:
-        for process in processes:
-            try:
-                if force:
-                    process.kill()
-                else:
-                    process.terminate()
-            except psutil.NoSuchProcess:
-                # The process may have already been terminated.
-                pass
+    def kill(proc: psutil.Process):
+        try:
+            if force:
+                proc.kill()
+            else:
+                proc.terminate()
+            proc.wait()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass
 
-    parent_process = psutil.Process()
-    for child in parent_process.children(recursive=True):
-        if child.pid in first_pid_to_kill:
-            pid_to_proc[child.pid] = child
+    if parent_pid is None:
+        parent_process = psutil.Process()
+    else:
+        parent_process = psutil.Process(parent_pid)
+
+    child_processes = parent_process.children(recursive=True)
+    if parent_pid is not None:
+        kill(parent_process)
+
+    remaining_child_processes = []
+    for child in child_processes:
+        if child.pid == first_pid_to_kill:
+            kill(child)
         else:
-            child_processes.append(child)
+            remaining_child_processes.append(child)
 
-    _kill_processes([
-        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
-    ])
-    _kill_processes(child_processes)
+    for child in remaining_child_processes:
+        kill(child)
 
 
 def run_with_retries(
