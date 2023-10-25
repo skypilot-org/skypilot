@@ -2541,12 +2541,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 pass
 
 
-    def to_config(self) -> dict:
-        result = {}
+    def to_config(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
         result['cluster_name'] = self.cluster_name
         result['cluster_name_on_cloud'] = self.cluster_name_on_cloud
         result['cluster_yaml'] = self.cluster_yaml
-        result['stable_internal_external_ips'] = self.stable_internal_external_ips
+        result[
+            'stable_internal_external_ips'] = self.stable_internal_external_ips
         result['stable_ssh_ports'] = self.stable_ssh_ports
         result['launched_nodes'] = self.launched_nodes
         result['launched_resources'] = self.launched_resources.to_yaml_config()
@@ -2554,7 +2555,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         result['tpu_create_script'] = self.tpu_create_script
         result['tpu_delete_script'] = self.tpu_delete_script
         return result
-    
+
     @classmethod
     def from_config(cls, config: dict) -> 'CloudVmRayResourceHandle':
         result = cls(
@@ -2570,7 +2571,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             tpu_delete_script=config['tpu_delete_script'])
         result.docker_user = config['docker_user']
         return result
-
 
 
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):

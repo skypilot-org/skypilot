@@ -1,21 +1,22 @@
-import os
-import requests
-import time
 import functools
+import os
 import subprocess
+import time
 from typing import List, Optional
 
+import requests
 
-from sky import task as task_lib
 from sky import backends
 from sky import optimizer
-from sky.skylet import constants
 from sky import sky_logging
+from sky import task as task_lib
+from sky.skylet import constants
 from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:8000'
+
 
 def get_server_url():
     return os.environ.get('SKYPILOT_SERVER_URL', DEFAULT_SERVER_URL)
@@ -31,13 +32,14 @@ def _start_uvicorn_in_background():
     subprocess.Popen(cmd, shell=True)
     time.sleep(1)
 
+
 def _handle_response(response):
     if response.status_code != 200:
         raise RuntimeError(
             f'Failed to connect to SkyPilot server at {get_server_url()}. '
-            f'Response: {response.content}'
-        )
+            f'Response: {response.content}')
     return response.json()
+
 
 def _check_health(func):
 
@@ -84,7 +86,6 @@ def launch(
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False):
 
-
     response = requests.post(
         f'{get_server_url()}/launch',
         json={
@@ -106,18 +107,19 @@ def launch(
 
 
 @_check_health
-def status(cluster_names: Optional[List[str]] = None, refresh: bool = False) -> List[dict]:
+def status(cluster_names: Optional[List[str]] = None,
+           refresh: bool = False) -> List[dict]:
     # TODO(zhwu): this does not stream the logs output by logger back to the
     # user
-    response = requests.get(f'{get_server_url()}/status', 
+    response = requests.get(f'{get_server_url()}/status',
                             json={
                                 'cluster_names': cluster_names,
                                 'refresh': refresh,
                             })
     clusters = _handle_response(response)
     for cluster in clusters:
-        cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(cluster['handle'])
+        cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(
+            cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-    
 
     return clusters
