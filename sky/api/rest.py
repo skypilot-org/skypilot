@@ -227,14 +227,14 @@ async def wait(wait_body: RequestIdBody):
 
 @app.post('/abort')
 async def abort(abort_body: RequestIdBody):
-    rest_task = rest_utils.get_request(abort_body.request_id)
     print(f'Trying to kill request ID {abort_body.request_id}')
-    if rest_task is None:
-        print(f'No task with request ID {abort_body.request_id}')
-        raise fastapi.HTTPException(status_code=404)
-    rest_task.status = rest_utils.RequestStatus.FAILED
-    if rest_task.pid is not None:
-        subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
+    with rest_utils.update_rest_task(abort_body.request_id) as rest_task:
+        if rest_task is None:
+            print(f'No task with request ID {abort_body.request_id}')
+            raise fastapi.HTTPException(status_code=404)
+        rest_task.status = rest_utils.RequestStatus.ABORTED
+        if rest_task.pid is not None:
+            subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
     print(f'Killed request: {abort_body.request_id}')
 
 
