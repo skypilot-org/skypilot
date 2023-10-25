@@ -1638,9 +1638,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters, silent=ip)
-        cluster_records = sdk.status(cluster_names=query_clusters,
+        request = sdk.status(cluster_names=query_clusters,
                                       refresh=refresh)
         if ip or show_endpoints:
+            cluster_records = sdk.get(request)
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
@@ -2853,9 +2854,9 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    sdk.down(name, purge=purge)
+                    sdk.get(sdk.down(name, purge=purge))
                 else:
-                    sdk.stop(name, purge=purge)
+                    sdk.get(sdk.stop(name, purge=purge))
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '

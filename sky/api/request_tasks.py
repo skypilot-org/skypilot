@@ -8,12 +8,15 @@ import os
 import pathlib
 import pickle
 import sqlite3
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
 from sky.utils import common_utils
 from sky.utils import db_utils
+from sky.api import request_return_encoders
+from sky.api import request_return_decoders
 
 
 class RequestStatus(enum.Enum):
@@ -30,6 +33,19 @@ class RequestStatus(enum.Enum):
                 list(RequestStatus).index(other))
 
 
+REQUEST_TASK_COLUMNS = [
+    'request_id',
+    'name',
+    'entrypoint',
+    'request_body',
+    'status',
+    'return_value',
+    'error',
+    'log_path',
+    'pid',
+]
+
+
 @dataclasses.dataclass
 class RequestTask:
     """A REST task."""
@@ -37,13 +53,29 @@ class RequestTask:
     request_id: str
     name: str
     entrypoint: str
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    request_body: Dict[str, Any]
     status: RequestStatus
     return_value: Any = None
-    error: Optional[Exception] = None
+    error: Optional[Dict[str, Any]] = None
     log_path: Optional[str] = None
     pid: Optional[int] = None
+
+    def set_error(self, error: Exception):
+        """Set the error."""
+        # TODO(zhwu): handle other members of Exception.
+        self.error = {
+            'type': type(error).__name__,
+            'message': str(error),
+            'traceback': traceback.format_exc(),
+        }
+    
+    def set_return_value(self, return_value: Any):
+        """Set the return value."""
+        self.return_value = request_return_encoders.get_handler(self.name)(return_value)
+
+    def get_return_value(self) -> Any:
+        """Get the return value."""
+        return request_return_decoders.get_handler(self.name)(self.return_value)
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'RequestTask':
@@ -51,20 +83,19 @@ class RequestTask:
             request_id=row[0],
             name=row[1],
             entrypoint=row[2],
-            args=json.loads(row[3]),
-            kwargs=json.loads(row[4]),
-            status=RequestStatus(row[5]),
-            return_value=json.loads(row[6]),
-            error=pickle.loads(row[7]),
-            log_path=row[8],
-            pid=row[9],
+            request_body=json.loads(row[3]),
+            status=RequestStatus(row[4]),
+            return_value=json.loads(row[5]),
+            error=json.loads(row[6]),
+            log_path=row[7],
+            pid=row[8],
         )
 
     def to_row(self) -> Tuple[Any, ...]:
         return (self.request_id, self.name, self.entrypoint,
-                json.dumps(self.args), json.dumps(self.kwargs),
+                json.dumps(self.request_body),
                 self.status.value, json.dumps(self.return_value),
-                pickle.dumps(self.error), self.log_path, self.pid)
+                json.dumps(self.error), self.log_path, self.pid)
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')
@@ -93,8 +124,7 @@ def create_table(cursor, conn):
         request_id TEXT PRIMARY KEY,
         name TEXT,
         entrypoint TEXT,
-        args TEXT,
-        kwargs TEXT,
+        request_body TEXT,
         status TEXT,
         return_value TEXT,
         error BLOB,

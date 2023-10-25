@@ -1,4 +1,5 @@
 """REST API for SkyPilot."""
+import argparse
 import asyncio
 import multiprocessing
 import sys
@@ -16,7 +17,7 @@ from sky import execution
 from sky import optimizer
 from sky import core
 from sky.api import sdk
-from sky.api import rest_utils
+from sky.api import request_tasks
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
@@ -62,39 +63,39 @@ events = [
 def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
             **kwargs: P.kwargs):
     print(f'Running task {request_id}')
-    with rest_utils.update_rest_task(request_id) as request_task:
+    with request_tasks.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.pid = multiprocessing.current_process().pid
-        request_task.status = rest_utils.RequestStatus.RUNNING
+        request_task.status = request_tasks.RequestStatus.RUNNING
     try:
         return_value = func(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
-        with rest_utils.update_rest_task(request_id) as request_task:
+        with request_tasks.update_rest_task(request_id) as request_task:
             assert request_task is not None, request_id
-            request_task.status = rest_utils.RequestStatus.FAILED
-            request_task.error = e
+            request_task.status = request_tasks.RequestStatus.FAILED
+            request_task.set_error(e)
         print(f'Task {request_id} failed')
         raise
     else:
-        with rest_utils.update_rest_task(request_id) as request_task:
+        with request_tasks.update_rest_task(request_id) as request_task:
             assert request_task is not None, request_id
-            request_task.status = rest_utils.RequestStatus.SUCCEEDED
-            request_task.return_value = return_value
+            request_task.status = request_tasks.RequestStatus.SUCCEEDED
+            request_task.set_return_value(return_value)
         print(f'Task {request_id} finished')
     return return_value
 
 
-def _start_background_request(request_id: str, request_name: str,
+def _start_background_request(request_id: str, request_name: str, request_body: Dict[str, Any],
                               func: Callable[P, Any], *args: P.args,
                               **kwargs: P.kwargs):
     """Start a task."""
-    rest_task = rest_utils.RequestTask(request_id=request_id,
-                                       name=request_name,
-                                       entrypoint=func.__module__,
-                                       args=args,
-                                       kwargs=kwargs,
-                                       status=rest_utils.RequestStatus.PENDING)
-    rest_utils.dump_reqest(rest_task)
+    rest_task = request_tasks.RequestTask(
+        request_id=request_id,
+        name=request_name,
+        entrypoint=func.__module__,
+        request_body=request_body,
+        status=request_tasks.RequestStatus.PENDING)
+    request_tasks.dump_reqest(rest_task)
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
                                       kwargs=kwargs)
@@ -142,6 +143,7 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     _start_background_request(
         request_id,
         request_name='launch',
+        request_body=launch_body.dict(),
         func=execution.launch,
         task=dag,
         cluster_name=launch_body.cluster_name,
@@ -165,37 +167,28 @@ class StatusBody(pydantic.BaseModel):
     refresh: bool = False
 
 
-class StatusReturn(pydantic.BaseModel):
-    name: str
-    launched_at: Optional[int] = None
-    last_use: Optional[str] = None
-    status: Optional[sky.ClusterStatus] = None
-    handle: Optional[dict] = None
-    autostop: int
-    to_down: bool
-    metadata: Dict[str, Any]
+# class StatusReturn(pydantic.BaseModel):
+#     name: str
+#     launched_at: Optional[int] = None
+#     last_use: Optional[str] = None
+#     status: Optional[sky.ClusterStatus] = None
+#     handle: Optional[dict] = None
+#     autostop: int
+#     to_down: bool
+#     metadata: Dict[str, Any]
 
 
 @app.get('/status')
-async def status(status_body: StatusBody = StatusBody()) -> List[StatusReturn]:
-    clusters = sdk.status(
+async def status(request: fastapi.Request,
+                 status_body: StatusBody = StatusBody()) -> None:
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='status',
+        request_body=status_body.dict(),
+        func=core.status,
         cluster_names=status_body.cluster_names,
         refresh=status_body.refresh,
     )
-    status_returns = []
-    for cluster in clusters:
-        status_returns.append(
-            StatusReturn(
-                name=cluster['name'],
-                launched_at=cluster['launched_at'],
-                last_use=cluster['last_use'],
-                handle=cluster['handle'].to_config(),
-                status=cluster['status'],
-                autostop=cluster['autostop'],
-                to_down=cluster['to_down'],
-                metadata=cluster['metadata'],
-            ))
-    return status_returns
 
 
 class DownBody(pydantic.BaseModel):
@@ -208,6 +201,7 @@ async def down(down_body: DownBody, request: fastapi.Request):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='down',
+        request_body=down_body.dict(),
         func=core.down,
         cluster_name=down_body.cluster_name,
         purge=down_body.purge,
@@ -218,17 +212,17 @@ class RequestIdBody(pydantic.BaseModel):
     request_id: str
 
 
-@app.get('/wait')
-async def wait(wait_body: RequestIdBody):
+@app.get('/get')
+async def get(wait_body: RequestIdBody) -> request_tasks.RequestTask:
     while True:
-        rest_task = rest_utils.get_request(wait_body.request_id)
-        if rest_task is None:
+        request_task = request_tasks.get_request(wait_body.request_id)
+        if request_task is None:
             print(f'No task with request ID {wait_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {wait_body.request_id} not found')
-        if rest_task.status > rest_utils.RequestStatus.RUNNING:
-            return rest_task.return_value
+        if request_task.status > request_tasks.RequestStatus.RUNNING:
+            return request_task
         await asyncio.sleep(1)
 
         # TODO(zhwu): stream the logs and handle errors.
@@ -237,24 +231,25 @@ async def wait(wait_body: RequestIdBody):
 @app.post('/abort')
 async def abort(abort_body: RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
-    with rest_utils.update_rest_task(abort_body.request_id) as rest_task:
+    with request_tasks.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
             print(f'No task with request ID {abort_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
-        rest_task.status = rest_utils.RequestStatus.ABORTED
+        rest_task.status = request_tasks.RequestStatus.ABORTED
         if rest_task.pid is not None:
             subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
     print(f'Killed request: {abort_body.request_id}')
 
 
 @app.get('/requests')
-async def requests(request_id: Optional[str]) -> List[rest_utils.RequestTask]:
+async def requests(
+        request_id: Optional[str]) -> List[request_tasks.RequestTask]:
     if request_id is None:
-        return rest_utils.get_request_tasks()
+        return request_tasks.get_request_tasks()
     else:
-        request_task = rest_utils.get_request(request_id)
+        request_task = request_tasks.get_request(request_id)
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
@@ -273,5 +268,11 @@ app.include_router(core.app_router)
 
 if __name__ == '__main__':
     import uvicorn
-    rest_utils.reset_db()
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+    request_tasks.reset_db()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', default='0.0.0.0')
+    parser.add_argument('--port', default=8000, type=int)
+    parser.add_argument('--reload', action='store_true')
+    args = parser.parse_args()
+    uvicorn.run('sky.api.rest:app', host=args.host, port=args.port, reload=args.reload)
