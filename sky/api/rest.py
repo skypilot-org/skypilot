@@ -70,7 +70,7 @@ class LaunchBody(pydantic.BaseModel):
 @app.post('/launch')
 async def launch(
     launch_body: LaunchBody,
-    background_tasks: fastapi.BackgroundTasks = None,
+    background_tasks: fastapi.BackgroundTasks,
 ):
     """Launch a task.
 

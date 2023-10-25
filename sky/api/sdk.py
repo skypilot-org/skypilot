@@ -41,7 +41,12 @@ def _start_uvicorn_in_background():
     # Start the uvicorn process in the background and don't wait for it.
     subprocess.Popen(cmd, shell=True)
     # Wait for the server to start.
-    time.sleep(5)
+    while True:
+        try:
+            requests.get(f'{_get_server_url()}/health', timeout=1)
+            break
+        except requests.exceptions.ConnectionError:
+            time.sleep(0.1)
 
 
 def _handle_response(response):
