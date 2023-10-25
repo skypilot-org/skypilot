@@ -19,12 +19,18 @@ import os
 import platform
 import re
 import subprocess
+import sys
 from typing import Dict, List
 
 import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
+_COMMIT_FAILURE_MESSAGE = (
+    'WARNING: SkyPilot fail to {verb} the commit hash in '
+    f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): '
+    '{error}')
+
 original_init_content = None
 
 system = platform.system()
@@ -70,28 +76,43 @@ def get_commit_hash():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='get', error=str(e)),
+              file=sys.stderr)
         return commit_hash
 
 
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
-    with open(INIT_FILE_PATH, 'r') as fp:
-        content = fp.read()
-        global original_init_content
-        original_init_content = content
-        content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
-                         f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
-                         content,
-                         flags=re.M)
-    with open(INIT_FILE_PATH, 'w') as fp:
-        fp.write(content)
+    try:
+        with open(INIT_FILE_PATH, 'r') as fp:
+            content = fp.read()
+            global original_init_content
+            original_init_content = content
+            content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
+                             f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                             content,
+                             flags=re.M)
+        with open(INIT_FILE_PATH, 'w') as fp:
+            fp.write(content)
+    except Exception as e:  # pylint: disable=broad-except
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
+        pass
 
 
 def revert_commit_hash():
-    if original_init_content is not None:
-        with open(INIT_FILE_PATH, 'w') as fp:
-            fp.write(original_init_content)
+    try:
+        if original_init_content is not None:
+            with open(INIT_FILE_PATH, 'w') as fp:
+                fp.write(original_init_content)
+    except Exception as e:  # pylint: disable=broad-except
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
 
 
 def parse_readme(readme: str) -> str:
