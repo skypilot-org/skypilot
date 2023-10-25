@@ -1,11 +1,21 @@
-"""Python SDK for SkyPilot."""
+"""Python SDK for SkyPilot.
+
+All the functions will return a future that can be awaited on with the `get`
+method. For example:
+
+.. code-block:: python
+
+    request_id = sky.status()
+    statuses = sky.get(request_id)
+
+"""
 import functools
 import os
 import subprocess
 import tempfile
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -14,6 +24,7 @@ import requests
 from sky import backends
 from sky import optimizer
 from sky import sky_logging
+from sky.api import request_tasks
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import dag_utils
@@ -51,12 +62,13 @@ def _start_uvicorn_in_background():
             time.sleep(0.1)
 
 
-def _handle_response(response):
+def _handle_response(response) -> Tuple[str, Dict[str, Any]]:
     if response.status_code != 200:
         raise RuntimeError(
             f'Failed to connect to SkyPilot server at {_get_server_url()}. '
             f'Response: {response.content}')
-    return response.json()
+    request_id = response.headers.get('X-Request-ID')
+    return request_id, response.json()
 
 
 def _check_health(func):
@@ -141,7 +153,7 @@ def launch(
 @usage_lib.entrypoint
 @_check_health
 def status(cluster_names: Optional[List[str]] = None,
-           refresh: bool = False) -> List[Dict[str, Any]]:
+           refresh: bool = False) -> str:
     # TODO(zhwu): this does not stream the logs output by logger back to the
     # user
     response = requests.get(f'{_get_server_url()}/status',
@@ -150,20 +162,28 @@ def status(cluster_names: Optional[List[str]] = None,
                                 'refresh': refresh,
                             },
                             timeout=30)
-    clusters = _handle_response(response)
-    logger.debug(f'Request ID: {response.headers.get("X-Request-ID")}')
-    for cluster in clusters:
-        cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(
-            cluster['handle'])
-        cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-
-    return clusters
+    request_id, _ = _handle_response(response)
+    return request_id
 
 
 @usage_lib.entrypoint
 @_check_health
-def down(cluster_names: Optional[List[str]],
-         purge: bool = False) -> Dict[str, str]:
+def get(request_id: str) -> Any:
+    response = requests.get(f'{_get_server_url()}/get',
+                            json={'request_id': request_id},
+                            timeout=30)
+    _, return_value = _handle_response(response)
+    request_task = request_tasks.RequestTask(**return_value)
+    if request_task.error:
+        # TODO(zhwu): we should have a better way to handle errors.
+        # Is it possible to raise the original exception?
+        raise RuntimeError(request_task.error)
+    return request_task.get_return_value()
+
+
+@usage_lib.entrypoint
+@_check_health
+def down(cluster_name: str, purge: bool = False) -> str:
     """Tear down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -181,25 +201,20 @@ def down(cluster_names: Optional[List[str]],
     Returns:
         A dictionary mapping cluster names to request IDs.
     """
-    existing_clusters = status(cluster_names=cluster_names)
-    request_ids = {}
-    for cluster in existing_clusters:
-        cluster_name = cluster['name']
-        response = requests.post(
-            f'{_get_server_url()}/down',
-            json={
-                'cluster_name': cluster_name,
-                'purge': purge,
-            },
-            timeout=5,
-        )
-        _handle_response(response)
-        request_id = response.headers.get('X-Request-ID')
-        assert request_id is not None, response
-        logger.debug(f'Tearing down {cluster_name!r} with request ID: '
-                     f'{request_id}')
-        request_ids[cluster_name] = request_id
-    return request_ids
+    response = requests.post(
+        f'{_get_server_url()}/down',
+        json={
+            'cluster_name': cluster_name,
+            'purge': purge,
+        },
+        timeout=5,
+    )
+    _handle_response(response)
+    request_id = response.headers.get('X-Request-ID')
+    assert request_id is not None, response
+    logger.debug(f'Tearing down {cluster_name!r} with request ID: '
+                 f'{request_id}')
+    return request_id
 
 
 # === API server management ===
