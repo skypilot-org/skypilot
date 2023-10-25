@@ -106,32 +106,22 @@ class Optimizer:
     def _set_plan_to_best_resources(dag: 'dag_lib.Dag',
                                     plan: Dict[task_lib.Task,
                                                resources_lib.Resources],
-                                    local_dag: 'dag_lib.Dag',
-                                    node_to_cost_map: _TaskToCostMap):
+                                    local_dag: 'dag_lib.Dag'):
         best_plan = {}
         for task, resources in plan.items():
             task_idx = local_dag.tasks.index(task)
-
-            translated_resources = None
-            for orig_resources in node_to_cost_map[task]:
-                if orig_resources.to_yaml_config() == resources.to_yaml_config():
-                    translated_resources = orig_resources
-                    break
-            assert translated_resources is not None
-            dag.tasks[task_idx].best_resources = translated_resources
-            best_plan[dag.tasks[task_idx]] = translated_resources
+            dag.tasks[task_idx].best_resources = resources
+            best_plan[dag.tasks[task_idx]] = resources
         return best_plan
 
     @staticmethod
     def _optimize_dag_with_user(
         dag: 'dag_lib.Dag',
         task_id: int,
-        node_to_cost_map: _TaskToCostMap,
         optimize_target=OptimizeTarget.COST,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None
     ) -> Dict[task_lib.Task, resources_lib.Resources]:
         local_dag = copy.deepcopy(dag)
-        local_dag = dag
         task = dag.tasks[task_id]
         local_task = local_dag.tasks[task_id]
         if isinstance(task.resources, list):
@@ -156,12 +146,12 @@ class Optimizer:
                 blocked_resources=blocked_resources,
                 quiet=True)
         else:
-            plan = Optimizer._optimize_dag_with_user(
-                local_dag, task_id + 1, node_to_cost_map, optimize_target, blocked_resources)
+            plan = Optimizer._optimize_dag_with_user(local_dag, task_id + 1,
+                                                     optimize_target,
+                                                     blocked_resources)
 
         if plan is not None:
-            return Optimizer._set_plan_to_best_resources(
-                dag, plan, local_dag, node_to_cost_map)
+            return Optimizer._set_plan_to_best_resources(dag, plan, local_dag)
 
         error_msg = (f'No launchable resource found for task {task}. '
                      'To fix: relax its resource requirements.\n'
@@ -911,6 +901,7 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
+            v_yaml = {json.dumps(k.to_yaml_config()): v for k, v in v.items()}
             accelerator_spot_list = [
                 r.get_accelerators_str() + r.get_spot_str()
                 for r in list(task.resources)
@@ -939,8 +930,9 @@ class Optimizer:
             # the best resources for the task.
             chosen_resources = best_plan[task]
             resource_table_key = _get_resource_group_hash(chosen_resources)
-            best_per_resource_group[resource_table_key] = (chosen_resources,
-                                                           v[chosen_resources])
+            best_per_resource_group[resource_table_key] = (
+                chosen_resources,
+                v_yaml[json.dumps(chosen_resources.to_yaml_config())])
             rows = []
             for resources, cost in best_per_resource_group.values():
                 if minimize_cost:
@@ -1031,7 +1023,6 @@ class Optimizer:
                 dag=dag,
                 task_id=0,
                 optimize_target=OptimizeTarget.COST,
-                node_to_cost_map=node_to_cost_map,
                 blocked_resources=blocked_resources)
             total_time = Optimizer._compute_total_time(graph, topo_order,
                                                        best_plan)
