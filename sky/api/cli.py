@@ -5254,11 +5254,13 @@ def api():
     pass
 
 @api.command('start', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
 def api_start():
     """Starts the API server locally."""
     sdk.api_start()
 
 @api.command('stop', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
 def api_stop():
     """Stops the API server locally."""
     sdk.api_stop()
@@ -5270,7 +5272,11 @@ def api_stop():
                 default=False,
                 required=False,
                 help='Follow the logs.')
-@click.option('--tail', '-n', default='all', help='Number of lines to show from the end of the logs (default "all")')
+@click.option('--tail', '-n', default='all',
+              help=('Number of lines to show from the end of the logs '
+              '(default "all")'))
+# Follow the arguments of `docker logs` command.
+@usage_lib.entrypoint
 def api_logs(follow: bool, tail: str):
     """Shows the API server logs."""
     sdk.api_logs(follow, tail)
