@@ -86,7 +86,12 @@ class Backend(Generic[_ResourceHandleType]):
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
                 detach_run: bool,
-                dryrun: bool = False) -> None:
+                dryrun: bool = False) -> Optional[int]:
+        """Execute the task on the cluster.
+
+        Returns:
+            Job id if the task is submitted to the cluster, None otherwise.
+        """
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
@@ -143,7 +148,7 @@ class Backend(Generic[_ResourceHandleType]):
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False) -> None:
+                 dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 
     def _post_execute(self, handle: _ResourceHandleType, down: bool) -> None:

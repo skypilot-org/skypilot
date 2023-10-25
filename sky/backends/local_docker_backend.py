@@ -268,8 +268,13 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False) -> None:
-        """ Launches the container."""
+                 dryrun: bool = False) -> Optional[int]:
+        """Launches the container.
+
+        Returns:
+            The job id of the launched job. Since LocalDockerBackend does not
+            have the concept of job id, it always returns None.
+        """
 
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
@@ -283,13 +288,14 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         # Handle a basic task
         if task.run is None:
             logger.info(f'Nothing to run; run command not specified:\n{task}')
-            return
+            return None
 
         if dryrun:
             logger.info(f'Dryrun complete. Would have run:\n{task}')
-            return
+            return None
 
         self._execute_task_one_node(handle, task)
+        return None
 
     def _post_execute(self, handle: LocalDockerResourceHandle,
                       down: bool) -> None:
