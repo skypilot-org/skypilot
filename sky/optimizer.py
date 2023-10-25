@@ -115,12 +115,14 @@ class Optimizer:
         return best_plan
 
     @staticmethod
-    def _optimize_dag_with_user(dag: 'dag_lib.Dag',
-                                task_id: int,
-                                optimize_target=OptimizeTarget.COST,
-                                blocked_resources: Optional[Iterable[
-                                    resources_lib.Resources]] = None):
+    def _optimize_dag_with_user(
+        dag: 'dag_lib.Dag',
+        task_id: int,
+        optimize_target=OptimizeTarget.COST,
+        blocked_resources: Optional[Iterable[resources_lib.Resources]] = None
+    ) -> Tuple[Dict[task_lib.Task, resources_lib.Resources], _TaskToCostMap]:
         local_dag = copy.deepcopy(dag)
+        local_dag = dag
         task = dag.tasks[task_id]
         local_task = local_dag.tasks[task_id]
         if isinstance(task.resources, list):
@@ -139,18 +141,18 @@ class Optimizer:
                     break
 
         if task_id == len(dag.tasks) - 1:
-            plan = Optimizer._optimize_objective(
+            plan, node_to_cost_map = Optimizer._optimize_objective(
                 dag=local_dag,
                 optimize_target=optimize_target,
                 blocked_resources=blocked_resources,
                 quiet=True)
         else:
-            plan = Optimizer._optimize_dag_with_user(local_dag, task_id + 1,
-                                                     optimize_target,
-                                                     blocked_resources)
+            plan, node_to_cost_map = Optimizer._optimize_dag_with_user(
+                local_dag, task_id + 1, optimize_target, blocked_resources)
 
         if plan is not None:
-            return Optimizer._set_plan_to_best_resources(dag, plan, local_dag)
+            return Optimizer._set_plan_to_best_resources(
+                dag, plan, local_dag), node_to_cost_map
 
         error_msg = (f'No launchable resource found for task {task}. '
                      'To fix: relax its resource requirements.\n'
@@ -194,13 +196,13 @@ class Optimizer:
                         logger.info(
                             f'{colorama.Fore.YELLOW}{task_id + 1}-th task is using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
                         )
-                _ = Optimizer._optimize_objective(
+                _, _ = Optimizer._optimize_objective(
                     dag=dag,
                     optimize_target=OptimizeTarget.USER,
                     blocked_resources=blocked_resources,
                     quiet=quiet)
             else:
-                _ = Optimizer._optimize_objective(
+                _, _ = Optimizer._optimize_objective(
                     dag=dag,
                     optimize_target=OptimizeTarget.COST
                     if minimize else OptimizeTarget.TIME,
@@ -996,7 +998,7 @@ class Optimizer:
         optimize_target: OptimizeTarget = OptimizeTarget.COST,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False,
-    ) -> Dict[task_lib.Task, resources_lib.Resources]:
+    ) -> Tuple[Dict[task_lib.Task, resources_lib.Resources], _TaskToCostMap]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
         The optimal mapping should consider the egress cost/time so that
@@ -1010,14 +1012,13 @@ class Optimizer:
         minimize_cost = optimize_target in [
             OptimizeTarget.COST, OptimizeTarget.USER
         ]
-
         node_to_cost_map, node_to_candidate_map = (
             Optimizer._estimate_nodes_cost_or_time(topo_order, minimize_cost,
                                                    blocked_resources))
         if optimize_target == OptimizeTarget.USER:
             # best_plan, total_time, total_cost = Optimizer._optimize_by_user(
             #     graph, topo_order, blocked_resources)
-            best_plan = Optimizer._optimize_dag_with_user(
+            best_plan, node_to_cost_map = Optimizer._optimize_dag_with_user(
                 dag=dag,
                 task_id=0,
                 optimize_target=OptimizeTarget.COST,
@@ -1048,7 +1049,7 @@ class Optimizer:
                                            node_to_cost_map, minimize_cost)
             if not env_options.Options.MINIMIZE_LOGGING.get():
                 Optimizer._print_candidates(node_to_candidate_map)
-        return best_plan
+        return best_plan, node_to_cost_map
 
 
 class DummyResources(resources_lib.Resources):
