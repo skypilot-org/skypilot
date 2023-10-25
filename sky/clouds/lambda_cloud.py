@@ -8,6 +8,7 @@ import requests
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.clouds.utils import lambda_utils
+from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -21,7 +22,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 

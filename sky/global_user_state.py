@@ -19,6 +19,7 @@ import uuid
 from sky import clouds
 from sky.utils import common_utils
 from sky.utils import db_utils
+from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -689,7 +690,7 @@ def get_cached_enabled_clouds() -> List[clouds.Cloud]:
     enabled_clouds: List[clouds.Cloud] = []
     for c in ret:
         try:
-            cloud = clouds.CLOUD_REGISTRY.from_str(c)
+            cloud = registry.CLOUD_REGISTRY.from_str(c)
         except ValueError:
             # Handle the case for the clouds whose support has been removed from
             # SkyPilot, e.g., 'local' was a cloud in the past and may be stored

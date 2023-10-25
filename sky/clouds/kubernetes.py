@@ -14,6 +14,7 @@ from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
 from sky.utils import schemas
+from sky.utils import registry
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -32,7 +33,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
