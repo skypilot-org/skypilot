@@ -287,7 +287,7 @@ ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
 # The log for SkyPilot API server.
-API_SERVER_LOGS = '~/.sky/api_server.log'
+API_SERVER_LOGS = '~/.sky/api_server/server.log'
 
 # The name for the environment variable that stores the URL of the SkyPilot
 # API server.
