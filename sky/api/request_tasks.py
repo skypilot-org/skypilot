@@ -6,17 +6,16 @@ import functools
 import json
 import os
 import pathlib
-import pickle
 import sqlite3
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
+from sky.api import request_return_decoders
+from sky.api import request_return_encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
-from sky.api import request_return_encoders
-from sky.api import request_return_decoders
 
 
 class RequestStatus(enum.Enum):
@@ -68,10 +67,11 @@ class RequestTask:
             'message': str(error),
             'traceback': traceback.format_exc(),
         }
-    
+
     def set_return_value(self, return_value: Any):
         """Set the return value."""
-        self.return_value = request_return_encoders.get_handler(self.name)(return_value)
+        self.return_value = request_return_encoders.get_handler(
+            self.name)(return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
@@ -93,9 +93,9 @@ class RequestTask:
 
     def to_row(self) -> Tuple[Any, ...]:
         return (self.request_id, self.name, self.entrypoint,
-                json.dumps(self.request_body),
-                self.status.value, json.dumps(self.return_value),
-                json.dumps(self.error), self.log_path, self.pid)
+                json.dumps(self.request_body), self.status.value,
+                json.dumps(self.return_value), json.dumps(self.error),
+                self.log_path, self.pid)
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')
