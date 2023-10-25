@@ -19,12 +19,12 @@ from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.backends import backend_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import status_lib
@@ -865,8 +865,8 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
-        backend_utils.validate_schema(config, schemas.get_storage_schema(),
-                                      'Invalid storage YAML: ')
+        common_utils.validate_schema(config, schemas.get_storage_schema(),
+                                     'Invalid storage YAML: ')
 
         name = config.pop('name', None)
         source = config.pop('source', None)

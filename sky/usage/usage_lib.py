@@ -72,6 +72,7 @@ class UsageMessageToReport(MessageToReport):
         self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
+        self.sky_commit: str = sky.__commit__
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()

@@ -11,7 +11,7 @@ import copy
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import colorama
 
@@ -91,9 +91,9 @@ def bootstrap_instances(
         extended_ip_rules = security_group_config.get('IpPermissions', [])
         if extended_ip_rules is None:
             extended_ip_rules = []
-        security_group_ids = _configure_security_group(
-            ec2, vpc_id, expected_sg_name,
-            config.provider_config.get('ports', []), extended_ip_rules)
+        security_group_ids = _configure_security_group(ec2, vpc_id,
+                                                       expected_sg_name,
+                                                       extended_ip_rules)
         end_time = time.time()
         elapsed = end_time - start_time
         logger.info(
@@ -414,35 +414,13 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
     return subnets, vpc_id
 
 
-def _retrieve_user_specified_rules(ports):
-    rules = []
-    for port in ports:
-        if isinstance(port, int):
-            from_port = to_port = port
-        else:
-            from_port, to_port = port.split('-')
-            from_port = int(from_port)
-            to_port = int(to_port)
-        rules.append({
-            'FromPort': from_port,
-            'ToPort': to_port,
-            'IpProtocol': 'tcp',
-            'IpRanges': [{
-                'CidrIp': '0.0.0.0/0'
-            }],
-        })
-    return rules
-
-
 def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
-                              ports: List[Union[int, str]],
                               extended_ip_rules: List) -> List[str]:
     security_group = _get_or_create_vpc_security_group(ec2, vpc_id,
                                                        expected_sg_name)
     sg_ids = [security_group.id]
 
-    inbound_rules = _retrieve_user_specified_rules(ports)
-    inbound_rules.extend([
+    inbound_rules = [
         # intra-cluster rules
         {
             'FromPort': -1,
@@ -462,7 +440,7 @@ def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
             }],
         },
         *extended_ip_rules,
-    ])
+    ]
     # upsert the default security group
     if not security_group.ip_permissions:
         # If users specify security groups, we should not change the rules
