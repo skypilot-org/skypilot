@@ -6,6 +6,7 @@ from sky.utils import status_lib
 
 handlers: Dict[str, Any] = {}
 
+
 def register_handler(name: str):
     """Decorator to register a handler."""
 
@@ -26,6 +27,7 @@ def default_decode_handler(return_value: Any) -> Any:
     """The default handler."""
     return return_value
 
+
 @register_handler('status')
 def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     clusters = return_value
@@ -36,4 +38,3 @@ def decode_status(return_value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
 
     return clusters
-

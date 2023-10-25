@@ -28,7 +28,6 @@ from sky.api import request_tasks
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import dag_utils
-from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     import sky
