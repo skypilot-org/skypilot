@@ -62,23 +62,24 @@ events = [
 def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
             **kwargs: P.kwargs):
     print(f'Running task {request_id}')
-    with rest_utils.update_rest_task(request_id) as rest_task:
-        assert rest_task is not None, request_id
-        rest_task.pid = multiprocessing.current_process().pid
-        rest_task.status = rest_utils.RequestStatus.RUNNING
+    with rest_utils.update_rest_task(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.pid = multiprocessing.current_process().pid
+        request_task.status = rest_utils.RequestStatus.RUNNING
     try:
         return_value = func(*args, **kwargs)
-    except Exception:  # pylint: disable=broad-except
-        with rest_utils.update_rest_task(request_id) as rest_task:
-            assert rest_task is not None, request_id
-            rest_task.status = rest_utils.RequestStatus.FAILED
+    except Exception as e:  # pylint: disable=broad-except
+        with rest_utils.update_rest_task(request_id) as request_task:
+            assert request_task is not None, request_id
+            request_task.status = rest_utils.RequestStatus.FAILED
+            request_task.error = e
         print(f'Task {request_id} failed')
         raise
     else:
-        with rest_utils.update_rest_task(request_id) as rest_task:
-            assert rest_task is not None, request_id
-            rest_task.status = rest_utils.RequestStatus.SUCCEEDED
-            rest_task.return_value = return_value
+        with rest_utils.update_rest_task(request_id) as request_task:
+            assert request_task is not None, request_id
+            request_task.status = rest_utils.RequestStatus.SUCCEEDED
+            request_task.return_value = return_value
         print(f'Task {request_id} finished')
     return return_value
 
@@ -87,9 +88,12 @@ def _start_background_request(request_id: str, request_name: str,
                               func: Callable[P, Any], *args: P.args,
                               **kwargs: P.kwargs):
     """Start a task."""
-    rest_task = rest_utils.Request(request_id=request_id,
-                                   request_name=request_name,
-                                   status=rest_utils.RequestStatus.PENDING)
+    rest_task = rest_utils.RequestTask(request_id=request_id,
+                                       name=request_name,
+                                       entrypoint=func.__module__,
+                                       args=args,
+                                       kwargs=kwargs,
+                                       status=rest_utils.RequestStatus.PENDING)
     rest_utils.dump_reqest(rest_task)
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
@@ -195,16 +199,19 @@ async def status(status_body: StatusBody = StatusBody()) -> List[StatusReturn]:
 
 
 class DownBody(pydantic.BaseModel):
-    cluster_names: List[str] = []
+    cluster_name: str
     purge: bool = False
 
 
 @app.post('/down')
-async def down(down_body: DownBody):
-    for cluster_name in down_body.cluster_names:
-        # TODO(zhwu): Make core down take a list of cluster names.
-        # Also, make this async.
-        core.down(cluster_name=cluster_name, purge=down_body.purge)
+async def down(down_body: DownBody, request: fastapi.Request):
+    _start_background_request(
+        request_id=request.state.request_id,
+        request_name='down',
+        func=core.down,
+        cluster_name=down_body.cluster_name,
+        purge=down_body.purge,
+    )
 
 
 class RequestIdBody(pydantic.BaseModel):
@@ -217,12 +224,14 @@ async def wait(wait_body: RequestIdBody):
         rest_task = rest_utils.get_request(wait_body.request_id)
         if rest_task is None:
             print(f'No task with request ID {wait_body.request_id}')
-            raise fastapi.HTTPException(status_code=404)
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Request {wait_body.request_id} not found')
         if rest_task.status > rest_utils.RequestStatus.RUNNING:
             return rest_task.return_value
         await asyncio.sleep(1)
 
-        # TODO(zhwu): stream the logs
+        # TODO(zhwu): stream the logs and handle errors.
 
 
 @app.post('/abort')
@@ -231,7 +240,9 @@ async def abort(abort_body: RequestIdBody):
     with rest_utils.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
             print(f'No task with request ID {abort_body.request_id}')
-            raise fastapi.HTTPException(status_code=404)
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f'Request {abort_body.request_id} not found')
         rest_task.status = rest_utils.RequestStatus.ABORTED
         if rest_task.pid is not None:
             subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
@@ -239,8 +250,15 @@ async def abort(abort_body: RequestIdBody):
 
 
 @app.get('/requests')
-async def requests() -> List[rest_utils.Request]:
-    return rest_utils.get_requests()
+async def requests(request_id: Optional[str]) -> List[rest_utils.RequestTask]:
+    if request_id is None:
+        return rest_utils.get_request_tasks()
+    else:
+        request_task = rest_utils.get_request(request_id)
+        if request_task is None:
+            raise fastapi.HTTPException(
+                status_code=404, detail=f'Request {request_id} not found')
+        return [request_task]
 
 
 @app.get('/health', response_class=fastapi.responses.PlainTextResponse)

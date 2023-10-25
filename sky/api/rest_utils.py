@@ -3,10 +3,12 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import json
 import os
 import pathlib
+import pickle
 import sqlite3
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
@@ -29,15 +31,40 @@ class RequestStatus(enum.Enum):
 
 
 @dataclasses.dataclass
-class Request:
+class RequestTask:
     """A REST task."""
 
     request_id: str
-    request_name: str
+    name: str
+    entrypoint: str
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
     status: RequestStatus
     return_value: Any = None
+    error: Optional[Exception] = None
     log_path: Optional[str] = None
     pid: Optional[int] = None
+
+    @classmethod
+    def from_row(cls, row: Tuple[Any, ...]) -> 'RequestTask':
+        return cls(
+            request_id=row[0],
+            name=row[1],
+            entrypoint=row[2],
+            args=json.loads(row[3]),
+            kwargs=json.loads(row[4]),
+            status=RequestStatus(row[5]),
+            return_value=json.loads(row[6]),
+            error=pickle.loads(row[7]),
+            log_path=row[8],
+            pid=row[9],
+        )
+
+    def to_row(self) -> Tuple[Any, ...]:
+        return (self.request_id, self.name, self.entrypoint,
+                json.dumps(self.args), json.dumps(self.kwargs),
+                self.status.value, json.dumps(self.return_value),
+                pickle.dumps(self.error), self.log_path, self.pid)
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')
@@ -64,9 +91,13 @@ def create_table(cursor, conn):
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS rest_tasks (
         request_id TEXT PRIMARY KEY,
-        request_name TEXT,
+        name TEXT,
+        entrypoint TEXT,
+        args TEXT,
+        kwargs TEXT,
         status TEXT,
         return_value TEXT,
+        error BLOB,
         log_path TEXT,
         pid INTEGER)""")
 
@@ -108,7 +139,7 @@ def update_rest_task(request_id: str):
         _dump_request_no_lock(rest_task)
 
 
-def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
+def _get_rest_task_no_lock(request_id: str) -> Optional[RequestTask]:
     """Get a REST task."""
     assert _DB is not None
     with _DB.conn:
@@ -118,25 +149,18 @@ def _get_rest_task_no_lock(request_id: str) -> Optional[Request]:
         row = cursor.fetchone()
         if row is None:
             return None
-    return Request(
-        request_id=row[0],
-        request_name=row[1],
-        status=RequestStatus(row[2]),
-        return_value=row[3],
-        log_path=row[4],
-        pid=row[5],
-    )
+    return RequestTask.from_row(row)
 
 
 @init_db
-def get_request(request_id: str) -> Optional[Request]:
+def get_request(request_id: str) -> Optional[RequestTask]:
     """Get a REST task."""
     with filelock.FileLock(request_lock_path(request_id)):
         return _get_rest_task_no_lock(request_id)
 
 
 @init_db
-def get_requests() -> List[Request]:
+def get_request_tasks() -> List[RequestTask]:
     """Get a REST task."""
     assert _DB is not None
     with _DB.conn:
@@ -147,31 +171,24 @@ def get_requests() -> List[Request]:
             return []
     rest_tasks = []
     for row in rows:
-        rest_task = Request(
-            request_id=row[0],
-            request_name=row[1],
-            status=RequestStatus(row[2]),
-            return_value=row[3],
-            log_path=row[4],
-            pid=row[5],
-        )
+        rest_task = RequestTask.from_row(row)
         rest_tasks.append(rest_task)
     return rest_tasks
 
 
-def _dump_request_no_lock(request: Request):
+def _dump_request_no_lock(request_task: RequestTask):
     """Dump a REST task."""
+    row = request_task.to_row()
+    fill_str = ', '.join(['?'] * len(row))
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
-        cursor.execute(
-            'INSERT OR REPLACE INTO rest_tasks VALUES (?, ?, ?, ?, ?, ?)',
-            (request.request_id, request.request_name, request.status.value,
-             request.return_value, request.log_path, request.pid))
+        cursor.execute(f'INSERT OR REPLACE INTO rest_tasks VALUES ({fill_str})',
+                       row)
 
 
 @init_db
-def dump_reqest(request: Request):
+def dump_reqest(request: RequestTask):
     """Dump a REST task."""
     with filelock.FileLock(request_lock_path(request.request_id)):
         _dump_request_no_lock(request)
