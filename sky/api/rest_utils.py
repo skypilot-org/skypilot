@@ -21,6 +21,7 @@ class RequestStatus(enum.Enum):
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
+    ABORTED = 'ABORTED'
 
     def __gt__(self, other):
         return (list(RequestStatus).index(self) >
