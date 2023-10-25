@@ -7,8 +7,8 @@ import typing
 from typing import List, Optional
 
 import colorama
-import requests
 import psutil
+import requests
 
 from sky import backends
 from sky import optimizer
@@ -23,6 +23,7 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:8000'
 API_SERVER_CMD = 'uvicorn sky.api.rest:app'
+
 
 def get_server_url():
     return os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR,
@@ -56,7 +57,7 @@ def _check_health(func):
         server_url = get_server_url()
 
         try:
-            response = requests.get(f'{get_server_url()}/health', timeout=3)
+            response = requests.get(f'{get_server_url()}/health', timeout=5)
         except requests.exceptions.ConnectionError:
             response = None
         if (response is None or response.status_code != 200):
@@ -72,8 +73,7 @@ def _check_health(func):
                     f'Could not connect to SkyPilot server at {server_url}. '
                     'Please ensure that the server is running and that the '
                     f'{constants.SKY_API_SERVER_URL_ENV_VAR} environment '
-                    f'variable is set correctly. Try: curl {server_url}/health'
-                )
+                    f'variable is set correctly. Try: curl {server_url}/health')
         return func(*args, **kwargs)
 
     return wrapper
@@ -131,6 +131,7 @@ def status(cluster_names: Optional[List[str]] = None,
                                 'refresh': refresh,
                             },
                             timeout=30)
+    logger.debug(f'Request ID: {response.headers.get("X-Request-ID")}')
     clusters = _handle_response(response)
     for cluster in clusters:
         cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(
@@ -146,6 +147,7 @@ def api_start():
     """Start the API server."""
     logger.info(f'SkyPilot API server: {get_server_url()}')
 
+
 def api_stop():
     """Kill the API server."""
     # Kill the uvicorn process by name: uvicorn sky.api.rest:app
@@ -155,15 +157,18 @@ def api_stop():
             f'Cannot kill the API server at {server_url} because it is not '
             f'the default SkyPilot API server started locally.')
 
-    for process in psutil.process_iter():
-        if API_SERVER_CMD in process.name():
+    found = False
+    for process in psutil.process_iter(attrs=['pid', 'cmdline']):
+        cmdline = process.info['cmdline']
+        if cmdline and API_SERVER_CMD in ' '.join(cmdline):
+            print(process)
             process.kill()
             logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
                         f'{colorama.Style.RESET_ALL}')
-            break
-    else:
+            found = True
+    if not found:
         logger.info('SkyPilot API server is not running.')
-        
+
 
 # Use the same args as tail -f
 def api_logs(follow: bool = True, tail: str = 'all'):
