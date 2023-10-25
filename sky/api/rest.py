@@ -1,6 +1,7 @@
 """REST API for SkyPilot."""
 import argparse
 import asyncio
+import json
 import multiprocessing
 import sys
 import tempfile
@@ -143,7 +144,7 @@ async def launch(launch_body: LaunchBody, request: fastapi.Request):
     _start_background_request(
         request_id,
         request_name='launch',
-        request_body=launch_body.dict(),
+        request_body=json.loads(launch_body.json()),
         func=execution.launch,
         task=dag,
         cluster_name=launch_body.cluster_name,
@@ -184,7 +185,7 @@ async def status(request: fastapi.Request,
     _start_background_request(
         request_id=request.state.request_id,
         request_name='status',
-        request_body=status_body.dict(),
+        request_body=json.loads(status_body.json()),
         func=core.status,
         cluster_names=status_body.cluster_names,
         refresh=status_body.refresh,
@@ -201,7 +202,7 @@ async def down(down_body: DownBody, request: fastapi.Request):
     _start_background_request(
         request_id=request.state.request_id,
         request_name='down',
-        request_body=down_body.dict(),
+        request_body=json.loads(down_body.json()),
         func=core.down,
         cluster_name=down_body.cluster_name,
         purge=down_body.purge,
@@ -245,7 +246,7 @@ async def abort(abort_body: RequestIdBody):
 
 @app.get('/requests')
 async def requests(
-        request_id: Optional[str]) -> List[request_tasks.RequestTask]:
+        request_id: Optional[str] = None) -> List[request_tasks.RequestTask]:
     if request_id is None:
         return request_tasks.get_request_tasks()
     else:
