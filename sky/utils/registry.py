@@ -1,4 +1,4 @@
-"""Clouds need to be registered in CLOUD_REGISTRY to be discovered"""
+"""Registry for classes to be discovered"""
 
 import typing
 from typing import Optional, Set, Type
