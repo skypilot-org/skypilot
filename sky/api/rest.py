@@ -1,8 +1,8 @@
+"""REST API for SkyPilot."""
 import asyncio
-import multiprocessing
-import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+import colorama
 import fastapi
 import pydantic
 import yaml
@@ -130,9 +130,13 @@ async def down(down_body: DownBody):
         sdk.down(cluster_name=cluster_name, purge=down_body.purge)
 
 
-@app.get('/health')
+@app.get('/health', response_class=fastapi.responses.PlainTextResponse)
 async def health() -> str:
-    return 'OK'
+    return (f'SkyPilot API Server: {colorama.Style.BRIGHT}{colorama.Fore.GREEN}'
+            f'Healthy{colorama.Style.RESET_ALL}\n')
+
+# @app.get('/version', response_class=fastapi.responses.PlainTextResponse)
+
 
 
 app.include_router(core.app_router)
