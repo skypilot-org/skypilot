@@ -1985,7 +1985,7 @@ def logs(
             'Both --sync_down and --status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
-    if len(job_ids) > 1 and not sync_down:
+    if job_ids and not sync_down:
         raise click.UsageError(
             f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
@@ -2006,7 +2006,8 @@ def logs(
         if not job_id.isdigit():
             raise click.UsageError(f'Invalid job ID {job_id}. '
                                    'Job ID must be integers.')
-        job_ids_to_query = [int(job_id)]
+        job_id = int(job_ids[0])
+        job_ids_to_query: Optional[Tuple[str, ...]] = (job_ids[0],)
     else:
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)

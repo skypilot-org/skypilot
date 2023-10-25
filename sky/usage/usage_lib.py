@@ -442,7 +442,27 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
+T = typing.TypeVar('T')
+
+
+@typing.overload
+def entrypoint(
+        name_or_fn: str,
+        fallback: bool = False
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def entrypoint(name_or_fn: Callable[..., T],
+               fallback: bool = False) -> Callable[..., T]:
+    ...
+
+
+def entrypoint(
+    name_or_fn: Union[str, Callable[..., T]],
+    fallback: bool = False
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import time
 import typing
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 import psutil
@@ -21,7 +21,6 @@ from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     import sky
-    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -97,7 +96,7 @@ def launch(
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     backend: Optional[backends.Backend] = None,
     optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
     detach_setup: bool = False,
@@ -142,7 +141,7 @@ def launch(
 @usage_lib.entrypoint
 @_check_health
 def status(cluster_names: Optional[List[str]] = None,
-           refresh: bool = False) -> List[dict]:
+           refresh: bool = False) -> List[Dict[str, Any]]:
     # TODO(zhwu): this does not stream the logs output by logger back to the
     # user
     response = requests.get(f'{_get_server_url()}/status',
@@ -151,8 +150,8 @@ def status(cluster_names: Optional[List[str]] = None,
                                 'refresh': refresh,
                             },
                             timeout=30)
-    logger.debug(f'Request ID: {response.headers.get("X-Request-ID")}')
     clusters = _handle_response(response)
+    logger.debug(f'Request ID: {response.headers.get("X-Request-ID")}')
     for cluster in clusters:
         cluster['handle'] = backends.CloudVmRayResourceHandle.from_config(
             cluster['handle'])
@@ -161,10 +160,46 @@ def status(cluster_names: Optional[List[str]] = None,
     return clusters
 
 
-# @usage_lib.entrypoint
-# @_check_health
-# def down(cluster_names: Optional[List[str]], purge: bool=False):
-#     requests
+@usage_lib.entrypoint
+@_check_health
+def down(cluster_names: Optional[List[str]],
+         purge: bool = False) -> Dict[str, str]:
+    """Tear down a cluster.
+
+    Tearing down a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
+
+    For local on-prem clusters, this function does not terminate the local
+    cluster, but instead removes the cluster from the status table and
+    terminates the calling user's running jobs.
+
+    Args:
+        cluster_names: names of clusters to down.
+        purge: whether to ignore cloud provider errors (if any).
+
+    Returns:
+        A dictionary mapping cluster names to request IDs.
+    """
+    existing_clusters = status(cluster_names=cluster_names)
+    request_ids = {}
+    for cluster in existing_clusters:
+        cluster_name = cluster['name']
+        response = requests.post(
+            f'{_get_server_url()}/down',
+            json={
+                'cluster_name': cluster_name,
+                'purge': purge,
+            },
+            timeout=5,
+        )
+        _handle_response(response)
+        request_id = response.headers.get('X-Request-ID')
+        assert request_id is not None, response
+        logger.debug(f'Tearing down {cluster_name!r} with request ID: '
+                     f'{request_id}')
+        request_ids[cluster_name] = request_id
+    return request_ids
 
 
 # === API server management ===
