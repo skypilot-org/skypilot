@@ -482,7 +482,7 @@ def queue(cluster_name: str,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the job queue of a cluster.
 
-    Please refer to the sky.cli.queue for the document.
+    Please refer to the sky.api.cli.queue for the document.
 
     Args:
         cluster_name: name of the cluster.
@@ -553,7 +553,7 @@ def cancel(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
-    Please refer to the sky.cli.cancel for the document.
+    Please refer to the sky.api.cli.cancel for the document.
 
     When `all` is False and `job_ids` is None, cancel the latest running job.
 
@@ -639,7 +639,7 @@ def tail_logs(cluster_name: str,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
-    Please refer to the sky.cli.tail_logs for the document.
+    Please refer to the sky.api.cli.tail_logs for the document.
 
     Args:
         cluster_name: name of the cluster.
@@ -790,7 +790,7 @@ def spot_queue(refresh: bool,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
-    Please refer to the sky.cli.spot_queue for the documentation.
+    Please refer to the sky.api.cli.spot_queue for the documentation.
 
     Args:
         refresh: whether to restart the spot controller if it is not UP.
@@ -887,7 +887,7 @@ def spot_cancel(name: Optional[str] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed spot jobs.
 
-    Please refer to the sky.cli.spot_cancel for the document.
+    Please refer to the sky.api.cli.spot_cancel for the document.
 
     Args:
         name: name of the job to cancel.
@@ -951,7 +951,7 @@ def spot_tail_logs(name: Optional[str],
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed spot jobs.
 
-    Please refer to the sky.cli.spot_logs for the document.
+    Please refer to the sky.api.cli.spot_logs for the document.
 
     Args:
         name: name of the job to tail.
