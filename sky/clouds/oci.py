@@ -18,6 +18,7 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import registry
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 

@@ -71,6 +71,7 @@ from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -480,7 +481,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -3009,7 +3010,7 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:

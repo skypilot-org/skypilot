@@ -2,21 +2,25 @@
 import functools
 import os
 import subprocess
+import tempfile
 import time
 import typing
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import colorama
 import psutil
 import requests
 
 from sky import backends
+from sky import optimizer
 from sky import sky_logging
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import dag_utils
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
+    import sky
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -85,47 +89,54 @@ def _check_health(func):
     return wrapper
 
 
-# @usage_lib.entrypoint
-# @_check_health
-# def launch(
-#     task: 'task_lib.Task',
-#     cluster_name: Optional[str] = None,
-#     retry_until_up: bool = False,
-#     idle_minutes_to_autostop: Optional[int] = None,
-#     dryrun: bool = False,
-#     down: bool = False,
-#     stream_logs: bool = True,
-#     optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
-#     detach_setup: bool = False,
-#     detach_run: bool = False,
-#     no_setup: bool = False,
-#     clone_disk_from: Optional[str] = None,
-#     # Internal only:
-#     # pylint: disable=invalid-name
-#     _is_launched_by_spot_controller: bool = False):
+@usage_lib.entrypoint
+@_check_health
+def launch(
+    task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: Optional[str] = None,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    dryrun: bool = False,
+    down: bool = False,
+    backend: Optional[backends.Backend] = None,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    detach_setup: bool = False,
+    detach_run: bool = False,
+    no_setup: bool = False,
+    clone_disk_from: Optional[str] = None,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
+) -> str:
 
-#     # TODO(zhwu): For all the file_mounts, we need to handle them properly
-#     # similarly to how we deal with it for spot_launch.
-#     requests.post(
-#         f'{_get_server_url()}/launch',
-#         json={
-#             'task': task.to_yaml_config(),
-#             'cluster_name': cluster_name,
-#             'retry_until_up': retry_until_up,
-#             'idle_minutes_to_autostop': idle_minutes_to_autostop,
-#             'dryrun': dryrun,
-#             'down': down,
-#             'stream_logs': stream_logs,
-#             'optimize_target': optimize_target,
-#             'detach_setup': detach_setup,
-#             'detach_run': detach_run,
-#             'no_setup': no_setup,
-#             'clone_disk_from': clone_disk_from,
-#             '_is_launched_by_spot_controller':
-#             _is_launched_by_spot_controller,
-#         },
-#         timeout=5,
-#     )
+    dag = dag_utils.convert_entrypoint_to_dag(task)
+
+    with tempfile.NamedTemporaryFile(mode='r') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_str = f.read()
+
+    # TODO(zhwu): For all the file_mounts, we need to handle them properly
+    # similarly to how we deal with it for spot_launch.
+    response = requests.post(
+        f'{_get_server_url()}/launch',
+        json={
+            'task': dag_str,
+            'cluster_name': cluster_name,
+            'retry_until_up': retry_until_up,
+            'idle_minutes_to_autostop': idle_minutes_to_autostop,
+            'dryrun': dryrun,
+            'down': down,
+            'backend': backend.NAME if backend else None,
+            'optimize_target': optimize_target,
+            'detach_setup': detach_setup,
+            'detach_run': detach_run,
+            'no_setup': no_setup,
+            'clone_disk_from': clone_disk_from,
+            '_is_launched_by_spot_controller': _is_launched_by_spot_controller,
+        },
+        timeout=5,
+    )
+    return response.headers['X-Request-ID']
 
 
 @usage_lib.entrypoint

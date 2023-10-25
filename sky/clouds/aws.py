@@ -21,6 +21,7 @@ from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -94,7 +95,7 @@ class AWSIdentityType(enum.Enum):
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 

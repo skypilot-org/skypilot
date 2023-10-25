@@ -13,6 +13,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
+from sky.utils import registry
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
@@ -30,7 +31,7 @@ _SCP_MIN_DISK_SIZE_GB = 100
 _SCP_MAX_DISK_SIZE_GB = 300
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
     """SCP Cloud."""
 
