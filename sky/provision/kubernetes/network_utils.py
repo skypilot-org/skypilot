@@ -1,40 +1,42 @@
-from typing import Dict, Tuple
+import os
+from typing import Dict, Tuple, Union
 
+import jinja2
+import yaml
+
+import sky
 from sky import exceptions
 from sky.adaptors import kubernetes
 
 
-def create_namespaced_ingress(namespace: str, ingress_name: str,
-                              path_prefix: str, service_name: str,
-                              service_port: int) -> None:
-    """Creates an ingress resource for the specified service."""
-    client = kubernetes.get_kubernetes().client
-    body = client.V1Ingress(
-        api_version="networking.k8s.io/v1",
-        kind="Ingress",
-        metadata=client.V1ObjectMeta(
-            name=ingress_name,
-            annotations={
-                "nginx.ingress.kubernetes.io/use-regex": "true",
-                "nginx.ingress.kubernetes.io/rewrite-target": "/$2"
-            }),
-        spec=client.V1IngressSpec(
-            ingress_class_name="nginx",
-            rules=[
-                client.V1IngressRule(http=client.V1HTTPIngressRuleValue(paths=[
-                    client.V1HTTPIngressPath(
-                        path=f'/{path_prefix.rstrip("/").lstrip("/")}(/|$)(.*)',
-                        path_type="ImplementationSpecific",
-                        backend=client.V1IngressBackend(
-                            service=client.V1IngressServiceBackend(
-                                port=client.V1ServiceBackendPort(
-                                    number=service_port,),
-                                name=service_name)))
-                ]))
-            ]))
+def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
+                          service_port: str, ingress_name: str,
+                          selector_key: str, selector_value: str) -> Dict:
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 'kubernetes-port.yml.j2')
+    if not os.path.exists(template_path):
+        raise FileNotFoundError('Template "kubernetes-port.j2" does not exist.')
+    with open(template_path) as fin:
+        template = fin.read()
+    j2_template = jinja2.Template(template)
+    cont = j2_template.render(
+        namespace=namespace,
+        path_prefix=path_prefix.rstrip('/').lstrip('/'),
+        service_name=service_name,
+        service_port=service_port,
+        ingress_name=ingress_name,
+        selector_key=selector_key,
+        selector_value=selector_value,
+    )
+    content = yaml.safe_load(cont)
+    return content
 
+
+def create_namespaced_ingress(namespace: str,
+                              ingress_spec: Dict[str, Union[str, int]]) -> None:
+    """Creates an ingress resource for the specified service."""
     networking_api = kubernetes.networking_api()
-    networking_api.create_namespaced_ingress(namespace, body)
+    networking_api.create_namespaced_ingress(namespace, ingress_spec)
 
 
 def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
@@ -49,20 +51,11 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
         raise e
 
 
-def create_namespaced_service(namespace: str, service_name: str, port: int,
-                              selector: Dict[str, str]) -> None:
+def create_namespaced_service(namespace: str,
+                              service_spec: Dict[str, Union[str, int]]) -> None:
     """Creates a service resource for the specified service."""
-    client = kubernetes.get_kubernetes().client
-    body = client.V1Service(
-        api_version="v1",
-        kind="Service",
-        metadata=client.V1ObjectMeta(name=service_name,),
-        spec=client.V1ServiceSpec(
-            selector=selector,
-            ports=[client.V1ServicePort(port=port, target_port=port)]))
-
     core_api = kubernetes.core_api()
-    core_api.create_namespaced_service(namespace, body)
+    core_api.create_namespaced_service(namespace, service_spec)
 
 
 def delete_namespaced_service(namespace: str, service_name: str) -> None:

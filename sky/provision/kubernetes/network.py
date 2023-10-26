@@ -23,18 +23,23 @@ def open_ports(
         ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
         path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
+
+        content = network_utils.fill_ingress_template(
+            namespace=provider_config['namespace'],
+            path_prefix=path_prefix,
+            service_name=service_name,
+            service_port=port,
+            ingress_name=ingress_name,
+            selector_key='skypilot-cluster',
+            selector_value=cluster_name_on_cloud,
+        )
         network_utils.create_namespaced_service(
             namespace=provider_config["namespace"],
-            service_name=service_name,
-            port=int(port),
-            selector={"skypilot-cluster": cluster_name_on_cloud},
+            service_spec=content['service_spec'],
         )
         network_utils.create_namespaced_ingress(
             namespace=provider_config['namespace'],
-            ingress_name=ingress_name,
-            path_prefix=path_prefix,
-            service_name=service_name,
-            service_port=int(port),
+            ingress_spec=content['ingress_spec'],
         )
 
 
