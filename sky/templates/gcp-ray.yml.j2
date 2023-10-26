@@ -18,7 +18,7 @@ docker:
 {%- endif %}
 
 provider:
-  # We use a custom node provider for GCP to support instance stop and reuse.
+  # We use a custom node provider for GCP to create, stop and reuse instances.
   type: external  # type: gcp
   module: sky.skylet.providers.gcp.GCPNodeProvider
   region: {{region}}
