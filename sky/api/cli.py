@@ -48,7 +48,6 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky.api import sdk
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
@@ -70,8 +69,8 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import log_utils
-from sky.utils import resources_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils

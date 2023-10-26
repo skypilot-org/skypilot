@@ -13,8 +13,8 @@ from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import common_utils
-from sky.utils import schemas
 from sky.utils import registry
+from sky.utils import schemas
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.

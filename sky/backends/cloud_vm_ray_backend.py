@@ -2584,7 +2584,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 # so the head IP in the database is not updated.
                 pass
 
-
     def to_config(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
         result['cluster_name'] = self.cluster_name

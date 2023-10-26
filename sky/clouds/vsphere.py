@@ -12,6 +12,7 @@ from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -25,7 +26,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Vsphere(clouds.Cloud):
     """Vsphere cloud"""
 

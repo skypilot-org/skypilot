@@ -50,9 +50,9 @@ import yaml
 
 from sky import sky_logging
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
-from sky.utils import registry
 
 # The config path is discovered in this order:
 #
