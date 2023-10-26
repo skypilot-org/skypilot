@@ -280,15 +280,17 @@ class GCPNodeProvider(NodeProvider):
                     )
                     for node_id in reuse_node_ids:
                         result = resource.start_instance(node_id)
-                        resize_result = resource.resize_disk(base_config, node_id, self.resources)
+                        if 'sourceMachineImage' in base_config:
+                            resource.resize_disk(base_config, node_id)
                         result_dict[node_id] = {node_id: result}
                     for node_id in reuse_node_ids:
                         self.set_node_tags(node_id, tags)
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
-                for _, instance_id in results:
-                    resource.resize_disk(base_config, instance_id, self.resources)
+                if 'sourceMachineImage' in base_config:
+                    for _, instance_id in results:
+                        resource.resize_disk(base_config, instance_id)
                 result_dict.update(
                     {instance_id: result for result, instance_id in results}
                 )

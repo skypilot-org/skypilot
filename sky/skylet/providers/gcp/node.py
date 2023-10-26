@@ -37,6 +37,7 @@ from uuid import uuid4
 
 from googleapiclient.discovery import Resource
 from googleapiclient.errors import HttpError
+from googleapiclient import discovery
 
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_NAME
 
@@ -291,38 +292,35 @@ class GCPResource(metaclass=abc.ABCMeta):
         return
     
     def resize_disk(
-        self, base_config: dict, node_id: str, resources, wait_for_operation: bool = True
+        self, 
+        base_config: dict, 
+        instance_name: str
     ) -> Tuple[dict, str]:
         """Resize a Google Cloud disk based on the provided configuration."""
-        # Import required libraries
-        import google.cloud.compute_v1 as gcloud_compute
+        # Build Compute Engine API
+        resource_v1 = discovery.build("compute", "v1")
 
-        # Initialize the DisksClient for making disk operations
-        diskClient = gcloud_compute.DisksClient()
+        # Extract the specified disk size from the configuration
+        new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
 
-        # Extract the new disk size from the configuration
-        new_size_gb = base_config['disks'][0]['initializeParams']['diskSizeGb']
-
-        # Set required parameters
-        project = self.project_id
-        zone = self.availability_zone
-        compute = self.resource.instances()
-
-        # Fetch the instance details using node_id to get the disk name
-        instance = compute.get(project=project, zone=zone, instance=node_id).execute()
-        disk_url = instance['disks'][0]['source']
-        disk_name = disk_url.split('/')[-1]
-
-        # Prepare the request for resizing the disk
-        request = gcloud_compute.ResizeDiskRequest(
-            disk=disk_name,
-            project=project,
-            zone=zone,
-            disks_resize_request_resource=gcloud_compute.types.DisksResizeRequest(size_gb=int(new_size_gb))
-        )
+        # Fetch the instance details to get the disk name
+        response = resource_v1.instances().get(
+            project=self.project_id,
+            zone=self.availability_zone,
+            instance=instance_name
+        ).execute()
+        disk_name = response["disks"][0]["source"].split("/")[-1]
 
         # Execute the resize request and return the response
-        response = diskClient.resize(request=request)
+        response = resource_v1.disks().resize(
+            project=self.project_id,
+            zone=self.availability_zone,
+            disk=disk_name,
+            body={
+                "sizeGb": str(new_size_gb),
+            },
+        ).execute()
+
         return response
 
 
