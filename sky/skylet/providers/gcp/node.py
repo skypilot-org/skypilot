@@ -289,8 +289,8 @@ class GCPResource(metaclass=abc.ABCMeta):
 
         Returns a tuple of (result, node_name).
         """
-        return 
-    
+        return
+
     def resize_disk(self, base_config: dict, instance_name: str) -> Tuple[dict, str]:
         """Resize a Google Cloud disk based on the provided configuration."""
         # Build Compute Engine API
