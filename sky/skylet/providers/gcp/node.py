@@ -291,11 +291,7 @@ class GCPResource(metaclass=abc.ABCMeta):
         """
         return
     
-    def resize_disk(
-        self, 
-        base_config: dict, 
-        instance_name: str
-    ) -> Tuple[dict, str]:
+    def resize_disk(self, base_config: dict, instance_name: str) -> Tuple[dict, str]:
         """Resize a Google Cloud disk based on the provided configuration."""
         # Build Compute Engine API
         resource_v1 = discovery.build("compute", "v1")
