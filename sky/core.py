@@ -979,7 +979,10 @@ def spot_tail_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
     # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
+    backend.tail_managed_job_logs(handle,
+                                  job_id=job_id,
+                                  job_name=name,
+                                  follow=follow)
 
 
 # ======================

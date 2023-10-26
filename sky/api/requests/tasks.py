@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
 
-from sky.api import request_return_decoders
-from sky.api import request_return_encoders
+from sky.api.requests import decoders
+from sky.api.requests import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -70,12 +70,11 @@ class RequestTask:
 
     def set_return_value(self, return_value: Any):
         """Set the return value."""
-        self.return_value = request_return_encoders.get_handler(
-            self.name)(return_value)
+        self.return_value = encoders.get_handler(self.name)(return_value)
 
     def get_return_value(self) -> Any:
         """Get the return value."""
-        return request_return_decoders.get_handler(self.name)(self.return_value)
+        return decoders.get_handler(self.name)(self.return_value)
 
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'RequestTask':

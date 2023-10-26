@@ -20,8 +20,8 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

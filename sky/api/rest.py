@@ -13,11 +13,10 @@ import fastapi
 import pydantic
 import starlette.middleware.base
 
+from sky import core
 from sky import execution
 from sky import optimizer
-from sky import core
-from sky.api import sdk
-from sky.api import request_tasks
+from sky.api.requests import tasks
 from sky.utils import dag_utils
 from sky.utils import registry
 from sky.utils import subprocess_utils
@@ -63,23 +62,23 @@ events = [
 def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
             **kwargs: P.kwargs):
     print(f'Running task {request_id}')
-    with request_tasks.update_rest_task(request_id) as request_task:
+    with tasks.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.pid = multiprocessing.current_process().pid
-        request_task.status = request_tasks.RequestStatus.RUNNING
+        request_task.status = tasks.RequestStatus.RUNNING
     try:
         return_value = func(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
-        with request_tasks.update_rest_task(request_id) as request_task:
+        with tasks.update_rest_task(request_id) as request_task:
             assert request_task is not None, request_id
-            request_task.status = request_tasks.RequestStatus.FAILED
+            request_task.status = tasks.RequestStatus.FAILED
             request_task.set_error(e)
         print(f'Task {request_id} failed')
         raise
     else:
-        with request_tasks.update_rest_task(request_id) as request_task:
+        with tasks.update_rest_task(request_id) as request_task:
             assert request_task is not None, request_id
-            request_task.status = request_tasks.RequestStatus.SUCCEEDED
+            request_task.status = tasks.RequestStatus.SUCCEEDED
             request_task.set_return_value(return_value)
         print(f'Task {request_id} finished')
     return return_value
@@ -90,13 +89,12 @@ def _start_background_request(request_id: str, request_name: str,
                                                                            Any],
                               *args: P.args, **kwargs: P.kwargs):
     """Start a task."""
-    rest_task = request_tasks.RequestTask(
-        request_id=request_id,
-        name=request_name,
-        entrypoint=func.__module__,
-        request_body=request_body,
-        status=request_tasks.RequestStatus.PENDING)
-    request_tasks.dump_reqest(rest_task)
+    rest_task = tasks.RequestTask(request_id=request_id,
+                                  name=request_name,
+                                  entrypoint=func.__module__,
+                                  request_body=request_body,
+                                  status=tasks.RequestStatus.PENDING)
+    tasks.dump_reqest(rest_task)
     process = multiprocessing.Process(target=wrapper,
                                       args=(func, request_id, *args),
                                       kwargs=kwargs)
@@ -180,8 +178,8 @@ class StatusBody(pydantic.BaseModel):
 
 
 @app.get('/status')
-async def status(request: fastapi.Request,
-                 status_body: StatusBody = StatusBody()) -> None:
+async def status(
+    request: fastapi.Request, status_body: StatusBody = StatusBody()) -> None:
     _start_background_request(
         request_id=request.state.request_id,
         request_name='status',
@@ -214,15 +212,15 @@ class RequestIdBody(pydantic.BaseModel):
 
 
 @app.get('/get')
-async def get(wait_body: RequestIdBody) -> request_tasks.RequestTask:
+async def get(wait_body: RequestIdBody) -> tasks.RequestTask:
     while True:
-        request_task = request_tasks.get_request(wait_body.request_id)
+        request_task = tasks.get_request(wait_body.request_id)
         if request_task is None:
             print(f'No task with request ID {wait_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {wait_body.request_id} not found')
-        if request_task.status > request_tasks.RequestStatus.RUNNING:
+        if request_task.status > tasks.RequestStatus.RUNNING:
             return request_task
         await asyncio.sleep(1)
 
@@ -232,25 +230,24 @@ async def get(wait_body: RequestIdBody) -> request_tasks.RequestTask:
 @app.post('/abort')
 async def abort(abort_body: RequestIdBody):
     print(f'Trying to kill request ID {abort_body.request_id}')
-    with request_tasks.update_rest_task(abort_body.request_id) as rest_task:
+    with tasks.update_rest_task(abort_body.request_id) as rest_task:
         if rest_task is None:
             print(f'No task with request ID {abort_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
-        rest_task.status = request_tasks.RequestStatus.ABORTED
+        rest_task.status = tasks.RequestStatus.ABORTED
         if rest_task.pid is not None:
             subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
     print(f'Killed request: {abort_body.request_id}')
 
 
 @app.get('/requests')
-async def requests(
-        request_id: Optional[str] = None) -> List[request_tasks.RequestTask]:
+async def requests(request_id: Optional[str] = None) -> List[tasks.RequestTask]:
     if request_id is None:
-        return request_tasks.get_request_tasks()
+        return tasks.get_request_tasks()
     else:
-        request_task = request_tasks.get_request(request_id)
+        request_task = tasks.get_request(request_id)
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
@@ -269,7 +266,7 @@ app.include_router(core.app_router)
 
 if __name__ == '__main__':
     import uvicorn
-    request_tasks.reset_db()
+    tasks.reset_db()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='0.0.0.0')

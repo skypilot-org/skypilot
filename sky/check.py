@@ -13,6 +13,7 @@ from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.utils import registry
+from sky.utils import ux_utils
 
 
 def check(
@@ -60,12 +61,12 @@ def check(
         if cloud_name.lower().startswith('cloudflare'):
             return cloudflare.SKY_CHECK_NAME, cloudflare
         else:
-            cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud_name)
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
             assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
             return repr(cloud_obj), cloud_obj
 
     def get_all_clouds():
-        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()] +
+        return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
                      [cloudflare.SKY_CHECK_NAME])
 
     if clouds is not None:
@@ -93,7 +94,7 @@ def check(
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
 
-    # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
+    # Cloudflare is not a real cloud in registry.CLOUD_REGISTRY, and should
     # not be inserted into the DB (otherwise `sky launch` and other code would
     # error out when it's trying to look it up in the registry).
     enabled_clouds_set = {

@@ -24,7 +24,7 @@ import requests
 from sky import backends
 from sky import optimizer
 from sky import sky_logging
-from sky.api import request_tasks
+from sky.api.requests import tasks
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import dag_utils
@@ -172,7 +172,7 @@ def get(request_id: str) -> Any:
                             json={'request_id': request_id},
                             timeout=30)
     _, return_value = _handle_response(response)
-    request_task = request_tasks.RequestTask(**return_value)
+    request_task = tasks.RequestTask(**return_value)
     if request_task.error:
         # TODO(zhwu): we should have a better way to handle errors.
         # Is it possible to raise the original exception?
