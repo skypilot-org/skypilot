@@ -136,9 +136,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if len(glob_storage) == 0:
             click.echo(f'Storage {storage_object} not found.')
-        else:
-            plural = 's' if len(glob_storage) > 1 else ''
-            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -3473,19 +3470,15 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         \b
         # Delete all storage objects.
         sky storage delete -a
-        \b
-        # Skip confirmation prompt.
-        sky storage delete imagenet -y
     """
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
-    if not yes:
+    if not yes and len(names) > 0:
         storage_names = ', '.join(names)
         storage_str = 'storages' if len(names) > 1 else 'storage'
         click.confirm(
