@@ -304,25 +304,31 @@ class GCPResource(metaclass=abc.ABCMeta):
         new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
 
         # Fetch the instance details to get the disk name
-        response = resource_v1.instances().get(
-            project=self.project_id,
-            zone=self.availability_zone,
-            instance=instance_name
-        ).execute()
+        response = (
+            resource_v1.instances()
+            .get(
+                project=self.project_id,
+                zone=self.availability_zone,
+                instance=instance_name,
+            )
+            .execute()
+        )
         disk_name = response["disks"][0]["source"].split("/")[-1]
 
         # Execute the resize request and return the response
-        response = resource_v1.disks().resize(
-            project=self.project_id,
-            zone=self.availability_zone,
-            disk=disk_name,
-            body={
-                "sizeGb": str(new_size_gb),
-            },
-        ).execute()
-
+        response = (
+            resource_v1.disks()
+            .resize(
+                project=self.project_id,
+                zone=self.availability_zone,
+                disk=disk_name,
+                body={
+                    "sizeGb": str(new_size_gb),
+                },
+            )
+            .execute()
+        )
         return response
-
 
     def create_instances(
         self,
