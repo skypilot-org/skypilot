@@ -137,6 +137,7 @@ User
 8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
 
 .. code-block:: text
+    
     compute.disks.get
     compute.disks.resize
     compute.images.get
