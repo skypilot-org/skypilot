@@ -549,15 +549,15 @@ class SSHConfigHelper(object):
             head_port = constants.DEFAULT_DOCKER_PORT
 
         #Start generating the config with the head node
-        codegens += codegen(sky_autogen_comment, cluster_name, ip, username,
-                            key_path, proxy_command, head_port,
-                            docker_proxy_command) + '\n'
+        codegen = cls._get_generated_config(
+            sky_autogen_comment, cluster_name, ip, username, key_path,
+            proxy_command, head_port, docker_proxy_command) + '\n'
 
         #add the worker nodes if any exist
         for i, ip in enumerate(ips[1:]):
             worker_name = cluster_name + f'-worker{i+1}'
             #TODO update port numbers for workers in edge cases
-            codegen = cls._get_generated_config(
+            codegen += cls._get_generated_config(
                 sky_autogen_comment,
                 worker_name,
                 ip,
@@ -565,8 +565,7 @@ class SSHConfigHelper(object):
                 key_path,
                 proxy_command,
                 ports[i],  #updated port numbers
-                docker_proxy_command)
-            codegens += codegen + '\n'
+                docker_proxy_command) + '\n'
 
         # Remove the cluster from the old config if it exists.
         # We will add the config in ~/.sky/ssh/<cluster_name> instead.
@@ -578,7 +577,7 @@ class SSHConfigHelper(object):
             cls.ssh_cluster_path.format(cluster_name))
 
         with open(config_path, 'w') as f:
-            f.write(codegens)
+            f.write(codegen)
 
     @classmethod
     @timeline.FileLockEvent(ssh_conf_lock_path)
