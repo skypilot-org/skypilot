@@ -2,7 +2,6 @@
 
 Responsible for autoscaling and replica management.
 """
-import asyncio
 import base64
 import logging
 import pickle
@@ -82,8 +81,8 @@ class SkyServeController:
     def run(self) -> None:
 
         @self.app.post('/controller/load_balancer_sync')
-        def load_balancer_sync(request: fastapi.Request):
-            request_data = asyncio.run(request.json())
+        async def load_balancer_sync(request: fastapi.Request):
+            request_data = await request.json()
             request_information_payload = request_data.get(
                 'request_information')
             request_information = pickle.loads(
