@@ -478,6 +478,7 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
+        host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         fix_stale_config = False
