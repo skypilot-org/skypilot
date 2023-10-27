@@ -550,7 +550,7 @@ class SSHConfigHelper(object):
 
         #Start generating the config with the head node
         codegen = cls._get_generated_config(
-            sky_autogen_comment, cluster_name, ip, username, key_path,
+            sky_autogen_comment, host_name, ip, username, key_path,
             proxy_command, head_port, docker_proxy_command) + '\n'
 
         #add the worker nodes if any exist
@@ -576,7 +576,7 @@ class SSHConfigHelper(object):
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
 
-        with open(config_path, 'w') as f:
+        with open(cluster_config_path, 'w') as f:
             f.write(codegen)
 
     @classmethod
@@ -692,7 +692,7 @@ class SSHConfigHelper(object):
         auth_config: Dict[str, str],
         docker_user: Optional[str] = None,
     ):
-        """Remove authentication information for cluster from local SSH config file 
+        """Remove authentication information for cluster from local SSH config file
         and ~/.sky/ssh/<cluster_name>.
 
         If no existing host matching the provided specification is found, then
