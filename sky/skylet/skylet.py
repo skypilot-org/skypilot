@@ -2,6 +2,7 @@
 
 import time
 
+import sky
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import events
@@ -10,7 +11,8 @@ from sky.skylet import events
 # `sky.skylet.skylet` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
 logger = sky_logging.init_logger('sky.skylet.skylet')
-logger.info(f'skylet started with version {constants.SKYLET_VERSION}.')
+logger.info(f'Skylet started with version {constants.SKYLET_VERSION}; '
+            f'SkyPilot v{sky.__version__} (commit: {sky.__commit__})')
 
 EVENTS = [
     events.AutostopEvent(),
