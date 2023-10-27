@@ -1016,16 +1016,12 @@ class Task:
         add_if_not_none('name', self.name)
 
         tmp_resource_config = {}
-        if isinstance(self.resources, list):
+        if isinstance(self.resources, (list, set)):
             resource_list = []
             for r in self.resources:
                 resource_list.append(r.to_yaml_config())
-            tmp_resource_config['ordered'] = resource_list
-        elif len(self.resources) > 1:
-            resource_list = []
-            for r in self.resources:
-                resource_list.append(r.to_yaml_config())
-            tmp_resource_config['any_of'] = resource_list
+            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
+            tmp_resource_config[key] = resource_list
         else:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 

@@ -396,7 +396,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
                                            launched_resources.region)
-            self._launched_resources = launched_resources  # pylint: disable=line-too-long
+            self._launched_resources = launched_resources
         else:
             self._launched_cloud_region = None
             self._launched_resources = None

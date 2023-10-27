@@ -192,9 +192,12 @@ class Optimizer:
                         resources_list = task.resources
                         accelerators_str = ', '.join(
                             [f'{r}' for r in resources_list])
-                        logger.info(
-                            f'{colorama.Fore.YELLOW}{task_id + 1}-th task is using user-specified accelerators list{colorama.Style.RESET_ALL} (will be tried in the listed order): {accelerators_str}'  # pylint: disable=line-too-long
-                        )
+                        logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th'
+                                    'task is using user-specified'
+                                    'accelerators list'
+                                    f'{colorama.Style.RESET_ALL}'
+                                    '(will be tried in the listed order):'
+                                    f'{accelerators_str}')
                 _ = Optimizer._optimize_objective(
                     dag=dag,
                     optimize_target=OptimizeTarget.USER,
@@ -914,6 +917,8 @@ class Optimizer:
                 f'{colorama.Style.RESET_ALL}')
 
             # Only print 1 row per cloud.
+            # The following code is to generate the table
+            # of optimizer table for display purpose.
             best_per_resource_group: Dict[str, Tuple[resources_lib.Resources,
                                                      float]] = {}
             for resources, cost in v.items():
