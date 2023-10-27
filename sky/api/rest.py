@@ -236,6 +236,9 @@ async def abort(abort_body: RequestIdBody):
             raise fastapi.HTTPException(
                 status_code=404,
                 detail=f'Request {abort_body.request_id} not found')
+        if rest_task.status > tasks.RequestStatus.RUNNING:
+            print(f'Request {abort_body.request_id} already finished')
+            return
         rest_task.status = tasks.RequestStatus.ABORTED
         if rest_task.pid is not None:
             subprocess_utils.kill_children_processes(parent_pid=rest_task.pid)
