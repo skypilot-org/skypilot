@@ -1,5 +1,4 @@
 """Kubernetes utilities for SkyPilot."""
-import enum
 import math
 import os
 import re
@@ -17,6 +16,7 @@ from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
@@ -35,33 +35,6 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 To further debug, run: sky check.'
 
 logger = sky_logging.init_logger(__name__)
-
-
-class KubernetesNetworkingMode(enum.Enum):
-    """Enum for the different types of networking modes for accessing
-    jump pods.
-    """
-    NODEPORT = 'nodeport'
-    PORTFORWARD = 'portforward'
-
-    @classmethod
-    def from_str(cls, mode: str) -> 'KubernetesNetworkingMode':
-        """Returns the enum value for the given string."""
-        if mode.lower() == cls.NODEPORT.value:
-            return cls.NODEPORT
-        elif mode.lower() == cls.PORTFORWARD.value:
-            return cls.PORTFORWARD
-        else:
-            raise ValueError(f'Unsupported kubernetes networking mode: '
-                             f'{mode}. The mode must be either '
-                             f'\'{cls.PORTFORWARD.value}\' or '
-                             f'\'{cls.NODEPORT.value}\'. ')
-
-
-class KubernetesServiceType(enum.Enum):
-    """Enum for the different types of services."""
-    NODEPORT = 'NodePort'
-    CLUSTERIP = 'ClusterIP'
 
 
 class GPULabelFormatter:
@@ -435,8 +408,9 @@ def get_port(svc_name: str, namespace: str) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
-    if network_mode == KubernetesNetworkingMode.PORTFORWARD:
+def get_external_ip(
+        network_mode: Optional[kubernetes_enums.KubernetesNetworkingMode]):
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP
     nodes = kubernetes.core_api().list_node().items
@@ -704,10 +678,10 @@ def construct_ssh_jump_command(private_key_path: str,
     return ssh_jump_proxy_command
 
 
-def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
-                          network_mode: KubernetesNetworkingMode,
-                          namespace: str, port_fwd_proxy_cmd_path: str,
-                          port_fwd_proxy_cmd_template: str) -> str:
+def get_ssh_proxy_command(
+        private_key_path: str, ssh_jump_name: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode, namespace: str,
+        port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
     By default, establishing an SSH connection creates a communication
@@ -755,7 +729,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
-    if network_mode == KubernetesNetworkingMode.NODEPORT:
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
@@ -776,7 +750,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
-                       service_type: KubernetesServiceType):
+                       service_type: kubernetes_enums.KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -815,10 +789,14 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                     name=ssh_jump_name, namespace=namespace)
                 kubernetes.core_api().create_namespaced_service(
                     namespace, content['service_spec'])
-                port_forward_mode = KubernetesNetworkingMode.PORTFORWARD.value
-                nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
-                clusterip_svc = KubernetesServiceType.CLUSTERIP.value
-                nodeport_svc = KubernetesServiceType.NODEPORT.value
+                port_forward_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
+                nodeport_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value)
+                clusterip_svc = (
+                    kubernetes_enums.KubernetesServiceType.CLUSTERIP.value)
+                nodeport_svc = (
+                    kubernetes_enums.KubernetesServiceType.NODEPORT.value)
                 curr_network_mode = port_forward_mode \
                     if curr_svc_type == clusterip_svc else nodeport_mode
                 new_network_mode = nodeport_mode \
@@ -1006,8 +984,8 @@ def check_port_forward_mode_dependencies() -> None:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
-                    'networking mode and it is not installed. '
+                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+                    'default networking mode and it is not installed. '
                     'On Debian/Ubuntu, install it with:\n'
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'

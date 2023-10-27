@@ -6,12 +6,12 @@ import pytest
 
 from sky import skypilot_config
 from sky.utils import common_utils
-from sky.utils import kubernetes_utils
+from sky.utils import kubernetes_enums
 
 VPC_NAME = 'vpc-12345678'
 PROXY_COMMAND = 'ssh -W %h:%p -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no'
-NODEPORT_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.NODEPORT.value
-PORT_FORWARD_MODE_NAME = kubernetes_utils.KubernetesNetworkingMode.PORTFORWARD.value
+NODEPORT_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value
+PORT_FORWARD_MODE_NAME = kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value
 
 
 def _reload_config() -> None:
@@ -56,6 +56,76 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'empty.yaml')
     _reload_config()
     _check_empty_config()
+
+
+def test_invalid_field_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file contains unknown field."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        aws:
+            vpc_name: {VPC_NAME}
+            not_a_field: 123
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
+def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file is incorrectly indented."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        spot:
+            controller:
+                resources:
+                cloud: gcp
+                instance_type: n2-standard-4
+                cpus: 4
+                disk_size: 50
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
+def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file contains an invalid enum value."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        spot:
+            controller:
+                resources:
+                    cloud: notacloud
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
+
+
+def test_invalid_num_items_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file contains an invalid number of array items."""
+    config_path = tmp_path / 'invalid.yaml'
+    config_path.open('w').write(
+        textwrap.dedent(f"""\
+        gcp:
+            specific_reservations:
+                - projects/my-project/reservations/my-reservation
+                - projects/my-project/reservations/my-reservation2
+        """))
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
+                        tmp_path / 'invalid.yaml')
+    with pytest.raises(ValueError) as e:
+        _reload_config()
+    assert 'Invalid config YAML' in e.value.args[0]
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:

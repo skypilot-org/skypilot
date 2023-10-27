@@ -39,10 +39,12 @@ TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
-# The version of skylet. We should bump this version whenever we need the skylet
-# to be restarted on existing clusters updated with the new version of SkyPilot,
+# The version of skylet. MUST bump this version whenever we need the skylet to
+# be restarted on existing clusters updated with the new version of SkyPilot,
 # e.g., when we add new events to skylet, or we fix a bug in skylet.
-SKYLET_VERSION = '3'
+#
+# TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
+SKYLET_VERSION = '4'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related

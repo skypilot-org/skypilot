@@ -1214,6 +1214,12 @@ def _add_command_alias_to_group(group, command, name, hidden):
               is_eager=True,
               help='Uninstall shell completion for the specified shell.')
 @click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
+@click.version_option(sky.__commit__,
+                      '--commit',
+                      '-c',
+                      prog_name='skypilot',
+                      message='%(prog)s, commit %(version)s',
+                      help='Show the commit hash and exit')
 def cli():
     pass
 
@@ -1691,6 +1697,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
     If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
 
+    If --ip is specified, show the IP address of the head node of the cluster.
+    Only available when CLUSTERS contains exactly one cluster, e.g.
+    ``sky status --ip mycluster``.
+
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
     command.
@@ -1751,6 +1761,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
         if ip:
+            if refresh:
+                raise click.UsageError(
+                    'Using --ip with --refresh is not supported for now. '
+                    'To fix, refresh first, then query the IP.')
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
@@ -3501,8 +3515,8 @@ def admin_deploy(clusterspec_yaml: str):
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
     is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                  'Invalid cluster YAML: ')
+    common_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                 'Invalid cluster YAML: ')
     if not is_yaml:
         raise ValueError('Must specify cluster config')
     assert yaml_config is not None, (is_yaml, yaml_config)
