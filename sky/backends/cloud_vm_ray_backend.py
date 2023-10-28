@@ -2904,8 +2904,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provisioner.ClusterName(handle.cluster_name,
                                             handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
-                    local_wheel_path=local_wheel_path,
-                    wheel_hash=wheel_hash,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
