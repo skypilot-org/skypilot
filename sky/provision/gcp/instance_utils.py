@@ -969,8 +969,7 @@ class GCPTPUVMInstance(GCPInstance):
                    labels: dict,
                    wait_for_operation: bool = True) -> dict:
         node = cls.load_resource().projects().locations().nodes().get(
-            name=node_id,
-        )
+            name=node_id)
         body = {
             "labels": dict(node["labels"], **labels),
         }

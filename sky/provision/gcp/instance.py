@@ -254,6 +254,17 @@ def run_instances(region: str, cluster_name: str,
         #   are started correctly.
         created_instance_ids = [instance_id for success, instance_id in results]
 
+    while True:
+        # wait until all instances are running
+        instances = resource.filter(
+            project_id=project_id,
+            zone=availability_zone,
+            label_filters=filter_labels,
+            status_filters=PENDING_STATUS,
+        )
+        if not instances:
+            break
+
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
                                   zone=availability_zone,
