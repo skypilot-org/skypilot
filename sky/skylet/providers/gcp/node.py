@@ -290,41 +290,14 @@ class GCPResource(metaclass=abc.ABCMeta):
         Returns a tuple of (result, node_name).
         """
         return
-
-    def resize_disk(self, base_config: dict, instance_name: str) -> Tuple[dict, str]:
-        """Resize a Google Cloud disk based on the provided configuration."""
-        # Build Compute Engine API
-        resource_v1 = discovery.build("compute", "v1")
-
-        # Extract the specified disk size from the configuration
-        new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
-
-        # Fetch the instance details to get the disk name
-        response = (
-            resource_v1.instances()
-            .get(
-                project=self.project_id,
-                zone=self.availability_zone,
-                instance=instance_name,
-            )
-            .execute()
-        )
-        disk_name = response["disks"][0]["source"].split("/")[-1]
-
-        # Execute the resize request and return the response
-        response = (
-            resource_v1.disks()
-            .resize(
-                project=self.project_id,
-                zone=self.availability_zone,
-                disk=disk_name,
-                body={
-                    "sizeGb": str(new_size_gb),
-                },
-            )
-            .execute()
-        )
-        return response
+    
+    @abc.abstractmethod
+    def resize_disk(self, base_config: dict, instance_name: str, wait_for_operation: bool = True) -> Tuple[dict, str]:
+        """Resize a Google Cloud disk based on the provided configuration.
+        
+        Returns the response of resize operation.
+        """
+        return 
 
     def create_instances(
         self,
@@ -656,6 +629,65 @@ class GCPCompute(GCPResource):
             result = operation
 
         return result
+
+    def resize_disk(self, base_config: dict, instance_name: str, wait_for_operation: bool = True) -> Tuple[dict, str]:
+        """Resize a Google Cloud disk based on the provided configuration."""
+        
+        # Extract the specified disk size from the configuration
+        new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
+
+        # Fetch the instance details to get the disk name and current disk size
+        response = (
+            self.resource.instances()
+            .get(
+                project=self.project_id,
+                zone=self.availability_zone,
+                instance=instance_name,
+            )
+            .execute()
+        )
+        disk_name = response["disks"][0]["source"].split("/")[-1]
+        cur_size_gb = response["disks"][0]['diskSizeGb']
+
+        # If the new disk size is the same as the existing disk size
+        # resizing is unnecessary
+        if int(new_size_gb) == int(cur_size_gb):
+            # Return empty list instead of raising exception to not break
+            # ray down.
+            return []
+        
+        elif int(new_size_gb) < int(cur_size_gb):
+            logger.warning("Disk resize operation aborted: Specified new disk size (%s GB) is smaller than the current disk size (%s GB)", new_size_gb, cur_size_gb)
+            return []
+
+        try:
+            # Execute the resize request and return the response
+            operation = (
+                self.resource.disks()
+                .resize(
+                    project=self.project_id,
+                    zone=self.availability_zone,
+                    disk=disk_name,
+                    body={
+                        "sizeGb": str(new_size_gb),
+                    },
+                )
+                .execute()
+            )
+        except HttpError as e:
+            # Catch HttpError when provided with invalid value for new disk size.
+            # Raises error when the new disk size is smaller than the exisiting 
+            # disk size
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            return []
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+    
+        return result
+
 
 
 class GCPTPU(GCPResource):
