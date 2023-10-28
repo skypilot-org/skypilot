@@ -428,12 +428,26 @@ class Task:
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
         resources_config = config.pop('resources', None)
+        if resources_config and resources_config.get(
+                'all_of') is not None and resources_config.get(
+                    'ordered') is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both "all_of" and "ordered" in resources.')
         if resources_config and resources_config.get('any_of') is not None:
+            if len(resources_config) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify "any_of" with other resource fields.')
             resources_set = set()
             for resource in resources_config['any_of']:
                 resources_set.add(sky.Resources.from_yaml_config(resource))
             task.set_resources(resources_set)
         elif resources_config and resources_config.get('ordered') is not None:
+            if len(resources_config) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify "any_of" with other resource fields.')
             resources_list = []
             for resource in resources_config['ordered']:
                 resources_list.append(sky.Resources.from_yaml_config(resource))

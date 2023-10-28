@@ -45,7 +45,6 @@ _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
-    USER = 2
 
 
 # For logging purposes.
@@ -103,65 +102,6 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def _set_plan_to_best_resources(dag: 'dag_lib.Dag',
-                                    plan: Dict[task_lib.Task,
-                                               resources_lib.Resources],
-                                    local_dag: 'dag_lib.Dag'):
-        best_plan = {}
-        for task, resources in plan.items():
-            task_idx = local_dag.tasks.index(task)
-            dag.tasks[task_idx].best_resources = resources
-            best_plan[dag.tasks[task_idx]] = resources
-        return best_plan
-
-    @staticmethod
-    def _optimize_dag_with_user(
-        dag: 'dag_lib.Dag',
-        task_id: int,
-        optimize_target=OptimizeTarget.COST,
-        blocked_resources: Optional[Iterable[resources_lib.Resources]] = None
-    ) -> Dict[task_lib.Task, resources_lib.Resources]:
-        local_dag = copy.deepcopy(dag)
-        task = dag.tasks[task_id]
-        local_task = local_dag.tasks[task_id]
-        if isinstance(task.resources, list):
-            for resources in task.resources:
-                local_task.set_resources(resources)
-
-                # Check if there exists launchable resources
-                launchable_resources_map, _ , _ = \
-                    _fill_in_launchable_resources(
-                        task = local_task,
-                        blocked_resources = blocked_resources,
-                        try_fix_with_sky_check = True,
-                        check_resource_satisfying = False
-                )
-                if len(launchable_resources_map[resources]) != 0:
-                    break
-
-        if task_id == len(dag.tasks) - 1:
-            plan = Optimizer._optimize_objective(
-                dag=local_dag,
-                optimize_target=optimize_target,
-                blocked_resources=blocked_resources,
-                quiet=True)
-        else:
-            plan = Optimizer._optimize_dag_with_user(local_dag, task_id + 1,
-                                                     optimize_target,
-                                                     blocked_resources)
-
-        if plan is not None:
-            return Optimizer._set_plan_to_best_resources(dag, plan, local_dag)
-
-        error_msg = (f'No launchable resource found for task {task}. '
-                     'To fix: relax its resource requirements.\n'
-                     'Hint: \'sky show-gpus --all\' '
-                     'to list available accelerators.\n'
-                     '      \'sky check\' to check the enabled clouds.')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ResourcesUnavailableError(error_msg)
-
-    @staticmethod
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
@@ -192,24 +132,18 @@ class Optimizer:
                         resources_list = task.resources
                         accelerators_str = ', '.join(
                             [f'{r}' for r in resources_list])
-                        logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th'
+                        logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th '
                                     'task is using user-specified'
                                     'accelerators list'
                                     f'{colorama.Style.RESET_ALL}'
                                     '(will be tried in the listed order):'
                                     f'{accelerators_str}')
-                _ = Optimizer._optimize_objective(
-                    dag=dag,
-                    optimize_target=OptimizeTarget.USER,
-                    blocked_resources=blocked_resources,
-                    quiet=quiet)
-            else:
-                _ = Optimizer._optimize_objective(
-                    dag=dag,
-                    optimize_target=OptimizeTarget.COST
-                    if minimize else OptimizeTarget.TIME,
-                    blocked_resources=blocked_resources,
-                    quiet=quiet)
+
+            unused_best_plan = Optimizer._optimize_dag(
+                dag=dag,
+                minimize_cost=minimize == OptimizeTarget.COST,
+                blocked_resources=blocked_resources,
+                quiet=quiet)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -315,6 +249,7 @@ class Optimizer:
         topo_order: List[task_lib.Task],
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
+        quiet: bool = False
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -348,7 +283,11 @@ class Optimizer:
             if node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
                 launchable_resources, cloud_candidates, fuzzy_candidates = (
-                    _fill_in_launchable_resources(node, blocked_resources))
+                    _fill_in_launchable_resources(
+                        task=node,
+                        blocked_resources=blocked_resources,
+                        try_fix_with_sky_check=True,
+                        quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
             else:
                 # Dummy sink node.
@@ -802,7 +741,7 @@ class Optimizer:
         def _get_resources_element_list(
                 resources: 'resources_lib.Resources') -> List[str]:
             accelerators = resources.get_accelerators_str()
-            spot = '[Spot]' if resources.use_spot else ''
+            spot = resources.get_spot_str()
             cloud = resources.cloud
             vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
@@ -840,7 +779,7 @@ class Optimizer:
                                        cost_str: str, chosen: bool) -> Row:
 
             accelerators = resources.get_accelerators_str()
-            spot = '[Spot]' if resources.use_spot else ''
+            spot = resources.get_spot_str()
             cloud = resources.cloud
             vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
@@ -904,11 +843,13 @@ class Optimizer:
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
-            v_yaml = {json.dumps(k.to_yaml_config()): v for k, v in v.items()}
-            accelerator_spot_list = [
-                r.get_accelerators_str() + r.get_spot_str()
-                for r in list(task.resources)
-            ]
+            # Hack: convert the dictionary values
+            # (resources) to their yaml config
+            # For dictionary comparison later.
+            v_yaml = {
+                json.dumps(resource.to_yaml_config()): cost
+                for resource, cost in v.items()
+            }
             task_str = (f'for task {repr(task)!r} ' if num_tasks > 1 else '')
             plural = 's' if task.num_nodes > 1 else ''
             logger.info(
@@ -952,12 +893,19 @@ class Optimizer:
             # NOTE: we've converted the cost to a string above, so we should
             # convert it back to float for sorting.
             if isinstance(task.resources, list):
-                rows = sorted(
-                    rows,
-                    key=lambda row: (
-                        accelerator_spot_list.index(row.accelerators + (  # pylint: disable=cell-var-from-loop
-                            '[Spot]' if '[Spot]' in row.instance else '')),  # pylint: disable=cell-var-from-loop
-                        float(row.cost_str)))  # pylint: disable=cell-var-from-loop
+                accelerator_spot_list = [
+                    r.get_accelerators_str() + r.get_spot_str()
+                    for r in list(task.resources)
+                ]
+
+                def sort_key(row, accelerator_spot_list=accelerator_spot_list):
+                    accelerator_index = accelerator_spot_list.index(
+                        row.accelerators +
+                        ('[Spot]' if '[Spot]' in row.instance else ''))
+                    cost = float(row.cost_str)
+                    return (accelerator_index, cost)
+
+                rows = sorted(rows, key=sort_key)
             else:
                 rows = sorted(rows, key=lambda row: float(row.cost_str))
 
@@ -999,9 +947,9 @@ class Optimizer:
                     f'To list more details, run \'sky show-gpus {acc_name}\'.')
 
     @staticmethod
-    def _optimize_objective(
+    def _optimize_dag(
         dag: 'dag_lib.Dag',
-        optimize_target: OptimizeTarget = OptimizeTarget.COST,
+        minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False,
     ) -> Dict[task_lib.Task, resources_lib.Resources]:
@@ -1015,40 +963,70 @@ class Optimizer:
 
         graph = dag.get_graph()
         topo_order = list(nx.topological_sort(graph))
-        minimize_cost = optimize_target in [
-            OptimizeTarget.COST, OptimizeTarget.USER
-        ]
-        node_to_cost_map, node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(topo_order, minimize_cost,
-                                                   blocked_resources))
-        if optimize_target == OptimizeTarget.USER:
-            # best_plan, total_time, total_cost = Optimizer._optimize_by_user(
-            #     graph, topo_order, blocked_resources)
-            best_plan = Optimizer._optimize_dag_with_user(
-                dag=dag,
-                task_id=0,
-                optimize_target=OptimizeTarget.COST,
-                blocked_resources=blocked_resources)
-            total_time = Optimizer._compute_total_time(graph, topo_order,
-                                                       best_plan)
-            total_cost = Optimizer._compute_total_cost(graph, topo_order,
-                                                       best_plan)
-        else:
-            if dag.is_chain():
-                best_plan, best_total_objective = Optimizer._optimize_by_dp(
-                    topo_order, node_to_cost_map, minimize_cost)
-            else:
-                best_plan, best_total_objective = Optimizer._optimize_by_ilp(
-                    graph, topo_order, node_to_cost_map, minimize_cost)
+        local_dag = copy.deepcopy(dag)
 
-            if minimize_cost:
-                total_time = Optimizer._compute_total_time(
-                    graph, topo_order, best_plan)
-                total_cost = best_total_objective
-            else:
-                total_time = best_total_objective
-                total_cost = Optimizer._compute_total_cost(
-                    graph, topo_order, best_plan)
+        for task_id in range(len(dag.tasks)):
+            task = dag.tasks[task_id]
+            local_task = local_dag.tasks[task_id]
+            if isinstance(task.resources, list):
+                for resources in task.resources:
+                    # Check if there exists launchable resources
+                    local_task.set_resources(resources)
+                    launchable_resources_map, _ , _ = \
+                        _fill_in_launchable_resources(
+                            task = local_task,
+                            blocked_resources = blocked_resources,
+                            try_fix_with_sky_check = True,
+                            quiet = True
+                    )
+                    if len(launchable_resources_map[resources]) != 0:
+                        break
+
+        local_graph = local_dag.get_graph()
+        local_topo_order = list(nx.topological_sort(local_graph))
+        local_node_to_cost_map, _ = (Optimizer._estimate_nodes_cost_or_time(
+            local_topo_order, minimize_cost, blocked_resources))
+
+        if dag.is_chain():
+            local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
+                local_topo_order, local_node_to_cost_map, minimize_cost)
+        else:
+            local_best_plan, best_total_objective = Optimizer._optimize_by_ilp(
+                local_graph, local_topo_order, local_node_to_cost_map,
+                minimize_cost)
+
+        if minimize_cost:
+            total_time = Optimizer._compute_total_time(local_graph,
+                                                       local_topo_order,
+                                                       local_best_plan)
+            total_cost = best_total_objective
+        else:
+            total_time = best_total_objective
+            total_cost = Optimizer._compute_total_cost(local_graph,
+                                                       local_topo_order,
+                                                       local_best_plan)
+
+        if local_best_plan is None:
+            error_msg = (f'No launchable resource found for task {task}. '
+                         'To fix: relax its resource requirements.\n'
+                         'Hint: \'sky show-gpus --all\' '
+                         'to list available accelerators.\n'
+                         '      \'sky check\' to check the enabled clouds.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(error_msg)
+
+        best_plan = {}
+        for task, resources in local_best_plan.items():
+            task_idx = local_dag.tasks.index(task)
+            dag.tasks[task_idx].best_resources = resources
+            best_plan[dag.tasks[task_idx]] = resources
+
+        node_to_cost_map, node_to_candidate_map = (
+            Optimizer._estimate_nodes_cost_or_time(
+                topo_order=topo_order,
+                minimize_cost=minimize_cost,
+                blocked_resources=blocked_resources,
+                quiet=True))
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
@@ -1141,7 +1119,7 @@ def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
-    check_resource_satisfying: bool = True
+    quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str]]:
     """Fills in the launchable resources for the task.
@@ -1207,7 +1185,7 @@ def _fill_in_launchable_resources(
                 num_node_str = ''
                 if task.num_nodes > 1:
                     num_node_str = f'{task.num_nodes}x '
-                if check_resource_satisfying:
+                if not quiet:
                     logger.info(
                         f'No resource satisfying {num_node_str}{resources} '
                         f'on {clouds_str}.')

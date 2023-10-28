@@ -8,7 +8,7 @@ resources:
 import time
 import traceback
 import typing
-from typing import Optional, Tuple
+from typing import Optional
 
 import sky
 from sky import backends
@@ -97,8 +97,11 @@ class StrategyExecutor:
 
         resource_list = list(task.resources)
         spot_recovery = resource_list[0].spot_recovery
-        if spot_recovery is None:
-            spot_recovery = SPOT_DEFAULT_STRATEGY
+        for resource in resource_list:
+            if resource.spot_recovery != spot_recovery:
+                raise ValueError(
+                    'The spot recovery strategy should be the same for all '
+                    'resources.')
         # Remove the spot_recovery field from the resources, as the strategy
         # will be handled by the strategy class.
         new_resources_list = [r.copy(spot_recovery=None) for r in resource_list]
@@ -379,8 +382,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
-        self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
-                                                    'sky.clouds.Region']] = None
         self._launched_resources: Optional['sky.resources.Resources'] = None
 
     def _launch(self,
@@ -394,11 +395,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             assert isinstance(handle, backends.CloudVmRayResourceHandle), (
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
-            self._launched_cloud_region = (launched_resources.cloud,
-                                           launched_resources.region)
             self._launched_resources = launched_resources
         else:
-            self._launched_cloud_region = None
             self._launched_resources = None
         return job_submitted_at
 
@@ -415,13 +413,13 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
         while True:
             # Add region constraint to the task, to retry on the same region
             # first (if valid).
-            if self._launched_cloud_region is not None:
-                assert self._launched_resources is not None
+            if self._launched_resources is not None:
                 task = self.dag.tasks[0]
                 original_resources = task.resources
-                launched_cloud, launched_region = self._launched_cloud_region
+                launched_cloud = self._launched_resources.cloud
+                launched_region = self._launched_resources.region
                 new_resources = self._launched_resources.copy(
-                    cloud=launched_cloud, region=launched_region)
+                    cloud=launched_cloud, region=launched_region, zone=None)
                 task.set_resources({new_resources})
                 # Not using self.launch to avoid the retry until up logic.
                 job_submitted_at = self._launch(raise_on_failure=False)
@@ -502,8 +500,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
         # Step 2
         logger.debug('Relaunch the cluster skipping the previously launched '
                      'cloud/region.')
-        if self._launched_cloud_region is not None:
-            assert self._launched_resources is not None
+        if self._launched_resources is not None:
             task = self.dag.tasks[0]
             requested_resources = self._launched_resources
             if (requested_resources.region is None and
@@ -512,7 +509,8 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
                 # if the requested resources does not specify a region or zone,
                 # because, otherwise, we will spend unnecessary time for
                 # skipping the only specified region/zone.
-                launched_cloud, launched_region = self._launched_cloud_region
+                launched_cloud = self._launched_resources.cloud
+                launched_region = self._launched_resources.region
                 task.blocked_resources = {
                     requested_resources.copy(cloud=launched_cloud,
                                              region=launched_region)

@@ -2740,11 +2740,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 break
             else:
                 requested_resource_list.append(f'{task.num_nodes}x {resource}')
-        requested_resource_str = ', '.join(requested_resource_list)
-        if isinstance(task.resources, list):
-            requested_resource_str = f'[{requested_resource_str}]'
-        elif isinstance(task.resources, set):
-            requested_resource_str = f'{{{requested_resource_str}}}'
+
         if valid_resource is None:
             for example_resource in task.resources:
                 if (example_resource.region is not None and
@@ -2766,14 +2762,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{example_resource.zone!r},'
                             'but the existing cluster '
                             f'{zone_str}')
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing '
-                        'cluster.\n'
-                        f'  Requested:\t{requested_resource_str}\n'
-                        f'  Existing:\t{handle.launched_nodes}x '
-                        f'{handle.launched_resources}\n'
-                        f'{mismatch_str}')
+            requested_resource_str = ', '.join(requested_resource_list)
+            if isinstance(task.resources, list):
+                requested_resource_str = f'[{requested_resource_str}]'
+            elif isinstance(task.resources, set):
+                requested_resource_str = f'{{{requested_resource_str}}}'
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Requested resources do not match the existing '
+                    'cluster.\n'
+                    f'  Requested:\t{requested_resource_str}\n'
+                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'{handle.launched_resources}\n'
+                    f'{mismatch_str}')
         return valid_resource
 
     def _provision(
@@ -3503,6 +3504,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
+        task_copy.best_resources = None
         resources_str = backend_utils.get_task_resources_str(task_copy)
 
         if dryrun:
