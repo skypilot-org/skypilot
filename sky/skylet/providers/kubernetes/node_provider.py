@@ -315,13 +315,41 @@ class KubernetesNodeProvider(NodeProvider):
                  pod.status.container_statuses]):
                 break
             time.sleep(1)
-        
+
+        # Setting up ssh for the pod instance. This is already setup for
+        # the jump pod so it does not need to be run for it.
+        set_k8s_ssh_cmd = [
+            '/bin/sh', '-c',
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+            '$(prefix_cmd) apt install openssh-server -y; '
+            '$(prefix_cmd) mkdir -p /var/run/sshd; '
+            '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
+            '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+            '$(prefix_cmd) mkdir -p ~/.ssh; '
+            '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
+            '$(prefix_cmd) service ssh restart')
+        ]
+
+        for new_node in new_nodes:
+                err=kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_ssh_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+
         # Checks if the default user has sufficient privilege to set up
         # the kubernetes instance pod.
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
             ('if [ $(id -u) -eq 0 ]; '
-             'then alias sudo=''; '
+             'then echo \'alias sudo=""\' >> ~/.bashrc; '
              'else command -v sudo >/dev/null 2>&1 || '
              f'( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); fi')
         ]
@@ -353,11 +381,20 @@ class KubernetesNodeProvider(NodeProvider):
         # To do so, we capture env vars from the pod's runtime and write them to
         # /etc/profile.d/, making them available for all users in future
         # shell sessions.
+        """
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',
             ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
              'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
              'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        ]
+        """
+        set_k8s_env_var_cmd = [
+            '/bin/sh', '-c',
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+            'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
         ]
         for new_node in new_nodes:
             kubernetes.stream()(
@@ -371,30 +408,6 @@ class KubernetesNodeProvider(NodeProvider):
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
         
-        # Setting up ssh for the pod instance. This is already setup for
-        # the jump pod so it does not need to be run for it.
-        set_k8s_ssh_cmd = ['/bin/sh', '-c',
-                           ('sudo apt install openssh-server -y && '
-                            'sudo mkdir -p /var/run/sshd && '
-                            'sudo sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config && '
-                            'sudo sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd && '
-                            'cd /etc/ssh/ && sudo ssh-keygen -A && '
-                            'sudo mkdir -p ~/.ssh && '
-                            'sudo cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && '
-                            'sudo service ssh restart')
-        ]
-        for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_ssh_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
