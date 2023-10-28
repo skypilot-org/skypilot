@@ -290,14 +290,16 @@ class GCPResource(metaclass=abc.ABCMeta):
         Returns a tuple of (result, node_name).
         """
         return
-    
+
     @abc.abstractmethod
-    def resize_disk(self, base_config: dict, instance_name: str, wait_for_operation: bool = True) -> Tuple[dict, str]:
+    def resize_disk(
+        self, base_config: dict, instance_name: str, wait_for_operation: bool = True
+    ) -> Tuple[dict, str]:
         """Resize a Google Cloud disk based on the provided configuration.
-        
+
         Returns the response of resize operation.
         """
-        return 
+        return
 
     def create_instances(
         self,
@@ -527,7 +529,6 @@ class GCPCompute(GCPResource):
     def create_instance(
         self, base_config: dict, labels: dict, wait_for_operation: bool = True
     ) -> Tuple[dict, str]:
-
         config = self._convert_resources_to_urls(base_config)
         # removing TPU-specific default key set in config.py
         config.pop("networkConfig", None)
@@ -630,9 +631,11 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def resize_disk(self, base_config: dict, instance_name: str, wait_for_operation: bool = True) -> Tuple[dict, str]:
+    def resize_disk(
+        self, base_config: dict, instance_name: str, wait_for_operation: bool = True
+    ) -> Tuple[dict, str]:
         """Resize a Google Cloud disk based on the provided configuration."""
-        
+
         # Extract the specified disk size from the configuration
         new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
 
@@ -647,7 +650,7 @@ class GCPCompute(GCPResource):
             .execute()
         )
         disk_name = response["disks"][0]["source"].split("/")[-1]
-        cur_size_gb = response["disks"][0]['diskSizeGb']
+        cur_size_gb = response["disks"][0]["diskSizeGb"]
 
         # If the new disk size is the same as the existing disk size
         # resizing is unnecessary
@@ -655,9 +658,13 @@ class GCPCompute(GCPResource):
             # Return empty list instead of raising exception to not break
             # ray down.
             return []
-        
+
         elif int(new_size_gb) < int(cur_size_gb):
-            logger.warning("Disk resize operation aborted: Specified new disk size (%s GB) is smaller than the current disk size (%s GB)", new_size_gb, cur_size_gb)
+            logger.warning(
+                "Disk resize operation aborted: Specified new disk size (%s GB) is smaller than the current disk size (%s GB)",
+                new_size_gb,
+                cur_size_gb,
+            )
             return []
 
         try:
@@ -676,7 +683,7 @@ class GCPCompute(GCPResource):
             )
         except HttpError as e:
             # Catch HttpError when provided with invalid value for new disk size.
-            # Raises error when the new disk size is smaller than the exisiting 
+            # Raises error when the new disk size is smaller than the exisiting
             # disk size
             logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
             return []
@@ -685,9 +692,8 @@ class GCPCompute(GCPResource):
             result = self.wait_for_operation(operation)
         else:
             result = operation
-    
-        return result
 
+        return result
 
 
 class GCPTPU(GCPResource):
@@ -766,7 +772,6 @@ class GCPTPU(GCPResource):
         label_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
         def filter_instance(instance: GCPTPUNode) -> bool:
-
             labels = instance.get_labels()
             if label_filters:
                 for key, value in label_filters.items():
