@@ -124,21 +124,6 @@ class Optimizer:
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
         try:
-            if _is_dag_resources_ordered(dag):
-                # Honor the user's choice.
-                # The actual task dag can store dummy tasks.
-                for task_id, task in enumerate(dag.tasks):
-                    if isinstance(task.resources, list):
-                        resources_list = task.resources
-                        accelerators_str = ', '.join(
-                            [f'{r}' for r in resources_list])
-                        logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th '
-                                    'task is using user-specified'
-                                    'accelerators list'
-                                    f'{colorama.Style.RESET_ALL}'
-                                    '(will be tried in the listed order):'
-                                    f'{accelerators_str}')
-
             unused_best_plan = Optimizer._optimize_dag(
                 dag=dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
@@ -961,14 +946,27 @@ class Optimizer:
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 
-        graph = dag.get_graph()
-        topo_order = list(nx.topological_sort(graph))
-        local_dag = copy.deepcopy(dag)
+        is_resources_ordered = _is_dag_resources_ordered(dag)
+        if is_resources_ordered:
+            # Honor the user's choice.
+            # The actual task dag can store dummy tasks.
+            for task_id, task in enumerate(dag.tasks):
+                if isinstance(task.resources, list):
+                    resources_list = task.resources
+                    accelerators_str = ', '.join(
+                        [f'{r}' for r in resources_list])
+                    logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th '
+                                'task is using user-specified'
+                                'accelerators list'
+                                f'{colorama.Style.RESET_ALL}'
+                                '(will be tried in the listed order):'
+                                f'{accelerators_str}')
 
+        local_dag = copy.deepcopy(dag)
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
-            local_task = local_dag.tasks[task_id]
             if isinstance(task.resources, list):
+                local_task = local_dag.tasks[task_id]
                 for resources in task.resources:
                     # Check if there exists launchable resources
                     local_task.set_resources(resources)
@@ -984,8 +982,10 @@ class Optimizer:
 
         local_graph = local_dag.get_graph()
         local_topo_order = list(nx.topological_sort(local_graph))
-        local_node_to_cost_map, _ = (Optimizer._estimate_nodes_cost_or_time(
-            local_topo_order, minimize_cost, blocked_resources))
+        local_node_to_cost_map, local_node_to_candidate_map = (
+            Optimizer._estimate_nodes_cost_or_time(local_topo_order,
+                                                   minimize_cost,
+                                                   blocked_resources))
 
         if dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
@@ -1015,18 +1015,28 @@ class Optimizer:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg)
 
-        best_plan = {}
-        for task, resources in local_best_plan.items():
-            task_idx = local_dag.tasks.index(task)
-            dag.tasks[task_idx].best_resources = resources
-            best_plan[dag.tasks[task_idx]] = resources
+        if is_resources_ordered:
+            best_plan = {}
+            for task, resources in local_best_plan.items():
+                task_idx = local_dag.tasks.index(task)
+                dag.tasks[task_idx].best_resources = resources
+                best_plan[dag.tasks[task_idx]] = resources
 
-        node_to_cost_map, node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(
-                topo_order=topo_order,
-                minimize_cost=minimize_cost,
-                blocked_resources=blocked_resources,
-                quiet=True))
+            graph = dag.get_graph()
+            topo_order = list(nx.topological_sort(graph))
+            node_to_cost_map, node_to_candidate_map = (
+                Optimizer._estimate_nodes_cost_or_time(
+                    topo_order=topo_order,
+                    minimize_cost=minimize_cost,
+                    blocked_resources=blocked_resources,
+                    quiet=True))
+        else:
+            best_plan = local_best_plan
+            node_to_cost_map = local_node_to_cost_map
+            node_to_candidate_map = local_node_to_candidate_map
+            topo_order = local_topo_order
+            graph = local_graph
+
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
