@@ -962,7 +962,8 @@ class Optimizer:
                                 '(will be tried in the listed order):'
                                 f'{accelerators_str}')
 
-        local_dag = copy.deepcopy(dag)
+        graph = dag.get_graph()
+        local_dag = copy.deepcopy(dag) if is_resources_ordered else dag
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
             if isinstance(task.resources, list):
@@ -986,8 +987,7 @@ class Optimizer:
             Optimizer._estimate_nodes_cost_or_time(local_topo_order,
                                                    minimize_cost,
                                                    blocked_resources))
-
-        if dag.is_chain():
+        if local_dag.is_chain():
             local_best_plan, best_total_objective = Optimizer._optimize_by_dp(
                 local_topo_order, local_node_to_cost_map, minimize_cost)
         else:
@@ -1021,21 +1021,18 @@ class Optimizer:
                 task_idx = local_dag.tasks.index(task)
                 dag.tasks[task_idx].best_resources = resources
                 best_plan[dag.tasks[task_idx]] = resources
-
-            graph = dag.get_graph()
-            topo_order = list(nx.topological_sort(graph))
-            node_to_cost_map, node_to_candidate_map = (
-                Optimizer._estimate_nodes_cost_or_time(
-                    topo_order=topo_order,
-                    minimize_cost=minimize_cost,
-                    blocked_resources=blocked_resources,
-                    quiet=True))
         else:
             best_plan = local_best_plan
-            node_to_cost_map = local_node_to_cost_map
-            node_to_candidate_map = local_node_to_candidate_map
-            topo_order = local_topo_order
-            graph = local_graph
+
+        topo_order = list(nx.topological_sort(graph)) if is_resources_ordered \
+            else local_topo_order
+        node_to_cost_map, node_to_candidate_map = (
+            Optimizer._estimate_nodes_cost_or_time(
+                topo_order=topo_order,
+                minimize_cost=minimize_cost,
+                blocked_resources=blocked_resources,
+                quiet=True)) if is_resources_ordered else (
+                    local_node_to_cost_map, local_node_to_candidate_map)
 
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
