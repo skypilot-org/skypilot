@@ -126,10 +126,10 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
     if minimize_cost:
-        optimizer_plan = sky.Optimizer._optimize_objective(
+        optimizer_plan = sky.Optimizer._optimize_dag(
             dag, sky.OptimizeTarget.COST)
     else:
-        optimizer_plan = sky.Optimizer._optimize_objective(
+        optimizer_plan = sky.Optimizer._optimize_dag(
             dag, sky.OptimizeTarget.TIME)
     if minimize_cost:
         objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
