@@ -37,7 +37,6 @@ from uuid import uuid4
 
 from googleapiclient.discovery import Resource
 from googleapiclient.errors import HttpError
-from googleapiclient import discovery
 
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME, TAG_RAY_NODE_NAME
 
@@ -294,7 +293,7 @@ class GCPResource(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def resize_disk(
         self, base_config: dict, instance_name: str, wait_for_operation: bool = True
-    ) -> Tuple[dict, str]:
+    ) -> dict:
         """Resize a Google Cloud disk based on the provided configuration.
 
         Returns the response of resize operation.
@@ -633,7 +632,7 @@ class GCPCompute(GCPResource):
 
     def resize_disk(
         self, base_config: dict, instance_name: str, wait_for_operation: bool = True
-    ) -> Tuple[dict, str]:
+    ) -> dict:
         """Resize a Google Cloud disk based on the provided configuration."""
 
         # Extract the specified disk size from the configuration
@@ -655,9 +654,9 @@ class GCPCompute(GCPResource):
         # If the new disk size is the same as the existing disk size
         # resizing is unnecessary
         if int(new_size_gb) == int(cur_size_gb):
-            # Return empty list instead of raising exception to not break
+            # Return empty dict instead of raising exception to not break
             # ray down.
-            return []
+            return {}
 
         elif int(new_size_gb) < int(cur_size_gb):
             logger.warning(
@@ -665,7 +664,7 @@ class GCPCompute(GCPResource):
                 new_size_gb,
                 cur_size_gb,
             )
-            return []
+            return {}
 
         try:
             # Execute the resize request and return the response
@@ -686,7 +685,7 @@ class GCPCompute(GCPResource):
             # Raises error when the new disk size is smaller than the exisiting
             # disk size
             logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
-            return []
+            return {}
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)
