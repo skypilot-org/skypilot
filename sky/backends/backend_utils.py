@@ -69,7 +69,6 @@ SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
-SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -161,7 +160,7 @@ def is_ip(s: str) -> bool:
 
 
 def _get_yaml_path_from_cluster_name(cluster_name: str,
-                                     prefix: str = SKY_USER_FILE_PATH) -> str:
+                                     prefix: str = constants.SKY_USER_FILE_PATH) -> str:
     output_path = pathlib.Path(
         prefix).expanduser().resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)
@@ -407,7 +406,7 @@ class SSHConfigHelper(object):
 
     ssh_conf_path = '~/.ssh/config'
     ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
-    ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
+    ssh_multinode_path = constants.SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
@@ -645,7 +644,7 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, ip, username, key_path,
                     proxy_command, port, docker_proxy_command)
 
-        # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
+        # All workers go to constants.SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
@@ -1117,7 +1116,7 @@ def write_cluster_config(
         if tpu_name is None:
             tpu_name = cluster_name
 
-        user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+        user_file_dir = os.path.expanduser(f'{constants.SKY_USER_FILE_PATH}/')
 
         # pylint: disable=import-outside-toplevel
         from sky.skylet.providers.gcp import config as gcp_config
@@ -1137,8 +1136,8 @@ def write_cluster_config(
                         'vpc_name': vpc_name,
                     }),
                 # Use new names for TPU scripts so that different runs can use
-                # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
-                # with cluster yamls.
+                # different TPUs.  Put in constants.SKY_USER_FILE_PATH to be
+                # consistent with cluster yamls.
                 output_path=script_path,
             )
             scripts.append(script_path)

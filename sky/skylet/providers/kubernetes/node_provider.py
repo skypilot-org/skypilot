@@ -1,5 +1,7 @@
 import copy
 import logging
+import os
+import re
 import time
 from typing import Dict
 from uuid import uuid4
@@ -12,6 +14,8 @@ from ray.autoscaler.tags import TAG_RAY_NODE_KIND
 
 from sky import exceptions
 from sky.adaptors import kubernetes
+from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.skylet.providers.kubernetes import config
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
@@ -158,6 +162,17 @@ class KubernetesNodeProvider(NodeProvider):
         # One more try
         self._set_node_tags(node_ids, tags)
 
+    def _recover_cluster_yaml_path(self, cluster_name_with_hash: str):
+        # 'cluster_name_with_hash' combines the cluster name and hash value, 
+        # separated by a hyphen. By using 'slice_length', we remove the hash
+        # (and its preceding hyphen) to retrieve the original cluster name.
+        slice_length = -(common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME+1)
+        cluster_name = cluster_name_with_hash[:slice_length]
+        cluster_yaml_path = (
+            os.path.join(os.path.expanduser(constants.SKY_USER_FILE_PATH),
+                                         f'{cluster_name}.yml'))
+        return cluster_yaml_path
+    
     def _set_node_tags(self, node_id, tags):
         pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         pod.metadata.labels.update(tags)
@@ -332,7 +347,7 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-                err=kubernetes.stream()(
+            kubernetes.stream()(
                 kubernetes.core_api().connect_get_namespaced_pod_exec,
                 new_node.metadata.name,
                 self.namespace,
@@ -346,6 +361,7 @@ class KubernetesNodeProvider(NodeProvider):
 
         # Checks if the default user has sufficient privilege to set up
         # the kubernetes instance pod.
+        
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
             ('if [ $(id -u) -eq 0 ]; '
@@ -369,7 +385,7 @@ class KubernetesNodeProvider(NodeProvider):
                     'Insufficient system privileges detected. '
                     'Ensure the default user has root access or '
                     '"sudo" is installed in the image.')
-        
+
         # Once all containers are ready, we can exec into them and set env vars.
         # Kubernetes automatically populates containers with critical
         # environment variables, such as those for discovering services running
@@ -407,7 +423,36 @@ class KubernetesNodeProvider(NodeProvider):
                 stdout=True,
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
-        
+
+
+        get_k8s_ssh_user_cmd = [
+            '/bin/sh', '-c',
+            ('echo $(whoami)')
+        ]
+        for new_node in new_nodes:
+            # TODO(doyoung): skip this for jump pod when #2589 is merged
+            ssh_user = kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=get_k8s_ssh_user_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+        cluster_name_with_hash = conf['metadata']['labels']['skypilot-cluster']
+        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name_with_hash)
+        with open(cluster_yaml_path, 'r') as f:
+            content = f.read()
+
+        # Replacing the default ssh user name with the actual user name.
+        # This updates user name specified in user's custom image.
+        content = re.sub(r'ssh_user: \w+', f'ssh_user: {ssh_user}', content)
+
+        with open(cluster_yaml_path, 'w') as f:
+            f.write(content)
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
@@ -474,6 +519,16 @@ class KubernetesNodeProvider(NodeProvider):
         docker_config(dict): If set, the docker information of the docker
             container that commands should be run on.
         """
+        # For custom images, the username might differ. Ensure that the 'ssh_user' 
+        # reflects the username from the custom image. The cluster configuration 
+        # from the yaml is updated during the 'create_node()' process.
+        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml_path)
+        credentials_to_keep = ['ssh_user', 'ssh_private_key',
+                               'ssh_proxy_command']
+        auth_config = {key: ssh_credentials[key]
+                       for key in credentials_to_keep}
+
         common_args = {
             'log_prefix': log_prefix,
             'node_id': node_id,
