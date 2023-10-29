@@ -162,17 +162,17 @@ class KubernetesNodeProvider(NodeProvider):
         # One more try
         self._set_node_tags(node_ids, tags)
 
-    def _recover_cluster_yaml_path(self, cluster_name_with_hash: str):
-        # 'cluster_name_with_hash' combines the cluster name and hash value, 
+    def _recover_cluster_yaml_path(self, cluster_name_with_hash: str) -> str:
+        # 'cluster_name_with_hash' combines the cluster name and hash value,
         # separated by a hyphen. By using 'slice_length', we remove the hash
         # (and its preceding hyphen) to retrieve the original cluster name.
-        slice_length = -(common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME+1)
+        slice_length = -(common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME + 1)
         cluster_name = cluster_name_with_hash[:slice_length]
-        cluster_yaml_path = (
-            os.path.join(os.path.expanduser(constants.SKY_USER_FILE_PATH),
-                                         f'{cluster_name}.yml'))
+        cluster_yaml_path = (os.path.join(
+            os.path.expanduser(constants.SKY_USER_FILE_PATH),
+            f'{cluster_name}.yml'))
         return cluster_yaml_path
-    
+
     def _set_node_tags(self, node_id, tags):
         pod = kubernetes.core_api().read_namespaced_pod(node_id, self.namespace)
         pod.metadata.labels.update(tags)
@@ -336,14 +336,14 @@ class KubernetesNodeProvider(NodeProvider):
         set_k8s_ssh_cmd = [
             '/bin/sh', '-c',
             ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-            '$(prefix_cmd) apt install openssh-server -y; '
-            '$(prefix_cmd) mkdir -p /var/run/sshd; '
-            '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
-            '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
-            'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-            '$(prefix_cmd) mkdir -p ~/.ssh; '
-            '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
-            '$(prefix_cmd) service ssh restart')
+             '$(prefix_cmd) apt install openssh-server -y; '
+             '$(prefix_cmd) mkdir -p /var/run/sshd; '
+             '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
+             '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+             '$(prefix_cmd) mkdir -p ~/.ssh; '
+             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
+             '$(prefix_cmd) service ssh restart')
         ]
 
         for new_node in new_nodes:
@@ -358,10 +358,9 @@ class KubernetesNodeProvider(NodeProvider):
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
 
-
         # Checks if the default user has sufficient privilege to set up
         # the kubernetes instance pod.
-        
+
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
             ('if [ $(id -u) -eq 0 ]; '
@@ -408,9 +407,9 @@ class KubernetesNodeProvider(NodeProvider):
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',
             ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-            'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
-            'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-            '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+             'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+             '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
         ]
         for new_node in new_nodes:
             kubernetes.stream()(
@@ -424,11 +423,7 @@ class KubernetesNodeProvider(NodeProvider):
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
 
-
-        get_k8s_ssh_user_cmd = [
-            '/bin/sh', '-c',
-            ('echo $(whoami)')
-        ]
+        get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
         for new_node in new_nodes:
             # TODO(doyoung): skip this for jump pod when #2589 is merged
             ssh_user = kubernetes.stream()(
@@ -443,7 +438,8 @@ class KubernetesNodeProvider(NodeProvider):
                 _request_timeout=kubernetes.API_TIMEOUT)
 
         cluster_name_with_hash = conf['metadata']['labels']['skypilot-cluster']
-        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name_with_hash)
+        cluster_yaml_path = self._recover_cluster_yaml_path(
+            cluster_name_with_hash)
         with open(cluster_yaml_path, 'r') as f:
             content = f.read()
 
@@ -519,15 +515,16 @@ class KubernetesNodeProvider(NodeProvider):
         docker_config(dict): If set, the docker information of the docker
             container that commands should be run on.
         """
-        # For custom images, the username might differ. Ensure that the 'ssh_user' 
-        # reflects the username from the custom image. The cluster configuration 
+        # For custom images, the username might differ. Ensure that the 'ssh_user'
+        # reflects the username from the custom image. The cluster configuration
         # from the yaml is updated during the 'create_node()' process.
         cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name)
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml_path)
-        credentials_to_keep = ['ssh_user', 'ssh_private_key',
-                               'ssh_proxy_command']
-        auth_config = {key: ssh_credentials[key]
-                       for key in credentials_to_keep}
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            cluster_yaml_path)
+        credentials_to_keep = [
+            'ssh_user', 'ssh_private_key', 'ssh_proxy_command'
+        ]
+        auth_config = {key: ssh_credentials[key] for key in credentials_to_keep}
 
         common_args = {
             'log_prefix': log_prefix,

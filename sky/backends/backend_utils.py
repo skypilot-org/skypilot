@@ -160,7 +160,8 @@ def is_ip(s: str) -> bool:
 
 
 def _get_yaml_path_from_cluster_name(cluster_name: str,
-                                     prefix: str = constants.SKY_USER_FILE_PATH) -> str:
+                                     prefix: str = constants.SKY_USER_FILE_PATH
+                                    ) -> str:
     output_path = pathlib.Path(
         prefix).expanduser().resolve() / f'{cluster_name}.yml'
     os.makedirs(output_path.parents[0], exist_ok=True)

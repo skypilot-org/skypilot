@@ -787,6 +787,10 @@ class Resources:
                     {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
+        if self.image_id[self.region].startswith('kubernetes:'):
+            # TODO(Doyoung): validate image's existence and size
+            return
+
         if self.cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
