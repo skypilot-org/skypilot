@@ -2171,9 +2171,6 @@ class RetryingVmProvisioner(object):
         # Retrying launchable resources.
         while True:
             try:
-                # Recheck cluster name as the 'except:' block below may
-                # change the cloud assignment.
-                to_provision.cloud.check_cluster_name_is_valid(cluster_name)
                 if dryrun:
                     cloud_user = None
                 else:
@@ -4340,12 +4337,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_handle=handle)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
-        # Use the task_cloud, because the cloud in `to_provision` can be changed
-        # later during the retry.
-        resources = list(task.resources)[0]
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
-        task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually
