@@ -3,7 +3,7 @@ import os
 import subprocess
 
 # Replaced with the current commit when building the wheels.
-_SKYPILOT_COMMIT_SHA = '{{SKYPILOT_COMMIT_SHA}}'
+_SKYPILOT_COMMIT_SHA = '4d6e455fcc002356fbcb298b051021d21166f3a2'
 
 
 def get_git_commit():
@@ -33,7 +33,7 @@ def get_git_commit():
 
 
 __commit__ = get_git_commit()
-__version__ = '1.0.0-dev0'
+__version__ = '0.4.1'
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Keep this order to avoid cyclic imports
