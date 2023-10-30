@@ -164,8 +164,12 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _raise_pod_scheduling_errors(self, new_nodes):
         for new_node in new_nodes:
-            pod_status = new_node.status.phase
-            pod_name = new_node._metadata._name
+            pod = kubernetes.core_api().read_namespaced_pod(
+                new_node.metadata.name, self.namespace)
+            pod_status = pod.status.phase
+            if pod_status == "Running":
+                continue
+            pod_name = pod._metadata._name
             events = kubernetes.core_api().list_namespaced_event(
                 self.namespace,
                 field_selector=(f'involvedObject.name={pod_name},'
@@ -173,10 +177,10 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = \
+            events_desc_by_time = (
                 sorted(events.items,
                 key=lambda e: e.metadata.creation_timestamp,
-                reverse=True)
+                reverse=True))
             for event in events_desc_by_time:
                 if event.reason == 'FailedScheduling':
                     event_message = event.message
@@ -200,8 +204,8 @@ class KubernetesNodeProvider(NodeProvider):
                         lf.get_label_key()
                         for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     ]
-                    if new_node.spec.node_selector:
-                        for label_key in new_node.spec.node_selector.keys():
+                    if pod.spec.node_selector:
+                        for label_key in pod.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
@@ -210,7 +214,7 @@ class KubernetesNodeProvider(NodeProvider):
                                     'didn\'t match Pod\'s node affinity/selector' in event_message:
                                     raise config.KubernetesError(
                                         f'{lack_resource_msg.format(resource="GPU")} '
-                                        f'Verify if {new_node.spec.node_selector[label_key]}'
+                                        f'Verify if {pod.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
                 raise config.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
