@@ -167,7 +167,7 @@ class KubernetesNodeProvider(NodeProvider):
             pod = kubernetes.core_api().read_namespaced_pod(
                 new_node.metadata.name, self.namespace)
             pod_status = pod.status.phase
-            if pod_status == "Running":
+            if pod_status != 'Pending':
                 continue
             pod_name = pod._metadata._name
             events = kubernetes.core_api().list_namespaced_event(
@@ -177,8 +177,8 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = (
-                sorted(events.items,
+            events_desc_by_time = (sorted(
+                events.items,
                 key=lambda e: e.metadata.creation_timestamp,
                 reverse=True))
             for event in events_desc_by_time:
