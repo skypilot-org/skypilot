@@ -3094,9 +3094,8 @@ class TestStorageWithCredentials:
         assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd = ['sky', 'storage', 'delete', '--yes']
         delete_cmd += storage_obj_name
-        delete_cmd.append('--yes')
         subprocess.check_output(delete_cmd)
 
         # Run sky storage ls to check if all storage objects filtered by store
