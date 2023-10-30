@@ -1,5 +1,12 @@
-#FROM continuumio/miniconda3:22.11.1
-FROM nvidia/cuda:12.2.0-devel-ubuntu20.04
+#FROM continuumio/miniconda3:22.11.1 - pass
+#FROM nvidia/cuda:12.2.0-devel-ubuntu20.04 - pass
+#FROM pytorch/pytorch:latest - not pass
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+#FROM tensorflow/tensorflow:latest
+#FROM tensorflow/tensorflow:nightly-gpu-jupyter
+#FROM ubuntu:latest
+#FROM continuumio/miniconda3
+#FROM gpuci/miniforge-cuda:11.4-devel-ubuntu18.04
 
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
@@ -15,7 +22,7 @@ RUN apt update -y && apt install -y --no-install-recommends tzdata
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install sudo rsync openssh-server -y
+    apt install rsync -y
     #sudo apt update -y && \
     #apt install rsync openssh-server -y
     #rm -rf /var/lib/apt/lists/*
@@ -32,11 +39,13 @@ RUN apt update -y && \
 
 
 # Setup new user named sky and add to sudoers. Also add /opt/conda/bin to sudo path.
-RUN useradd -m -s /bin/bash sky && \
-    echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+#RUN useradd -m -s /bin/bash sky && \
+    #alias sudo='' && \
+    #echo "sky ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     #echo 'Defaults        secure_path="/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
-    echo 'Defaults        secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
+    #echo 'Defaults        secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/sudoers.d/sky
 
+RUN useradd -ou 0 -g 0 -m -s /bin/bash sky
 
 # Switch to sky user
 USER sky
@@ -65,6 +74,5 @@ RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 ENV PYTHONUNBUFFERED=1
 
 # Set WORKDIR and initialize conda for sky user
-WORKDIR /home/sky
 #RUN conda init
 
