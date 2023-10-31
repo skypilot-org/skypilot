@@ -363,10 +363,16 @@ class KubernetesNodeProvider(NodeProvider):
 
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
-            ('if [ $(id -u) -eq 0 ]; '
-             'then echo \'alias sudo=""\' >> ~/.bashrc; '
-             'else command -v sudo >/dev/null 2>&1 || '
-             f'( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); fi')
+            ('if [ $(id -u) -eq 0 ]; then'
+            '  echo \'alias sudo=""\' >> ~/.bashrc; '
+            'else '
+            '  if command -v sudo >/dev/null 2>&1; then '
+            '    timeout 2 sudo -l >/dev/null 2>&1 || '
+            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+            '  else '
+            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+            '  fi; '
+            'fi')
         ]
         for new_node in new_nodes:
             privilege_check = kubernetes.stream()(
@@ -383,7 +389,8 @@ class KubernetesNodeProvider(NodeProvider):
                 raise config.KubernetesError(
                     'Insufficient system privileges detected. '
                     'Ensure the default user has root access or '
-                    '"sudo" is installed in the image.')
+                    '"sudo" is installed and the user is added to the sudoers '
+                    'from the image.')
 
         # Once all containers are ready, we can exec into them and set env vars.
         # Kubernetes automatically populates containers with critical
@@ -396,14 +403,6 @@ class KubernetesNodeProvider(NodeProvider):
         # To do so, we capture env vars from the pod's runtime and write them to
         # /etc/profile.d/, making them available for all users in future
         # shell sessions.
-        """
-        set_k8s_env_var_cmd = [
-            '/bin/sh', '-c',
-            ('printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
-             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-             'sudo mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
-        ]
-        """
         set_k8s_env_var_cmd = [
             '/bin/sh', '-c',
             ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
