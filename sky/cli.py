@@ -3489,7 +3489,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
             show_default=True)
     elif all and len(names) == 0:
         click.echo('No storage(s) to delete.')
-        
+
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
