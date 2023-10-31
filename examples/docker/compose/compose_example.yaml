@@ -1,0 +1,19 @@
+# Minimal example using docker compose to run multiple containers
+#
+# Syncs the docker-compose.yml in the current workdir to the remote cluster and
+# runs docker compose up.
+#
+# Usage:
+#   sky launch -c myclus compose_example.yaml
+#   sky down myclus
+
+resources:
+  accelerators: T4:2
+
+workdir: .
+
+setup: |
+  sudo apt-get install docker-compose-plugin
+
+run: |
+  docker compose -f docker-compose.yml up

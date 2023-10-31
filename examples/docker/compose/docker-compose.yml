@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  gpu-app1:
+    image: nvidia/cuda:11.8.0-runtime-ubuntu20.04
+    command: nvidia-smi
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+  gpu-app2:
+    image: nvidia/cuda:11.8.0-runtime-ubuntu20.04
+    command: nvidia-smi
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
