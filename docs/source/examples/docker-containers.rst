@@ -100,7 +100,7 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
   run: |
     # Commands to run inside the container
 
-Any GPUs assigned to the task will be automatically mapped to your Docker container and all future tasks on the cluster will also execute in the container.
+Any GPUs assigned to the task will be automatically mapped to your Docker container, and all subsequent tasks within the cluster will also run inside the container. In a multi-node scenario, the container will be launched on all nodes, and the corresponding node's container will be assigned for task execution.
 
 .. tip::
 
