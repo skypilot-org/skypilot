@@ -165,6 +165,9 @@ def _start(service_name: str, task_yaml: str, job_id: int):
                 constants.LOAD_BALANCER_PORT_START)
 
             # Start the load balancer.
+            # TODO(tian): Probably we could enable multiple ports specified in
+            # service spec and we could start multiple load balancers.
+            # After that, we will have a mapping from replica port to endpoint.
             load_balancer_process = multiprocessing.Process(
                 target=serve_utils.RedirectOutputTo(
                     load_balancer.run_load_balancer,
