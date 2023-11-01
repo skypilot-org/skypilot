@@ -3478,16 +3478,17 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
-    if not yes and len(names) > 0:
-        storage_names = ', '.join(names)
-        storage_str = 'storages' if len(names) > 1 else 'storage'
-        click.confirm(
-            f'Deleting {len(names)} {storage_str}: '
-            f'{storage_names}. Proceed?',
-            default=True,
-            abort=True,
-            show_default=True)
-    elif all and len(names) == 0:
+    if names:
+        if not yes:
+            storage_names = ', '.join(names)
+            storage_str = 'storages' if len(names) > 1 else 'storage'
+            click.confirm(
+                f'Deleting {len(names)} {storage_str}: '
+                f'{storage_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+    elif all:
         click.echo('No storage(s) to delete.')
 
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
