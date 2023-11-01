@@ -12,7 +12,7 @@ SkyPilot is capable of running containerized application directly. The Docker ru
 
 To launch a containerized application, you can directly invoke the :code:`docker run` command in the :code:`run` section of your task.
 
-For example, to run a hugging face TGI serving container:
+For example, to run a HuggingFace TGI serving container:
 
 .. code-block:: yaml
 
@@ -22,16 +22,17 @@ For example, to run a hugging face TGI serving container:
   run: |
     docker run --gpus all --shm-size 1g -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id lmsys/vicuna-13b-v1.5
 
+    # The above command is blocking, so any commands after it are uncommon and
+    # will NOT be run inside the container.
+
 Using Docker Containers as Runtime Environment
 ----------------------------------------------
 
-When a container is used as the runtime environment, all the SkyPilot task is executed inside the container.
+When a container is used as the runtime environment, everything happens inside the container:
 
-This means all :code:`setup` and :code:`run` commands in the YAML file will be executed in the container, and any files created by the task will be stored inside the container. The Docker container functions as an image ID within the virtual machines provided by cloud service providers.
-
-Any GPUs assigned to the task will be automatically mapped to your Docker container and all future tasks on the cluster will also execute in the container.
-
-Example Usage: Running a fresh Ubuntu 20.04 container as development environment
+- The SkyPilot runtime is automatically installed and launched inside the container;
+- :code:`setup` and :code:`run` commands are executed in the container;
+- Any files created by the task will be stored inside the container.
 
 To use a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file to :code:`docker:<image_id>`.
 For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
@@ -42,12 +43,30 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
     image_id: docker:ubuntu:20.04
 
   setup: |
-    # Will run inside container
+    # Commands to run inside the container
 
   run: |
-    # Will run inside container
+    # Commands to run inside the container
 
-If you have a development environment set up within a Docker image, it can be utilized as the runtime environment for your tasks across various cloud providers. This proves beneficial when dealing with a complex development environment that is challenging to configure on a new virtual machine, such as dependencies on specific versions of CUDA or cuDNN.
+Any GPUs assigned to the task will be automatically mapped to your Docker container and all future tasks on the cluster will also execute in the container.
+
+.. tip::
+
+    **When to use this?**
+
+    If you have a preconfigured development environment set up within a Docker
+    image, it can be convenient to use the runtime environment mode.  This is
+    especially useful for launching development environments that are
+    challenging to configure on a new virtual machine, such as dependencies on
+    specific versions of CUDA or cuDNN.
+
+.. note::
+
+    Since we ``pip install skypilot`` inside the user-specified container image
+    as part of a launch, users should ensure dependency conflicts do not occur.
+
+Private Registries
+^^^^^^^^^^^^^^^^^^
 
 For Docker images hosted on private registries, you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
