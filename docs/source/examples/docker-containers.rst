@@ -25,6 +25,58 @@ For example, to run a HuggingFace TGI serving container:
     # The above command is blocking, so any commands after it are uncommon and
     # will NOT be run inside the container.
 
+Private Registries
+^^^^^^^^^^^^^^^^^^
+
+For Docker images hosted on private registries, when running containerized application, add a :code:`setup` section to your task YAML file to authenticate with the registry:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:1
+
+  setup: |
+    # Authenticate with private registry
+    docker login -u <username> -p <password> <registry>
+
+  run: |
+    docker run <registry>/<image>:<tag>
+
+Building containers remotely
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are running containerized application, the container image can also be built remotely on the cluster in the :code:`setup` phase of the task.
+
+The :code:`echo_app` `example <https://github.com/skypilot-org/skypilot/tree/master/examples/docker>`_ provides an example on how to do this:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /inputs: ./echo_app  # Input to application
+    /echo_app: ./echo_app  # Contains the Dockerfile and build context
+    /outputs:  # Output to be written directly to S3 bucket
+      name: # Set unique bucket name here
+      store: s3
+      mode: MOUNT
+
+  setup: |
+    # Build docker image. If pushed to a registry, can also do docker pull here
+    docker build -t echo:v0 /echo_app
+
+  run: |
+    docker run --rm \
+      --volume="/inputs:/inputs:ro" \
+      --volume="/outputs:/outputs:rw" \
+      echo:v0 \
+      /inputs/README.md /outputs/output.txt
+
+In this example, the Dockerfile and build context are contained in :code:`./echo_app`.
+The :code:`setup` phase of the task builds the image, and the :code:`run` phase runs the container.
+The inputs to the app are copied to SkyPilot using :code:`file_mounts` and mounted into the container using docker volume mounts (:code:`--volume` flag).
+The output of the app produced at :code:`/outputs` path in the container is also volume mounted to :code:`/outputs` on the VM, which gets directly written to a S3 bucket through SkyPilot Storage mounting.
+
+Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
+
 Using Docker Containers as Runtime Environment
 ----------------------------------------------
 
@@ -68,7 +120,7 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 Private Registries
 ^^^^^^^^^^^^^^^^^^
 
-For Docker images hosted on private registries, you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
+For Docker images hosted on private registries, when using docker container as runtime environment, you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
 .. code-block:: yaml
 
@@ -89,38 +141,3 @@ We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable thr
 
   $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
   $ sky launch ecr_private_docker.yaml --env SKYPILOT_DOCKER_PASSWORD
-
-Building containers remotely
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If you are running the container as a task, the container image can also be built remotely on the cluster in the :code:`setup` phase of the task.
-
-The :code:`echo_app` `example <https://github.com/skypilot-org/skypilot/tree/master/examples/docker>`_ provides an example on how to do this:
-
-.. code-block:: yaml
-
-  file_mounts:
-    /inputs: ./echo_app  # Input to application
-    /echo_app: ./echo_app  # Contains the Dockerfile and build context
-    /outputs:  # Output to be written directly to S3 bucket
-      name: # Set unique bucket name here
-      store: s3
-      mode: MOUNT
-
-  setup: |
-    # Build docker image. If pushed to a registry, can also do docker pull here
-    docker build -t echo:v0 /echo_app
-
-  run: |
-    docker run --rm \
-      --volume="/inputs:/inputs:ro" \
-      --volume="/outputs:/outputs:rw" \
-      echo:v0 \
-      /inputs/README.md /outputs/output.txt
-
-In this example, the Dockerfile and build context are contained in :code:`./echo_app`.
-The :code:`setup` phase of the task builds the image, and the :code:`run` phase runs the container.
-The inputs to the app are copied to SkyPilot using :code:`file_mounts` and mounted into the container using docker volume mounts (:code:`--volume` flag).
-The output of the app produced at :code:`/outputs` path in the container is also volume mounted to :code:`/outputs` on the VM, which gets directly written to a S3 bucket through SkyPilot Storage mounting.
-
-Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
