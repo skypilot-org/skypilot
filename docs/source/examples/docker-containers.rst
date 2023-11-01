@@ -3,12 +3,12 @@
 Using Docker Containers
 =======================
 
-SkyPilot can run a Docker container either as a containerized application, or the runtime environment for your task.
+SkyPilot can run a Docker container either as a containerized application, or the runtime environment of a cluster.
 
-Running Containerized Application
----------------------------------
+Running Containerized Applications
+----------------------------------
 
-SkyPilot is capable of running containerized application directly. The Docker runtime comes pre-configured and ready for use on the default VM image provided by SkyPilot, making it convenient for executing containerized applications.
+SkyPilot is capable of running containerized applications directly. The Docker runtime comes pre-configured and ready for use on the default VM images provided by SkyPilot.
 
 To launch a containerized application, you can directly invoke the :code:`docker run` command in the :code:`run` section of your task.
 
