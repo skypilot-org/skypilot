@@ -4,9 +4,9 @@ resources:
   zone: us-central1-a
   use_spot: True
 
-workdir: tests/skyserve/spot_recovery
+workdir: tests/skyserve/spot
 
-run: python3 nonrecovery.py
+run: python3 user_bug.py
 
 service:
   port: 8080

@@ -2752,7 +2752,7 @@ def test_skyserve_spot_recovery():
     test = Test(
         f'test-skyserve-spot-recovery-gcp',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/spot_recovery.yaml',
+            f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
             terminate_replica(1),
@@ -2773,7 +2773,7 @@ def test_skyserve_spot_user_bug():
     test = Test(
         f'test-skyserve-spot-user-bug-gcp',
         [
-            f'sky serve up -n {name} -y tests/skyserve/spot/spot_user_bug.yaml',
+            f'sky serve up -n {name} -y tests/skyserve/spot/user_bug.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             # After failure due to user bug, the service should fail instead of
             # triggering spot recovery.
