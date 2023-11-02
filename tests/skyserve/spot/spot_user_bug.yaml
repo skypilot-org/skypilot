@@ -1,6 +1,7 @@
 resources:
   cloud: gcp
   cpus: 2+
+  zone: us-central1-a
   use_spot: true
 
 workdir: examples/serve/http_server

@@ -482,7 +482,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
-        logger.info(f'preempted: {info.status_property.preempted}')
+        logger.info(f'preempted: {info.status_property.preempted}, '
+                    f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
         p = multiprocessing.Process(
@@ -723,7 +724,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         cluster_status_str = (
                             '' if cluster_status is None else
                             f' (status: {cluster_status.value})')
-                        logger.info(f'Cluster {info.cluster_name} '
+                        logger.info(f'Replica {info.replica_id} '
                                     f'is preempted{cluster_status_str}.')
                         self._recover_from_preemption(info.replica_id)
 
