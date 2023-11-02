@@ -494,11 +494,11 @@ def _get_replica_resources(replica_record: _ReplicaRecord) -> str:
     if handle.launched_resources.accelerators is None:
         vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
             handle.launched_resources.instance_type)
-        hardware = f'vCPU={int(vcpu)})'
+        hardware = f'vCPU={int(vcpu)}'
     else:
         hardware = f'{handle.launched_resources.accelerators})'
     spot = '[Spot]' if handle.launched_resources.use_spot else ''
-    resources_str = f'{handle.launched_nodes}x {cloud}({hardware}{spot})'
+    resources_str = f'{handle.launched_nodes}x {cloud}({spot}{hardware})'
     return resources_str
 
 

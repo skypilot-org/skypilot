@@ -81,7 +81,7 @@ class ReplicaStatus(enum.Enum):
     # we should guarantee no resource leakage like regular sky.
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
-    # The replica spot VM is preempted by the cloud provider.
+    # The replica is a spot VM and it is preempted by the cloud provider.
     PREEMPTED = 'PREEMPTED'
 
     # Unknown status. This should never happen.

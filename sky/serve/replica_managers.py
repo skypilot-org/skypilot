@@ -198,6 +198,8 @@ class ReplicaStatusProperty:
             return False
         if not self.service_ready_now:
             return False
+        if self.preempted:
+            return True
         return self.first_ready_time is not None
 
     def should_track_status(self) -> bool:
@@ -208,7 +210,7 @@ class ReplicaStatusProperty:
         if self.user_app_failed:
             return False
         if self.preempted:
-            return False
+            return True
         return True
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
@@ -505,6 +507,7 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _recover_from_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning recovery for preempted replica {replica_id}.')
+        # TODO(MaoZiming): Support spot recovery policies
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
@@ -700,8 +703,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status_property.first_ready_time is None:
                     info.status_property.first_ready_time = probe_time
             else:
-                if self.use_spot:
-                    # Pull the actual cluster status from the cloud provider to
+                handle = info.handle
+                if (handle and handle.launched_resources and
+                        handle.launched_resources.use_spot):
+                    # Pull the actual cluster status
+                    # from the cloud provider to
                     # determine whether the cluster is preempted.
                     (cluster_status,
                      _) = backends.backend_utils.refresh_cluster_status_handle(
