@@ -5,8 +5,10 @@ Using Docker Containers
 
 SkyPilot can run a container either as a task, or as the runtime environment of a cluster.
 
-* If the container image is invocable / has an entrypoint: run it as a task.
-* Otherwise, the container image is likely to be used as a runtime environment (e.g., ``ubuntu``) and you likely have extra commands to run inside the container: run it as a runtime environment.
+* If the container image is invocable / has an entrypoint: run it :ref:`as a task <docker-containers-as-tasks>`.
+* Otherwise, the container image is likely to be used as a runtime environment (e.g., ``ubuntu``) and you likely have extra commands to run inside the container: run it :ref:`as a runtime environment <docker-containers-as-runtime-environments>`.
+
+.. _docker-containers-as-tasks:
 
 Running Containers as Tasks
 ---------------------------
@@ -85,6 +87,8 @@ The output of the app produced at :code:`/outputs` path in the container is also
 
 Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
 
+.. _docker-containers-as-runtime-environments:
+
 Using Containers as Runtime Environments
 ----------------------------------------
 
@@ -124,6 +128,12 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 
     Since we ``pip install skypilot`` inside the user-specified container image
     as part of a launch, users should ensure dependency conflicts do not occur.
+
+    Currently, the following requirements must be met:
+
+    1. The container image should be based on Debian;
+
+    2. The container image must grant sudo permissions without requiring password authentication for the user. Having a root user is also acceptable.
 
 Private Registries
 ^^^^^^^^^^^^^^^^^^
