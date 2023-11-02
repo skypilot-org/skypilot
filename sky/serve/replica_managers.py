@@ -18,6 +18,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -169,6 +170,8 @@ class ReplicaStatusProperty:
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
     sky_down_status: Optional[ProcessStatus] = None
+    # The replica's spot instance was preempted.
+    preempted: bool = False
 
     def is_scale_down_succeeded(self, initial_delay_seconds: int,
                                 auto_restart: bool) -> bool:
@@ -193,6 +196,8 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
+        if self.preempted:
+            return True
         if not self.service_ready_now:
             return False
         return self.first_ready_time is not None
@@ -204,6 +209,8 @@ class ReplicaStatusProperty:
             return False
         if self.user_app_failed:
             return False
+        if self.preempted:
+            return True
         return True
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
@@ -211,6 +218,9 @@ class ReplicaStatusProperty:
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
+            if self.preempted:
+                # Replica (spot) is preempted
+                return serve_state.ReplicaStatus.PREEMPTED
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
@@ -472,6 +482,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
+        logger.info(f'preempted: {info.status_property.preempted}, '
+                    f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
         p = multiprocessing.Process(
@@ -489,6 +501,16 @@ class SkyPilotReplicaManager(ReplicaManager):
     def scale_down(self, replica_ids: List[int]) -> None:
         for replica_id in replica_ids:
             self._terminate_replica(replica_id, sync_down_logs=False)
+
+    def _recover_from_preemption(self, replica_id: int) -> None:
+        logger.info(f'Beginning recovery for preempted replica {replica_id}.')
+        # TODO(MaoZiming): Support spot recovery policies
+        info = serve_state.get_replica_info_from_id(self.service_name,
+                                                    replica_id)
+        assert info is not None
+        info.status_property.preempted = True
+        serve_state.add_or_update_replica(self.service_name, replica_id, info)
+        self._terminate_replica(replica_id, sync_down_logs=False)
 
     #################################
     # ReplicaManager Daemon Threads #
@@ -557,11 +579,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status_property.is_scale_down_succeeded(
                         self.initial_delay_seconds, self.auto_restart):
                     # This means the cluster is deleted due to
-                    # a scale down. Delete the replica info
+                    # a scale down or the cluster is recovering
+                    # from preemption. Delete the replica info
                     # so it won't count as a replica.
-                    logger.info(f'Replica {replica_id} removed from the '
-                                'replica table normally.')
                     serve_state.remove_replica(self.service_name, replica_id)
+                    if info.status_property.preempted:
+                        removal_reason = 'for preemption recovery'
+                    else:
+                        removal_reason = 'normally'
+                    logger.info(f'Replica {replica_id} removed from the '
+                                f'replica table {removal_reason}.')
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -673,6 +700,36 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status_property.first_ready_time is None:
                     info.status_property.first_ready_time = probe_time
             else:
+                handle = info.handle
+                if handle is None:
+                    logger.error('Cannot find handle for '
+                                 f'replica {info.replica_id}.')
+                elif handle.launched_resources is None:
+                    logger.error('Cannot find launched_resources in handle'
+                                 f' for replica {info.replica_id}.')
+                elif handle.launched_resources.use_spot:
+                    # Pull the actual cluster status
+                    # from the cloud provider to
+                    # determine whether the cluster is preempted.
+                    (cluster_status,
+                     _) = backends.backend_utils.refresh_cluster_status_handle(
+                         info.cluster_name,
+                         force_refresh_statuses=set(status_lib.ClusterStatus))
+
+                    if cluster_status != status_lib.ClusterStatus.UP:
+                        # The cluster is (partially) preempted.
+                        # It can be down, INIT or STOPPED, based on the
+                        # interruption behavior of the cloud.
+                        # Spot recovery is needed.
+                        cluster_status_str = (
+                            '' if cluster_status is None else
+                            f' (status: {cluster_status.value})')
+                        logger.info(f'Replica {info.replica_id} '
+                                    f'is preempted{cluster_status_str}.')
+                        self._recover_from_preemption(info.replica_id)
+
+                        continue
+
                 if info.first_not_ready_time is None:
                     info.first_not_ready_time = probe_time
                 if info.status_property.first_ready_time is not None:

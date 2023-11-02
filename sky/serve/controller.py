@@ -41,8 +41,8 @@ class SkyServeController:
                  task_yaml: str, port: int) -> None:
         self.service_name = service_name
         self.replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.SkyPilotReplicaManager(service_name,
-                                                    service_spec,
+            replica_managers.SkyPilotReplicaManager(service_name=service_name,
+                                                    spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self.autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
