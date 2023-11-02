@@ -161,3 +161,10 @@ def get_base_url(namespace: str) -> Tuple[str, str]:
 
     external_ip = ingress_service.status.load_balancer.ingress[0].ip
     return f'http://{external_ip}', f'https://{external_ip}'
+
+
+def get_loadbalancer_ip(namespace: str, service_name: str) -> str:
+    """Returns the IP address of the load balancer."""
+    core_api = kubernetes.core_api()
+    service = core_api.read_namespaced_service(service_name, namespace)
+    return service.status.load_balancer.ingress[0].ip

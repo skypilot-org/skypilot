@@ -6,6 +6,7 @@ from sky.provision.kubernetes import network_utils
 from sky.utils import ux_utils
 
 _PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
+_LOADBALANCER_SERVICE_NAME = "{cluster_name_on_cloud}-skypilot-loadbalancer"
 
 
 def _get_port_mode() -> network_utils.KubernetesPortMode:
@@ -47,7 +48,8 @@ def _open_ports_using_loadbalancer(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     assert provider_config is not None, 'provider_config is required'
-    service_name = f"{cluster_name_on_cloud}-skypilot-loadbalancer"
+    service_name = _LOADBALANCER_SERVICE_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
     content = network_utils.fill_loadbalancer_template(
         namespace=provider_config['namespace'],
         service_name=service_name,
@@ -119,7 +121,8 @@ def _cleanup_ports_for_loadbalancer(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     assert provider_config is not None, cluster_name_on_cloud
-    service_name = f"{cluster_name_on_cloud}-skypilot-loadbalancer"
+    service_name = _LOADBALANCER_SERVICE_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
     network_utils.delete_namespaced_service(
         namespace=provider_config["namespace"],
         service_name=service_name,
@@ -152,8 +155,44 @@ def query_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Tuple[str, str]]:
     """See sky/provision/__init__.py"""
-    del ip, provider_config  # Unused.
+    del ip  # Unused.
+    port_mode = _get_port_mode()
+    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+        assert provider_config is not None, 'provider_config is required'
+        return _query_ports_for_loadbalancer(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            ports=ports,
+            provider_config=provider_config,
+        )
+    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+        return _query_ports_for_ingress(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            ports=ports,
+        )
+    else:
+        return {}
 
+
+def _query_ports_for_loadbalancer(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Dict[str, Any],
+) -> Dict[str, Tuple[str, str]]:
+    result = {}
+    service_name = _LOADBALANCER_SERVICE_NAME.format(
+        cluster_name_on_cloud=cluster_name_on_cloud)
+    external_ip = network_utils.get_loadbalancer_ip(
+        namespace=provider_config['namespace'], service_name=service_name)
+    for port in ports:
+        result[port] = f"{external_ip}:{port}", f"{external_ip}:{port}"
+
+    return result
+
+
+def _query_ports_for_ingress(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+) -> Dict[str, Tuple[str, str]]:
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
     result = {}
     for port in ports:
