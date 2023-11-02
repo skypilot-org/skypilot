@@ -196,10 +196,10 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
-        if not self.service_ready_now:
-            return False
         if self.preempted:
             return True
+        if not self.service_ready_now:
+            return False
         return self.first_ready_time is not None
 
     def should_track_status(self) -> bool:
@@ -219,6 +219,7 @@ class ReplicaStatusProperty:
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
             if self.preempted:
+                # Replica (spot) is preempted
                 return serve_state.ReplicaStatus.PREEMPTED
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
@@ -266,14 +267,12 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str,
-                 use_spot: bool) -> None:
+    def __init__(self, replica_id: int, cluster_name: str) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
-        self.use_spot: bool = use_spot
 
     @property
     def handle(self) -> Optional[backends.CloudVmRayResourceHandle]:
@@ -305,7 +304,6 @@ class ReplicaInfo:
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
-            'use_spot': self.use_spot
         }
         if with_handle:
             info_dict['handle'] = self.handle
@@ -389,16 +387,14 @@ class SkyPilotReplicaManager(ReplicaManager):
     """Replica Manager for SkyPilot clusters."""
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 use_spot: bool, task_yaml_path: str) -> None:
+                 task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self.task_yaml_path = task_yaml_path
-        self.use_spot = use_spot
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
 
-        logger.info(f'Use spot: {self.use_spot}')
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -435,7 +431,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         p.start()
         self.launch_process_pool[replica_id] = p
-        info = ReplicaInfo(replica_id, cluster_name, self.use_spot)
+        info = ReplicaInfo(replica_id, cluster_name)
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
     def scale_up(self, n: int) -> None:
@@ -704,8 +700,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                     info.status_property.first_ready_time = probe_time
             else:
                 handle = info.handle
-                if (handle and handle.launched_resources and
-                        handle.launched_resources.use_spot):
+                if handle is None:
+                    logger.error('Cannot find handle for '
+                                 f'replica {info.replica_id}.')
+                elif handle.launched_resources is None:
+                    logger.error('Cannot find launched_resources in handle'
+                                 f' for replica {info.replica_id}.')
+                elif handle.launched_resources.use_spot:
                     # Pull the actual cluster status
                     # from the cloud provider to
                     # determine whether the cluster is preempted.

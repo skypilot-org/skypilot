@@ -11,7 +11,6 @@ import time
 import fastapi
 import uvicorn
 
-from sky import resources as resources_lib
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -41,11 +40,9 @@ class SkyServeController:
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
                  task_yaml: str, port: int) -> None:
         self.service_name = service_name
-        resources = resources_lib.Resources.from_yaml(task_yaml)
         self.replica_manager: replica_managers.ReplicaManager = (
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
-                                                    use_spot=resources.use_spot,
                                                     task_yaml_path=task_yaml))
         self.autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
