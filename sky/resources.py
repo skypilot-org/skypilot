@@ -160,10 +160,10 @@ class Resources:
         # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id.strip()}
+            self._image_id = {None: image_id.strip()}
         elif isinstance(image_id, dict):
             if None in image_id:
-                self._image_id = {self._region: image_id[None].strip()}
+                self._image_id = {None: image_id[None].strip()}
             else:
                 self._image_id = {
                     k.strip(): v.strip() for k, v in image_id.items()
@@ -804,7 +804,7 @@ class Resources:
                     'explicitly specify the cloud.')
 
         if self._region is not None:
-            if self._region not in self._image_id:
+            if self._region not in self._image_id and None not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '

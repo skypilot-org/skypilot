@@ -211,8 +211,12 @@ class IBM(clouds.Cloud):
                                                    r.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
         # r.image_id: {clouds.Region:image_id} - property of Resources class
-        image_id = r.image_id[
-            region.name] if r.image_id else self.get_default_image(region_name)
+        if r.image_id is None:
+            image_id = self.get_default_image(region_name)
+        elif None in r.image_id:
+            image_id = r.image_id[None]
+        else:
+            image_id = r.image_id[region.name]  
 
         return {
             'instance_type': r.instance_type,
