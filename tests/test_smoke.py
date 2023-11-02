@@ -2774,7 +2774,7 @@ def test_skyserve_spot_user_bug():
         f'test-skyserve-spot-user-bug-gcp',
         [
             f'sky serve up -n {name} -y tests/skyserve/spot/user_bug.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             # After failure due to user bug, the service should fail instead of
             # triggering spot recovery.
             '(while true; do'
