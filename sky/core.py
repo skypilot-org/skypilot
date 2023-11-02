@@ -1028,6 +1028,7 @@ def serve_status(
             'replica_id': (int) replica id,
             'name': (str) replica name,
             'status': (sky.ReplicaStatus) replica status,
+            'replica_type': (sky.serve.serve_state.ReplicaType) replica type,
             'handle': (ResourceHandle) handle of the replica cluster,
         }
 

@@ -38,7 +38,7 @@ class RoundRobinPolicy(LoadBalancingPolicy):
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         if not self.replicas_queue:
             return None
-        replica_ip = self.replicas_queue[self.index]
+        replica = self.replicas_queue[self.index]
         self.index = (self.index + 1) % len(self.replicas_queue)
         request_repr = ('<Request '
                         f'method="{request.method}" '
@@ -46,5 +46,5 @@ class RoundRobinPolicy(LoadBalancingPolicy):
                         f'headers={dict(request.headers)} '
                         f'query_params={dict(request.query_params)}'
                         '>')
-        logger.info(f'Selected replica {replica_ip} for request {request_repr}')
-        return replica_ip
+        logger.info(f'Selected replica {replica} for request {request_repr}')
+        return replica

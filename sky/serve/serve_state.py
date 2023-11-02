@@ -48,6 +48,11 @@ _CONN.commit()
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
+class ReplicaType(enum.Enum):
+    SKYPILOT_CLUSTER = 'SKYPILOT_CLUSTER'
+    EXISTING_ENDPOINT = 'EXISTING_ENDPOINT'
+
+
 # === Statuses ===
 class ReplicaStatus(enum.Enum):
     """Replica status."""

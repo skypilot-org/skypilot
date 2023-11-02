@@ -2,7 +2,7 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -26,6 +26,7 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
+        existing_endpoints: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -54,6 +55,7 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._auto_restart = auto_restart
+        self._existing_endpoints = existing_endpoints
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -67,6 +69,8 @@ class SkyServiceSpec:
 
         service_config = {}
         service_config['replica_port'] = config['port']
+        service_config['existing_endpoints'] = config.get(
+            'existing_endpoints', None)
 
         readiness_section = config['readiness_probe']
         if isinstance(readiness_section, str):
@@ -153,6 +157,7 @@ class SkyServiceSpec:
                     config[section][key] = value
 
         add_if_not_none('port', None, int(self.replica_port))
+        add_if_not_none('existing_endpoints', None, self.existing_endpoints)
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
                         self.initial_delay_seconds)
@@ -182,16 +187,16 @@ class SkyServiceSpec:
                 f'{self.max_replicas} replica{max_plural}')
 
     def __repr__(self) -> str:
+        existing_endpoints_str = (', '.join(self.existing_endpoints)
+                                  if self.existing_endpoints is not None else
+                                  'None')
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}\
+            Replica auto restart:             {self.auto_restart}
+            Existing Endpoints:               {existing_endpoints_str}\
         """)
-
-    @property
-    def readiness_suffix(self) -> str:
-        return f':{self._replica_port}{self._readiness_path}'
 
     @property
     def readiness_path(self) -> str:
@@ -228,3 +233,7 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def existing_endpoints(self) -> Optional[List[str]]:
+        return self._existing_endpoints

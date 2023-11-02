@@ -65,6 +65,8 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
     for info in replica_infos:
+        if info.replica_type != serve_state.ReplicaType.SKYPILOT_CLUSTER:
+            continue
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
         p.start()
@@ -89,6 +91,9 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
+    for info in replica_infos:
+        if info.replica_type != serve_state.ReplicaType.SKYPILOT_CLUSTER:
+            serve_state.remove_replica(service_name, info.replica_id)
     task = task_lib.Task.from_yaml(task_yaml)
     backend = cloud_vm_ray_backend.CloudVmRayBackend()
     backend.teardown_ephemeral_storage(task)
@@ -132,6 +137,21 @@ def _start(service_name: str, task_yaml: str, job_id: int):
                                       requested_resources=requested_resources,
                                       status=status)
 
+    # Add any existing endpoints as a replica.
+    if service_spec.existing_endpoints is not None:
+        next_replica_id = 1
+        for endpoint in service_spec.existing_endpoints:
+            serve_state.add_or_update_replica(
+                service_name,
+                next_replica_id,
+                replica_managers.ReplicaInfo(
+                    replica_id=next_replica_id,
+                    # TODO(tian): Maybe use None here?
+                    cluster_name='',
+                    replica_type=serve_state.ReplicaType.EXISTING_ENDPOINT,
+                    endpoint=endpoint))
+            next_replica_id += 1
+
     controller_process = None
     load_balancer_process = None
     try:
@@ -160,7 +180,6 @@ def _start(service_name: str, task_yaml: str, job_id: int):
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://localhost:{controller_port}'
-            replica_port = int(service_spec.replica_port)
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
 
@@ -172,7 +191,7 @@ def _start(service_name: str, task_yaml: str, job_id: int):
                 target=serve_utils.RedirectOutputTo(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, replica_port))
+                args=(controller_addr, load_balancer_port))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
