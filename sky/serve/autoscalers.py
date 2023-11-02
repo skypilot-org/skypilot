@@ -113,6 +113,12 @@ class RequestRateAutoscaler(Autoscaler):
         self,
         infos: List[Dict[str, Any]],
     ) -> AutoscalerDecision:
+        # Only evaluating SKYPILOT_CLUSTER replicas.
+        infos = [
+            info for info in infos
+            if info['replica_type'] == serve_state.ReplicaType.SKYPILOT_CLUSTER
+        ]
+
         current_time = time.time()
         num_replicas = len(infos)
 

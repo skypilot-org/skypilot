@@ -165,6 +165,12 @@ def get_service_schema():
             'port': {
                 'type': 'integer',
             },
+            'existing_endpoints': {
+                'type': 'array',
+                'items': {
+                    'type': 'string',
+                }
+            },
             'readiness_probe': {
                 'anyOf': [{
                     'type': 'string',

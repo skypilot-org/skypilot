@@ -161,7 +161,8 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
     status_columns = [
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
-        StatusColumn('IP', _get_head_ip),
+        StatusColumn('URL', _get_url),
+        StatusColumn('TYPE', _get_replica_type),
         StatusColumn(
             'RESOURCES',
             _get_full_replica_resources if show_all else _get_replica_resources,
@@ -393,6 +394,8 @@ _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 _get_replica_id = lambda replica_record: replica_record['replica_id']
+_get_replica_type = lambda replica_record: replica_record['replica_type'].value
+_get_url = lambda replica_record: replica_record['url']
 _get_service_name = lambda replica_record: replica_record['service_name']
 _get_policy = lambda replica_record: replica_record['policy']
 _get_requested_resources = lambda replica_record: replica_record[
