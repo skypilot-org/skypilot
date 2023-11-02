@@ -1,9 +1,25 @@
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky import skypilot_config
 from sky.provision.kubernetes import network_utils
+from sky.utils import ux_utils
 
 _PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
+
+
+def _get_port_mode() -> network_utils.KubernetesPortMode:
+    mode_str = skypilot_config.get_nested(
+        ('kubernetes', 'ports'),
+        network_utils.KubernetesPortMode.LOADBALANCER.value)
+    try:
+        port_mode = network_utils.KubernetesPortMode.from_str(mode_str)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
+                from None
+
+    return port_mode
 
 
 def open_ports(
@@ -12,6 +28,44 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    port_mode = _get_port_mode()
+
+    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+        _open_ports_using_loadbalancer(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            ports=ports,
+            provider_config=provider_config)
+    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+        _open_ports_using_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
+                                  ports=ports,
+                                  provider_config=provider_config)
+
+
+def _open_ports_using_loadbalancer(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    assert provider_config is not None, 'provider_config is required'
+    service_name = f"{cluster_name_on_cloud}-skypilot-loadbalancer"
+    content = network_utils.fill_loadbalancer_template(
+        namespace=provider_config['namespace'],
+        service_name=service_name,
+        ports=ports,
+        selector_key='skypilot-cluster',
+        selector_value=cluster_name_on_cloud,
+    )
+    network_utils.create_or_replace_namespaced_loadbalancer(
+        namespace=provider_config['namespace'],
+        service_name=service_name,
+        service_spec=content['service_spec'])
+
+
+def _open_ports_using_ingress(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
     if not network_utils.ingress_controller_exists():
         raise Exception(
             "Ingress controller not found. Please install ingress controller first."
@@ -49,6 +103,34 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
+    port_mode = _get_port_mode()
+    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+        _cleanup_ports_for_loadbalancer(
+            cluster_name_on_cloud=cluster_name_on_cloud,
+            provider_config=provider_config)
+    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+        _cleanup_ports_for_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
+                                   ports=ports,
+                                   provider_config=provider_config)
+
+
+def _cleanup_ports_for_loadbalancer(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    assert provider_config is not None, cluster_name_on_cloud
+    service_name = f"{cluster_name_on_cloud}-skypilot-loadbalancer"
+    network_utils.delete_namespaced_service(
+        namespace=provider_config["namespace"],
+        service_name=service_name,
+    )
+
+
+def _cleanup_ports_for_ingress(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
     assert provider_config is not None, cluster_name_on_cloud
     for port in ports:
         service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"

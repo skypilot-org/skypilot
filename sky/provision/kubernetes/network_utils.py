@@ -1,5 +1,6 @@
+import enum
 import os
-from typing import Dict, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import jinja2
 import yaml
@@ -8,14 +9,62 @@ import sky
 from sky import exceptions
 from sky.adaptors import kubernetes
 
+_INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
+_LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
+
+
+class KubernetesPortMode(enum.Enum):
+    """Enum for the different types of modes supported for opening
+    ports on Kubernetes.
+    """
+    INGRESS = 'ingress'
+    LOADBALANCER = 'loadbalancer'
+
+    @classmethod
+    def from_str(cls, mode: str) -> 'KubernetesPortMode':
+        """Returns the enum value for the given string."""
+        if mode.lower() == cls.LOADBALANCER.value:
+            return cls.LOADBALANCER
+        elif mode.lower() == cls.INGRESS.value:
+            return cls.INGRESS
+        else:
+            raise ValueError(f'Unsupported kubernetes port mode: '
+                             f'{mode}. The mode must be either '
+                             f'\'{cls.LOADBALANCER.value}\' or '
+                             f'\'{cls.INGRESS.value}\'. ')
+
+
+def fill_loadbalancer_template(namespace: str, service_name: str,
+                               ports: List[str], selector_key: str,
+                               selector_value: str) -> Dict:
+    template_path = os.path.join(sky.__root_dir__, 'templates',
+                                 _LOADBALANCER_TEMPLATE_NAME)
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(
+            f'Template "{_LOADBALANCER_TEMPLATE_NAME}" does not exist.')
+
+    with open(template_path) as fin:
+        template = fin.read()
+    j2_template = jinja2.Template(template)
+    cont = j2_template.render(
+        namespace=namespace,
+        service_name=service_name,
+        ports=ports,
+        selector_key=selector_key,
+        selector_value=selector_value,
+    )
+    content = yaml.safe_load(cont)
+    return content
+
 
 def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
                           service_port: str, ingress_name: str,
                           selector_key: str, selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
-                                 'kubernetes-port.yml.j2')
+                                 _INGRESS_TEMPLATE_NAME)
     if not os.path.exists(template_path):
-        raise FileNotFoundError('Template "kubernetes-port.j2" does not exist.')
+        raise FileNotFoundError(
+            f'Template "{_INGRESS_TEMPLATE_NAME}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     j2_template = jinja2.Template(template)
@@ -30,6 +79,22 @@ def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
     )
     content = yaml.safe_load(cont)
     return content
+
+
+def create_or_replace_namespaced_loadbalancer(
+        namespace: str, service_name: str,
+        service_spec: Dict[str, Union[str, int]]) -> None:
+    core_api = kubernetes.core_api()
+
+    try:
+        core_api.read_namespaced_service(service_name, namespace)
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        if e.status == 404:
+            core_api.create_namespaced_service(namespace, service_spec)
+            return
+        raise e
+
+    core_api.replace_namespaced_service(service_name, namespace, service_spec)
 
 
 def create_namespaced_ingress(namespace: str,
