@@ -3,14 +3,17 @@
 Using Docker Containers
 =======================
 
-SkyPilot can run a Docker container either as a containerized application, or the runtime environment of a cluster.
+SkyPilot can run a container either as a task, or as the runtime environment of a cluster.
 
-Running Containerized Applications
-----------------------------------
+* If the container image is invocable / has an entrypoint: run it as a task.
+* Otherwise, the container image is likely to be used as a runtime environment (e.g., ``ubuntu``) and you likely have extra commands to run inside the container: run it as a runtime environment.
 
-SkyPilot is capable of running containerized applications directly. The Docker runtime comes pre-configured and ready for use on the default VM images provided by SkyPilot.
+Running Containers as Tasks
+---------------------------
 
-To launch a containerized application, you can directly invoke the :code:`docker run` command in the :code:`run` section of your task.
+SkyPilot can run containerized applications directly as regular tasks. The default VM images provided by SkyPilot already have the Docker runtime pre-configured.
+
+To launch a containerized application, you can directly invoke :code:`docker run` in the :code:`run` section of your task.
 
 For example, to run a HuggingFace TGI serving container:
 
@@ -20,15 +23,20 @@ For example, to run a HuggingFace TGI serving container:
     accelerators: A100:1
 
   run: |
-    docker run --gpus all --shm-size 1g -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id lmsys/vicuna-13b-v1.5
+    docker run --gpus all --shm-size 1g -v ~/data:/data \
+      ghcr.io/huggingface/text-generation-inference \
+      --model-id lmsys/vicuna-13b-v1.5
 
-    # The above command is blocking, so any commands after it are uncommon and
+    # NOTE: Uncommon to have any commands after the above.
+    # `docker run` is blocking, so any commands after it
     # will NOT be run inside the container.
 
 Private Registries
 ^^^^^^^^^^^^^^^^^^
 
-For Docker images hosted on private registries, when running containerized application, add a :code:`setup` section to your task YAML file to authenticate with the registry:
+When using this mode, to access Docker images hosted on private registries,
+simply add a :code:`setup` section to your task YAML file to authenticate with
+the registry:
 
 .. code-block:: yaml
 
@@ -45,7 +53,7 @@ For Docker images hosted on private registries, when running containerized appli
 Building containers remotely
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you are running containerized application, the container image can also be built remotely on the cluster in the :code:`setup` phase of the task.
+If you are running containerized applications, the container image can also be built remotely on the cluster in the :code:`setup` phase of the task.
 
 The :code:`echo_app` `example <https://github.com/skypilot-org/skypilot/tree/master/examples/docker>`_ provides an example on how to do this:
 
@@ -77,8 +85,8 @@ The output of the app produced at :code:`/outputs` path in the container is also
 
 Our GitHub repository has more examples, including running `Detectron2 in a Docker container <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_ via SkyPilot.
 
-Using Docker Containers as Runtime Environment
-----------------------------------------------
+Using Containers as Runtime Environments
+----------------------------------------
 
 When a container is used as the runtime environment, everything happens inside the container:
 
@@ -120,7 +128,8 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 Private Registries
 ^^^^^^^^^^^^^^^^^^
 
-For Docker images hosted on private registries, when using docker container as runtime environment, you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
+When using this mode, to access Docker images hosted on private registries,
+you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:
 
 .. code-block:: yaml
 
