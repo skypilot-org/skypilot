@@ -1,10 +1,12 @@
 """Resources: compute requirements of Tasks."""
 import functools
+import os
 import textwrap
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 from typing_extensions import Literal
+import yaml
 
 from sky import clouds
 from sky import global_user_state
@@ -1103,6 +1105,21 @@ class Resources:
         if self.ports is not None:
             features.add(clouds.CloudImplementationFeatures.OPEN_PORTS)
         return features
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str) -> 'Resources':
+        with open(os.path.expanduser(yaml_path), 'r') as f:
+            config = yaml.safe_load(f)
+
+        if isinstance(config, str):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('YAML loaded as str, not as dict. '
+                                 f'Is it correct? Path: {yaml_path}')
+
+        if config is None:
+            config = {}
+
+        return Resources.from_yaml_config(config.get('resources', None))
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':

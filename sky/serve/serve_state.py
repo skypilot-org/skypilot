@@ -81,6 +81,9 @@ class ReplicaStatus(enum.Enum):
     # we should guarantee no resource leakage like regular sky.
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
+    # The replica spot VM is preempted by the cloud provider.
+    PREEMPTED = 'PREEMPTED'
+
     # Unknown status. This should never happen.
     UNKNOWN = 'UNKNOWN'
 
@@ -101,6 +104,7 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.PREEMPTED: colorama.Fore.MAGENTA,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
 

@@ -1,0 +1,16 @@
+resources:
+  cloud: gcp
+  cpus: 2+
+  zone: us-central1-a
+  use_spot: True
+
+workdir: tests/skyserve/spot_recovery
+
+run: python3 nonrecovery.py
+
+service:
+  port: 8080
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1

@@ -1,0 +1,16 @@
+resources:
+  cloud: gcp
+  cpus: 2+
+  use_spot: true
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: python3 server.py --port 8080
+
+service:
+  port: 8080
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 2

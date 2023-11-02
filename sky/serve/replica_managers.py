@@ -18,6 +18,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -169,6 +170,8 @@ class ReplicaStatusProperty:
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
     sky_down_status: Optional[ProcessStatus] = None
+    # The replica's spot instance was preempted.
+    preempted: bool = False
 
     def is_scale_down_succeeded(self, initial_delay_seconds: int,
                                 auto_restart: bool) -> bool:
@@ -204,6 +207,8 @@ class ReplicaStatusProperty:
             return False
         if self.user_app_failed:
             return False
+        if self.preempted:
+            return False
         return True
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
@@ -211,6 +216,8 @@ class ReplicaStatusProperty:
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
+            if self.preempted:
+                return serve_state.ReplicaStatus.PREEMPTED
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
@@ -257,12 +264,14 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str) -> None:
+    def __init__(self, replica_id: int, cluster_name: str,
+                 use_spot: bool) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
+        self.use_spot: bool = use_spot
 
     @property
     def handle(self) -> Optional[backends.CloudVmRayResourceHandle]:
@@ -294,6 +303,7 @@ class ReplicaInfo:
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
+            'use_spot': self.use_spot
         }
         if with_handle:
             info_dict['handle'] = self.handle
@@ -377,14 +387,16 @@ class SkyPilotReplicaManager(ReplicaManager):
     """Replica Manager for SkyPilot clusters."""
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 task_yaml_path: str) -> None:
+                 use_spot: bool, task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self.task_yaml_path = task_yaml_path
+        self.use_spot = use_spot
         self.launch_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
 
+        logger.info(f'Use spot: {self.use_spot}')
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -421,7 +433,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         p.start()
         self.launch_process_pool[replica_id] = p
-        info = ReplicaInfo(replica_id, cluster_name)
+        info = ReplicaInfo(replica_id, cluster_name, self.use_spot)
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
 
     def scale_up(self, n: int) -> None:
@@ -472,6 +484,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
+        logger.info(f'preempted: {info.status_property.preempted}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self.service_name, replica_id)
         p = multiprocessing.Process(
@@ -489,6 +502,15 @@ class SkyPilotReplicaManager(ReplicaManager):
     def scale_down(self, replica_ids: List[int]) -> None:
         for replica_id in replica_ids:
             self._terminate_replica(replica_id, sync_down_logs=False)
+
+    def _recover_from_preemption(self, replica_id: int) -> None:
+        logger.info(f'Beginning recovery for preempted replica {replica_id}.')
+        info = serve_state.get_replica_info_from_id(self.service_name,
+                                                    replica_id)
+        assert info is not None
+        info.status_property.preempted = True
+        serve_state.add_or_update_replica(self.service_name, replica_id, info)
+        self._terminate_replica(replica_id, sync_down_logs=False)
 
     #################################
     # ReplicaManager Daemon Threads #
@@ -557,11 +579,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status_property.is_scale_down_succeeded(
                         self.initial_delay_seconds, self.auto_restart):
                     # This means the cluster is deleted due to
-                    # a scale down. Delete the replica info
+                    # a scale down or the cluster is recovering
+                    # from preemption. Delete the replica info
                     # so it won't count as a replica.
-                    logger.info(f'Replica {replica_id} removed from the '
-                                'replica table normally.')
                     serve_state.remove_replica(self.service_name, replica_id)
+                    if info.status_property.preempted:
+                        removal_reason = 'for preemption recovery'
+                    else:
+                        removal_reason = 'normally'
+                    logger.info(f'Replica {replica_id} removed from the '
+                                f'replica table {removal_reason}.')
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -673,6 +700,28 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if info.status_property.first_ready_time is None:
                     info.status_property.first_ready_time = probe_time
             else:
+                if self.use_spot:
+                    # Pull the actual cluster status from the cloud provider to
+                    # determine whether the cluster is preempted.
+                    (cluster_status,
+                     _) = backends.backend_utils.refresh_cluster_status_handle(
+                         info.cluster_name,
+                         force_refresh_statuses=set(status_lib.ClusterStatus))
+
+                    if cluster_status != status_lib.ClusterStatus.UP:
+                        # The cluster is (partially) preempted.
+                        # It can be down, INIT or STOPPED, based on the
+                        # interruption behavior of the cloud.
+                        # Spot recovery is needed.
+                        cluster_status_str = (
+                            '' if cluster_status is None else
+                            f' (status: {cluster_status.value})')
+                        logger.info(f'Cluster {info.cluster_name} '
+                                    f'is preempted{cluster_status_str}.')
+                        self._recover_from_preemption(info.replica_id)
+
+                        continue
+
                 if info.first_not_ready_time is None:
                     info.first_not_ready_time = probe_time
                 if info.status_property.first_ready_time is not None:

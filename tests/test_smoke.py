@@ -2736,6 +2736,62 @@ def test_skyserve_llm():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
+def test_skyserve_spot_recovery():
+    name = _get_service_name()
+    zone = 'us-central1-a'
+
+    # Reference: test_spot_recovery_gcp
+    def terminate_replica(replica_id: int) -> str:
+        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+        query_cmd = (f'gcloud compute instances list --filter='
+                     f'"(labels.ray-cluster-name:{cluster_name})" '
+                     f'--zones={zone} --format="value(name)"')
+        return (f'gcloud compute instances delete --zone={zone}'
+                f' --quiet $({query_cmd})')
+
+    test = Test(
+        f'test-skyserve-spot-recovery-gcp',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot_recovery/gcp.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+            terminate_replica(1),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_spot_nonrecovery():
+    """Tests that spot recovery doesn't occur for non-preemption failures"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-spot-nonrecovery-gcp',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/spot_recovery/nonrecovery.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            # After failure due to user bug, the service should fail instead of
+            # triggering spot recovery.
+            '(while true; do'
+            f'    output=$(sky serve status {name});'
+            '     echo "$output" | grep -q "FAILED" && break;'
+            '     echo "$output" | grep -q "PROVISIONING" && exit 1;'
+            '     sleep 10;'
+            f'done)',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_replica_failure():
     """Test skyserve with manually interrupting some replica"""
     name = _get_service_name()
