@@ -212,6 +212,9 @@ def get_service_schema():
                     'spot_placement': {
                         'type': 'string'
                     },
+                    'mix_policy': {
+                        'type': 'string'
+                    },
                     'spot_zones': {
                         'type': 'array'
                     }

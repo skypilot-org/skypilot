@@ -14,8 +14,8 @@ service:
     path: /health
     initial_delay_seconds: 20
   replica_policy: 
-    min_replicas: 2
+    min_replicas: 1
     max_replicas: 2
-    spot_placement: EvenSpread
+    spot_placement: EagerFailover
     mix_policy: OnlySpot
     spot_zones: [us-central1-a, us-central1-b, us-central1-c]

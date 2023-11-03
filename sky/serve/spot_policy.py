@@ -7,22 +7,38 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
-class SpotPolicy(enum.Enum):
+class SpotPolicyName(enum.Enum):
 
     EVEN_SPREAD = 'EvenSpread'
     EAGER_FAILOVER = 'EagerFailover'
 
-class SpotPlacer:
-    """Spot Placer specification."""
 
-    def __init__(self, zones: List[str], spot_policy: str) -> None:
+class MixPolicyName(enum.Enum):
 
-        if spot_policy == 'EvenSpread':
-            self.spot_policy = SpotPolicy.EVEN_SPREAD
-        elif spot_policy == 'EagerFailover':
-            self.spot_policy = SpotPolicy.EAGER_FAILOVER
+    ONLY_SPOT = 'OnlySpot'
+    FALLBACK_ON_DEMAND = 'FallbackOnDemand'
+
+
+class SpotPolicy:
+    """Spot Policy specification."""
+
+    def __init__(self, zones: List[str], spot_placement: str,
+                 mix_policy: str) -> None:
+
+        if spot_placement == 'EvenSpread':
+            self.spot_placement = SpotPolicyName.EVEN_SPREAD
+        elif spot_placement == 'EagerFailover':
+            self.spot_placement = SpotPolicyName.EAGER_FAILOVER
         else:
-            raise NotImplementedError(f'Unknown spot_policy: {spot_policy}')
+            raise NotImplementedError(
+                f'Unknown spot_placement: {spot_placement}')
+
+        if mix_policy == 'OnlySpot':
+            self.mix_policy = MixPolicyName.ONLY_SPOT
+        elif mix_policy == 'FallbackOnDemand':
+            self.mix_policy = MixPolicyName.FALLBACK_ON_DEMAND
+        else:
+            raise NotImplementedError(f'Unknown mix_policy: {mix_policy}')
 
         self.zones = zones
         self.current_zone_idx: int = 0
@@ -30,16 +46,23 @@ class SpotPlacer:
 
     def get_next_zone(self) -> str:
         assert self.zones is not None
-        if self.spot_policy == SpotPolicy.EVEN_SPREAD:
+        if self.spot_placement == SpotPolicyName.EVEN_SPREAD:
             zone = self.zones[self.current_zone_idx]
             self.current_zone_idx += 1
-        elif self.spot_policy == SpotPolicy.EAGER_FAILOVER:
+        elif self.spot_placement == SpotPolicyName.EAGER_FAILOVER:
             zone = random.choice(self.zones)
             while zone in self.preempted_zones:
                 zone = random.choice(self.zones)
-        logger.info(f'Chosen zone: {zone}, policy: {self.spot_policy}')
+        logger.info(f'Chosen zone: {zone}, policy: {self.spot_placement}')
         self._clear_preempted_zones()
         return zone
+
+    def is_fallback_on_demand(self) -> bool:
+        if self.mix_policy == MixPolicyName.ONLY_SPOT:
+            return False
+        else:
+            raise NotImplementedError(
+                f'Not implemented mix_policy: {self.mix_policy}')
 
     def handle_preemption(self, zone):
         logger.info(f'handle_preemption: {zone}')

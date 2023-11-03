@@ -57,9 +57,10 @@ def launch_cluster(task_yaml_path: str,
     """
     task = sky.Task.from_yaml(task_yaml_path)
     if overwrite_dict:
+        resources = set()
         for resource in task.resources:
-            if 'zone' in overwrite_dict:
-                resource.set_zone(overwrite_dict['zone'])
+            resources.add(resource.copy(**overwrite_dict))
+        task.set_resources(resources)
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
@@ -400,10 +401,11 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-        self.spot_placer: Optional[
-            spot_policy.SpotPlacer] = spot_policy.SpotPlacer(
-                spec.spot_zones, spec.spot_placement
-            ) if spec.spot_zones and spec.spot_placement else None
+        self.spot_policy: Optional[
+            spot_policy.SpotPolicy] = spot_policy.SpotPolicy(
+                spec.spot_zones, spec.spot_placement,
+                spec.mix_policy) if (spec.spot_zones and spec.spot_placement and
+                                     spec.mix_policy) else None
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -423,8 +425,8 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def _generate_launch_overwrite_dict(self) -> Dict[str, str]:
         overwrite_dict = {}
-        if self.spot_placer is not None:
-            zone = self.spot_placer.get_next_zone()
+        if self.spot_policy is not None:
+            zone = self.spot_policy.get_next_zone()
             overwrite_dict['zone'] = zone
         return overwrite_dict
 
@@ -527,11 +529,18 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert info is not None
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
-        if (self.spot_placer is not None and info.handle is not None and
+        if (self.spot_policy is not None and info.handle is not None and
                 info.handle.launched_resources is not None):
-            self.spot_placer.handle_preemption(
+            self.spot_policy.handle_preemption(
                 info.handle.launched_resources.zone)
         self._terminate_replica(replica_id, sync_down_logs=False)
+
+        if (self.spot_policy is not None and
+                self.spot_policy.is_fallback_on_demand()):
+            raise NotImplementedError(
+                'Fallback on demand is not supported yet.')
+        else:
+            pass
 
     #################################
     # ReplicaManager Daemon Threads #

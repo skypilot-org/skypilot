@@ -27,6 +27,7 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
         spot_placement: Optional[str] = None,
+        mix_policy: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
@@ -57,6 +58,7 @@ class SkyServiceSpec:
         self._post_data = post_data
         self._auto_restart = auto_restart
         self._spot_placement = spot_placement
+        self._mix_policy = mix_policy
         self._spot_zones = spot_zones
 
     @staticmethod
@@ -121,6 +123,8 @@ class SkyServiceSpec:
                 'auto_restart', True)
             service_config['spot_placement'] = policy_section.get(
                 'spot_placement', None)
+            service_config['mix_policy'] = policy_section.get(
+                'mix_policy', None)
             service_config['spot_zones'] = policy_section.get(
                 'spot_zones', None)
 
@@ -174,6 +178,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
         add_if_not_none('replica_policy', 'spot_placement',
                         self._spot_placement)
+        add_if_not_none('replica_policy', 'mix_policy', self._mix_policy)
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         return config
 
@@ -182,6 +187,16 @@ class SkyServiceSpec:
             return f'GET {self.readiness_path}'
         return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
 
+    def spot_policy_str(self):
+        string = ''
+        if self.spot_placement:
+            string += self.spot_placement
+        if self.mix_policy:
+            string += f' with {self.mix_policy}'
+        if string == '':
+            return 'No spot policy'
+        return string
+
     def policy_str(self):
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
@@ -189,14 +204,16 @@ class SkyServiceSpec:
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to '
-                f'{self.max_replicas} replica{max_plural}')
+                f'{self.max_replicas} replica{max_plural}'
+                f'({self.spot_policy_str()})')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}\
+            Replica auto restart:             {self.auto_restart}
+            Spot Policy:                      {self.spot_policy_str()}\
         """)
 
     @property
@@ -242,6 +259,10 @@ class SkyServiceSpec:
     @property
     def spot_placement(self) -> Optional[str]:
         return self._spot_placement
+
+    @property
+    def mix_policy(self) -> Optional[str]:
+        return self._mix_policy
 
     @property
     def spot_zones(self) -> Optional[List[str]]:
