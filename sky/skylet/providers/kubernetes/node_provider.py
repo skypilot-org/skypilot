@@ -181,10 +181,10 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = (sorted(
+            events_desc_by_time = sorted(
                 events.items,
                 key=lambda e: e.metadata.creation_timestamp,
-                reverse=True))
+                reverse=True)
             for event in events_desc_by_time:
                 if event.reason == 'FailedScheduling':
                     event_message = event.message
