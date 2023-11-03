@@ -1915,17 +1915,6 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 # down, and the hint for showing sky spot queue
                 # will still be shown.
                 success = False
-
-            try:
-                pool.close()
-                pool.join()
-            except SystemExit as e:
-                # This is to avoid a "Exception ignored" problem caused by
-                # ray worker setting the sigterm handler to sys.exit(15)
-                # (see ray/_private/worker.py).
-                # TODO (zhwu): Remove any importing of ray in SkyPilot.
-                if e.code != 15:
-                    raise
             return success, result
 
         spot_jobs_success = True
@@ -1973,7 +1962,19 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                     success, msg = _try_get_future_result(services_future)
                     if not success:
                         msg = 'KeyboardInterrupt'
-                    click.echo(msg)
+                click.echo(msg)
+
+        if show_spot_jobs or show_services:
+            try:
+                pool.close()
+                pool.join()
+            except SystemExit as e:
+                # This is to avoid a "Exception ignored" problem caused by
+                # ray worker setting the sigterm handler to sys.exit(15)
+                # (see ray/_private/worker.py).
+                # TODO (zhwu): Remove any importing of ray in SkyPilot.
+                if e.code != 15:
+                    raise
 
         if num_pending_autostop > 0 and not refresh:
             # Don't print this hint if there's no pending autostop or user has
