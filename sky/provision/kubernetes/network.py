@@ -57,7 +57,7 @@ def _open_ports_using_loadbalancer(
         selector_key='skypilot-cluster',
         selector_value=cluster_name_on_cloud,
     )
-    network_utils.create_or_replace_namespaced_loadbalancer(
+    network_utils.create_or_replace_namespaced_service(
         namespace=provider_config['namespace'],
         service_name=service_name,
         service_spec=content['service_spec'])
@@ -89,12 +89,14 @@ def _open_ports_using_ingress(
             selector_key='skypilot-cluster',
             selector_value=cluster_name_on_cloud,
         )
-        network_utils.create_namespaced_service(
+        network_utils.create_or_replace_namespaced_service(
             namespace=provider_config["namespace"],
+            service_name=service_name,
             service_spec=content['service_spec'],
         )
-        network_utils.create_namespaced_ingress(
+        network_utils.create_or_replace_namespaced_ingress(
             namespace=provider_config['namespace'],
+            ingress_name=ingress_name,
             ingress_spec=content['ingress_spec'],
         )
 

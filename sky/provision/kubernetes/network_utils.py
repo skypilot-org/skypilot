@@ -81,27 +81,22 @@ def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
     return content
 
 
-def create_or_replace_namespaced_loadbalancer(
-        namespace: str, service_name: str,
-        service_spec: Dict[str, Union[str, int]]) -> None:
-    core_api = kubernetes.core_api()
+def create_or_replace_namespaced_ingress(
+        namespace: str, ingress_name: str,
+        ingress_spec: Dict[str, Union[str, int]]) -> None:
+    """Creates an ingress resource for the specified service."""
+    networking_api = kubernetes.networking_api()
 
     try:
-        core_api.read_namespaced_service(service_name, namespace)
+        networking_api.read_namespaced_ingress(ingress_name, namespace)
     except kubernetes.get_kubernetes().client.ApiException as e:
         if e.status == 404:
-            core_api.create_namespaced_service(namespace, service_spec)
+            networking_api.create_namespaced_ingress(namespace, ingress_spec)
             return
         raise e
 
-    core_api.replace_namespaced_service(service_name, namespace, service_spec)
-
-
-def create_namespaced_ingress(namespace: str,
-                              ingress_spec: Dict[str, Union[str, int]]) -> None:
-    """Creates an ingress resource for the specified service."""
-    networking_api = kubernetes.networking_api()
-    networking_api.create_namespaced_ingress(namespace, ingress_spec)
+    networking_api.replace_namespaced_ingress(ingress_name, namespace,
+                                              ingress_spec)
 
 
 def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
@@ -116,11 +111,21 @@ def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
         raise e
 
 
-def create_namespaced_service(namespace: str,
-                              service_spec: Dict[str, Union[str, int]]) -> None:
+def create_or_replace_namespaced_service(
+        namespace: str, service_name: str,
+        service_spec: Dict[str, Union[str, int]]) -> None:
     """Creates a service resource for the specified service."""
     core_api = kubernetes.core_api()
-    core_api.create_namespaced_service(namespace, service_spec)
+
+    try:
+        core_api.read_namespaced_service(service_name, namespace)
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        if e.status == 404:
+            core_api.create_namespaced_service(namespace, service_spec)
+            return
+        raise e
+
+    core_api.replace_namespaced_service(service_name, namespace, service_spec)
 
 
 def delete_namespaced_service(namespace: str, service_name: str) -> None:
