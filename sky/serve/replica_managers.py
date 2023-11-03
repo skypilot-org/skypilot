@@ -5,6 +5,7 @@ import enum
 import functools
 import multiprocessing
 import os
+import pathlib
 import threading
 import time
 import traceback
@@ -445,13 +446,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                            'already exists. Skipping.')
             return
 
-        def _sync_down_logs():
-            info = serve_state.get_replica_info_from_id(self.service_name,
-                                                        replica_id)
-            if info is None:
-                logger.error(f'Cannot find replica {replica_id} in the '
-                             'replica table. Skipping syncing down logs.')
-                return
+        def _sync_down_logs(info: ReplicaInfo):
+            local_log_file_name = (
+                serve_utils.generate_replica_local_log_file_name(
+                    self.service_name, replica_id))
             logger.info(f'Syncing down logs for replica {replica_id}...')
             backend = backends.CloudVmRayBackend()
             handle = global_user_state.get_handle_from_cluster_name(
@@ -460,7 +458,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.error(f'Cannot find cluster {info.cluster_name} for '
                              f'replica {replica_id} in the cluster table. '
                              'Skipping syncing down logs.')
+                # Create an empty file to indicate that we have tried to
+                # sync down logs. There is a small possibility that the
+                # launch process is still running and the cluster is not
+                # created yet; or the launch process failed before the
+                # cluster record is created. In this case, we will not
+                # be able to sync down logs.
+                pathlib.Path(local_log_file_name).touch()
                 return
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
             log_file = backend_utils.download_and_stream_latest_job_log(
@@ -470,18 +476,18 @@ class SkyPilotReplicaManager(ReplicaManager):
                 log_position_hint='replica cluster',
                 log_finish_hint=f'Replica: {replica_id}')
             if log_file is not None:
-                local_log_file_name = (
-                    serve_utils.generate_replica_local_log_file_name(
-                        self.service_name, replica_id))
                 os.rename(log_file, local_log_file_name)
-
-        if sync_down_logs:
-            _sync_down_logs()
+            else:
+                pathlib.Path(local_log_file_name).touch()
 
         logger.info(f'Terminating replica {replica_id}...')
         info = serve_state.get_replica_info_from_id(self.service_name,
                                                     replica_id)
         assert info is not None
+
+        if sync_down_logs:
+            _sync_down_logs(info)
+
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
