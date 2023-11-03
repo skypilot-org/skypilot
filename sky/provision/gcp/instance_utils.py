@@ -44,12 +44,12 @@ def _retry_on_http_exception(
     """Retry a function call n-times for as long as it throws an exception."""
 
     def dec(func):
-        from googleapiclient.errors import HttpError
-
-        exception = HttpError
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            from googleapiclient.errors import HttpError
+
+            exception = HttpError
 
             def try_catch_exc():
                 try:
