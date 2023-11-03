@@ -209,6 +209,12 @@ def get_service_schema():
                     'auto_restart': {
                         'type': 'boolean',
                     },
+                    'spot_placement': {
+                        'type': 'string'
+                    },
+                    'spot_zones': {
+                        'type': 'array'
+                    }
                 }
             },
             'replicas': {

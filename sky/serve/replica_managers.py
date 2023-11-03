@@ -23,6 +23,7 @@ from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve import spot_policy
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -42,6 +43,7 @@ _RETRY_INIT_GAP_SECONDS = 60
 
 def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
+                   overwrite_dict: Dict[str, str],
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -54,6 +56,10 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     task = sky.Task.from_yaml(task_yaml_path)
+    if overwrite_dict:
+        for resource in task.resources:
+            if 'zone' in overwrite_dict:
+                resource.set_zone(overwrite_dict['zone'])
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
@@ -394,7 +400,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-
+        self.spot_placer: Optional[
+            spot_policy.SpotPlacer] = spot_policy.SpotPlacer(
+                spec.spot_zones, spec.spot_placement
+            ) if spec.spot_zones and spec.spot_placement else None
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -412,6 +421,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replicas.add(info.ip)
         return ready_replicas
 
+    def _generate_launch_overwrite_dict(self) -> Dict[str, str]:
+        overwrite_dict = {}
+        if self.spot_placer is not None:
+            zone = self.spot_placer.get_next_zone()
+            overwrite_dict['zone'] = zone
+        return overwrite_dict
+
     def _launch_replica(self, replica_id: int) -> None:
         if replica_id in self.launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
@@ -422,12 +438,13 @@ class SkyPilotReplicaManager(ReplicaManager):
             self.service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self.service_name, replica_id)
+        overwrite_dict = self._generate_launch_overwrite_dict()
         p = multiprocessing.Process(
             target=serve_utils.RedirectOutputTo(
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self.task_yaml_path, cluster_name),
+            args=(self.task_yaml_path, cluster_name, overwrite_dict),
         )
         p.start()
         self.launch_process_pool[replica_id] = p
@@ -510,6 +527,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert info is not None
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self.service_name, replica_id, info)
+        if (self.spot_placer is not None and info.handle is not None and
+                info.handle.launched_resources is not None):
+            self.spot_placer.handle_preemption(
+                info.handle.launched_resources.zone)
         self._terminate_replica(replica_id, sync_down_logs=False)
 
     #################################

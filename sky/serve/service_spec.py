@@ -2,7 +2,7 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -26,6 +26,8 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
+        spot_placement: Optional[str] = None,
+        spot_zones: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -54,6 +56,8 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._auto_restart = auto_restart
+        self._spot_placement = spot_placement
+        self._spot_zones = spot_zones
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -115,6 +119,10 @@ class SkyServiceSpec:
                 'qps_lower_threshold', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
+            service_config['spot_placement'] = policy_section.get(
+                'spot_placement', None)
+            service_config['spot_zones'] = policy_section.get(
+                'spot_zones', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -164,7 +172,9 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
-
+        add_if_not_none('replica_policy', 'spot_placement',
+                        self._spot_placement)
+        add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         return config
 
     def probe_str(self):
@@ -228,3 +238,11 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def spot_placement(self) -> Optional[str]:
+        return self._spot_placement
+
+    @property
+    def spot_zones(self) -> Optional[List[str]]:
+        return self._spot_zones
