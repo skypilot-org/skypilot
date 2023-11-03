@@ -3,13 +3,13 @@ version: '3.8'
 services:
   gpu-app1:
     image: nvidia/cuda:11.5.2-runtime-ubuntu20.04
-    command: nvidia-smi
+    command: nvidia-smi # To keep the running in a loop, add -l 1
     deploy:
       resources:
         reservations:
           devices:
           - driver: nvidia
-            count: 1
+            device_ids: ['0']
             capabilities: [gpu]
 
   gpu-app2:
@@ -20,5 +20,5 @@ services:
         reservations:
           devices:
           - driver: nvidia
-            count: 1
+            device_ids: ['1'] # Allocates GPU ID 1 to this container. Inside the container, this will be visible as device id 0
             capabilities: [gpu]
