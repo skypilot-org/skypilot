@@ -101,7 +101,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name: str,
+def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     # NOTE: although google cloud instances have IDs, but they are
@@ -128,7 +128,7 @@ def run_instances(region: str, cluster_name: str,
         raise ValueError(f'Unknown node type {node_type}')
 
     PENDING_STATUS = ['PROVISIONING', 'STAGING']
-    filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name}
+    filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     # wait until all stopping instances are stopped/terminated
     while True:
@@ -195,7 +195,7 @@ def run_instances(region: str, cluster_name: str,
     if head_instance_id is None:
         if running_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name,
+                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 running_instances[0]['name'],
@@ -203,7 +203,7 @@ def run_instances(region: str, cluster_name: str,
             )
         elif pending_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name,
+                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 pending_instances[0]['name'],
@@ -212,12 +212,13 @@ def run_instances(region: str, cluster_name: str,
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
     if config.resume_stopped_nodes and len(exist_instances) > config.count:
-        raise RuntimeError('The number of running/stopped/stopping '
-                           f'instances combined ({len(exist_instances)}) in '
-                           f'cluster "{cluster_name}" is greater than the '
-                           f'number requested by the user ({config.count}). '
-                           'This is likely a resource leak. '
-                           'Use "sky down" to terminate the cluster.')
+        raise RuntimeError(
+            'The number of running/stopped/stopping '
+            f'instances combined ({len(exist_instances)}) in '
+            f'cluster "{cluster_name_on_cloud}" is greater than the '
+            f'number requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     to_start_count = (config.count - len(running_instances) -
                       len(pending_instances))
@@ -235,7 +236,7 @@ def run_instances(region: str, cluster_name: str,
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
-                cluster_name,
+                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 resumed_instance_ids[0],
@@ -243,7 +244,7 @@ def run_instances(region: str, cluster_name: str,
             )
 
     if to_start_count > 0:
-        results = resource.create_instances(cluster_name, project_id,
+        results = resource.create_instances(cluster_name_on_cloud, project_id,
                                             availability_zone,
                                             config.node_config, labels,
                                             to_start_count,
@@ -268,13 +269,13 @@ def run_instances(region: str, cluster_name: str,
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
                                   zone=availability_zone,
-                                  cluster_name=cluster_name,
+                                  cluster_name=cluster_name_on_cloud,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
 
 
-def wait_instances(region: str, cluster_name: str,
+def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
     # We already wait for the instances to be running in run_instances.
