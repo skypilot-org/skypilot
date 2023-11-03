@@ -134,6 +134,8 @@ class Azure(clouds.Cloud):
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
+        # TODO(tian): images for Azure is not well organized. We should refactor
+        # it to images.csv like AWS.
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
         # nvidia-driver: 535.54.03, cuda: 12.2
@@ -161,6 +163,10 @@ class Azure(clouds.Cloud):
 
         # ubuntu-2004 v21.11.04, the previous image we used in the past for
         # V1 HyperV instance before we change default image to ubuntu-hpc.
+        # In Azure, all instances with K80 (Standard_NC series), some
+        # instances with M60 (Standard_NV series) and some cpu instances
+        # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
+        # we use the previous image.
         if gen_version == 'V1':
             image_config = {
                 'image_publisher': 'microsoft-dsvm',
