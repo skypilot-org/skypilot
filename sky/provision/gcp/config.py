@@ -1,15 +1,10 @@
 """GCP configuration bootstrapping."""
 import copy
-import json
 import logging
 import time
 from typing import Dict, List, Set, Tuple
 
-from google.oauth2 import service_account
-from google.oauth2.credentials import Credentials as OAuthCredentials
-from googleapiclient import discovery
-from googleapiclient import errors
-
+from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision.gcp import instance_utils
 from sky.provision.gcp.constants import FIREWALL_RULES_REQUIRED
@@ -104,28 +99,28 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 
 def _create_crm(gcp_credentials=None):
-    return discovery.build('cloudresourcemanager',
-                           'v1',
-                           credentials=gcp_credentials,
-                           cache_discovery=False)
+    return gcp.build('cloudresourcemanager',
+                     'v1',
+                     credentials=gcp_credentials,
+                     cache_discovery=False)
 
 
 def _create_iam(gcp_credentials=None):
-    return discovery.build('iam',
-                           'v1',
-                           credentials=gcp_credentials,
-                           cache_discovery=False)
+    return gcp.build('iam',
+                     'v1',
+                     credentials=gcp_credentials,
+                     cache_discovery=False)
 
 
 def _create_compute(gcp_credentials=None):
-    return discovery.build('compute',
-                           'v1',
-                           credentials=gcp_credentials,
-                           cache_discovery=False)
+    return gcp.build('compute',
+                     'v1',
+                     credentials=gcp_credentials,
+                     cache_discovery=False)
 
 
 def _create_tpu(gcp_credentials=None):
-    return discovery.build(
+    return gcp.build(
         'tpu',
         TPU_VERSION,
         credentials=gcp_credentials,
@@ -160,20 +155,7 @@ def construct_clients_from_provider_config(provider_config):
 
     cred_type = gcp_credentials['type']
     credentials_field = gcp_credentials['credentials']
-
-    if cred_type == 'service_account':
-        # If parsing the gcp_credentials failed, then the user likely made a
-        # mistake in copying the credentials into the config yaml.
-        try:
-            service_account_info = json.loads(credentials_field)
-        except json.decoder.JSONDecodeError:
-            raise RuntimeError('gcp_credentials found in cluster yaml file but '
-                               'formatted improperly.')
-        credentials = service_account.Credentials.from_service_account_info(
-            service_account_info)
-    elif cred_type == 'credentials_token':
-        # Otherwise the credentials type must be credentials_token.
-        credentials = OAuthCredentials(credentials_field)
+    credentials = gcp.get_credentials(cred_type, credentials_field)
 
     tpu_resource = (_create_tpu(credentials) if provider_config.get(
         HAS_TPU_PROVIDER_FIELD, False) else None)
@@ -675,7 +657,7 @@ def _list_subnets(project_id: str, region: str, compute, filter=None):
 def _get_project(project_id: str, crm):
     try:
         project = crm.projects().get(projectId=project_id).execute()
-    except errors.HttpError as e:
+    except gcp.http_error_exception() as e:
         if e.resp.status != 403:
             raise
         project = None
@@ -700,7 +682,7 @@ def _get_service_account(account: str, project_id: str, iam):
     try:
         service_account = iam.projects().serviceAccounts().get(
             name=full_name).execute()
-    except errors.HttpError as e:
+    except gcp.http_error_exception() as e:
         if e.resp.status not in [403, 404]:
             # SkyPilot: added 403, which means the service account doesn't exist,
             # or not accessible by the current account, which is fine, as we do the
