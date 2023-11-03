@@ -191,7 +191,8 @@ def _start(service_name: str, task_yaml: str, job_id: int):
                 target=serve_utils.RedirectOutputTo(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port))
+                args=(controller_addr, load_balancer_port,
+                      service_spec.load_balancing_policy))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)

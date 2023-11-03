@@ -9,7 +9,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -164,7 +164,8 @@ class ReplicaStatusProperty:
     # when `sky.launch` is called.
     sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
     user_app_failed: bool = False
-    service_ready_now: bool = False
+    # TODO(tian): Rename this variable.
+    service_ready_now: Optional[float] = None
     # None means readiness probe is not passed yet.
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
@@ -193,7 +194,7 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
-        if not self.service_ready_now:
+        if self.service_ready_now is None:
             return False
         return self.first_ready_time is not None
 
@@ -223,7 +224,7 @@ class ReplicaStatusProperty:
             if self.first_ready_time is None:
                 # initial delay seconds exceeded
                 return serve_state.ReplicaStatus.FAILED
-            if not self.service_ready_now:
+            if self.service_ready_now is None:
                 # Max continuous failure exceeded
                 return serve_state.ReplicaStatus.FAILED
             if self.sky_launch_status == ProcessStatus.FAILED:
@@ -239,7 +240,7 @@ class ReplicaStatusProperty:
             # executing. It is also a potential resource leak, so we mark
             # it as FAILED_CLEANUP.
             return serve_state.ReplicaStatus.FAILED_CLEANUP
-        if self.service_ready_now:
+        if self.service_ready_now is not None:
             # Service is ready
             return serve_state.ReplicaStatus.READY
         if self.user_app_failed:
@@ -352,14 +353,16 @@ class ReplicaInfo:
         self,
         readiness_path: str,
         post_data: Optional[Dict[str, Any]],
-    ) -> Tuple['ReplicaInfo', bool, float]:
+    ) -> Tuple['ReplicaInfo', Optional[float], float]:
         """Probe the readiness of the replica.
 
         Returns:
-            Tuple of (self, is_ready, probe_time).
+            Tuple of (self, latency, probe_time). Whether latency is None
+            represent the probe failed or not.
         """
         replica_identity = f'replica {self.replica_id} with url {self.url}'
         probe_time = time.time()
+        latency = None
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
@@ -375,6 +378,7 @@ class ReplicaInfo:
                 response = requests.get(
                     readiness_probe_url,
                     timeout=serve_constants.READINESS_PROBE_TIMEOUT)
+            latency = time.time() - probe_time
             msg += (f' request to {replica_identity} returned status '
                     f'code {response.status_code}')
             if response.status_code == 200:
@@ -384,12 +388,12 @@ class ReplicaInfo:
             logger.info(msg)
             if response.status_code == 200:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
-                return self, True, probe_time
+                return self, latency, probe_time
         except requests.exceptions.RequestException as e:
             logger.info(e)
             logger.info(f'{replica_identity.capitalize()} is not ready.')
             pass
-        return self, False, probe_time
+        return self, latency, probe_time
 
 
 class ReplicaManager:
@@ -412,8 +416,8 @@ class ReplicaManager:
         logger.info(f'Initial delay seconds: {self.initial_delay_seconds}')
         logger.info(f'Post data: {self.post_data}')
 
-    def get_ready_replica_urls(self) -> Set[str]:
-        """Get all ready replica's URL."""
+    def get_ready_replica_url_to_info(self) -> Dict[str, Any]:
+        """Get all ready replica's URL and corresponding info."""
         raise NotImplementedError
 
     def scale_up(self, n: int) -> None:
@@ -445,14 +449,14 @@ class SkyPilotReplicaManager(ReplicaManager):
     # Replica management functions #
     ################################
 
-    def get_ready_replica_urls(self) -> Set[str]:
-        ready_replicas = set()
+    def get_ready_replica_url_to_info(self) -> Dict[str, Any]:
+        url2info = dict()
         infos = serve_state.get_replica_infos(self.service_name)
         for info in infos:
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
-                ready_replicas.add(info.url)
-        return ready_replicas
+                url2info[info.url] = info.status_property.service_ready_now
+        return url2info
 
     def _launch_replica(self, replica_id: int) -> None:
         if replica_id in self.launch_process_pool:
@@ -718,11 +722,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         # object as well, so that we could update the info object in the
         # same order.
         for future in futures.as_completed(probe_futures):
-            future_result: Tuple[ReplicaInfo, bool, float] = future.result()
-            info, probe_succeeded, probe_time = future_result
-            info.status_property.service_ready_now = probe_succeeded
+            future_result: Tuple[ReplicaInfo, Optional[float],
+                                 float] = future.result()
+            info, latency, probe_time = future_result
+            info.status_property.service_ready_now = latency
             should_teardown = False
-            if probe_succeeded:
+            if latency is not None:
                 if self.uptime is None:
                     self.uptime = probe_time
                     logger.info(f'Replica {info.replica_id} is the first ready '

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from sky.serve import constants
+from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -26,6 +27,7 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
+        load_balancing_policy: str = lb_policies.DEFAULT_POLICY_NAME,
         existing_endpoints: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
@@ -55,6 +57,7 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._auto_restart = auto_restart
+        self._load_balancing_policy = load_balancing_policy
         self._existing_endpoints = existing_endpoints
 
     @staticmethod
@@ -69,6 +72,8 @@ class SkyServiceSpec:
 
         service_config = {}
         service_config['replica_port'] = config['port']
+        service_config['load_balancing_policy'] = config.get(
+            'load_balancing_policy', lb_policies.DEFAULT_POLICY_NAME)
         service_config['existing_endpoints'] = config.get(
             'existing_endpoints', None)
 
@@ -157,6 +162,8 @@ class SkyServiceSpec:
                     config[section][key] = value
 
         add_if_not_none('port', None, int(self.replica_port))
+        add_if_not_none('load_balancing_policy', None,
+                        self._load_balancing_policy)
         add_if_not_none('existing_endpoints', None, self.existing_endpoints)
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
         add_if_not_none('readiness_probe', 'initial_delay_seconds',
@@ -195,6 +202,7 @@ class SkyServiceSpec:
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
             Replica auto restart:             {self.auto_restart}
+            Load Balancing policy:            {self.load_balancing_policy}
             Existing Endpoints:               {existing_endpoints_str}\
         """)
 
@@ -233,6 +241,10 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def load_balancing_policy(self) -> str:
+        return self._load_balancing_policy
 
     @property
     def existing_endpoints(self) -> Optional[List[str]]:

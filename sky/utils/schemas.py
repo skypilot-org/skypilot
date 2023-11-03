@@ -156,6 +156,8 @@ def get_storage_schema():
 
 
 def get_service_schema():
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import load_balancing_policies as lb_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -194,6 +196,10 @@ def get_service_schema():
                         }
                     }
                 }]
+            },
+            'load_balancing_policy': {
+                'type': 'string',
+                'case_insensitive_enum': list(lb_policies.POLICIES.keys()),
             },
             'replica_policy': {
                 'type': 'object',

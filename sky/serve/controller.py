@@ -97,8 +97,8 @@ class SkyServeController:
                                      'RequestRateAutoscaler.')
                 self.autoscaler.update_request_information(request_information)
             return {
-                'ready_replica_urls':
-                    self.replica_manager.get_ready_replica_urls()
+                'ready_replicas':
+                    self.replica_manager.get_ready_replica_url_to_info()
             }
 
         @self.app.on_event('startup')

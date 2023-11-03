@@ -25,18 +25,20 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
+    def __init__(self, controller_url: str, load_balancer_port: int,
+                 load_balancing_policy_name: str) -> None:
         """Initialize the load balancer.
 
         Args:
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
+            load_balancing_policy_name: The name of the load balancing policy.
         """
         self.app = fastapi.FastAPI()
         self.controller_url = controller_url
         self.load_balancer_port = load_balancer_port
         self.load_balancing_policy: lb_policies.LoadBalancingPolicy = (
-            lb_policies.RoundRobinPolicy())
+            lb_policies.POLICIES[load_balancing_policy_name]())
         self.request_information: serve_utils.RequestInformation = (
             serve_utils.RequestTimestamp())
 
@@ -66,14 +68,13 @@ class SkyServeLoadBalancer:
                     # Clean up after reporting request information to avoid OOM.
                     self.request_information.clear()
                     response.raise_for_status()
-                    ready_replica_urls = response.json().get(
-                        'ready_replica_urls')
+                    ready_replicas = response.json().get('ready_replicas')
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Replica URLs: {ready_replica_urls}')
+                    logger.info(f'Available Replica to info: {ready_replicas}')
                     self.load_balancing_policy.set_ready_replicas(
-                        ready_replica_urls)
+                        ready_replicas)
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL)
 
     async def _redirect_handler(self, request: fastapi.Request):
@@ -109,7 +110,10 @@ class SkyServeLoadBalancer:
         uvicorn.run(self.app, host='0.0.0.0', port=self.load_balancer_port)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int):
-    load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)
+def run_load_balancer(controller_addr: str, load_balancer_port: int,
+                      load_balancing_policy_name: str) -> None:
+    load_balancer = SkyServeLoadBalancer(
+        controller_url=controller_addr,
+        load_balancer_port=load_balancer_port,
+        load_balancing_policy_name=load_balancing_policy_name)
     load_balancer.run()
