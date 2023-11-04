@@ -1,7 +1,10 @@
-# SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
+# SkyServe YAML to run stable diffusion web tool.
 #
 # Usage:
-#   ..
+#   sky serve up -n sd examples/serve/stable_diffusion_service.yaml
+# Then visit the endpoint printed in the console. You could also
+# check the endpoint by running:
+#   sky serve status --endpoint sd
 
 service:
   port: 7860

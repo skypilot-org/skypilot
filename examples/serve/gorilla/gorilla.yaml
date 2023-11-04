@@ -1,3 +1,13 @@
+# SkyServe YAML to run gorilla LLM.
+#
+# Usage:
+#   sky serve up -n gorilla examples/serve/gorilla/gorilla.yaml
+# Then go to the examples/serve/gorilla/use_gorilla.ipynb
+# and follow the instructions there.
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint gorilla
+
 service:
   port: 8087
   readiness_probe:

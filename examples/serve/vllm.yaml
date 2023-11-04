@@ -1,3 +1,11 @@
+# SkyServe YAML to run vLLM with Vicuna LLM.
+#
+# Usage:
+#   sky serve up -n vllm examples/serve/vllm.yaml
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint vllm
+
 service:
   port: 8081
   readiness_probe:

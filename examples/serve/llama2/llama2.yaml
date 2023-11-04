@@ -1,3 +1,15 @@
+# SkyServe YAML to run Llama2 LLM.
+#
+# Usage: replace the <your-huggingface-token> with
+# your huggingface token, and run:
+#   sky serve up -n llama2 examples/serve/llama2/llama2.yaml
+# Then run the following command to interact with
+# the model:
+#   python3 examples/serve/llama2/chat.py
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint llama2
+
 service:
   port: 8087
   readiness_probe: /v1/models

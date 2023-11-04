@@ -1,3 +1,5 @@
+# Usage: Please refer to the README.md in this directory.
+
 service:
   port: 9000
   readiness_probe:

@@ -1,3 +1,11 @@
+# SkyServe YAML to run HuggingFace TGI with WizardLM/WizardCoder-15B-V1.0.
+#
+# Usage:
+#   sky serve up -n tgi examples/serve/tgi_coder.yaml
+# Then visit the endpoint printed in the console. You could also
+# check the endpoint by running:
+#   sky serve status --endpoint tgi
+
 service:
   port: 8082
   readiness_probe: /health
