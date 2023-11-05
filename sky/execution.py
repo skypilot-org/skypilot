@@ -1078,6 +1078,7 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
         backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=controller_file.name)
+        # TODO(tian): Probably we should support customizable setup commands.
         controller_task = task_lib.Task.from_yaml(controller_file.name)
         controller_task.set_resources(controller_resources)
 
