@@ -78,7 +78,9 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
         """)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
     _reload_config()
-    _check_empty_config()
+    proxy_config = skypilot_config.get_nested(
+        ('aws', 'ssh_proxy_command', 'eu-west-1'), 'default')
+    assert proxy_config is None, proxy_config
 
 
 def test_invalid_field_config(monkeypatch, tmp_path) -> None:
