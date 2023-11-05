@@ -63,9 +63,6 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
-                                                         'supported in '
-                                                         'Kubernetes.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
                                                        'supported in '
                                                        'Kubernetes.'
@@ -207,7 +204,7 @@ class Kubernetes(clouds.Cloud):
         if resources.image_id:
             # Use custom image specified in resources
             image_id_with_region = resources.image_id['kubernetes']
-            image_id = image_id_with_region[len('kubernetes:'):]
+            image_id = image_id_with_region[len('docker:'):]
         else:
             # Select image based on whether we are using GPUs or not.
             image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
