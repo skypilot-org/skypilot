@@ -57,6 +57,7 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _reload_config()
     _check_empty_config()
 
+
 def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file is empty."""
     with open(tmp_path / 'valid.yaml', 'w') as f:
@@ -78,6 +79,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
     _reload_config()
     _check_empty_config()
+
 
 def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains unknown field."""
