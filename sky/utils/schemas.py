@@ -324,8 +324,12 @@ def get_config_schema():
                             'required': [],
                             'additionalProperties': {
                                 'anyOf': [
-                                    {'type': 'string'},
-                                    {'type': 'null'},
+                                    {
+                                        'type': 'string'
+                                    },
+                                    {
+                                        'type': 'null'
+                                    },
                                 ]
                             }
                         }]
