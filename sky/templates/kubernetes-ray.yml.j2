@@ -274,14 +274,14 @@ setup_commands:
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
-  - {{ conda_installation_commands }}
-    sudo apt install gcc patch pciutils nano fuse python3 python3-pip -y;
+  - sudo apt install gcc patch pciutils nano fuse python3 python3-pip -y;
     pip3 install wheel Click colorama cryptography jinja2 jsonschema && pip3 install networkx oauth2client pandas pendulum PrettyTable && pip3 install rich tabulate filelock && pip3 install packaging 'protobuf<4.0.0' pulp && pip3 install awscli boto3 pycryptodome==3.12.0 && pip3 install docker kubernetes;
     pip3 install "skypilot[aws]";
     mkdir -p ~/.ssh; sudo touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+    {{ conda_installation_commands }} conda init;
     source ~/.bashrc;
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && sudo touch ~/.sudo_as_admin_successful;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
