@@ -336,15 +336,15 @@ class KubernetesNodeProvider(NodeProvider):
         check_k8s_user_sudo_cmd = [
             '/bin/sh', '-c',
             ('if [ $(id -u) -eq 0 ]; then'
-            '  echo \'alias sudo=""\' >> ~/.bashrc; '
-            'else '
-            '  if command -v sudo >/dev/null 2>&1; then '
-            '    timeout 2 sudo -l >/dev/null 2>&1 || '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  else '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  fi; '
-            'fi')
+             '  echo \'alias sudo=""\' >> ~/.bashrc; '
+             'else '
+             '  if command -v sudo >/dev/null 2>&1; then '
+             '    timeout 2 sudo -l >/dev/null 2>&1 || '
+             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+             '  else '
+             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+             '  fi; '
+             'fi')
         ]
 
         for new_node in new_nodes:
