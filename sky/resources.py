@@ -160,7 +160,7 @@ class Resources:
         # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {None: image_id.strip()}
+            self._image_id = {self._region: image_id.strip()}
         elif isinstance(image_id, dict):
             if None in image_id:
                 self._image_id = {None: image_id[None].strip()}
