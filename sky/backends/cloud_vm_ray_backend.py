@@ -81,6 +81,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.Local: 90,
     clouds.OCI: 300,
+    clouds.Kubernetes: 300,
 }
 
 # Time gap between retries after failing to provision in all possible places.
@@ -783,7 +784,16 @@ class RetryingVmProvisioner(object):
         else:
             # No such structured error response found.
             assert not exception_list, stderr
-            if 'was not found' in stderr:
+            if 'Head node fetch timed out' in stderr:
+                # Example: click.exceptions.ClickException: Head node fetch
+                # timed out. Failed to create head node.
+                # This is a transient error, but we have retried in need_ray_up
+                # and failed.  So we skip this zone.
+                logger.info('Got \'Head node fetch timed out\' in '
+                            f'{zone.name}.')
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif 'was not found' in stderr:
                 # Example: The resource
                 # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
                 # was not found.
@@ -890,7 +900,16 @@ class RetryingVmProvisioner(object):
                 in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
         ]
         if not errors:
-            if 'rsync: command not found' in stderr:
+            if 'Head node fetch timed out' in stderr:
+                # Example: click.exceptions.ClickException: Head node fetch
+                # timed out. Failed to create head node.
+                # This is a transient error, but we have retried in need_ray_up
+                # and failed.  So we skip this region.
+                logger.info('Got \'Head node fetch timed out\' in '
+                            f'{region.name}.')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=region.name))
+            elif 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
             logger.info('====== stdout ======')
@@ -1911,6 +1930,14 @@ class RetryingVmProvisioner(object):
                         'Retrying due to list request rate limit exceeded.')
                     return True
 
+                # https://github.com/skypilot-org/skypilot/issues/2666
+                if ('Head node fetch timed out. Failed to create head node.'
+                        in stderr):
+                    logger.info(
+                        'Retrying head node provisioning due to head fetching '
+                        'timeout.')
+                    return True
+
                 # https://github.com/skypilot-org/skypilot/issues/1797
                 # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
                 pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
@@ -1918,9 +1945,19 @@ class RetryingVmProvisioner(object):
                 result = re.search(pattern, stderr)
                 if result is not None:
                     # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info(
-                        'Retrying due to the possibly flaky RESOURCE_NOT_FOUND '
-                        'error.')
+                    logger.info('Retrying due to the possibly transient '
+                                'RESOURCE_NOT_FOUND error.')
+                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
+                    return True
+
+                # "The resource 'projects/skypilot-375900/regions/us-central1/subnetworks/default' is not ready". Details: "[{'message': "The resource 'projects/xxx/regions/us-central1/subnetworks/default' is not ready", 'domain': 'global', 'reason': 'resourceNotReady'}]"> # pylint: disable=line-too-long
+                pattern = (r'is not ready(.*)\'reason\': \'resourceNotReady\'')
+                result = re.search(pattern, stderr)
+                if result is not None:
+                    # Retry. Unlikely will succeed if it's due to no capacity.
+                    logger.info('Retrying due to the possibly transient '
+                                'resourceNotReady error.')
+                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
             if isinstance(to_provision_cloud, clouds.Lambda):
@@ -2867,8 +2904,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     provisioner.ClusterName(handle.cluster_name,
                                             handle.cluster_name_on_cloud),
                     handle.cluster_yaml,
-                    local_wheel_path=local_wheel_path,
-                    wheel_hash=wheel_hash,
                     provision_record=provision_record,
                     custom_resource=resources_vars.get('custom_resources'),
                     log_dir=self.log_dir)
@@ -4585,8 +4620,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 else:
                     # Strip the command (a big heredoc) from the exception
                     raise exceptions.CommandError(
-                        e.returncode, command='to mount',
-                        error_msg=e.error_msg) from None
+                        e.returncode,
+                        command='to mount',
+                        error_msg=e.error_msg,
+                        detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
