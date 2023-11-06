@@ -649,22 +649,6 @@ class GCPCompute(GCPResource):
             .execute()
         )
         disk_name = response["disks"][0]["source"].split("/")[-1]
-        cur_size_gb = response["disks"][0]["diskSizeGb"]
-
-        # If the new disk size is the same as the existing disk size
-        # resizing is unnecessary
-        if int(new_size_gb) == int(cur_size_gb):
-            # Return empty dict instead of raising exception to not break
-            # ray down.
-            return {}
-
-        elif int(new_size_gb) < int(cur_size_gb):
-            logger.warning(
-                "Disk resize operation aborted: Specified new disk size (%s GB) is smaller than the current disk size (%s GB)",
-                new_size_gb,
-                cur_size_gb,
-            )
-            return {}
 
         try:
             # Execute the resize request and return the response
