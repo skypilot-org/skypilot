@@ -216,7 +216,7 @@ class IBM(clouds.Cloud):
         elif None in r.image_id:
             image_id = r.image_id[None]
         else:
-            image_id = r.image_id[region.name]  
+            image_id = r.image_id[region.name]
 
         return {
             'instance_type': r.instance_type,

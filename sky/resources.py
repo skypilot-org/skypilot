@@ -804,19 +804,21 @@ class Resources:
                     'explicitly specify the cloud.')
 
         if self._region is not None:
-            if self._region not in self._image_id and None not in self._image_id:
+            if (self._region not in self._image_id and
+                    None not in self._image_id):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
-                        f'for the specified region {self._region}.')
-            # Narrow down the image_id to the specified region.
-            self._image_id = {self._region: self._image_id[self._region]}
+                        f'for the specified region {self._region} or None.')
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
+            # For None, narrow down to self._region.
+            if region is None:
+                region = self._region
             if (image_id.startswith('skypilot:') and
                     not self._cloud.is_image_tag_valid(image_id, region)):
-                region_str = f' ({region})' if region else ''
+                region_str = f' ({region})' if region is not None else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Image tag {image_id!r} is not valid, please make sure'
