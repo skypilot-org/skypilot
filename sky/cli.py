@@ -136,9 +136,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if len(glob_storage) == 0:
             click.echo(f'Storage {storage_object} not found.')
-        else:
-            plural = 's' if len(glob_storage) > 1 else ''
-            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -3457,8 +3454,14 @@ def storage_ls(all: bool):
               is_flag=True,
               required=False,
               help='Delete all storage objects.')
+@click.option('--yes',
+              '-y',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip confirmation prompt.')
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3477,11 +3480,23 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
+        if not storages:
+            click.echo('No storage(s) to delete.')
+            return
         names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
+    if names:
+        if not yes:
+            storage_names = ', '.join(names)
+            storage_str = 'storages' if len(names) > 1 else 'storage'
+            click.confirm(
+                f'Deleting {len(names)} {storage_str}: '
+                f'{storage_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
 
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
