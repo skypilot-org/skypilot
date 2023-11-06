@@ -331,12 +331,46 @@ class KubernetesNodeProvider(NodeProvider):
                 break
             time.sleep(1)
 
+        # Checks if the default user has sufficient privilege to set up
+        # the kubernetes instance pod.
+        check_k8s_user_sudo_cmd = [
+            '/bin/sh', '-c',
+            ('if [ $(id -u) -eq 0 ]; then'
+            '  echo \'alias sudo=""\' >> ~/.bashrc; '
+            'else '
+            '  if command -v sudo >/dev/null 2>&1; then '
+            '    timeout 2 sudo -l >/dev/null 2>&1 || '
+            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+            '  else '
+            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+            '  fi; '
+            'fi')
+        ]
+
+        for new_node in new_nodes:
+            privilege_check = kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=check_k8s_user_sudo_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+                raise config.KubernetesError(
+                    'Insufficient system privileges detected. '
+                    'Ensure the default user has root access or '
+                    '"sudo" is installed and the user is added to the sudoers '
+                    'from the image.')
+
         # Setting up ssh for the pod instance. This is already setup for
         # the jump pod so it does not need to be run for it.
         set_k8s_ssh_cmd = [
             '/bin/sh', '-c',
             ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-             '$(prefix_cmd) apt install openssh-server -y; '
+             '$(prefix_cmd) apt install openssh-server rsync -y; '
              '$(prefix_cmd) mkdir -p /var/run/sshd; '
              '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
              '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
@@ -357,40 +391,6 @@ class KubernetesNodeProvider(NodeProvider):
                 stdout=True,
                 tty=False,
                 _request_timeout=kubernetes.API_TIMEOUT)
-
-        # Checks if the default user has sufficient privilege to set up
-        # the kubernetes instance pod.
-
-        check_k8s_user_sudo_cmd = [
-            '/bin/sh', '-c',
-            ('if [ $(id -u) -eq 0 ]; then'
-            '  echo \'alias sudo=""\' >> ~/.bashrc; '
-            'else '
-            '  if command -v sudo >/dev/null 2>&1; then '
-            '    timeout 2 sudo -l >/dev/null 2>&1 || '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  else '
-            f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-            '  fi; '
-            'fi')
-        ]
-        for new_node in new_nodes:
-            privilege_check = kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=check_k8s_user_sudo_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-                raise config.KubernetesError(
-                    'Insufficient system privileges detected. '
-                    'Ensure the default user has root access or '
-                    '"sudo" is installed and the user is added to the sudoers '
-                    'from the image.')
 
         # Once all containers are ready, we can exec into them and set env vars.
         # Kubernetes automatically populates containers with critical
