@@ -833,6 +833,9 @@ class Resources:
 
         # Validate the image exists and the size is smaller than the disk size.
         for region, image_id in self._image_id.items():
+            # For None, narrow down to self._region.
+            if region is None:
+                region = self._region
             # Check the image exists and get the image size.
             # It will raise ValueError if the image does not exist.
             image_size = self.cloud.get_image_size(image_id, region)
