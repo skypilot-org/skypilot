@@ -3,7 +3,7 @@ version: '3.8'
 services:
   gpu-app1:
     image: nvidia/cuda:11.5.2-runtime-ubuntu20.04
-    command: nvidia-smi # To keep the running in a loop, add -l 1
+    command: nvidia-smi # To keep running in a loop, add -l 1
     deploy:
       resources:
         reservations:
