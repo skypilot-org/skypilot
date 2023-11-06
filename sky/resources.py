@@ -160,7 +160,7 @@ class Resources:
         # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id.strip()}
+            self._image_id = {None: image_id.strip()}
         elif isinstance(image_id, dict):
             if None in image_id:
                 self._image_id = {None: image_id[None].strip()}
@@ -810,10 +810,14 @@ class Resources:
                     raise ValueError(
                         f'image_id {self._image_id} should contain the image '
                         f'for the specified region {self._region} or None.')
+            # Narrow down the image_id to the specified region, if multiple
+            # regions are specified.
+            if len(self._image_id) > 1:
+                self._image_id = {self._region: self._image_id[self._region]}
 
         # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
-            # For None, narrow down to self._region.
+            # For None, narrow down to self._region to check.
             if region is None:
                 region = self._region
             if (image_id.startswith('skypilot:') and
@@ -833,7 +837,7 @@ class Resources:
 
         # Validate the image exists and the size is smaller than the disk size.
         for region, image_id in self._image_id.items():
-            # For None, narrow down to self._region.
+            # For None, narrow down to self._region to check.
             if region is None:
                 region = self._region
             # Check the image exists and get the image size.
