@@ -905,4 +905,3 @@ class GCPTPU(GCPResource):
         to expand disk capacity. For more context on this requirement and its current status, refer to the related issue:
         #2387
         """
-        return {}
