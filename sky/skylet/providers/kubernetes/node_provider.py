@@ -307,7 +307,7 @@ class KubernetesNodeProvider(NodeProvider):
                     for container_status in pod.status.container_statuses:
                         waiting = container_status.state.waiting
                         if waiting and (waiting.reason == 'ErrImagePull' or
-                            waiting.reason == 'ImagePullBackOff'):
+                                        waiting.reason == 'ImagePullBackOff'):
                             raise config.KubernetesError(
                                 'Failed to pull docker image while '
                                 'launching the node. Please check '
