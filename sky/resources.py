@@ -834,20 +834,13 @@ class Resources:
             # Check the image exists and get the image size.
             # It will raise ValueError if the image does not exist.
             image_size = self.cloud.get_image_size(image_id, region)
-            if image_size > self.disk_size:
+            if image_size >= self.disk_size:
                 with ux_utils.print_exception_no_traceback():
+                    size_comparison = "larger" if image_size > self.disk_size else "equal"
                     raise ValueError(
                         f'Image {image_id!r} is {image_size}GB, which is '
-                        f'larger than the specified disk_size: {self.disk_size}'
-                        ' GB. Please specify a larger disk_size to use this '
-                        'image.')
-            elif image_size == self.disk_size:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Image {image_id!r} is {image_size}GB, which is '
-                        f'equal to the specified disk_size: {self.disk_size}'
-                        ' GB. Please specify a larger disk_size to use this '
-                        'image.')
+                        f'{size_comparison} than the specified disk_size: {self.disk_size}'
+                        ' GB. Please specify a larger disk_size to use this image.')
 
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
