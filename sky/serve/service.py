@@ -89,9 +89,13 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    task = task_lib.Task.from_yaml(task_yaml)
-    backend = cloud_vm_ray_backend.CloudVmRayBackend()
-    backend.teardown_ephemeral_storage(task)
+    try:
+        task = task_lib.Task.from_yaml(task_yaml)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        backend.teardown_ephemeral_storage(task)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to clean up storage: {e}')
+        failed = True
     return failed
 
 
