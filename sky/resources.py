@@ -764,10 +764,15 @@ class Resources:
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
             return None
-        if len(self.image_id) == 1 and self.region in self.image_id:
-            image_id = self.image_id[self.region]
-            if image_id.startswith('docker:'):
-                return image_id[len('docker:'):]
+        if len(self.image_id) == 1:
+            image_id = None
+            if self.region in self.image_id:
+                image_id = self.image_id[self.region]
+            elif None in self.image_id:
+                image_id = self.image_id[None]
+            if image_id is not None:
+                if image_id.startswith('docker:'):
+                    return image_id[len('docker:'):]
         return None
 
     def _try_validate_image_id(self) -> None:
