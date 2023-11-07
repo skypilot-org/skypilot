@@ -900,8 +900,7 @@ class GCPTPU(GCPResource):
         self, base_config: dict, instance_name: str, wait_for_operation: bool = True
     ) -> dict:
         """
-        TODO: Implement the functionality to attach persistent disks for expanding local disk capacity in TPU VMs.
-        Currently, the boot disk of TPU VMs is not resizable, and users need to add a persistent disk
-        to expand disk capacity. For more context on this requirement and its current status, refer to the related issue:
-        #2387
+        TODO: Implement the feature to attach persistent disks for TPU VMs.
+        The boot disk of TPU VMs is not resizable, and users need to add a
+        persistent disk to expand disk capacity. Related issue: #2387
         """
