@@ -216,7 +216,7 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
-        
+
         k8s_acc_label_key = None
         k8s_acc_label_value = None
 

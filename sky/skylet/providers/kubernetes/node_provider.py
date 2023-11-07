@@ -174,7 +174,7 @@ class KubernetesNodeProvider(NodeProvider):
                 new_node.metadata.name, self.namespace)
             pod_status = pod.status.phase
             # When there are multiple pods involved while launching instance,
-            # there may be a single pod causing issue while others are
+            # there may be a single pod causing issue while others successfully
             # scheduled. In this case, we make sure to not surface the error
             # message from the pod that is already scheduled.
             if pod_status != 'Pending':
@@ -410,7 +410,6 @@ class KubernetesNodeProvider(NodeProvider):
         # fail early if there is an error
         self._wait_for_pods_to_run(new_nodes)
         self._set_env_vars_in_pods(new_nodes)
-
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
