@@ -59,8 +59,8 @@ def launch_cluster(task_yaml_path: str,
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
         raise RuntimeError(
-            'Failed to launch the sky serve replica cluster '
-            f'{cluster_name} due to invalid task yaml file.') from e
+            f'Failed to launch the sky serve replica cluster {cluster_name} '
+            'due to failing to initialize sky.Task from yaml file.') from e
     retry_cnt = 0
     backoff = common_utils.Backoff(_RETRY_INIT_GAP_SECONDS)
     while True:
