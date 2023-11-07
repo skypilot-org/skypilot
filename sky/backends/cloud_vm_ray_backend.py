@@ -3401,7 +3401,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo see detailed info:\t\t'
                     f'{backend_utils.BOLD}sky serve status {sn} (-a)'
                     f'{backend_utils.RESET_BOLD}'
-                    '\nTo teardown the service:\t'
+                    '\nTo teardown the service:\t\t'
                     f'{backend_utils.BOLD}sky serve down {sn}'
                     f'{backend_utils.RESET_BOLD}'
                     '\n'
