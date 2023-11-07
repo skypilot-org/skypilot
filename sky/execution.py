@@ -205,6 +205,11 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+
+    Raises:
+      sky.exceptions.ResourcesMismatchError: if an existing cluster is given,
+      and the requested resources in the task is more demanding than the
+      existing cluster.
     """
     dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -745,15 +750,24 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        _execute(
-            entrypoint=controller_task,
-            stream_logs=stream_logs,
-            cluster_name=controller_name,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=spot.
-            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-        )
+        try:
+            _execute(
+                entrypoint=controller_task,
+                stream_logs=stream_logs,
+                cluster_name=controller_name,
+                detach_run=detach_run,
+                idle_minutes_to_autostop=spot.
+                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                retry_until_up=True,
+            )
+        except exceptions.ResourcesMismatchError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Found existing spot controller but ~/.sky/config.yaml '
+                    'specifies a different spot.controller.resources field.\n'
+                    'To change the spot controller\'s resources, `sky down` '
+                    'it first and redo `sky spot launch` for the configured '
+                    'resources to take effect.') from e
 
 
 def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
