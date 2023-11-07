@@ -26,8 +26,10 @@ class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
     CREDENTIAL_PATH = '~/.kube/config'
-    CONTEXT = 'gkeuse1'
-    _REPR = 'GKE Dev Cluster 1 (us-east1)'
+    CONTEXT = 'rise'
+    _REPR = 'RISELab Cluster'
+    PRIORITY_CLASS = 'low-priority'
+    COST = 0.0 if PRIORITY_CLASS == 'high-priority' else 0.00001
     SKY_SSH_KEY_SECRET_NAME = f'sky-ssh-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = f'sky-ssh-jump-{common_utils.get_user_hash()}'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
@@ -99,7 +101,7 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Investigate how users can provide their own cost catalog
         #  for Kubernetes clusters.
         # For now, assume zero cost for Kubernetes clusters
-        return 0.0
+        return self.COST
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -245,6 +247,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_context': self.CONTEXT,
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
+            'k8s_priority_class': self.PRIORITY_CLASS,
         }
         return deploy_vars
 
@@ -407,5 +410,7 @@ class Kubernetes(clouds.Cloud):
 
 @clouds.CLOUD_REGISTRY.register
 class Kubernetes2(Kubernetes):
-    _REPR = 'GKE Dev Cluster 2 (us-central1)'
-    CONTEXT = 'gkeusc1'
+    _REPR = 'BAIR Cluster'
+    CONTEXT = 'bair'
+    PRIORITY_CLASS = 'high-priority'
+    COST = 0.0 if PRIORITY_CLASS == 'high-priority' else 0.00001

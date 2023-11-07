@@ -159,6 +159,7 @@ available_node_types:
         - name: dev-fuse    # Required for fuse mounting
           hostPath:
             path: /dev/fuse
+        priorityClassName: {{k8s_priority_class}}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -244,6 +245,7 @@ available_node_types:
         - name: dev-fuse    # Required for fuse mounting
           hostPath:
             path: /dev/fuse
+        priorityClassName: {{k8s_priority_class}}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
