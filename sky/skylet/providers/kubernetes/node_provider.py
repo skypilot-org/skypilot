@@ -306,7 +306,7 @@ class KubernetesNodeProvider(NodeProvider):
                     # Iterate over each container in pod to check their status
                     for container_status in pod.status.container_statuses:
                         waiting = container_status.state.waiting
-                        if waiting and (waiting.reason == 'ErrImagePull' or \
+                        if waiting and (waiting.reason == 'ErrImagePull' or
                             waiting.reason == 'ImagePullBackOff'):
                             raise config.KubernetesError(
                                 'Failed to pull docker image while '
