@@ -8,6 +8,7 @@ import re
 import shlex
 import threading
 import time
+import traceback
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
                     TextIO, Type, TypeVar)
@@ -171,12 +172,19 @@ class RedirectOutputTo:
             # reconfigure logger since the logger is initialized before
             # with previous stdout/stderr
             sky_logging.reload_logger()
+            logger = sky_logging.init_logger(__name__)
             # The subprocess_util.run('sky status') inside
             # sky.execution::_execute cannot be redirect, since we cannot
             # directly operate on the stdout/stderr of the subprocess. This
             # is because some code in skypilot will specify the stdout/stderr
             # of the subprocess.
-            self.func(*args, **kwargs)
+            try:
+                self.func(*args, **kwargs)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Failed to run {self.func.__name__}. '
+                             f'Details: {common_utils.format_exception(e)}\n'
+                             f'Traceback:\n{traceback.format_exc()}')
+                raise
 
 
 def generate_remote_service_dir_name(service_name: str) -> str:
