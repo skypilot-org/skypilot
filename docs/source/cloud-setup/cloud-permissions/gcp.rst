@@ -28,7 +28,7 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/iam.securityAdmin
 
 .. note::
-    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, remove the role from the list above.
+    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, replace the role ``roles/iam.securityAdmin`` with ``roles/iam.roleViewer`` in the list above.
 
 
 Optionally, to use TPUs, add the following role:

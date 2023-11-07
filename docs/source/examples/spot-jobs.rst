@@ -3,6 +3,10 @@
 Managed Spot Jobs
 ================================================
 
+.. tip::
+
+  This feature is great for scaling out: running a single job for long durations, or running many jobs.
+
 SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
@@ -185,6 +189,10 @@ cost savings from spot instances without worrying about preemption or losing pro
 
   $ sky spot launch -n bert-qa bert_qa.yaml
 
+.. tip::
+
+  Try copy-paste this example and adapt it to your own job.
+
 
 Useful CLIs
 -----------
@@ -267,26 +275,34 @@ you can still tear it down manually with
 Customizing spot controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You may customize the resources of the spot controller for the following reasons:
+You may want to customize the resources of the spot controller for several reasons:
 
-1. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
-2. Changing the maximum number of spot jobs that can be run concurrently. (Default: 16)
-3. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
+1. Use a lower-cost controller (if you have a low number of concurrent spot jobs).
+2. Enforcing the spot controller to run on a specific location. (Default: cheapest location)
+3. Changing the maximum number of spot jobs that can be run concurrently, which is 2x the vCPUs of the controller. (Default: 16)
+4. Changing the disk_size of the spot controller to store more logs. (Default: 50GB)
 
 To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
 
 .. code-block:: yaml
 
   spot:
+    # NOTE: these settings only take effect for a new spot controller, not if
+    # you have an existing one.
     controller:
       resources:
-        # All configs below are optional
-        # 1. Specify the location of the spot controller.
+        # All configs below are optional.
+        # Specify the location of the spot controller.
         cloud: gcp
         region: us-central1
-        # 2. Specify the maximum number of spot jobs that can be run concurrently.
+        # Specify the maximum number of spot jobs that can be run concurrently.
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
-        # 3. Specify the disk_size of the spot controller.
+        # Specify the disk_size in GB of the spot controller.
         disk_size: 100
 
 The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+
+.. note::
+  These settings will not take effect if you have an existing controller (either
+  stopped or live).  For them to take effect, tear down the existing controller
+  first, which requires all in-progress spot jobs to finish or be canceled.
