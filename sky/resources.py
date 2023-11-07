@@ -836,11 +836,13 @@ class Resources:
             image_size = self.cloud.get_image_size(image_id, region)
             if image_size >= self.disk_size:
                 with ux_utils.print_exception_no_traceback():
-                    size_comparison = "larger" if image_size > self.disk_size else "equal"
+                    size_compare = 'larger than' if image_size > self.disk_size \
+                        else 'equal to'
                     raise ValueError(
                         f'Image {image_id!r} is {image_size}GB, which is '
-                        f'{size_comparison} than the specified disk_size: {self.disk_size}'
-                        ' GB. Please specify a larger disk_size to use this image.')
+                        f'{size_compare} the specified disk_size: '
+                        f'{self.disk_size} GB. Please specify a larger '
+                        'disk_size to use this image.')
 
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
