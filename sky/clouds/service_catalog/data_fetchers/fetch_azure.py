@@ -34,6 +34,8 @@ EXCLUDED_REGIONS = {
     'brazilus',
 }
 
+SINGLE_THREADED = False
+
 
 def get_regions() -> List[str]:
     """Get all available regions."""
@@ -149,12 +151,18 @@ def get_gpu_name(family: str) -> Optional[str]:
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
-    with mp_pool.Pool() as pool:
-        dfs = pool.map_async(get_pricing_df, region_set)
-        df_sku = pool.apply_async(get_sku_df, (region_set,))
-        dfs = dfs.get()
+    if SINGLE_THREADED:
+        dfs = [get_pricing_df(region) for region in region_set]
+        df_sku = get_sku_df(region_set)
         df = pd.concat(dfs)
-        df_sku = df_sku.get()
+    else:
+        with mp_pool.Pool() as pool:
+            dfs_result = pool.map_async(get_pricing_df, region_set)
+            df_sku_result = pool.apply_async(get_sku_df, (region_set,))
+
+            dfs = dfs_result.get()
+            df_sku = df_sku_result.get()
+            df = pd.concat(dfs)
 
     print('Processing dataframes')
     df.drop_duplicates(inplace=True)
@@ -259,7 +267,15 @@ if __name__ == '__main__':
     parser.add_argument('--exclude',
                         nargs='+',
                         help='Exclude the list of specified regions.')
+    parser.add_argument('--single-threaded',
+                        action='store_true',
+                        help='Run in single-threaded mode. This is useful when '
+                        'running in github action, as the multiprocessing '
+                        'does not work well with the azure client due '
+                        'to ssl issues.')
     args = parser.parse_args()
+
+    SINGLE_THREADED = args.single_threaded
 
     if args.regions:
         region_filter = set(args.regions) - EXCLUDED_REGIONS

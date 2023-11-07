@@ -166,7 +166,14 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 def validate_region_zone_impl(
         cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    """Validates whether region and zone exist in the catalog."""
+    """Validates whether region and zone exist in the catalog.
+
+    Returns:
+        A tuple of region and zone, if validated.
+
+    Raises:
+        ValueError: If region or zone is invalid or not supported.
+    """
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
@@ -194,7 +201,16 @@ def validate_region_zone_impl(
                 candidate_strs = _get_candidate_str(
                     region.lower(), df['Region'].str.lower().unique())
                 if not candidate_strs:
-                    error_msg += _get_all_supported_regions_str()
+                    if cloud_name in ('azure', 'gcp'):
+                        faq_msg = (
+                            '\nIf a region is not included in the following '
+                            'list, please check the FAQ docs for how to fetch '
+                            'its catalog info.\nhttps://skypilot.readthedocs.io'
+                            '/en/latest/reference/faq.html#advanced-how-to-'
+                            'make-skypilot-use-all-global-regions')
+                        error_msg += faq_msg + _get_all_supported_regions_str()
+                    else:
+                        error_msg += _get_all_supported_regions_str()
                     raise ValueError(error_msg)
                 error_msg += candidate_strs
                 raise ValueError(error_msg)
@@ -489,7 +505,7 @@ def list_accelerators_impl(
             'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
             'MemoryGiB'
         ],
-                            dropna=False).aggregate(min).reset_index()
+                            dropna=False).aggregate('min').reset_index()
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,

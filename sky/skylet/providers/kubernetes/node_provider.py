@@ -170,8 +170,16 @@ class KubernetesNodeProvider(NodeProvider):
         descriptive errors for better debugging and user feedback.
         """
         for new_node in new_nodes:
-            pod_status = new_node.status.phase
-            pod_name = new_node._metadata._name
+            pod = kubernetes.core_api().read_namespaced_pod(
+                new_node.metadata.name, self.namespace)
+            pod_status = pod.status.phase
+            # When there are multiple pods involved while launching instance,
+            # there may be a single pod causing issue while others are
+            # scheduled. In this case, we make sure to not surface the error
+            # message from the pod that is already scheduled.
+            if pod_status != 'Pending':
+                continue
+            pod_name = pod._metadata._name
             events = kubernetes.core_api().list_namespaced_event(
                 self.namespace,
                 field_selector=(f'involvedObject.name={pod_name},'
@@ -179,8 +187,8 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = \
-                sorted(events.items,
+            events_desc_by_time = sorted(
+                events.items,
                 key=lambda e: e.metadata.creation_timestamp,
                 reverse=True)
 
@@ -208,8 +216,8 @@ class KubernetesNodeProvider(NodeProvider):
                         lf.get_label_key()
                         for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     ]
-                    if new_node.spec.node_selector:
-                        for label_key in new_node.spec.node_selector.keys():
+                    if pod.spec.node_selector:
+                        for label_key in pod.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
@@ -218,17 +226,20 @@ class KubernetesNodeProvider(NodeProvider):
                                     'didn\'t match Pod\'s node affinity/selector' in event_message:
                                     raise config.KubernetesError(
                                         f'{lack_resource_msg.format(resource="GPU")} '
-                                        f'Verify if {new_node.spec.node_selector[label_key]}'
+                                        f'Verify if {pod.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
                 raise config.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
 
-    def wait_for_pods_to_schedule(self, new_nodes):
+    def _wait_for_pods_to_schedule(self, new_nodes):
         """Wait for all pods to be scheduled.
         
-        Failure to schedule before timeout would cause to raise an error.
+        Wait for all pods including jump pod to be ready, and if it
+        exceeds the timeout, raise an exception. If pod's container
+        is ContainerCreating, then we can assume that resources have been
+        allocated and we can exit.
         """
         start_time = time.time()
         while time.time() - start_time < self.timeout:
@@ -270,7 +281,7 @@ class KubernetesNodeProvider(NodeProvider):
                 'for pod scheduling failure. '
                 f'Error: {common_utils.format_exception(e)}') from None
 
-    def wait_for_pods_to_run(self, new_nodes):
+    def _wait_for_pods_to_run(self, new_nodes):
         """Wait for pods and their containers to be ready.
         
         Pods may be pulling images or may be in the process of container
@@ -310,7 +321,7 @@ class KubernetesNodeProvider(NodeProvider):
                 break
             time.sleep(1)
 
-    def set_env_vars_in_pods(self, new_nodes):
+    def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
         
         Once all containers are ready, we can exec into them and set env vars.
@@ -385,13 +396,21 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
+        # Adding the jump pod to the new_nodes list as well so it can be
+        # checked if it's scheduled and running along with other pod instances.
+        ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, self.namespace)
+        new_nodes.append(jump_pod)
+
         # Wait until the pods are scheduled and surface cause for error
         # if there is one
-        self.wait_for_pods_to_schedule(new_nodes)
+        self._wait_for_pods_to_schedule(new_nodes)
         # Wait until the pods and their containers are up and running, and
         # fail early if there is an error
-        self.wait_for_pods_to_run(new_nodes)
-        self.set_env_vars_in_pods(new_nodes)
+        self._wait_for_pods_to_run(new_nodes)
+        self._set_env_vars_in_pods(new_nodes)
+
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')

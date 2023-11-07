@@ -100,7 +100,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
                              accelerators={'tpu-v2-8': 1},
-                             accelerator_args={'runtime_version': '2.5.0'},
+                             accelerator_args={'runtime_version': '2.12.0'},
                              use_spot=False),
 }
 
@@ -136,9 +136,6 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if len(glob_storage) == 0:
             click.echo(f'Storage {storage_object} not found.')
-        else:
-            plural = 's' if len(glob_storage) > 1 else ''
-            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
@@ -564,7 +561,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         ctx.exit()
 
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
         click.secho(f'Shell completion installed for {value}', fg='green')
         click.echo(
             'Completion will take effect once you restart the terminal: ' +
@@ -1214,6 +1211,12 @@ def _add_command_alias_to_group(group, command, name, hidden):
               is_eager=True,
               help='Uninstall shell completion for the specified shell.')
 @click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
+@click.version_option(sky.__commit__,
+                      '--commit',
+                      '-c',
+                      prog_name='skypilot',
+                      message='%(prog)s, commit %(version)s',
+                      help='Show the commit hash and exit')
 def cli():
     pass
 
@@ -1691,6 +1694,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
     If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
 
+    If --ip is specified, show the IP address of the head node of the cluster.
+    Only available when CLUSTERS contains exactly one cluster, e.g.
+    ``sky status --ip mycluster``.
+
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
     command.
@@ -1751,6 +1758,10 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
         if ip:
+            if refresh:
+                raise click.UsageError(
+                    'Using --ip with --refresh is not supported for now. '
+                    'To fix, refresh first, then query the IP.')
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
@@ -2072,13 +2083,23 @@ def logs(
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
+        # Already check that len(job_ids) <= 1. This variable is used later
+        # in core.tail_logs.
         job_id = job_ids[0]
         if not job_id.isdigit():
             raise click.UsageError(f'Invalid job ID {job_id}. '
                                    'Job ID must be integers.')
+        job_ids_to_query = [int(job_id)]
+    else:
+        job_ids_to_query = job_ids
     if status:
-        job_statuses = core.job_status(cluster, job_ids)
+        job_statuses = core.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]
+        # If job_ids is None and no job has been submitted to the cluster,
+        # it will return {None: None}.
+        if job_id is None:
+            click.secho(f'No job found on cluster {cluster!r}.', fg='red')
+            sys.exit(1)
         job_status = list(job_statuses.values())[0]
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
@@ -3228,9 +3249,6 @@ def show_gpus(
     type is the lowest across all regions for both on-demand and spot
     instances. There may be multiple regions with the same lowest price.
     """
-    # validation for the --cloud kubernetes
-    if cloud == 'kubernetes':
-        raise click.UsageError('Kubernetes does not have a service catalog.')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
@@ -3261,6 +3279,11 @@ def show_gpus(
                 clouds=cloud,
                 region_filter=region,
             )
+
+            if len(result) == 0 and cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             # "Common" GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -3317,6 +3340,10 @@ def show_gpus(
                                                    case_sensitive=False)
 
         if len(result) == 0:
+            if cloud == 'kubernetes':
+                yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
+                return
+
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             yield f'Resources \'{name}\'{quantity_str} not found. '
@@ -3427,8 +3454,14 @@ def storage_ls(all: bool):
               is_flag=True,
               required=False,
               help='Delete all storage objects.')
+@click.option('--yes',
+              '-y',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Skip confirmation prompt.')
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3447,11 +3480,23 @@ def storage_delete(names: List[str], all: bool):  # pylint: disable=redefined-bu
     if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
+        if not storages:
+            click.echo('No storage(s) to delete.')
+            return
         names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
+    if names:
+        if not yes:
+            storage_names = ', '.join(names)
+            storage_str = 'storages' if len(names) > 1 else 'storage'
+            click.confirm(
+                f'Deleting {len(names)} {storage_str}: '
+                f'{storage_names}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
 
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
@@ -3485,8 +3530,8 @@ def admin_deploy(clusterspec_yaml: str):
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
     is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
-    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
-                                  'Invalid cluster YAML: ')
+    common_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                 'Invalid cluster YAML: ')
     if not is_yaml:
         raise ValueError('Must specify cluster config')
     assert yaml_config is not None, (is_yaml, yaml_config)
@@ -3688,7 +3733,7 @@ def spot_launch(
         dag.name = name
 
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-    dag_utils.fill_default_spot_config_in_dag(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     click.secho(
         f'Managed spot job {dag.name!r} will be launched on (estimated):',

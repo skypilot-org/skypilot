@@ -96,7 +96,7 @@ class Azure(clouds.Cloud):
         # GPUs, while the task specifies to use 1 GPU.
         return 0
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         # In general, query this from the cloud:
         #   https://azure.microsoft.com/en-us/pricing/details/bandwidth/
         # NOTE: egress from US East.

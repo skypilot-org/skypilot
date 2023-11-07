@@ -17,6 +17,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -48,7 +49,8 @@ class SkyletEvent:
             except Exception as e:  # pylint: disable=broad-except
                 # Keep the skylet running even if an event fails.
                 logger.error(f'{self.__class__.__name__} error: {e}')
-                logger.error(traceback.format_exc())
+                with ux_utils.enable_traceback():
+                    logger.error(traceback.format_exc())
 
     def _run(self):
         raise NotImplementedError
@@ -127,14 +129,20 @@ class AutostopEvent(SkyletEvent):
             config = common_utils.read_yaml(self._ray_yaml_path)
 
             provider_module = config['provider']['module']
-            provider_search = re.search(r'providers\.(.*)\.', provider_module)
+            # Examples:
+            #   'sky.skylet.providers.aws.AWSNodeProviderV2' -> 'aws'
+            #   'sky.provision.aws' -> 'aws'
+            provider_search = re.search(r'(?:providers|provision)\.(\w+)\.?',
+                                        provider_module)
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
-
-            if provider_name in ['aws', 'gcp']:
+            if provider_name in ('aws', 'gcp'):
+                logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)
                 return
+            logger.info('Not using new provisioner to stop the cluster. '
+                        f'Cloud of this cluster: {provider_name}')
 
             is_cluster_multinode = config['max_workers'] > 0
 

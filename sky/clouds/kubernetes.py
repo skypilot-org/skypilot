@@ -46,7 +46,8 @@ class Kubernetes(clouds.Cloud):
     _DEFAULT_MEMORY_CPU_RATIO = 1
     _DEFAULT_MEMORY_CPU_RATIO_WITH_GPU = 4  # Allocate more memory for GPU tasks
     _REPR = 'Kubernetes'
-    _regions: List[clouds.Region] = [clouds.Region('kubernetes')]
+    _SINGLETON_REGION = 'kubernetes'
+    _regions: List[clouds.Region] = [clouds.Region(_SINGLETON_REGION)]
     _CLOUD_UNSUPPORTED_FEATURES = {
         # TODO(romilb): Stopping might be possible to implement with
         #  container checkpointing introduced in Kubernetes v1.25. See:
@@ -55,10 +56,6 @@ class Kubernetes(clouds.Cloud):
                                                  'support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
                                                      'support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not '
-                                                       'supported by the '
-                                                       'Kubernetes '
-                                                       'implementation yet.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
@@ -66,8 +63,12 @@ class Kubernetes(clouds.Cloud):
                                                              'tiers are not '
                                                              'supported in '
                                                              'Kubernetes.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            ('Docker image is not supported in Kubernetes. ')
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
+                                                         'supported in '
+                                                         'Kubernetes.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Opening ports is not '
+                                                       'supported in '
+                                                       'Kubernetes.'
     }
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
@@ -215,7 +216,7 @@ class Kubernetes(clouds.Cloud):
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')
-
+        
         k8s_acc_label_key = None
         k8s_acc_label_value = None
 
@@ -325,7 +326,13 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        # Kubernetes doesn't have regions or zones, so we don't need to validate
+        if region != self._SINGLETON_REGION:
+            raise ValueError(
+                'Kubernetes support does not support setting region.'
+                ' Cluster used is determined by the kubeconfig.')
+        if zone is not None:
+            raise ValueError('Kubernetes support does not support setting zone.'
+                             ' Cluster used is determined by the kubeconfig.')
         return region, zone
 
     def accelerator_in_region_or_zone(self,

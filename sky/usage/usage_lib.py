@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -71,6 +72,7 @@ class UsageMessageToReport(MessageToReport):
         self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
+        self.sky_commit: str = sky.__commit__
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()
@@ -146,6 +148,7 @@ class UsageMessageToReport(MessageToReport):
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
         self.runtimes: Dict[str, float] = {}  # update_runtime
+        self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
@@ -418,9 +421,14 @@ def entrypoint_context(name: str, fallback: bool = False):
     # Should be the outermost entrypoint or the fallback entrypoint.
     try:
         yield
-    except (Exception, SystemExit, KeyboardInterrupt):
-        trace = traceback.format_exc()
-        messages.usage.stacktrace = trace
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
+        with ux_utils.enable_traceback():
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            messages.usage.exception = common_utils.remove_color(
+                common_utils.format_exception(e))
         raise
     finally:
         if fallback:

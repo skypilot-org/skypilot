@@ -34,10 +34,24 @@ proc = subprocess.run(
 running = (proc.returncode == 0)
 
 version_match = False
+found_version = None
 if os.path.exists(VERSION_FILE):
     with open(VERSION_FILE) as f:
-        if f.read().strip() == constants.SKYLET_VERSION:
+        found_version = f.read().strip()
+        if found_version == constants.SKYLET_VERSION:
             version_match = True
+
+version_string = (f' (found version {found_version}, new version '
+                  f'{constants.SKYLET_VERSION})')
+if not running:
+    print('Skylet is not running. Starting (version '
+          f'{constants.SKYLET_VERSION})...')
+elif not version_match:
+    print(f'Skylet is stale{version_string}. Restarting...')
+else:
+    print(
+        f'Skylet is running with the latest version {constants.SKYLET_VERSION}.'
+    )
 
 if not running or not version_match:
     restart_skylet()
