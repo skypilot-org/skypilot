@@ -215,7 +215,8 @@ class AbstractStore:
             sync_on_reconstruction: bool; Whether to sync data if the storage
               object is found in the global_user_state and reconstructed from
               there. This is set to false when the Storage object is created not
-              for direct use, e.g. for sky storage delete.
+              for direct use, e.g. for 'sky storage delete', or the storage is
+              being re-used, e.g., for `sky start` on a stopped cluster.
 
         Raises:
             StorageBucketCreateError: If bucket creation fails
@@ -434,7 +435,8 @@ class Storage(object):
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
             there. This is set to false when the Storage object is created not
-            for direct use, e.g. for sky storage delete or sky start.
+            for direct use, e.g. for 'sky storage delete', or the storage is
+            being re-used, e.g., for `sky start` on a stopped cluster.
         """
         self.name: str
         self.source = source
@@ -729,6 +731,9 @@ class Storage(object):
             # Following error is raised from _get_bucket and caught only when
             # an externally removed storage is attempted to be fetched.
             except exceptions.StorageExternalDeletionError:
+                logger.debug(f'Storage object, {self.name}, was attempted to '
+                             'be reconstructed while the corresponding bucket'
+                             ' was externally deleted.')
                 continue
 
             self._add_store(store, is_reconstructed=True)
@@ -1204,7 +1209,7 @@ class S3Store(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
-    def _get_bucket(self) -> Tuple[Optional[StorageHandle], bool]:
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the S3 bucket.
 
         If the bucket exists, this method will return the bucket.
@@ -1215,8 +1220,10 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
-            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
@@ -1657,8 +1664,10 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
-            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         try:
             bucket = self.client.get_bucket(self.name)
@@ -1922,7 +1931,7 @@ class R2Store(AbstractStore):
     def batch_aws_rsync(self,
                         source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
-        """Invokes aws s3 sync to batch upload a list of local paths to S3
+        """Invokes aws s3 sync to batch upload a list of local paths to R2
 
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
         increase parallelism, modify max_concurrent_requests in your aws config
@@ -2007,8 +2016,10 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
-            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         r2 = cloudflare.resource('s3')
         bucket = r2.Bucket(self.name)
@@ -2038,7 +2049,7 @@ class R2Store(AbstractStore):
         if isinstance(self.source, str) and self.source.startswith('r2://'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using '
                     '`AWS_SHARED_CREDENTIALS_FILE='
                     f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
@@ -2417,6 +2428,12 @@ class IBMCosStore(AbstractStore):
         Returns:
           StorageHandle(str): bucket name
           bool: indicates whether a new bucket was created.
+
+        Raises:
+            StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
 
         bucket_profile_name = Rclone.RcloneClouds.IBM.value + self.name
@@ -2449,7 +2466,7 @@ class IBMCosStore(AbstractStore):
             # bucket doesn't exist but source is a bucket URI
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.name} by providing URI. Consider using '
                     '`rclone lsd <remote>` on relevant remotes returned '
                     'via `rclone listremotes` to debug.')
