@@ -841,6 +841,13 @@ class Resources:
                         f'larger than the specified disk_size: {self.disk_size}'
                         ' GB. Please specify a larger disk_size to use this '
                         'image.')
+            elif image_size == self.disk_size:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Image {image_id!r} is {image_size}GB, which is '
+                        f'equal to the specified disk_size: {self.disk_size}'
+                        ' GB. Please specify a larger disk_size to use this '
+                        'image.')
 
     def _try_validate_disk_tier(self) -> None:
         if self.disk_tier is None:
