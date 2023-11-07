@@ -1911,9 +1911,6 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 result = future.get()
             except KeyboardInterrupt:
                 pool.terminate()
-                # Set to -1, so that the controller is not considered
-                # down, and the hint for showing sky spot queue
-                # will still be shown.
                 success = False
             return success, result
 
@@ -1927,6 +1924,9 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 if spot_jobs_success:
                     num_in_progress_jobs, msg = result
                 else:
+                    # Set to -1, so that the controller is not considered
+                    # down, and the hint for showing sky spot queue
+                    # will still be shown.
                     num_in_progress_jobs = -1
                     msg = 'KeyboardInterrupt'
 
