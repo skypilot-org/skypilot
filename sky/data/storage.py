@@ -746,8 +746,14 @@ class Storage(object):
         Used when reconstructing Storage object and AbstractStore objects from
         global_user_state.
         """
-        storage_obj = cls(name=override_args.get('name', metadata.storage_name),
-                          source=override_args.get('source', metadata.source),
+        # Name should not be specified if the source is a URI. Name will be
+        # be inferred from the URI.
+        source = override_args.get('source', metadata.source)
+        name = None
+        if not data_utils.is_cloud_store_url(source):
+            name = override_args.get('name', metadata.storage_name)
+            
+        storage_obj = cls(name=name, source=source,
                           sync_on_reconstruction=override_args.get(
                               'sync_on_reconstruction', True),
                           mode=override_args.get('mode', metadata.mode))
