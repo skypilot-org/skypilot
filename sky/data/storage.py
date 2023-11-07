@@ -852,8 +852,8 @@ class Storage(object):
                         warn_for_git_dir(source)
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Could not upload {self.source} to store '
-                         f'name {store.name}.')
+            logger.error(f'Could not upload {self.source!r} to store '
+                         f'name {store.name!r}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
                     self.name, StorageStatus.UPLOAD_FAILED)

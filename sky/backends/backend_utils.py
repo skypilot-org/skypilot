@@ -7,6 +7,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -292,8 +293,12 @@ def path_size_megabytes(path: str) -> int:
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
+        #
+        # We shlex.quote() because the path may contain spaces:
+        #   'my dir/.git/info/exclude'
+        # Without quoting rsync fails.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / command_runner.GIT_EXCLUDE))
+            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{command_runner.RSYNC_FILTER_OPTION} '
                      f'{git_exclude_filter} --dry-run {path!r}')
