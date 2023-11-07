@@ -173,7 +173,7 @@ class StorageModeError(StorageSpecError):
     pass
 
 
-class StorageExternalDeletionError(StorageError):
+class StorageExternalDeletionError(StorageBucketGetError):
     # Error raised when the bucket is attempted to be fetched while it has been
     # deleted externally.
     pass
