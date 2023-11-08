@@ -1063,7 +1063,7 @@ def serve_status(
         # When the controller is STOPPED, the head_ip will be None, as
         # it will be set in global_user_state.remove_cluster().
         # We do not directly check for UP because the controller may be
-        # in INIT state during another spot launch, but still have
+        # in INIT state during another `sky serve up`, but still have
         # head_ip available. In this case, we can still try to ssh
         # into the controller and fetch the job table.
         raise exceptions.ClusterNotUpError('Sky serve controller is not up.',
