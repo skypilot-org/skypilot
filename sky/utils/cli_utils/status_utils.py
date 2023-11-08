@@ -174,7 +174,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
     truncate_hint = ''
     if not show_all:
         if len(replica_records) > REPLICA_TRUNC_NUM:
-            truncate_hint = '... (use --all to show all replicas)\n'
+            truncate_hint = '\n... (use --all to show all replicas)'
         replica_records = replica_records[:REPLICA_TRUNC_NUM]
 
     columns = []
@@ -189,7 +189,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
                 row.append(status_column.calc(record))
         replica_table.add_row(row)
 
-    return f'{replica_table}\n{truncate_hint}'
+    return f'{replica_table}{truncate_hint}'
 
 
 def get_total_cost_of_displayed_records(
