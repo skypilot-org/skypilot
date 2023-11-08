@@ -836,8 +836,8 @@ class Resources:
             image_size = self.cloud.get_image_size(image_id, region)
             if image_size >= self.disk_size:
                 with ux_utils.print_exception_no_traceback():
-                    size_comp = ('larger than' if image_size > self.disk_size
-                                 else 'equal to')
+                    size_comp = ('larger than'
+                                 if image_size > self.disk_size else 'equal to')
                     raise ValueError(
                         f'Image {image_id!r} is {image_size}GB, which is '
                         f'{size_comp} the specified disk_size: '
