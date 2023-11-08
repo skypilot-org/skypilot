@@ -121,7 +121,7 @@ class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
     # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = ControllerSpec(
+    SPOT_CONTROLLER = _ControllerSpec(
         name='managed spot controller',
         cluster_name=spot_lib.SPOT_CONTROLLER_NAME,
         sky_status_hint=(
@@ -147,7 +147,7 @@ class Controllers(enum.Enum):
             f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
             'managed spot controller. '),
         default_hint_if_non_existent='No managed spot jobs are found.')
-    SKY_SERVE_CONTROLLER = ControllerSpec(
+    SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='sky serve controller',
         cluster_name=serve_lib.SKY_SERVE_CONTROLLER_NAME,
         sky_status_hint=(
