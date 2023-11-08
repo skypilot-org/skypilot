@@ -143,3 +143,36 @@ class ClusterInfo:
         if self.head_instance_id not in self.instances:
             raise ValueError('Head instance ID not in the cluster metadata.')
         return self.instances[self.head_instance_id]
+
+
+class Endpoint:
+    """Base class for endpoints."""
+    pass
+
+
+@dataclasses.dataclass
+class SocketEndpoint(Endpoint):
+    """Socket endpoint accesible via a host and a port."""
+    host: str
+    port: int
+
+    def __str__(self):
+        return f'{self.host}:{self.port}'
+
+
+@dataclasses.dataclass
+class HTTPEndpoint(Endpoint):
+    """HTTP endpoint accesible via a url."""
+    url: str
+
+    def __str__(self):
+        return self.url
+
+
+@dataclasses.dataclass
+class HTTPSEndpoint(Endpoint):
+    """HTTPS endpoint accesible via a url."""
+    url: str
+
+    def __str__(self):
+        return self.url

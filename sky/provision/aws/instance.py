@@ -800,12 +800,12 @@ def query_ports(
     ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[str, str]]:
+) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     del cluster_name_on_cloud, provider_config  # Unused.
-
-    result = {}
+    ports = list(resources_utils.port_ranges_to_set(ports))
+    result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
-        result[port] = f'{ip}:{port}', f'{ip}:{port}'
+        result[port] = [common.SocketEndpoint(host=ip, port=port)]
 
     return result

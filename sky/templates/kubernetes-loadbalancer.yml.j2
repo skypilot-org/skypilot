@@ -11,7 +11,8 @@ service_spec:
       {{ selector_key }}: {{ selector_value }}
     ports:
 {%- for port in ports %}
-    - port: {{ port }}
-      targetPort: {{ port }}
+    - port: {{ port | int }}
+      targetPort: {{ port | int }}
       protocol: TCP
+      name: port{{ port }}
 {%- endfor %}

@@ -145,7 +145,7 @@ def query_ports(
     ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[str, str]]:
+) -> Dict[int, List[common.Endpoint]]:
     """Query details about ports on a cluster.
 
     Returns a dict with port as the key and the value as the http and https url to access the port.

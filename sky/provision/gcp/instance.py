@@ -6,7 +6,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.provision import common
 from sky.provision.gcp import instance_utils
+from sky.utils.resources_utils import port_ranges_to_set
 
 logger = sky_logging.init_logger(__name__)
 
@@ -253,12 +255,12 @@ def query_ports(
     ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[str, str]]:
+) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     del cluster_name_on_cloud, provider_config  # Unused.
-
-    result = {}
+    ports = list(port_ranges_to_set(ports))
+    result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
-        result[port] = f'{ip}:{port}', f'{ip}:{port}'
+        result[port] = [common.SocketEndpoint(host=ip, port=port)]
 
     return result

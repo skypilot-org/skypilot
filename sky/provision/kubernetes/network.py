@@ -1,23 +1,25 @@
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import skypilot_config
+from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.utils import ux_utils
+from sky.utils.resources_utils import port_ranges_to_set
 
 _PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
 _LOADBALANCER_SERVICE_NAME = "{cluster_name_on_cloud}-skypilot-loadbalancer"
 
 
-def _get_port_mode() -> network_utils.KubernetesPortMode:
-    mode_str = skypilot_config.get_nested(
-        ('kubernetes', 'ports'),
-        network_utils.KubernetesPortMode.LOADBALANCER.value)
+def _get_port_mode(
+        provider_config: Dict[str, Any]) -> network_utils.KubernetesPortMode:
+    mode_str = provider_config.get(
+        "port_mode", network_utils.KubernetesPortMode.LOADBALANCER.value)
     try:
         port_mode = network_utils.KubernetesPortMode.from_str(mode_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
+            raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'
+                              + 'Please check the port_mode in provider config.') \
                 from None
 
     return port_mode
@@ -29,8 +31,9 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    port_mode = _get_port_mode()
-
+    assert provider_config is not None, 'provider_config is required'
+    port_mode = _get_port_mode(provider_config=provider_config)
+    ports = list(port_ranges_to_set(ports))
     if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
@@ -44,10 +47,9 @@ def open_ports(
 
 def _open_ports_using_loadbalancer(
     cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+    ports: List[int],
+    provider_config: Dict[str, Any],
 ) -> None:
-    assert provider_config is not None, 'provider_config is required'
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     content = network_utils.fill_loadbalancer_template(
@@ -65,15 +67,14 @@ def _open_ports_using_loadbalancer(
 
 def _open_ports_using_ingress(
     cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+    ports: List[int],
+    provider_config: Dict[str, Any],
 ) -> None:
     if not network_utils.ingress_controller_exists():
         raise Exception(
             "Ingress controller not found. Please install ingress controller first."
         )
 
-    assert provider_config is not None, 'provider_config is required'
     for port in ports:
         service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
         ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
@@ -107,7 +108,9 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    port_mode = _get_port_mode()
+    assert provider_config is not None, 'provider_config is required'
+    port_mode = _get_port_mode(provider_config=provider_config)
+    ports = list(port_ranges_to_set(ports))
     if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
@@ -120,9 +123,8 @@ def cleanup_ports(
 
 def _cleanup_ports_for_loadbalancer(
     cluster_name_on_cloud: str,
-    provider_config: Optional[Dict[str, Any]] = None,
+    provider_config: Dict[str, Any],
 ) -> None:
-    assert provider_config is not None, cluster_name_on_cloud
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     network_utils.delete_namespaced_service(
@@ -133,10 +135,9 @@ def _cleanup_ports_for_loadbalancer(
 
 def _cleanup_ports_for_ingress(
     cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
+    ports: List[int],
+    provider_config: Dict[str, Any],
 ) -> None:
-    assert provider_config is not None, cluster_name_on_cloud
     for port in ports:
         service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
         ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
@@ -155,12 +156,13 @@ def query_ports(
     ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[str, str]]:
+) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     del ip  # Unused.
-    port_mode = _get_port_mode()
+    assert provider_config is not None, 'provider_config is required'
+    port_mode = _get_port_mode(provider_config=provider_config)
+    ports = list(port_ranges_to_set(ports))
     if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
-        assert provider_config is not None, 'provider_config is required'
         return _query_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             ports=ports,
@@ -177,31 +179,34 @@ def query_ports(
 
 def _query_ports_for_loadbalancer(
     cluster_name_on_cloud: str,
-    ports: List[str],
+    ports: List[int],
     provider_config: Dict[str, Any],
-) -> Dict[str, Tuple[str, str]]:
-    result = {}
+) -> Dict[int, List[common.Endpoint]]:
+    result: Dict[int, List[common.Endpoint]] = {}
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     external_ip = network_utils.get_loadbalancer_ip(
         namespace=provider_config['namespace'], service_name=service_name)
     for port in ports:
-        result[port] = f"{external_ip}:{port}", f"{external_ip}:{port}"
+        result[port] = [common.SocketEndpoint(host=external_ip, port=port)]
 
     return result
 
 
 def _query_ports_for_ingress(
     cluster_name_on_cloud: str,
-    ports: List[str],
-) -> Dict[str, Tuple[str, str]]:
+    ports: List[int],
+) -> Dict[int, List[common.Endpoint]]:
     http_url, https_url = network_utils.get_base_url("ingress-nginx")
-    result = {}
+    result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
         path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
-        result[port] = os.path.join(http_url,
-                                    path_prefix.lstrip('/')), os.path.join(
-                                        https_url, path_prefix.lstrip('/'))
+        result[port] = [
+            common.HTTPEndpoint(
+                url=os.path.join(http_url, path_prefix.lstrip('/'))),
+            common.HTTPEndpoint(
+                url=os.path.join(https_url, path_prefix.lstrip('/'))),
+        ]
 
     return result

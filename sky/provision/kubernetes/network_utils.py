@@ -35,7 +35,7 @@ class KubernetesPortMode(enum.Enum):
 
 
 def fill_loadbalancer_template(namespace: str, service_name: str,
-                               ports: List[str], selector_key: str,
+                               ports: List[int], selector_key: str,
                                selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _LOADBALANCER_TEMPLATE_NAME)
@@ -58,7 +58,7 @@ def fill_loadbalancer_template(namespace: str, service_name: str,
 
 
 def fill_ingress_template(namespace: str, path_prefix: str, service_name: str,
-                          service_port: str, ingress_name: str,
+                          service_port: int, ingress_name: str,
                           selector_key: str, selector_value: str) -> Dict:
     template_path = os.path.join(sky.__root_dir__, 'templates',
                                  _INGRESS_TEMPLATE_NAME)

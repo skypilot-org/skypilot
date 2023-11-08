@@ -7,9 +7,11 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
+from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
@@ -222,7 +224,17 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-        return {
+        mode_str = skypilot_config.get_nested(
+            ('kubernetes', 'ports'),
+            network_utils.KubernetesPortMode.LOADBALANCER.value)
+        try:
+            port_mode = network_utils.KubernetesPortMode.from_str(mode_str)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
+                    from None
+
+        deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
@@ -232,6 +244,7 @@ class Kubernetes(clouds.Cloud):
             'timeout': str(self.TIMEOUT),
             'k8s_namespace':
                 kubernetes_utils.get_current_kube_config_context_namespace(),
+            'k8s_port_mode': port_mode.value,
             'k8s_ssh_key_secret_name': self.SKY_SSH_KEY_SECRET_NAME,
             'k8s_acc_label_key': k8s_acc_label_key,
             'k8s_acc_label_value': k8s_acc_label_value,
@@ -240,6 +253,8 @@ class Kubernetes(clouds.Cloud):
             # TODO(romilb): Allow user to specify custom images
             'image_id': image_id,
         }
+
+        return deploy_vars
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
