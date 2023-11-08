@@ -1027,7 +1027,7 @@ def serve_status(
         {
             'replica_id': (int) replica id,
             'name': (str) replica name,
-            'status': (sky.ReplicaStatus) replica status,
+            'status': (sky.serve.ReplicaStatus) replica status,
             'handle': (ResourceHandle) handle of the replica cluster,
         }
 
@@ -1176,7 +1176,7 @@ def serve_tail_logs(
             # replica_id=3, # Must be specified when target is REPLICA.
         )
 
-    `target` is a enum of sky.ServiceComponent, which can be one of:
+    `target` is a enum of sky.serve.ServiceComponent, which can be one of:
         - CONTROLLER
         - LOAD_BALANCER
         - REPLICA
@@ -1187,7 +1187,7 @@ def serve_tail_logs(
     To tail controller logs:
         # follow default to True
         core.serve_tail_logs(
-            service_name, target=sky.ServiceComponent.CONTROLLER)
+            service_name, target=sky.serve.ServiceComponent.CONTROLLER)
 
     To print replica 3 logs:
         # Pass target as a lower-case string is also supported.
@@ -1204,7 +1204,7 @@ def serve_tail_logs(
     if not isinstance(target, serve.ServiceComponent):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'`target` must be a string or '
-                             f'sky.ServiceComponent, got {type(target)}.')
+                             f'sky.serve.ServiceComponent, got {type(target)}.')
     if target == serve.ServiceComponent.REPLICA:
         if replica_id is None:
             with ux_utils.print_exception_no_traceback():

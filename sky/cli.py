@@ -51,6 +51,7 @@ from sky import clouds
 from sky import core
 from sky import exceptions
 from sky import global_user_state
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky import status_lib
@@ -4289,8 +4290,9 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       connection or there are too many requests overwhelming the replica.
 
     - ``SHUTTING_DOWN``: The replica is being shut down. This usually happens
-      when the replica is being scaled down or some error occurred. SkyServe
-      will terminate all replicas that errored.
+      when the replica is being scaled down, some error occurred, or the
+      `sky serve down` command is called. SkyServe will terminate all replicas
+      that errored.
 
     - ``FAILED``: Some error occurred when the replica is serving requests.
       This indicates that the replica is already shut down. (Otherwise, it is
@@ -4467,22 +4469,22 @@ def serve_logs(
         if target is not None:
             click.secho(f'Overriding --target={target} with --controller.',
                         fg='yellow')
-        target_component = sky.ServiceComponent.CONTROLLER
+        target_component = serve_lib.ServiceComponent.CONTROLLER
     elif load_balancer:
         if target is not None:
             click.secho(f'Overriding --target={target} with --load-balancer.',
                         fg='yellow')
-        target_component = sky.ServiceComponent.LOAD_BALANCER
+        target_component = serve_lib.ServiceComponent.LOAD_BALANCER
     elif target is not None:
         # Change load-balancer to load_balancer to match the enum.
         target = target.replace('-', '_')
-        target_component = sky.ServiceComponent(target)
-        if (target_component == sky.ServiceComponent.REPLICA and
+        target_component = serve_lib.ServiceComponent(target)
+        if (target_component == serve_lib.ServiceComponent.REPLICA and
                 not have_replica_id):
             raise click.UsageError(
                 'REPLICA_ID must be specified when using --target replica.')
     else:
-        target_component = sky.ServiceComponent.REPLICA
+        target_component = serve_lib.ServiceComponent.REPLICA
     try:
         core.serve_tail_logs(service_name,
                              target=target_component,

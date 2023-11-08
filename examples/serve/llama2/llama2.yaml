@@ -10,6 +10,8 @@
 # could also check the endpoint by running:
 #   sky serve status --endpoint llama2
 
+# TODO(tian): Change usage to `HF_TOKEN=<your-token> sky serve up -n llama2 examples/serve/llama2/llama2.yaml --env HF_TOKEN` once we have `--env` enabled.
+
 service:
   port: 8087
   readiness_probe: /v1/models
