@@ -297,8 +297,8 @@ def get_replica_info(service_name: str,
     ]
 
 
-def get_latest_info(service_name: str,
-                    with_replica_info: bool = True) -> Dict[str, Any]:
+def get_serve_status(service_name: str,
+                     with_replica_info: bool = True) -> Dict[str, Any]:
     """Get the latest information of the service.
 
     Args:
@@ -317,37 +317,37 @@ def get_latest_info(service_name: str,
     return record
 
 
-def get_latest_info_encoded(service_names: Optional[List[str]]) -> str:
-    latest_infos = []
+def get_serve_status_encoded(service_names: Optional[List[str]]) -> str:
+    serve_statuss = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        latest_info = get_latest_info(service_name)
-        latest_infos.append({
+        serve_status = get_serve_status(service_name)
+        serve_statuss.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in latest_info.items()
+            for k, v in serve_status.items()
         })
-    return common_utils.encode_payload(latest_infos)
+    return common_utils.encode_payload(serve_statuss)
 
 
-def load_latest_info(payload: str) -> List[Dict[str, Any]]:
-    latest_infos_encoded = common_utils.decode_payload(payload)
-    latest_infos = []
-    for latest_info in latest_infos_encoded:
-        latest_infos.append({
+def load_serve_status(payload: str) -> List[Dict[str, Any]]:
+    serve_statuss_encoded = common_utils.decode_payload(payload)
+    serve_statuss = []
+    for serve_status in serve_statuss_encoded:
+        serve_statuss.append({
             k: pickle.loads(base64.b64decode(v))
-            for k, v in latest_info.items()
+            for k, v in serve_status.items()
         })
-    return latest_infos
+    return serve_statuss
 
 
 def terminate_services(service_names: Optional[List[str]]) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     for service_name in service_names:
-        latest_info = get_latest_info(service_name, with_replica_info=False)
-        if (latest_info['status']
+        serve_status = get_serve_status(service_name, with_replica_info=False)
+        if (serve_status['status']
                 in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
             # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
             # like spot doesn't implement this yet?
@@ -555,11 +555,13 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+# TODO(tian): Use REST API instead of SSH in the future. This will require
+# authentication.
 class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_latest_info(service_name)
+      >> code = ServeCodeGen.get_serve_status(service_name)
     """
     _PREFIX = [
         'from sky.serve import serve_state',
@@ -575,9 +577,9 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_latest_info(cls, service_names: Optional[List[str]]) -> str:
+    def get_serve_status(cls, service_names: Optional[List[str]]) -> str:
         code = [
-            f'msg = serve_utils.get_latest_info_encoded({service_names!r})',
+            f'msg = serve_utils.get_serve_status_encoded({service_names!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)

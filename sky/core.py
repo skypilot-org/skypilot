@@ -1072,8 +1072,8 @@ def serve_status(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve.ServeCodeGen.get_latest_info(service_names)
-    returncode, latest_info_payload, stderr = backend.run_on_head(
+    code = serve.ServeCodeGen.get_serve_status(service_names)
+    returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
         require_outputs=True,
@@ -1089,7 +1089,7 @@ def serve_status(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    return serve.load_latest_info(latest_info_payload)
+    return serve.load_serve_status(serve_status_payload)
 
 
 @usage_lib.entrypoint

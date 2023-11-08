@@ -659,7 +659,7 @@ def spot_launch(
     dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     for task_ in dag.tasks:
-        _maybe_translate_local_file_mounts_and_sync_up(task_, prefix='spot')
+        _maybe_translate_local_file_mounts_and_sync_up(task_, path='spot')
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
@@ -791,7 +791,7 @@ def spot_launch(
 
 
 def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
-                                                   prefix: str):
+                                                   path: str):
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -863,7 +863,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        bucket_name = constants.FM_BUCKET_NAME.format(
+        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=getpass.getuser(),
             id=f'{run_id}-{i}',
         )
@@ -879,13 +879,14 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    local_fm_path = os.path.join(tempfile.gettempdir(),
-                                 constants.FM_LOCAL_TMP_DIR.format(id=run_id))
+    local_fm_path = os.path.join(
+        tempfile.gettempdir(),
+        constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = constants.FM_FILE_ONLY_BUCKET_NAME.format(
+    file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
         username=getpass.getuser(), id=run_id)
-    file_mount_remote_tmp_dir = constants.FM_REMOTE_TMP_DIR.format(
-        prefix=prefix)
+    file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
+        path)
     if copy_mounts_with_file_in_src:
         src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
@@ -961,26 +962,13 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
             storage_obj.force_delete = True
 
 
-def _register_service_name(service_name: str) -> bool:
+def _register_service_name(service_name: str,
+                           handle: backends.CloudVmRayResourceHandle) -> bool:
     """Register a service name on the controller if it is running.
 
     Returns:
-        True if the service name is registered successfully, False otherwise.
+        True if the service name is not occupied, False otherwise.
     """
-    with sky_logging.silent():
-        _, handle = backend_utils.is_controller_up(
-            controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
-            stopped_message='')
-    if handle is None or handle.head_ip is None:
-        # The sky serve controller is STOPPED, or it is the first time
-        # provisioning either after an AUTOSTOP, or the first time the
-        # controller is created, which means there is no service on the
-        # controller. We will create the service database record in
-        # sky.serve.service._start once the controller is running.
-        logger.info('The sky serve controller is not running. '
-                    'Will register the service once the controller is up.')
-        return True
-    # The sky serve controller is UP, check if the service exists.
     code = serve.ServeCodeGen.add_service_if_not_exist(service_name)
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
@@ -1006,9 +994,6 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
         ('serve', 'controller', 'resources'), None)
     if custom_controller_resources_config is not None:
         controller_resources_config.update(custom_controller_resources_config)
-    if 'ports' in controller_resources_config:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Cannot specify ports for controller resources.')
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config)
@@ -1034,24 +1019,43 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
 
     with rich_utils.safe_status(
             '[cyan]Registering service on the controller[/]'):
-        success = _register_service_name(service_name)
-        if not success:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'The service {service_name!r} is already running. '
-                    'Update service will be supported in the future. For now, '
-                    '`sky serve down` and then `sky serve up` again.')
+        with sky_logging.silent():
+            status, handle = backend_utils.is_controller_up(
+                controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
+                stopped_message='')
+        if handle is None or handle.head_ip is None:
+            # The sky serve controller is STOPPED, or it is the first time
+            # provisioning either after an AUTOSTOP, or the first time the
+            # controller is created, which means there is no service on the
+            # controller. We will create the service database record in
+            # sky.serve.service._start once the controller is running.
+            logger.info('The sky serve controller is not running. '
+                        'Will register the service once the controller is up.')
+        else:
+            # The sky serve controller is UP, check if the service exists.
+            success = _register_service_name(service_name, handle)
+            if not success:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'The service {service_name!r} is already running. '
+                        'Updating a service will be supported in the future. '
+                        'For now, `sky serve down` and then `sky serve up` '
+                        'again.')
 
     controller_name = serve.SKY_SERVE_CONTROLLER_NAME
     # TODO(tian): Probably run another sky.launch after we get the load balancer
     # port from the controller? So we don't need to open so many ports here. Or,
     # we should have a nginx traffic control to refuse any connection to the
     # unregistered ports.
-    # TODO(tian): Probably choose the same cloud if replica cloud is specified?
+    # Choose the same cloud if controller is not launched, controller resources
+    # not specify cloud and replica cloud is specified.
+    controller_cloud = (requested_resources.cloud if status is None and
+                        controller_resources.cloud is None and
+                        requested_resources.cloud is not None else None)
     controller_resources = controller_resources.copy(
-        ports=[serve.LOAD_BALANCER_PORT_RANGE])
+        cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
 
-    _maybe_translate_local_file_mounts_and_sync_up(task, prefix='serve')
+    _maybe_translate_local_file_mounts_and_sync_up(task, path='serve')
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
