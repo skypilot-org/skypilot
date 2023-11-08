@@ -105,7 +105,7 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
 
 @dataclasses.dataclass
-class ControllerSpec:
+class _ControllerSpec:
     """Spec for skypilot controllers."""
     name: str
     cluster_name: str
