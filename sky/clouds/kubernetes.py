@@ -13,6 +13,7 @@ from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
+from sky.utils import kubernetes_enums
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 
@@ -226,9 +227,9 @@ class Kubernetes(clouds.Cloud):
 
         mode_str = skypilot_config.get_nested(
             ('kubernetes', 'ports'),
-            network_utils.KubernetesPortMode.LOADBALANCER.value)
+            kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
         try:
-            port_mode = network_utils.KubernetesPortMode.from_str(mode_str)
+            port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \

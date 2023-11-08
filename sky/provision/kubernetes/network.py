@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
+from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 from sky.utils.resources_utils import port_ranges_to_set
 
@@ -11,11 +12,11 @@ _LOADBALANCER_SERVICE_NAME = "{cluster_name_on_cloud}-skypilot-loadbalancer"
 
 
 def _get_port_mode(
-        provider_config: Dict[str, Any]) -> network_utils.KubernetesPortMode:
+        provider_config: Dict[str, Any]) -> kubernetes_enums.KubernetesPortMode:
     mode_str = provider_config.get(
-        "port_mode", network_utils.KubernetesPortMode.LOADBALANCER.value)
+        "port_mode", kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
     try:
-        port_mode = network_utils.KubernetesPortMode.from_str(mode_str)
+        port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'
@@ -34,12 +35,12 @@ def open_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = _get_port_mode(provider_config=provider_config)
     ports = list(port_ranges_to_set(ports))
-    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+    if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             ports=ports,
             provider_config=provider_config)
-    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+    elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _open_ports_using_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
                                   ports=ports,
                                   provider_config=provider_config)
@@ -111,11 +112,11 @@ def cleanup_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = _get_port_mode(provider_config=provider_config)
     ports = list(port_ranges_to_set(ports))
-    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+    if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             provider_config=provider_config)
-    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+    elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _cleanup_ports_for_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
                                    ports=ports,
                                    provider_config=provider_config)
@@ -162,13 +163,13 @@ def query_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = _get_port_mode(provider_config=provider_config)
     ports = list(port_ranges_to_set(ports))
-    if port_mode == network_utils.KubernetesPortMode.LOADBALANCER:
+    if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         return _query_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             ports=ports,
             provider_config=provider_config,
         )
-    elif port_mode == network_utils.KubernetesPortMode.INGRESS:
+    elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         return _query_ports_for_ingress(
             cluster_name_on_cloud=cluster_name_on_cloud,
             ports=ports,

@@ -13,27 +13,6 @@ _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
 
 
-class KubernetesPortMode(enum.Enum):
-    """Enum for the different types of modes supported for opening
-    ports on Kubernetes.
-    """
-    INGRESS = 'ingress'
-    LOADBALANCER = 'loadbalancer'
-
-    @classmethod
-    def from_str(cls, mode: str) -> 'KubernetesPortMode':
-        """Returns the enum value for the given string."""
-        if mode.lower() == cls.LOADBALANCER.value:
-            return cls.LOADBALANCER
-        elif mode.lower() == cls.INGRESS.value:
-            return cls.INGRESS
-        else:
-            raise ValueError(f'Unsupported kubernetes port mode: '
-                             f'{mode}. The mode must be either '
-                             f'\'{cls.LOADBALANCER.value}\' or '
-                             f'\'{cls.INGRESS.value}\'. ')
-
-
 def fill_loadbalancer_template(namespace: str, service_name: str,
                                ports: List[int], selector_key: str,
                                selector_value: str) -> Dict:
