@@ -752,8 +752,9 @@ class Storage(object):
         name = None
         if not data_utils.is_cloud_store_url(source):
             name = override_args.get('name', metadata.storage_name)
-            
-        storage_obj = cls(name=name, source=source,
+
+        storage_obj = cls(name=name,
+                          source=source,
                           sync_on_reconstruction=override_args.get(
                               'sync_on_reconstruction', True),
                           mode=override_args.get('mode', metadata.mode))
@@ -1226,6 +1227,7 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
                 attempted to be fetched while reconstructing the storage for
@@ -1670,6 +1672,7 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
                 attempted to be fetched while reconstructing the storage for
@@ -2022,6 +2025,7 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
                 attempted to be fetched while reconstructing the storage for
@@ -2436,6 +2440,7 @@ class IBMCosStore(AbstractStore):
           bool: indicates whether a new bucket was created.
 
         Raises:
+            StorageBucketCreateError: If bucket creation fails.
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
                 attempted to be fetched while reconstructing the storage for
