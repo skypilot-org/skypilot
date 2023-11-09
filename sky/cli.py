@@ -1676,11 +1676,17 @@ def _get_spot_jobs(
                     'clusters, the returned IP address is the internal IP '
                     'of the head pod, and may not be accessible from outside '
                     'the cluster.'))
-@click.option('--ports',
+@click.option('--endpoints',
               default=False,
               is_flag=True,
               required=False,
-              help=('Get the exposed ports and corresponding URLs of a'
+              help=('Get all exposed endpoints and corresponding URLs for a'
+                    'cluster. This option will override all other options.'))
+@click.option('--endpoint',
+              required=False,
+              default=None,
+              type=int,
+              help=('Get a single exposed endpoint URL of a'
                     'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
@@ -1694,8 +1700,8 @@ def _get_spot_jobs(
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, ip: bool, ports: bool,
-           show_spot_jobs: bool, clusters: List[str]):
+def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
+           endpoint: Optional[int], show_spot_jobs: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1704,6 +1710,11 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
     If --ip is specified, show the IP address of the head node of the cluster.
     Only available when CLUSTERS contains exactly one cluster, e.g.
     ``sky status --ip mycluster``.
+
+    If --endpoints is specified, show all exposed endpoints in the cluster.
+    Only available when CLUSTERS contains exactly one cluster, e.g.
+    ``sky status --endpoints mycluster``. To query a single endpoint, you can use
+    ``sky status mycluster --endpoint 8888``.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1753,8 +1764,9 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
-        # specifies --ip.
-        show_spot_jobs = show_spot_jobs and not any([clusters, ip, ports])
+        # specifies --ip or --endpoint/s.
+        show_spot_jobs = show_spot_jobs and not any([clusters, ip, endpoints])
+        show_endpoints = endpoints or endpoint is not None
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1765,16 +1777,22 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                           limit_num_jobs_to_show=not all,
                           is_called_by_user=False))
 
-        if ip or ports:
+        if ip or show_endpoints:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip or --ports with --refresh is not supported for now. '
-                    'To fix, refresh first, then query the IP or port.')
+                    'Using --ip or --endpoint/s with --refresh is not supported for now. '
+                    'To fix, refresh first, then query the IP or endpoint.')
 
-            if ip and ports:
+            if ip and show_endpoints:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify both --ip and --ports at the same time.'
+                        'Cannot specify both --ip and --endpoint/s at the same time.'
+                    )
+
+            if endpoint is not None and endpoints:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify both --endpoint and --endpoints at the same time.'
                     )
 
             if len(clusters) != 1:
@@ -1787,8 +1805,8 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='specified',
-                            property='IP address' if ip else 'ports',
-                            flag='ip' if ip else 'ports'))
+                            property='IP address' if ip else 'endpoint/s',
+                            flag='ip' if ip else 'endpoint/s {port}'))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1797,7 +1815,7 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
             query_clusters = _get_glob_clusters(clusters, silent=ip)
         cluster_records = core.status(cluster_names=query_clusters,
                                       refresh=refresh)
-        if ip or ports:
+        if ip or show_endpoints:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
@@ -1808,8 +1826,8 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='found',
-                            property='IP address' if ip else 'ports',
-                            flag='ip' if ip else 'ports'))
+                            property='IP address' if ip else 'endpoint/s',
+                            flag='ip' if ip else 'endpoint/s \{port\}'))
 
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
@@ -1823,19 +1841,28 @@ def status(all: bool, refresh: bool, ip: bool, ports: bool,
                                      'for local clusters.')
 
             head_ip = handle.external_ips()[0]
-            if ports:
+            if show_endpoints:
                 cloud = handle.launched_resources.cloud
                 if not provision_lib.supports(repr(cloud), 'query_ports'):
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError('Querying ports is not supported '
+                        raise ValueError('Querying endpoints is not supported '
                                          f'for {cloud}.')
 
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 port_details = provision_lib.query_ports(
                     repr(cloud), handle.cluster_name_on_cloud, head_ip,
                     handle.launched_resources.ports, config['provider'])
+
+                if endpoint is not None:
+                    if endpoint not in port_details:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Endpoint for port {endpoint} not found.')
+                    click.echo(port_details[endpoint][0])
+                    return -1
+
                 if not port_details:
-                    click.echo('No ports exposed.')
+                    click.echo('No endpoints exposed.')
 
                 for port, urls in port_details.items():
                     click.echo(
