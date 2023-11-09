@@ -148,11 +148,15 @@ def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
 def get_base_url(namespace: str) -> Optional[Tuple[str, str]]:
     """Returns the HTTP and HTTPS base url of the ingress controller for the cluster."""
     core_api = kubernetes.core_api()
-    ingress_service = [
+    ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
         if item.spec.type == "LoadBalancer"
-    ][0]
+    ]
+    if len(ingress_services) == 0:
+        return None
+
+    ingress_service = ingress_services[0]
     if ingress_service.status.load_balancer.ingress is None:
         ports = ingress_service.spec.ports
         http_port = [port for port in ports if port.name == "http"][0].node_port
@@ -160,8 +164,10 @@ def get_base_url(namespace: str) -> Optional[Tuple[str, str]]:
                      ][0].node_port
         return f'localhost:{http_port}', f'localhost:{https_port}'
 
-    external_ip = ingress_service.status.load_balancer.ingress[0].ip
-    return f'http://{external_ip}', f'https://{external_ip}'
+    external_ip = ingress_service.status.load_balancer.ingress[
+        0].ip or ingress_service.status.load_balancer.ingress[0].hostname
+    return (f'http://{external_ip}',
+            f'https://{external_ip}') if external_ip is not None else None
 
 
 def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
@@ -173,4 +179,6 @@ def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
     if service.status.load_balancer.ingress is None:
         return None
 
-    return service.status.load_balancer.ingress[0].ip
+    ip = service.status.load_balancer.ingress[
+        0].ip or service.status.load_balancer.ingress[0].hostname
+    return ip if ip is not None else None
