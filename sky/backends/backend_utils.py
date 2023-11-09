@@ -7,6 +7,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -107,6 +108,11 @@ SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Filelocks for updating cluster's file_mounts.
+CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
+    '~/.sky/.{}_file_mounts.lock')
+CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -292,8 +298,12 @@ def path_size_megabytes(path: str) -> int:
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
+        #
+        # We shlex.quote() because the path may contain spaces:
+        #   'my dir/.git/info/exclude'
+        # Without quoting rsync fails.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / command_runner.GIT_EXCLUDE))
+            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{command_runner.RSYNC_FILTER_OPTION} '
                      f'{git_exclude_filter} --dry-run {path!r}')
