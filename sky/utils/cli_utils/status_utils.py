@@ -252,7 +252,7 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           reserved_group_name: Optional[str] = None):
+                           controller_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -315,11 +315,11 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
-        if reserved_group_name is not None:
+        if controller_name is not None:
             autostop_minutes = (
                 controller_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')

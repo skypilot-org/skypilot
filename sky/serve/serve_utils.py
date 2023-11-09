@@ -294,23 +294,6 @@ def load_add_service_result(payload: str) -> bool:
     return common_utils.decode_payload(payload)
 
 
-def get_replica_info(service_name: str,
-                     with_handle: bool) -> List[Dict[str, Any]]:
-    """Get the information of all replicas of the service.
-
-    Args:
-        service_name: The name of the service.
-        with_handle: Whether to include the handle of the replica.
-
-    Returns:
-        A list of dictionaries of replica information.
-    """
-    return [
-        info.to_info_dict(with_handle=with_handle)
-        for info in serve_state.get_replica_infos(service_name)
-    ]
-
-
 def get_serve_status(service_name: str,
                      with_replica_info: bool = True) -> Dict[str, Any]:
     """Get the status dict of the service.
@@ -326,8 +309,10 @@ def get_serve_status(service_name: str,
     if record is None:
         raise ValueError(f'Service {service_name!r} does not exist.')
     if with_replica_info:
-        record['replica_info'] = get_replica_info(service_name,
-                                                  with_handle=True)
+        record['replica_info'] = [
+            info.to_info_dict(with_handle=True)
+            for info in serve_state.get_replica_infos(service_name)
+        ]
     return record
 
 
@@ -496,10 +481,10 @@ def stream_replica_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = get_replica_info(service_name, with_handle=False)
+        replica_info = serve_state.get_replica_infos(service_name)
         for info in replica_info:
-            if info['replica_id'] == replica_id:
-                return info['status']
+            if info.replica_id == replica_id:
+                return info.status
         raise ValueError(
             _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
 

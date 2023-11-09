@@ -809,9 +809,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             try:
                 self._probe_all_replicas()
                 replica_statuses = [
-                    info['status']
-                    for info in serve_utils.get_replica_info(self._service_name,
-                                                             with_handle=False)
+                    info.status for info in serve_state.get_replica_infos(
+                        self._service_name)
                 ]
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)

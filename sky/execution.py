@@ -601,9 +601,9 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
-def _shared_controller_env_vars() -> Dict[str, Any]:
-    env_vars: Dict[str, Any] = {
-        env.value: 1 for env in env_options.Options if env.get()
+def _shared_controller_env_vars() -> Dict[str, str]:
+    env_vars: Dict[str, str] = {
+        env.value: '1' for env in env_options.Options if env.get()
     }
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
@@ -611,7 +611,7 @@ def _shared_controller_env_vars() -> Dict[str, Any]:
         constants.USER_ENV_VAR: getpass.getuser(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
-        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: 1,
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
     return env_vars
 
@@ -1038,9 +1038,10 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'The service {service_name!r} is already running. '
-                        'Updating a service will be supported in the future. '
-                        'For now, `sky serve down` and then `sky serve up` '
-                        'again.')
+                        'Please specify a different name for your service. '
+                        'To update an existing service, run: `sky serve down` '
+                        'and then `sky serve up` again (in-place update will '
+                        'be supported in the future).')
 
     _maybe_translate_local_file_mounts_and_sync_up(task, path='serve')
 

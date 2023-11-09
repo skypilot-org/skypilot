@@ -187,12 +187,12 @@ def _start(
             cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for skypilot controllers. Pass '
+                             'supported for SkyPilot controllers. Pass '
                              '`down=False` or omit it instead.')
         if idle_minutes_to_autostop is not None:
             raise ValueError(
                 'Passing a custom autostop setting is currently not '
-                'supported when starting skypilot controllers. To '
+                'supported when starting SkyPilot controllers. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
         idle_minutes_to_autostop = (
@@ -875,7 +875,7 @@ def spot_cancel(name: Optional[str] = None,
         # controller_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError('',
+            raise exceptions.ClusterNotUpError(message='',
                                                cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
@@ -1124,7 +1124,7 @@ def serve_down(service_names: Optional[Union[str, List[str]]] = None,
         # controller_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError('',
+            raise exceptions.ClusterNotUpError(message='',
                                                cluster_status=cluster_status)
 
     service_names_str = ','.join(service_names)

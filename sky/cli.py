@@ -1907,29 +1907,29 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
             result = None
-            success = True
+            interrupted = False
             try:
                 result = future.get()
             except KeyboardInterrupt:
                 pool.terminate()
-                success = False
-            return success, result
+                interrupted = True
+            return interrupted, result
 
-        spot_jobs_success = True
+        spot_jobs_query_interrupted = False
         if show_spot_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed spot jobs{colorama.Style.RESET_ALL}')
             with rich_utils.safe_status('[cyan]Checking spot jobs[/]'):
-                spot_jobs_success, result = _try_get_future_result(
+                spot_jobs_query_interrupted, result = _try_get_future_result(
                     spot_jobs_future)
-                if spot_jobs_success:
-                    num_in_progress_jobs, msg = result
-                else:
+                if spot_jobs_query_interrupted:
                     # Set to -1, so that the controller is not considered
                     # down, and the hint for showing sky spot queue
                     # will still be shown.
                     num_in_progress_jobs = -1
                     msg = 'KeyboardInterrupt'
+                else:
+                    num_in_progress_jobs, msg = result
 
             click.echo(msg)
             if num_in_progress_jobs is not None:
@@ -1954,16 +1954,15 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         if show_services:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Services{colorama.Style.RESET_ALL}')
-            if not spot_jobs_success:
+            if spot_jobs_query_interrupted:
                 # The pool is terminated, so we cannot run the service query.
-                click.secho('Failed to query services. Please try again later.',
-                            fg='yellow')
+                msg = 'KeyboardInterrupt'
             else:
                 with rich_utils.safe_status('[cyan]Checking services[/]'):
-                    success, msg = _try_get_future_result(services_future)
-                    if not success:
+                    interrupted, msg = _try_get_future_result(services_future)
+                    if interrupted:
                         msg = 'KeyboardInterrupt'
-                click.echo(msg)
+            click.echo(msg)
 
         if show_spot_jobs or show_services:
             try:
@@ -2021,7 +2020,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     cluster_records = core.cost_report()
 
     nonreserved_cluster_records = []
-    reserved_clusters = dict()
+    controllers = dict()
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
         controller = controller_utils.Controllers.check_cluster_name(
@@ -2030,8 +2029,8 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
             controller_name = controller.value.name
             # to display most recent entry for each reserved cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
-            if controller_name not in reserved_clusters:
-                reserved_clusters[controller_name] = cluster_record
+            if controller_name not in controllers:
+                controllers[controller_name] = cluster_record
         else:
             nonreserved_cluster_records.append(cluster_record)
 
@@ -2039,11 +2038,9 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         nonreserved_cluster_records, all)
 
     status_utils.show_cost_report_table(nonreserved_cluster_records, all)
-    for controller_name, cluster_record in reserved_clusters.items():
+    for controller_name, cluster_record in controllers.items():
         status_utils.show_cost_report_table(
-            [cluster_record],
-            all,
-            reserved_group_name=controller_name.capitalize())
+            [cluster_record], all, controller_name=controller_name.capitalize())
         total_cost += cluster_record['total_cost']
 
     click.echo(f'\n{colorama.Style.BRIGHT}'
@@ -2655,26 +2652,30 @@ def start(
     if not to_start:
         return
 
-    # Checks for reserved clusters (spot controller).
-    reserved, non_reserved = [], []
+    # Checks for controller clusters (spot controller / sky serve controller).
+    controllers, normal_clusters = [], []
     for name in to_start:
         if controller_utils.Controllers.check_cluster_name(name) is not None:
-            reserved.append(name)
+            controllers.append(name)
         else:
-            non_reserved.append(name)
-    if reserved and non_reserved:
+            normal_clusters.append(name)
+    if controllers and normal_clusters:
         # Keep this behavior the same as _down_or_stop_clusters().
         raise click.UsageError('Starting controllers with other cluster(s) '
                                'is currently not supported.\n'
                                'Please start the former independently.')
-    if reserved:
+    if controllers:
         bold = backend_utils.BOLD
         reset_bold = backend_utils.RESET_BOLD
+        if len(controllers) != 1:
+            raise click.UsageError(
+                'Starting multiple controllers is currently not supported.\n'
+                'Please start them independently.')
         if idle_minutes_to_autostop is not None:
             raise click.UsageError(
                 'Autostop options are currently not allowed when starting the '
                 'controllers. Use the default autostop settings by directly '
-                f'calling: {bold}sky start {" ".join(reserved)}{reset_bold}')
+                f'calling: {bold}sky start {" ".join(controllers)}{reset_bold}')
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'

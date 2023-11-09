@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -12,6 +12,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
+    from sky.serve import replica_managers
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -19,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
 # TODO(tian): determine this value based on controller resources.
-_MAX_BOOTSTRAPPING_NUM = 5
+_MAX_NUM_LAUNCH = 5
 
 
 class AutoscalerDecisionOperator(enum.Enum):
@@ -30,6 +31,18 @@ class AutoscalerDecisionOperator(enum.Enum):
 
 @dataclasses.dataclass
 class AutoscalerDecision:
+    """Autoscaling decisions.
+
+    |---------------------------------------------------------|
+    | Operator   | TargetType | Meaning                       |
+    |------------|------------|-------------------------------|
+    | SCALE_UP   | int        | Number of replicas to add     |
+    |------------|------------|-------------------------------|
+    | SCALE_DOWN | List[int]  | List of replica ids to remove |
+    |------------|------------|-------------------------------|
+    | NO_OP      | None       | No scaling needed             |
+    |---------------------------------------------------------|
+    """
     operator: AutoscalerDecisionOperator
     target: Optional[Union[int, List[int]]]
 
@@ -63,8 +76,10 @@ class Autoscaler:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
-    def evaluate_scaling(self, infos: List[Dict[str,
-                                                Any]]) -> AutoscalerDecision:
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> AutoscalerDecision:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
@@ -111,10 +126,10 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(
         self,
-        infos: List[Dict[str, Any]],
+        replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> AutoscalerDecision:
         current_time = time.time()
-        num_replicas = len(infos)
+        num_replicas = len(replica_infos)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -146,7 +161,7 @@ class RequestRateAutoscaler(Autoscaler):
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                       target=min(
                                           self.min_replicas - num_replicas,
-                                          _MAX_BOOTSTRAPPING_NUM))
+                                          _MAX_NUM_LAUNCH))
         if (self.upper_threshold is not None and
                 requests_per_replica > self.upper_threshold):
             if num_replicas < self.max_replicas:
@@ -178,16 +193,16 @@ class RequestRateAutoscaler(Autoscaler):
                     self.last_scale_operation = current_time
                     # Remove FAILED replicas first.
                     replica_ids_to_remove: List[int] = []
-                    for i in infos:
+                    for info in replica_infos:
                         if len(replica_ids_to_remove) >= num_replicas_to_remove:
                             break
-                        if i['status'] == serve_state.ReplicaStatus.FAILED:
-                            replica_ids_to_remove.append(i['replica_id'])
+                        if info.status == serve_state.ReplicaStatus.FAILED:
+                            replica_ids_to_remove.append(info.replica_id)
                     # Then rest of them.
-                    for i in infos:
+                    for info in replica_infos:
                         if len(replica_ids_to_remove) >= num_replicas_to_remove:
                             break
-                        replica_ids_to_remove.append(i['replica_id'])
+                        replica_ids_to_remove.append(info.replica_id)
                     return AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_DOWN,
                         target=replica_ids_to_remove)

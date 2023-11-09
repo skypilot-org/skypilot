@@ -16,7 +16,7 @@ from sky import sky_logging
 from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import replica_managers
-from sky.serve import serve_utils
+from sky.serve import serve_state
 from sky.utils import env_options
 
 logger = sky_logging.init_logger(__name__)
@@ -57,10 +57,13 @@ class SkyServeController:
         logger.info('Starting autoscaler.')
         while True:
             try:
-                replica_info = serve_utils.get_replica_info(
-                    self._service_name,
-                    with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                logger.info(f'All replica info: {replica_info}')
+                replica_info = serve_state.get_replica_infos(self._service_name)
+                replica_info_dicts = [
+                    info.to_info_dict(
+                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+                    for info in replica_info
+                ]
+                logger.info(f'All replica info: {replica_info_dicts}')
                 scaling_option = self._autoscaler.evaluate_scaling(replica_info)
                 if (scaling_option.operator ==
                         autoscalers.AutoscalerDecisionOperator.SCALE_UP):
