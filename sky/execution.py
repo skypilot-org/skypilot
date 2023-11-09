@@ -32,6 +32,7 @@ from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -370,7 +371,8 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = backend_utils.Controllers.check_cluster_name(cluster_name)
+        controller = controller_utils.Controllers.check_cluster_name(
+            cluster_name)
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
@@ -492,8 +494,8 @@ def launch(
     Other exceptions may be raised depending on the backend.
     """
     entrypoint = task
-    backend_utils.check_cluster_name_not_reserved(cluster_name,
-                                                  operation_str='sky.launch')
+    controller_utils.check_cluster_name_not_reserved(cluster_name,
+                                                     operation_str='sky.launch')
 
     _execute(
         entrypoint=entrypoint,
@@ -577,8 +579,8 @@ def exec(  # pylint: disable=redefined-builtin
             f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
             'deprecated. Pass sky.Task instead.'
             f'{colorama.Style.RESET_ALL}')
-    backend_utils.check_cluster_name_not_reserved(cluster_name,
-                                                  operation_str='sky.exec')
+    controller_utils.check_cluster_name_not_reserved(cluster_name,
+                                                     operation_str='sky.exec')
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
@@ -800,7 +802,7 @@ def spot_launch(
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
-            idle_minutes_to_autostop=backend_utils.
+            idle_minutes_to_autostop=controller_utils.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
@@ -1017,8 +1019,9 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
     with rich_utils.safe_status(
             '[cyan]Registering service on the controller[/]'):
         with sky_logging.silent():
-            status, handle = backend_utils.is_controller_up(
-                controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
+            status, handle = controller_utils.is_controller_up(
+                controller_type=controller_utils.Controllers.
+                SKY_SERVE_CONTROLLER,
                 stopped_message='')
         if handle is None or handle.head_ip is None:
             # The sky serve controller is STOPPED, or it is the first time
@@ -1099,7 +1102,7 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
-            idle_minutes_to_autostop=backend_utils.
+            idle_minutes_to_autostop=controller_utils.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
@@ -1119,7 +1122,7 @@ def serve_up(
         service_name: Name of the service.
     """
     if service_name is None:
-        service_name = backend_utils.generate_service_name()
+        service_name = serve.generate_service_name()
 
     # The service name will be used as:
     # 1. controller cluster name: 'sky-serve-controller-<service_name>'

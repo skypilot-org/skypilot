@@ -19,7 +19,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
-from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -27,6 +26,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
@@ -497,13 +497,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             assert isinstance(handle, backends.CloudVmRayResourceHandle)
             replica_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                                 'replica_jobs')
-            log_file = backend_utils.download_and_stream_latest_job_log(
-                backend,
-                handle,
-                replica_job_logs_dir,
-                log_position_hint='replica cluster',
-                log_finish_hint=f'Replica: {replica_id}')
+            log_file = controller_utils.download_and_stream_latest_job_log(
+                backend, handle, replica_job_logs_dir)
             if log_file is not None:
+                logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(local_log_file_name,
                           'a') as local_file, open(log_file, 'r') as job_file:
                     local_file.write(job_file.read())

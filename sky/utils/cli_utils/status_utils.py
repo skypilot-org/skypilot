@@ -11,6 +11,7 @@ from sky import serve
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 
 COMMAND_TRUNC_LENGTH = 25
@@ -192,6 +193,49 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
     return f'{replica_table}{truncate_hint}'
 
 
+def format_storage_table(storages: List[Dict[str, Any]],
+                         show_all: bool = False) -> str:
+    """Format the storage table for display.
+
+    Args:
+        storage_table (dict): The storage table.
+
+    Returns:
+        str: The formatted storage table.
+    """
+    storage_table = log_utils.create_table([
+        'NAME',
+        'UPDATED',
+        'STORE',
+        'COMMAND',
+        'STATUS',
+    ])
+
+    for row in storages:
+        launched_at = row['launched_at']
+        if show_all:
+            command = row['last_use']
+        else:
+            command = truncate_long_string(row['last_use'],
+                                           COMMAND_TRUNC_LENGTH)
+        storage_table.add_row([
+            # NAME
+            row['name'],
+            # LAUNCHED
+            log_utils.readable_time_duration(launched_at),
+            # CLOUDS
+            ', '.join([s.value for s in row['store']]),
+            # COMMAND,
+            command,
+            # STATUS
+            row['status'].value,
+        ])
+    if storages:
+        return str(storage_table)
+    else:
+        return 'No existing storage.'
+
+
 def get_total_cost_of_displayed_records(
         cluster_records: List[_ClusterCostReportRecord], display_all: bool):
     """Compute total cost of records to be displayed in cost report."""
@@ -272,7 +316,8 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 
     if cluster_records:
         if reserved_group_name is not None:
-            autostop_minutes = backend_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            autostop_minutes = (
+                controller_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{reserved_group_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
@@ -295,10 +340,8 @@ def show_local_status_table(local_clusters: List[str]):
     `sky launch`. Sky understands what types of resources are on the nodes and
     has ran at least one job on the cluster.
     """
-    clusters_status = backend_utils.get_clusters(
-        include_reserved=False,
-        refresh=False,
-        cloud_filter=backend_utils.CloudFilter.LOCAL)
+    clusters_status = controller_utils.get_non_reserved_clusters(
+        refresh=False, cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [
         'NAME',
         'USER',
@@ -419,7 +462,7 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
 
 
 def get_endpoint(service_record: _ServiceRecord) -> str:
-    # Don't use backend_utils.is_controller_up since it is too slow.
+    # Don't use controller_utils.is_controller_up since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         serve.SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)

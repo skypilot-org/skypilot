@@ -105,9 +105,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     # Remove clusters that are in global user state but are not in
     # ~/.sky/local.
     records = backend_utils.get_clusters(
-        include_reserved=False,
-        refresh=False,
-        cloud_filter=backend_utils.CloudFilter.LOCAL)
+        refresh=False, cloud_filter=backend_utils.CloudFilter.LOCAL)
     saved_clusters = [r['name'] for r in records]
     for cluster_name in saved_clusters:
         if cluster_name not in local_cluster_names:

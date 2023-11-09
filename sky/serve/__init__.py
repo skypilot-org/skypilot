@@ -14,6 +14,7 @@ from sky.serve.serve_utils import generate_remote_config_yaml_file_name
 from sky.serve.serve_utils import generate_remote_controller_log_file_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name
 from sky.serve.serve_utils import generate_replica_cluster_name
+from sky.serve.serve_utils import generate_service_name
 from sky.serve.serve_utils import load_add_service_result
 from sky.serve.serve_utils import load_serve_status
 from sky.serve.serve_utils import ServeCodeGen

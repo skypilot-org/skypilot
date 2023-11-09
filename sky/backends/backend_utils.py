@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import dataclasses
 from datetime import datetime
 import enum
 import getpass
@@ -38,7 +37,6 @@ from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.provision import instance_setup
@@ -98,96 +96,6 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
-
-# The default idle timeout for skypilot controllers. This include spot
-# controller and sky serve controller.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
-
-@dataclasses.dataclass
-class _ControllerSpec:
-    """Spec for skypilot controllers."""
-    name: str
-    cluster_name: str
-    sky_status_hint: str
-    decline_cancel_hint: str
-    decline_down_in_init_status_hint: str
-    decline_down_for_dirty_controller_hint: str
-    check_cluster_name_hint: str
-    default_hint_if_non_existent: str
-
-
-class Controllers(enum.Enum):
-    """Skypilot controllers."""
-    # NOTE(dev): Keep this align with
-    # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = _ControllerSpec(
-        name='managed spot controller',
-        cluster_name=spot_lib.SPOT_CONTROLLER_NAME,
-        sky_status_hint=(
-            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
-            f'sky spot queue{colorama.Style.RESET_ALL}'),
-        decline_cancel_hint=(
-            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
-            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
-            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_in_init_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the spot controller while '
-            'it is in INIT state is not supported (this means a spot launch '
-            'is in progress or the previous launch failed), as we cannot '
-            'guarantee that all the spot jobs are finished. Please wait '
-            'until the spot controller is UP or fix it with '
-            f'{colorama.Style.BRIGHT}sky start '
-            f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
-        decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
-            f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
-            f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
-        check_cluster_name_hint=(
-            f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller. '),
-        default_hint_if_non_existent='No managed spot jobs are found.')
-    SKY_SERVE_CONTROLLER = _ControllerSpec(
-        name='sky serve controller',
-        cluster_name=serve_lib.SKY_SERVE_CONTROLLER_NAME,
-        sky_status_hint=(
-            f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status{colorama.Style.RESET_ALL}'),
-        decline_cancel_hint=(
-            'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_in_init_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the sky serve controller '
-            'while it is in INIT state is not supported (this means a sky '
-            'serve up is in progress or the previous launch failed), as we '
-            'cannot guarantee that all the services are terminated. Please '
-            'wait until the sky serve controller is UP or fix it with '
-            f'{colorama.Style.BRIGHT}sky start '
-            f'{serve_lib.SKY_SERVE_CONTROLLER_NAME}'
-            f'{colorama.Style.RESET_ALL}.'),
-        decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
-            'supported, as it is currently serving the following services: '
-            '{service_names}. Please terminate the services first with '
-            f'{colorama.Style.BRIGHT}sky serve down -a'
-            f'{colorama.Style.RESET_ALL}.'),
-        check_cluster_name_hint=(
-            f'Cluster {serve_lib.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller. '),
-        default_hint_if_non_existent='No service is found.')
-
-    @classmethod
-    def check_cluster_name(cls, name: Optional[str]) -> Optional['Controllers']:
-        """Check if the cluster name is a controller name.
-
-        Returns:
-            The controller if the cluster name is a controller name.
-            Otherwise, returns None.
-        """
-        for controller in cls:
-            if controller.value.cluster_name == name:
-                return controller
-        return None
-
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -1560,10 +1468,6 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
 
 
-def generate_service_name():
-    return f'sky-service-{uuid.uuid4().hex[:4]}'
-
-
 def get_cleaned_username(username: str = '') -> str:
     """Cleans the username to be used as part of a cluster name.
 
@@ -2585,77 +2489,6 @@ def check_cluster_available(
     return handle
 
 
-def is_controller_up(
-    controller_type: Controllers,
-    stopped_message: str,
-    non_existent_message: Optional[str] = None,
-) -> Tuple[Optional[status_lib.ClusterStatus],
-           Optional['backends.CloudVmRayResourceHandle']]:
-    """Check if the spot/serve controller is up.
-
-    It can be used to check the actual controller status (since the autostop is
-    set for the controller) before the spot/serve commands interact with the
-    controller.
-
-    Args:
-        type: Type of the controller.
-        stopped_message: Message to print if the controller is STOPPED.
-        non_existent_message: Message to show if the controller does not exist.
-
-    Returns:
-        controller_status: The status of the controller. If it fails during
-          refreshing the status, it will be the cached status. None if the
-          controller does not exist.
-        handle: The ResourceHandle of the controller. None if the
-          controller is not UP or does not exist.
-
-    Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
-          the same as the user who created the cluster.
-        exceptions.CloudUserIdentityError: if we fail to get the current user
-          identity.
-    """
-    if non_existent_message is None:
-        non_existent_message = controller_type.value.default_hint_if_non_existent
-    cluster_name = controller_type.value.cluster_name
-    controller_name = controller_type.value.name.replace(' controller', '')
-    try:
-        # Set force_refresh_statuses=None to make sure the refresh only happens
-        # when the controller is INIT/UP (triggered in these statuses as the
-        # autostop is always set for the controller). This optimization avoids
-        # unnecessary costly refresh when the controller is already stopped.
-        # This optimization is based on the assumption that the user will not
-        # start the controller manually from the cloud console.
-        controller_status, handle = refresh_cluster_status_handle(
-            cluster_name, force_refresh_statuses=None)
-    except exceptions.ClusterStatusFetchingError as e:
-        # We do not catch the exceptions related to the cluster owner identity
-        # mismatch, please refer to the comment in
-        # `backend_utils.check_cluster_available`.
-        logger.warning(
-            'Failed to get the status of the controller. It is not '
-            f'fatal, but {controller_name} commands/calls may hang or return '
-            'stale information, when the controller is not up.\n'
-            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        controller_status, handle = None, None
-        if record is not None:
-            controller_status, handle = record['status'], record['handle']
-
-    if controller_status is None:
-        sky_logging.print(non_existent_message)
-    elif controller_status != status_lib.ClusterStatus.UP:
-        msg = (f'{controller_name.capitalize()} controller {cluster_name} '
-               f'is {controller_status.value}.')
-        if controller_status == status_lib.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        sky_logging.print(msg)
-        handle = None
-    return controller_status, handle
-
-
 class CloudFilter(enum.Enum):
     # Filter for all types of clouds.
     ALL = 'all'
@@ -2666,7 +2499,6 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-    include_reserved: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -2679,8 +2511,6 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_reserved: Whether to include reserved clusters, e.g. spot
-            controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
@@ -2694,12 +2524,6 @@ def get_clusters(
         terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
-
-    if not include_reserved:
-        records = [
-            record for record in records
-            if Controllers.check_cluster_name(record['name']) is None
-        ]
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -2808,51 +2632,6 @@ def get_clusters(
     return kept_records
 
 
-# Internal only:
-def download_and_stream_latest_job_log(
-        backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle', local_dir: str,
-        log_position_hint: str, log_finish_hint: str) -> Optional[str]:
-    """Downloads and streams the latest job log.
-
-    This function is only used by spot controller and sky serve controller.
-    """
-    os.makedirs(local_dir, exist_ok=True)
-    log_file = None
-    try:
-        log_dirs = backend.sync_down_logs(
-            handle,
-            # Download the log of the latest job.
-            # The job_id for the spot job running on the spot cluster is not
-            # necessarily 1, as it is possible that the worker node in a
-            # multi-node cluster is preempted, and we recover the spot job
-            # on the existing cluster, which leads to a larger job_id. Those
-            # job_ids all represent the same logical spot job.
-            job_ids=None,
-            local_dir=local_dir)
-    except exceptions.CommandError as e:
-        logger.info(f'Failed to download the logs: '
-                    f'{common_utils.format_exception(e)}')
-    else:
-        if not log_dirs:
-            logger.error('Failed to find the logs for the user program in '
-                         f'the {log_position_hint}.')
-        else:
-            log_dir = list(log_dirs.values())[0]
-            log_file = os.path.join(log_dir, 'run.log')
-
-            # Print the logs to the console.
-            try:
-                with open(log_file) as f:
-                    print(f.read())
-            except FileNotFoundError:
-                logger.error('Failed to find the logs for the user '
-                             f'program at {log_file}.')
-            else:
-                logger.info(f'\n== End of logs ({log_finish_hint}) ==')
-    return log_file
-
-
 @typing.overload
 def get_backend_from_handle(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
@@ -2930,30 +2709,6 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_not_reserved(
-        cluster_name: Optional[str],
-        operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster name is reserved.
-
-    Currently, all reserved cluster names are skypilot controller, i.e.
-    spot controller/sky serve controller.
-
-    Raises:
-      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
-        with an error message explaining 'operation_str' is not allowed.
-
-    Returns:
-      None, if the cluster name is not reserved.
-    """
-    controller = Controllers.check_cluster_name(cluster_name)
-    if controller is not None:
-        msg = controller.value.check_cluster_name_hint
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c

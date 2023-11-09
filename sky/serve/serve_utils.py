@@ -12,6 +12,7 @@ import traceback
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
                     TextIO, Type, TypeVar)
+import uuid
 
 import colorama
 import filelock
@@ -29,7 +30,7 @@ from sky.utils import common_utils
 if typing.TYPE_CHECKING:
     import fastapi
 
-SKY_SERVE_CONTROLLER_NAME = (
+SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
@@ -188,6 +189,10 @@ class RedirectOutputTo:
                              f'Details: {common_utils.format_exception(e)}\n'
                              f'Traceback:\n{traceback.format_exc()}')
                 raise
+
+
+def generate_service_name():
+    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def generate_remote_service_dir_name(service_name: str) -> str:
