@@ -28,6 +28,7 @@ from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
@@ -176,7 +177,7 @@ def _start(service_name: str, task_yaml: str, job_id: int):
             # service spec and we could start multiple load balancers.
             # After that, we will have a mapping from replica port to endpoint.
             load_balancer_process = multiprocessing.Process(
-                target=serve_utils.RedirectOutputTo(
+                target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
                 args=(controller_addr, load_balancer_port, replica_port))

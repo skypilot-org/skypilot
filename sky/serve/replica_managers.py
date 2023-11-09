@@ -381,7 +381,6 @@ class ReplicaInfo:
         except requests.exceptions.RequestException as e:
             logger.info(e)
             logger.info(f'{replica_identity.capitalize()} is not ready.')
-            pass
         return self, False, probe_time
 
 
@@ -398,9 +397,9 @@ class ReplicaManager:
         self._initial_delay_seconds: int = spec.initial_delay_seconds
         self._post_data: Optional[Dict[str, Any]] = spec.post_data
         self._uptime: Optional[float] = None
-        logger.info(f'Readiness probe suffix: {self._readiness_route}')
-        logger.info(f'Initial delay seconds: {self._initial_delay_seconds}')
-        logger.info(f'Post data: {self._post_data}')
+        logger.info(f'Readiness probe suffix: {self._readiness_route}\n'
+                    f'Initial delay seconds: {self._initial_delay_seconds}\n'
+                    f'Post data: {self._post_data}')
 
     def get_ready_replica_ips(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -464,7 +463,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
         p = multiprocessing.Process(
-            target=serve_utils.RedirectOutputTo(
+            target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
@@ -532,7 +531,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self._service_name, replica_id)
         p = multiprocessing.Process(
-            target=serve_utils.RedirectOutputTo(
+            target=ux_utils.RedirectOutputForProcess(
                 terminate_cluster,
                 log_file_name,
             ).run,

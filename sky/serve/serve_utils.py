@@ -8,7 +8,6 @@ import re
 import shlex
 import threading
 import time
-import traceback
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
                     TextIO, Type, TypeVar)
@@ -156,39 +155,6 @@ class RequestTimestamp(RequestsAggregator):
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'
-
-
-class RedirectOutputTo:
-    """Redirect stdout and stderr to a file."""
-
-    def __init__(self, func: Callable, file: str) -> None:
-        self.func = func
-        self.file = file
-
-    def run(self, *args, **kwargs):
-        import sys  # pylint: disable=import-outside-toplevel
-
-        from sky import sky_logging  # pylint: disable=import-outside-toplevel
-
-        with open(self.file, 'w') as f:
-            sys.stdout = f
-            sys.stderr = f
-            # reconfigure logger since the logger is initialized before
-            # with previous stdout/stderr
-            sky_logging.reload_logger()
-            logger = sky_logging.init_logger(__name__)
-            # The subprocess_util.run('sky status') inside
-            # sky.execution::_execute cannot be redirect, since we cannot
-            # directly operate on the stdout/stderr of the subprocess. This
-            # is because some code in skypilot will specify the stdout/stderr
-            # of the subprocess.
-            try:
-                self.func(*args, **kwargs)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Failed to run {self.func.__name__}. '
-                             f'Details: {common_utils.format_exception(e)}\n'
-                             f'Traceback:\n{traceback.format_exc()}')
-                raise
 
 
 def generate_service_name():

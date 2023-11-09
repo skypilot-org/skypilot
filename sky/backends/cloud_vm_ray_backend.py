@@ -312,11 +312,11 @@ class RayCodeGen:
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
-        task_cpu_demand = resources_dict.pop('CPU')
+        bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{'CPU': task_cpu_demand} for _ in range(num_nodes)]
+        task_cpu_demand = resources_dict.pop('CPU')
 
         if resources_dict:
             assert len(resources_dict) == 1, (
@@ -331,7 +331,6 @@ class RayCodeGen:
                 gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
-                    **resources_dict,
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
