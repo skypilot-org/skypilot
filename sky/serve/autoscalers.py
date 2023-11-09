@@ -166,8 +166,8 @@ class RequestRateAutoscaler(Autoscaler):
                 requests_per_replica > self.upper_threshold):
             if num_replicas < self.max_replicas:
                 scale_target = requests_per_replica / self.upper_threshold
-                num_replicas_to_add = max(int(scale_target * num_replicas),
-                                          self.max_replicas) - num_replicas
+                num_replicas_to_add = min(max(int(scale_target * num_replicas),
+                                          self.min_replicas), self.max_replicas) - num_replicas
                 if num_replicas_to_add > 0:
                     plural = 's' if num_replicas_to_add > 1 else ''
                     logger.info('Requests per replica is above upper threshold '
