@@ -1018,8 +1018,8 @@ def write_cluster_config(
                     'SKYPILOT_USER', '')),
 
                 # AWS only:
-                'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                       None),
+                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
+                                                           None),
                 'use_internal_ips': skypilot_config.get_nested(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
@@ -1033,6 +1033,8 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
+                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
+                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1124,7 +1126,15 @@ def write_cluster_config(
         # pylint: disable=import-outside-toplevel
         from sky.skylet.providers.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = gcp_config.get_usable_vpc(config)
+        vpc_name = None
+        try:
+            vpc_name = gcp_config.get_usable_vpc(config)
+        except RuntimeError as e:
+            # Launching a TPU and encountering a bootstrap-phase error, no point
+            # in failover unless:
+            # TODO(zongheng): handle failover when multi-resource is added.
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
         scripts = []
         for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):

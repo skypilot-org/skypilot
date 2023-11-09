@@ -103,6 +103,22 @@ Available fields and semantics:
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
+    # VPC to use (optional).
+    #
+    # Default: None, which implies the following behavior. First, the VPC named
+    # 'default' is checked against minimal recommended firewall rules for
+    # SkyPilot to function. If it satisfies these rules, this VPC is used.
+    # Otherwise, a new VPC named 'skypilot-vpc' is automatically created with
+    # the minimal recommended firewall rules and will be used.
+    #
+    # If this field is set, SkyPilot will use the VPC with this name. Useful for
+    # when users want to manually set up a VPC and precisely control its
+    # firewall rules. If no region restrictions are given, SkyPilot only
+    # provisions in regions for which a subnet of this VPC exists. Errors are
+    # thrown if VPC with this name is not found. The VPC does not get modified
+    # in any way.
+    vpc_name: skypilot-vpc
+
     # Reserved capacity (optional).
     #
     # The specific reservation to be considered when provisioning clusters on GCP.
@@ -117,15 +133,24 @@ Available fields and semantics:
   # Advanced Kubernetes configurations (optional).
   kubernetes:
     # The networking mode for accessing SSH jump pod (optional).
-    # This must be either: 'nodeport' or 'portforward'. If not specified, defaults to 'portforward'.
     #
-    # nodeport: Exposes the jump pod SSH service on a static port number on each Node, allowing external access to using <NodeIP>:<NodePort>. Using this mode requires opening multiple ports on nodes in the Kubernetes cluster.
-    # portforward: Uses `kubectl port-forward` to create a tunnel and directly access the jump pod SSH service in the Kubernetes cluster. Does not require opening ports the cluster nodes and is more secure. 'portforward' is used as default if 'networking' is not specified.
+    # This must be either: 'nodeport' or 'portforward'. If not specified,
+    # defaults to 'portforward'.
+    #
+    # nodeport: Exposes the jump pod SSH service on a static port number on each
+    # Node, allowing external access to using <NodeIP>:<NodePort>. Using this
+    # mode requires opening multiple ports on nodes in the Kubernetes cluster.
+    #
+    # portforward: Uses `kubectl port-forward` to create a tunnel and directly
+    # access the jump pod SSH service in the Kubernetes cluster. Does not
+    # require opening ports the cluster nodes and is more secure. 'portforward'
+    # is used as default if 'networking' is not specified.
     networking: portforward
 
   # Advanced OCI configurations (optional).
   oci:
-    # A dict mapping region names to region-specific configurations, or `default` for the default configuration.
+    # A dict mapping region names to region-specific configurations, or
+    # `default` for the default configuration.
     default:
       # The OCID of the profile to use for launching instances (optional).
       oci_config_profile: DEFAULT
