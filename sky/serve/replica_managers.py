@@ -46,6 +46,8 @@ _RETRY_INIT_GAP_SECONDS = 60
 _MAX_NUM_LAUNCH = psutil.cpu_count()
 
 
+# TODO(tian): Combine this with
+# sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
                    max_retry: int = 3) -> None:
@@ -113,6 +115,8 @@ def launch_cluster(task_yaml_path: str,
         time.sleep(gap_seconds)
 
 
+# TODO(tian): Combine this with
+# sky/spot/recovery_strategy.py::terminate_cluster
 def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
     retry_cnt = 0

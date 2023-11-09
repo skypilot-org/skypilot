@@ -1,4 +1,5 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
+import random
 from typing import List, Optional
 
 import fastapi
@@ -30,6 +31,10 @@ class RoundRobinPolicy(LoadBalancingPolicy):
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(ready_replicas) != set(self.ready_replicas):
+            # If the autoscaler keeps scaling up and down the replicas,
+            # we need this shuffle to not let the first replica have the
+            # most of the load.
+            random.shuffle(ready_replicas)
             self.ready_replicas = ready_replicas
             self.index = 0
 

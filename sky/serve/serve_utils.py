@@ -120,12 +120,12 @@ class RequestsAggregator:
         """Add a request to the request aggregator."""
         raise NotImplementedError
 
-    def get(self) -> List[Any]:
-        """Get all current request aggregator."""
-        raise NotImplementedError
-
     def clear(self) -> None:
         """Clear all current request aggregator."""
+        raise NotImplementedError
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
         raise NotImplementedError
 
     def __repr__(self) -> str:
@@ -146,13 +146,13 @@ class RequestTimestamp(RequestsAggregator):
         del request  # unused
         self.timestamps.append(time.time())
 
-    def get(self) -> List[float]:
-        """Get all current request aggregator."""
-        return self.timestamps
-
     def clear(self) -> None:
         """Clear all current request aggregator."""
         self.timestamps = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
+        return {'timestamps': self.timestamps}
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'

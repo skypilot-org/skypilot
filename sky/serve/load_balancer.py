@@ -1,7 +1,5 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
-import base64
 import logging
-import pickle
 import threading
 import time
 
@@ -65,9 +63,8 @@ class SkyServeLoadBalancer:
                     response = session.post(
                         self._controller_url + '/controller/load_balancer_sync',
                         json={
-                            'request_aggregator': base64.b64encode(
-                                pickle.dumps(self._request_aggregator)
-                            ).decode('utf-8')
+                            'request_aggregator':
+                                self._request_aggregator.to_dict()
                         },
                         timeout=5)
                     # Clean up after reporting request information to avoid OOM.

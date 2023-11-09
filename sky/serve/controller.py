@@ -2,9 +2,7 @@
 
 Responsible for autoscaling and replica management.
 """
-import base64
 import logging
-import pickle
 import threading
 import time
 
@@ -86,9 +84,7 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
-            request_aggregator_payload = request_data.get('request_aggregator')
-            request_aggregator = pickle.loads(
-                base64.b64decode(request_aggregator_payload))
+            request_aggregator = request_data.get('request_aggregator')
             logger.info(
                 f'Received inflight request information: {request_aggregator}')
             self._autoscaler.collect_request_information(request_aggregator)

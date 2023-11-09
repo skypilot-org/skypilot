@@ -4,12 +4,11 @@ import dataclasses
 import enum
 import time
 import typing
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
-from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -67,7 +66,7 @@ class Autoscaler:
                            'not always got the latest information.')
 
     def collect_request_information(
-            self, request_aggregator: serve_utils.RequestsAggregator) -> None:
+            self, request_aggregator_info: Dict[str, Any]) -> None:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
@@ -108,12 +107,17 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps: List[float] = []
 
     def collect_request_information(
-            self, request_aggregator: serve_utils.RequestsAggregator) -> None:
-        if not isinstance(request_aggregator, serve_utils.RequestTimestamp):
-            raise ValueError('Request aggregator must be of type '
-                             'serve_utils.RequestTimestamp for '
-                             'RequestRateAutoscaler.')
-        self.request_timestamps.extend(request_aggregator.get())
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling.
+
+        request_aggregator_info should be a dict with the following format:
+
+        {
+            'timestamps': [timestamp1 (float), timestamp2 (float), ...]
+        }
+        """
+        self.request_timestamps.extend(
+            request_aggregator_info.get('timestamps', []))
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.rps_window_size)
