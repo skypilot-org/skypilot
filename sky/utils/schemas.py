@@ -8,6 +8,109 @@ from sky.clouds import cloud_registry
 from sky.data import storage
 
 
+def get_single_resources_schema():
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'cloud': {
+                'type': 'string',
+                'case_insensitive_enum': list(
+                    cloud_registry.CLOUD_REGISTRY.keys())
+            },
+            'region': {
+                'type': 'string',
+            },
+            'zone': {
+                'type': 'string',
+            },
+            'cpus': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'accelerators': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'maxProperties': 1,
+                    'additionalProperties': {
+                        'type': 'number'
+                    }
+                }]
+            },
+            'instance_type': {
+                'type': 'string',
+            },
+            'use_spot': {
+                'type': 'boolean',
+            },
+            'spot_recovery': {
+                'type': 'string',
+            },
+            'disk_size': {
+                'type': 'integer',
+            },
+            'disk_tier': {
+                'type': 'string',
+            },
+            'ports': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'integer',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'integer',
+                        }]
+                    }
+                }],
+            },
+            'accelerator_args': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'runtime_version': {
+                        'type': 'string',
+                    },
+                    'tpu_name': {
+                        'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
+                    }
+                }
+            },
+            'image_id': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                }]
+            }
+        }
+    }
+
+
 def get_resources_schema():
     return {
         '$schema': 'http://json-schema.org/draft-07/schema#',
