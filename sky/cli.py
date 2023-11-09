@@ -4281,6 +4281,9 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
 
     Each replica can have one of the following statuses:
 
+    - ``PENDING``: The maximum number of simultaneous launches has been reached
+      and the replica launch process is pending.
+
     - ``PROVISIONING``: The replica is being provisioned.
 
     - ``STARTING``: Replica provisioning has succeeded and the replica is

@@ -17,11 +17,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# Since sky.launch is very resource demanding, we limit the number of
-# concurrent sky.launch process to avoid overloading the machine.
-# TODO(tian): determine this value based on controller resources.
-_MAX_NUM_LAUNCH = 5
-
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -159,15 +154,14 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info('Bootstrapping service.')
             self.last_scale_operation = current_time
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=min(
-                                          self.min_replicas - num_replicas,
-                                          _MAX_NUM_LAUNCH))
+                                      target=self.min_replicas - num_replicas)
         if (self.upper_threshold is not None and
                 requests_per_replica > self.upper_threshold):
             if num_replicas < self.max_replicas:
                 scale_target = requests_per_replica / self.upper_threshold
-                num_replicas_to_add = min(max(int(scale_target * num_replicas),
-                                          self.min_replicas), self.max_replicas) - num_replicas
+                num_replicas_to_add = min(
+                    max(int(scale_target * num_replicas), self.min_replicas),
+                    self.max_replicas) - num_replicas
                 if num_replicas_to_add > 0:
                     plural = 's' if num_replicas_to_add > 1 else ''
                     logger.info('Requests per replica is above upper threshold '

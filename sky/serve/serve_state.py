@@ -52,6 +52,9 @@ _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 class ReplicaStatus(enum.Enum):
     """Replica status."""
 
+    # The `sky.launch` is pending due to max number of simultaneous launches.
+    PENDING = 'PENDING'
+
     # The replica VM is being provisioned. i.e., the `sky.launch` is still
     # running.
     PROVISIONING = 'PROVISIONING'
@@ -97,6 +100,7 @@ class ReplicaStatus(enum.Enum):
 
 
 _REPLICA_STATUS_TO_COLOR = {
+    ReplicaStatus.PENDING: colorama.Fore.YELLOW,
     ReplicaStatus.PROVISIONING: colorama.Fore.BLUE,
     ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
@@ -361,3 +365,15 @@ def get_replica_infos(
             SELECT replica_info FROM replicas
             WHERE service_name=(?)""", (service_name,)).fetchall()
         return [pickle.loads(row[0]) for row in rows]
+
+
+def total_number_provisioning_replicas() -> int:
+    """Returns the total number of provisioning replicas."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute('SELECT replica_info FROM replicas').fetchall()
+        provisioning_count = 0
+        for row in rows:
+            replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+            if replica_info.status == ReplicaStatus.PROVISIONING:
+                provisioning_count += 1
+        return provisioning_count

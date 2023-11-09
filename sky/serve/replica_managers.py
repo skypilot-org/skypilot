@@ -11,6 +11,7 @@ import traceback
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
+import psutil
 import requests
 
 import sky
@@ -39,6 +40,10 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
+
+# Since sky.launch is very resource demanding, we limit the number of
+# concurrent sky.launch process to avoid overloading the machine.
+_MAX_NUM_LAUNCH = psutil.cpu_count()
 
 
 def launch_cluster(task_yaml_path: str,
@@ -170,9 +175,8 @@ class ReplicaStatusProperty:
         first_ready_time: The first time the service is ready.
         sky_down_status: Process status of sky.down.
     """
-    # Initial value is RUNNING since each `ReplicaInfo` is created
-    # when `sky.launch` is called.
-    sky_launch_status: ProcessStatus = ProcessStatus.RUNNING
+    # None means sky.launch is not called yet.
+    sky_launch_status: Optional[ProcessStatus] = None
     user_app_failed: bool = False
     service_ready_now: bool = False
     # None means readiness probe is not passed yet.
@@ -235,6 +239,9 @@ class ReplicaStatusProperty:
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
         """Convert status property to human-readable replica status."""
+        if self.sky_launch_status is None:
+            # Pending to launch
+            return serve_state.ReplicaStatus.PENDING
         if self.sky_launch_status == ProcessStatus.RUNNING:
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
@@ -459,7 +466,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             ).run,
             args=(self._task_yaml_path, cluster_name),
         )
-        p.start()
+        # Don't start right now; we will start it later in _refresh_process_pool
+        # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
         info = ReplicaInfo(replica_id, cluster_name)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
@@ -559,29 +567,44 @@ class SkyPilotReplicaManager(ReplicaManager):
         """
         for replica_id, p in list(self._launch_process_pool.items()):
             if not p.is_alive():
-                # TODO(tian): Try-catch in process, and have an enum return
-                # value to indicate which type of failure happened.
-                # Currently we only have user code failure since the
-                # retry_until_up flag is set to True, but it will be helpful
-                # when we enable user choose whether to retry or not.
-                logger.info(
-                    f'Launch process for replica {replica_id} finished.')
-                del self._launch_process_pool[replica_id]
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None
-                if p.exitcode != 0:
-                    logger.warning(
-                        f'Launch process for replica {replica_id} exited '
-                        f'abnormally with code {p.exitcode}. Terminating...')
-                    info.status_property.sky_launch_status = (
-                        ProcessStatus.FAILED)
-                    self._terminate_replica(replica_id, sync_down_logs=True)
+                error_in_sky_launch = False
+                if info.status == serve_state.ReplicaStatus.PENDING:
+                    # sky.launch not started yet
+                    if (serve_state.total_number_provisioning_replicas() <
+                            _MAX_NUM_LAUNCH):
+                        p.start()
+                        info.status_property.sky_launch_status = (
+                            ProcessStatus.RUNNING)
                 else:
-                    info.status_property.sky_launch_status = (
-                        ProcessStatus.SUCCEEDED)
+                    # sky.launch finished
+                    # TODO(tian): Try-catch in process, and have an enum return
+                    # value to indicate which type of failure happened.
+                    # Currently we only have user code failure since the
+                    # retry_until_up flag is set to True, but it will be helpful
+                    # when we enable user choose whether to retry or not.
+                    logger.info(
+                        f'Launch process for replica {replica_id} finished.')
+                    del self._launch_process_pool[replica_id]
+                    if p.exitcode != 0:
+                        logger.warning(
+                            f'Launch process for replica {replica_id} '
+                            f'exited abnormally with code {p.exitcode}. '
+                            'Terminating...')
+                        info.status_property.sky_launch_status = (
+                            ProcessStatus.FAILED)
+                        error_in_sky_launch = True
+                    else:
+                        info.status_property.sky_launch_status = (
+                            ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
+                if error_in_sky_launch:
+                    # Teardown after update replica info since
+                    # _terminate_replica will update the replica info too.
+                    self._terminate_replica(replica_id, sync_down_logs=True)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():
                 logger.info(
