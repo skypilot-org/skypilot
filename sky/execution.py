@@ -8,7 +8,7 @@ import getpass
 import os
 import re
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -614,6 +614,96 @@ def _shared_controller_env_vars() -> Dict[str, Any]:
     return env_vars
 
 
+def _controller_skypilot_config_setup(
+    controller_type: str,
+    controller_resources_config: Dict[str, Any],
+    remote_user_config_path: str,
+) -> Tuple[Dict[str, Any], 'sky.Resources']:
+    """Read the skypilot config and setup the controller resources.
+
+    Returns:
+        A tuple of (vars_to_fill, controller_resources).
+    """
+    vars_to_fill: Dict[str, Any] = {}
+    controller_envs = _shared_controller_env_vars()
+    controller_resources_config_copied: Dict[str, Any] = copy.copy(
+        controller_resources_config)
+    if skypilot_config.loaded():
+        # Look up the contents of the already loaded configs via the
+        # 'skypilot_config' module. Don't simply read the on-disk file as
+        # it may have changed since this process started.
+        #
+        # Set any proxy command to None, because the controller would've
+        # been launched behind the proxy, and in general any nodes we
+        # launch may not have or need the proxy setup. (If the controller
+        # needs to launch mew clusters in another region/VPC, the user
+        # should properly set up VPC peering, which will allow the
+        # cross-region/VPC communication. The proxy command is orthogonal
+        # to this scenario.)
+        #
+        # This file will be uploaded to the controller node and will be
+        # used throughout the spot job's / service's recovery attempts
+        # (i.e., if it relaunches due to preemption, we make sure the
+        # same config is used).
+        #
+        # NOTE: suppose that we have a controller in old VPC, then user
+        # changes 'vpc_name' in the config and does a 'spot launch' /
+        # 'serve up'. In general, the old controller may not successfully
+        # launch the job in the new VPC. This happens if the two VPCs don’t
+        # have peering set up. Like other places in the code, we assume
+        # properly setting up networking is user's responsibilities.
+        # TODO(zongheng): consider adding a basic check that checks
+        # controller VPC (or name) == the spot job's / service's VPC
+        # (or name). It may not be a sufficient check (as it's always
+        # possible that peering is not set up), but it may catch some
+        # obvious errors.
+        # TODO(zhwu): hacky. We should only set the proxy command of the
+        # cloud where the controller is launched (currently, only aws user
+        # uses proxy_command).
+        proxy_command_key = ('aws', 'ssh_proxy_command')
+        ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
+        config_dict = skypilot_config.to_dict()
+        if isinstance(ssh_proxy_command, str):
+            config_dict = skypilot_config.set_nested(proxy_command_key, None)
+        elif isinstance(ssh_proxy_command, dict):
+            # Instead of removing the key, we set the value to empty string
+            # so that the controller will only try the regions specified by
+            # the keys.
+            ssh_proxy_command = {k: None for k in ssh_proxy_command}
+            config_dict = skypilot_config.set_nested(proxy_command_key,
+                                                     ssh_proxy_command)
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+            common_utils.dump_yaml(tmpfile.name, config_dict)
+            controller_envs[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
+                remote_user_config_path)
+            vars_to_fill.update({
+                'user_config_path': tmpfile.name,
+                'remote_user_config_path': remote_user_config_path,
+            })
+
+        # Override the controller resources with the ones specified in the
+        # config.
+        custom_controller_resources_config = skypilot_config.get_nested(
+            (controller_type, 'controller', 'resources'), None)
+        if custom_controller_resources_config is not None:
+            controller_resources_config_copied.update(
+                custom_controller_resources_config)
+    try:
+        controller_resources = sky.Resources.from_yaml_config(
+            controller_resources_config_copied)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=common_utils.format_exception(e,
+                                                      use_bracket=True))) from e
+
+    vars_to_fill['envs'] = controller_envs
+    return vars_to_fill, controller_resources
+
+
 @usage_lib.entrypoint
 def spot_launch(
     task: Union['sky.Task', 'sky.Dag'],
@@ -665,6 +755,10 @@ def spot_launch(
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
+        extra_vars, controller_resources = _controller_skypilot_config_setup(
+            controller_type='spot',
+            controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
+            remote_user_config_path=f'{dag.name}-{dag_uuid}.config_yaml')
         vars_to_fill = {
             'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
             'user_yaml_path': f.name,
@@ -676,86 +770,8 @@ def spot_launch(
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
+            **extra_vars,
         }
-        controller_resources_config = copy.copy(
-            spot.constants.CONTROLLER_RESOURCES)
-        spot_env_vars = _shared_controller_env_vars()
-        if skypilot_config.loaded():
-            # Look up the contents of the already loaded configs via the
-            # 'skypilot_config' module. Don't simply read the on-disk file as
-            # it may have changed since this process started.
-            #
-            # Set any proxy command to None, because the controller would've
-            # been launched behind the proxy, and in general any nodes we
-            # launch may not have or need the proxy setup. (If the controller
-            # needs to launch spot clusters in another region/VPC, the user
-            # should properly set up VPC peering, which will allow the
-            # cross-region/VPC communication. The proxy command is orthogonal
-            # to this scenario.)
-            #
-            # This file will be uploaded to the controller node and will be
-            # used throughout the spot job's recovery attempts (i.e., if it
-            # relaunches due to preemption, we make sure the same config is
-            # used).
-            #
-            # NOTE: suppose that we have a controller in old VPC, then user
-            # changes 'vpc_name' in the config and does a 'spot launch'. In
-            # general, the old controller may not successfully launch the job
-            # in the new VPC. This happens if the two VPCs don’t have peering
-            # set up. Like other places in the code, we assume properly setting
-            # up networking is user's responsibilities.
-            # TODO(zongheng): consider adding a basic check that checks
-            # controller VPC (or name) == the spot job's VPC (or name). It may
-            # not be a sufficient check (as it's always possible that peering
-            # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should only set the proxy command of the
-            # cloud where the controller is launched (currently, only aws user
-            # uses proxy_command).
-            proxy_command_key = ('aws', 'ssh_proxy_command')
-            ssh_proxy_command = skypilot_config.get_nested(
-                proxy_command_key, None)
-            config_dict = skypilot_config.to_dict()
-            if isinstance(ssh_proxy_command, str):
-                config_dict = skypilot_config.set_nested(
-                    proxy_command_key, None)
-            elif isinstance(ssh_proxy_command, dict):
-                # Instead of removing the key, we set the value to empty string
-                # so that the controller will only try the regions specified by
-                # the keys.
-                ssh_proxy_command = {k: None for k in ssh_proxy_command}
-                config_dict = skypilot_config.set_nested(
-                    proxy_command_key, ssh_proxy_command)
-
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
-                prefix = spot.SPOT_TASK_YAML_PREFIX
-                remote_user_config_path = (
-                    f'{prefix}/{dag.name}-{dag_uuid}.config_yaml')
-                common_utils.dump_yaml(tmpfile.name, config_dict)
-                spot_env_vars[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
-                    remote_user_config_path)
-                vars_to_fill.update({
-                    'user_config_path': tmpfile.name,
-                    'remote_user_config_path': remote_user_config_path,
-                    'envs': spot_env_vars,
-                })
-
-            # Override the controller resources with the ones specified in the
-            # config.
-            custom_controller_resources_config = skypilot_config.get_nested(
-                ('spot', 'controller', 'resources'), None)
-            if custom_controller_resources_config is not None:
-                controller_resources_config.update(
-                    custom_controller_resources_config)
-        try:
-            controller_resources = sky.Resources.from_yaml_config(
-                controller_resources_config)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                        controller_type='spot',
-                        err=common_utils.format_exception(
-                            e, use_bracket=True))) from e
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
@@ -986,26 +1002,7 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
-    controller_resources_config: Dict[str, Any] = copy.copy(
-        serve.CONTROLLER_RESOURCES)
-    # Override the controller resources with the ones specified in the
-    # config.
-    custom_controller_resources_config = skypilot_config.get_nested(
-        ('serve', 'controller', 'resources'), None)
-    if custom_controller_resources_config is not None:
-        controller_resources_config.update(custom_controller_resources_config)
-    try:
-        controller_resources = sky.Resources.from_yaml_config(
-            controller_resources_config)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
-                    controller_type='serve',
-                    err=common_utils.format_exception(e, use_bracket=True),
-                )) from e
 
-    assert task.service is not None, task
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
     if requested_resources.ports is not None:
@@ -1042,19 +1039,6 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
                         'For now, `sky serve down` and then `sky serve up` '
                         'again.')
 
-    controller_name = serve.SKY_SERVE_CONTROLLER_NAME
-    # TODO(tian): Probably run another sky.launch after we get the load balancer
-    # port from the controller? So we don't need to open so many ports here. Or,
-    # we should have a nginx traffic control to refuse any connection to the
-    # unregistered ports.
-    # Choose the same cloud if controller is not launched, controller resources
-    # not specify cloud and replica cloud is specified.
-    controller_cloud = (requested_resources.cloud if status is None and
-                        controller_resources.cloud is None and
-                        requested_resources.cloud is not None else None)
-    controller_resources = controller_resources.copy(
-        cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
-
     _maybe_translate_local_file_mounts_and_sync_up(task, path='serve')
 
     with tempfile.NamedTemporaryFile(
@@ -1064,12 +1048,19 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
+        controller_name = serve.SKY_SERVE_CONTROLLER_NAME
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_task_yaml_path = (
             serve.generate_remote_task_yaml_file_name(service_name))
+        remote_config_yaml_path = (
+            serve.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve.generate_remote_controller_log_file_name(service_name))
+        extra_vars, controller_resources = _controller_skypilot_config_setup(
+            controller_type='serve',
+            controller_resources_config=serve.CONTROLLER_RESOURCES,
+            remote_user_config_path=remote_config_yaml_path)
         vars_to_fill = {
             'remote_task_yaml_path': remote_task_yaml_path,
             'local_task_yaml_path': service_file.name,
@@ -1077,13 +1068,23 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
-            'envs': _shared_controller_env_vars(),
+            **extra_vars,
         }
         backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
                                     output_path=controller_file.name)
-        # TODO(tian): Probably we should support customizable setup commands.
         controller_task = task_lib.Task.from_yaml(controller_file.name)
+        # Choose the same cloud if controller is not launched, controller
+        # resources not specify cloud and replica cloud is specified.
+        controller_cloud = (requested_resources.cloud if status is None and
+                            controller_resources.cloud is None and
+                            requested_resources.cloud is not None else None)
+        # TODO(tian): Probably run another sky.launch after we get the load
+        # balancer port from the controller? So we don't need to open so many
+        # ports here. Or, we should have a nginx traffic control to refuse
+        # any connection to the unregistered ports.
+        controller_resources = controller_resources.copy(
+            cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
         controller_task.set_resources(controller_resources)
 
         # Set this to modify default ray task CPU usage to custom value

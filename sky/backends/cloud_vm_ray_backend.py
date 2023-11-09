@@ -321,8 +321,7 @@ class RayCodeGen:
             assert len(resources_dict) == 1, (
                 'There can only be one type of accelerator per instance. '
                 f'Found: {resources_dict}.')
-            acc_name = list(resources_dict.keys())[0]
-            acc_count = list(resources_dict.values())[0]
+            acc_name, acc_count = list(resources_dict.items())[0]
             gpu_dict = {'GPU': acc_count}
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve

@@ -2891,12 +2891,18 @@ def get_backend_from_handle(
 
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
-    """Returns the resources dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet
-    # except for sky serve controller task.
+    """Returns the resources dict of the task.
+
+    Returns:
+        A dict of the resources of the task. The keys are the resource names
+        and the values are the number of the resources. It always contains
+        the CPU resource (to control the maximum number of tasks), and
+        optionally accelerator demands.
+    """
+    # TODO: Custom CPU and other memory resources are not supported yet.
+    # For sky serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of services.
     resources_dict = {
-        # We set CPU resource for sky serve controller to a smaller value
-        # to support a larger number of services.
         'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
                 if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
     }
@@ -2913,6 +2919,11 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
+    """Returns the resources string of the task.
+
+    The resources string is only used as a display purpose, so we only show
+    the accelerator demands (if any). Otherwise, the CPU demand is shown.
+    """
     resources_dict = get_task_demands_dict(task)
     if len(resources_dict) > 1:
         resources_dict.pop('CPU')

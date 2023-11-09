@@ -1,5 +1,5 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
-from typing import List, Optional, Set
+from typing import List, Optional
 
 import fastapi
 
@@ -12,9 +12,9 @@ class LoadBalancingPolicy:
     """Abstract class for load balancing policies."""
 
     def __init__(self) -> None:
-        self.ready_replicas: Set[str] = set()
+        self.ready_replicas: List[str] = []
 
-    def set_ready_replicas(self, ready_replicas: Set[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
@@ -26,20 +26,18 @@ class RoundRobinPolicy(LoadBalancingPolicy):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.replicas_queue: List[str] = []
         self.index = 0
 
-    def set_ready_replicas(self, ready_replicas: Set[str]) -> None:
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(ready_replicas) != set(self.ready_replicas):
             self.ready_replicas = ready_replicas
-            self.replicas_queue = list(ready_replicas)
             self.index = 0
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
-        if not self.replicas_queue:
+        if not self.ready_replicas:
             return None
-        replica_ip = self.replicas_queue[self.index]
-        self.index = (self.index + 1) % len(self.replicas_queue)
+        replica_ip = self.ready_replicas[self.index]
+        self.index = (self.index + 1) % len(self.ready_replicas)
         request_repr = ('<Request '
                         f'method="{request.method}" '
                         f'url="{request.url}" '

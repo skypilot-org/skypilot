@@ -4,39 +4,37 @@ CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
-# The filelock for selecting service ports when starting a service. We need to
-# have a filelock to avoid port collision when starting multiple services at
-# the same time.
+# The filelock for selecting service ports on controller VM when starting a
+# service. We need to have a filelock to avoid port collision when starting
+# multiple services at the same time.
 PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
-# The time interval for load balancer to sync with controller. Every time the
-# load balancer syncs with controller, it will update all available replica ips
-# for each service, also send the number of requests in last query interval.
-LB_CONTROLLER_SYNC_INTERVAL = 20
+# The time interval in seconds for load balancer to sync with controller. Every
+# time the load balancer syncs with controller, it will update all available
+# replica ips for each service, also send the number of requests in last query
+# interval.
+LB_CONTROLLER_SYNC_INTERVAL_SECONDS = 20
 
-# Interval to probe replica endpoint.
-ENDPOINT_PROBE_INTERVAL = 10
+# Interval in seconds to probe replica endpoint.
+ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 
-# The default timeout for a readiness probe request. We set the timeout to 15s
-# since using actual generation in LLM services as readiness probe is very
-# time-consuming (33B, 70B, ...).
+# The default timeout in seconds for a readiness probe request. We set the
+# timeout to 15s since using actual generation in LLM services as readiness
+# probe is very time-consuming (33B, 70B, ...).
 # TODO(tian): Expose this option to users in yaml file.
-READINESS_PROBE_TIMEOUT = 15
+READINESS_PROBE_TIMEOUT_SECONDS = 15
 
-# Wait for 1 minutes for controller / load balancer to terminate.
-SERVE_TERMINATE_WAIT_TIMEOUT = 60
-
-# Autoscaler window size for request per second. We calculate rps by divide the
-# number of requests in last window size by this window size.
-AUTOSCALER_RPS_WINDOW_SIZE = 60
-# Autoscaler scale frequency. We will try to scale up/down every
+# Autoscaler window size in seconds for request per second. We calculate rps by
+# divide the number of requests in last window size by this window size.
+AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
+# Autoscaler scale frequency in seconds. We will try to scale up/down every
 # `scale_frequency`.
-AUTOSCALER_SCALE_FREQUENCY = 20
-# Autoscaler cooldown time. We will not scale up/down if the last scale up/down
-# is within this cooldown time.
+AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
+# Autoscaler cooldown time in seconds. We will not scale up/down if the last
+# scale up/down is within this cooldown time.
 AUTOSCALER_COOLDOWN_SECONDS = 60
 
 # The default controller resources.
@@ -44,16 +42,17 @@ AUTOSCALER_COOLDOWN_SECONDS = 60
 # size is 150 GB. Also, we need 32 GB memory to run our controller and load
 # balancer jobs since it is very memory demanding.
 # TODO(tian): We might need to be careful that service logs can take a lot of
-# disk space. Maybe we could use a larger disk size or migrate to cloud storage.
+# disk space. Maybe we could use a larger disk size, migrate to cloud storage or
+# do some log rotation.
 CONTROLLER_RESOURCES = {'disk_size': 200, 'memory': '32+'}
 
 # Our ray jobs is very memory demanding and number of services on a single
 # controller is limited by memory. Rough benchmark result shows each service
 # needs ~0.6 GB to run only for controller and load balancer process.
 # Considering there will be some sky launch and sky down process on the fly, we
-# set the memory usage to 2 GB to be safe.
+# set the memory usage to 1 GB to be safe.
 # In this setup, a default highmem controller with 4 vCPU and 32 GB memory can
-# run 16 services.
+# run 32 services.
 # TODO(tian): Since now we only have one job, we set this to 1 GB. Should do
 # some benchmark to make sure this is safe.
 SERVICES_MEMORY_USAGE_GB = 1.0

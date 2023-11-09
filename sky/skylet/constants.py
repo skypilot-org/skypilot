@@ -96,6 +96,9 @@ USER_ENV_VAR = 'SKYPILOT_USER'
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
 
+# Used for translate local file mounts to cloud storage. Please refer to
+# sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
+# more details.
 WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
 FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
 FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'

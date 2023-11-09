@@ -1,4 +1,7 @@
-"""Service: Control both the controller and load balancer."""
+"""Main entrypoint to start a service.
+
+This including the controller and load balancer.
+"""
 import argparse
 import multiprocessing
 import os

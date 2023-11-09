@@ -2631,16 +2631,16 @@ def _get_service_name() -> str:
 # `REPLICAS` is in the form of `1/2` where the first number is the number of
 # ready replicas and the second number is the number of total replicas. We
 # grep such format to ensure that the service is ready, and early exit if any
-# failure detected. In the end we sleep for serve.LB_CONTROLLER_SYNC_INTERVAL to
-# make sure load balancer have enough time to sync with the controller and get
-# all ready replica IPs.
+# failure detected. In the end we sleep for 
+# serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS to make sure load balancer have
+# enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '(while true; do'
     '     output=$(sky serve status {name});'
     '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
     '     echo "$output" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
-    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL};')
+    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
@@ -2806,12 +2806,14 @@ def test_skyserve_replica_failure():
         return (f'gcloud compute instances delete --zone={zone}'
                 f' --quiet $({query_cmd})')
 
-    # In the worst case, the controller will first wait ENDPOINT_PROBE_INTERVAL
-    # for next probe, and wait LB_CONTROLLER_SYNC_INTERVAL for load balancer's
-    # next sync with controller. We add 5s more for any overhead, such as
-    # database read/write.
-    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL +
-                                    serve.LB_CONTROLLER_SYNC_INTERVAL + 5)
+    # In the worst case, the controller will first wait
+    # ENDPOINT_PROBE_INTERVAL_SECONDS for next probe, and wait
+    # LB_CONTROLLER_SYNC_INTERVAL_SECONDS for load balancer's
+    # next sync with controller. We add 5s more for any overhead,
+    # such as database read/write.
+    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL_SECONDS +
+                                    serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS +
+                                    5)
 
     test = Test(
         f'test-skyserve-replica-failure',
@@ -2877,7 +2879,7 @@ def test_skyserve_auto_restart():
             f'    output=$(sky serve status {name});'
             '     echo "$output" | grep -q "1/1" && break;'
             '     sleep 10;'
-            f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL};',
+            f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
         f'sky serve down -y {name}',

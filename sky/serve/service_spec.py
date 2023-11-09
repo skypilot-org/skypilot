@@ -190,7 +190,7 @@ class SkyServiceSpec:
         """)
 
     @property
-    def readiness_suffix(self) -> str:
+    def readiness_route(self) -> str:
         return f':{self._replica_port}{self._readiness_path}'
 
     @property
@@ -211,6 +211,7 @@ class SkyServiceSpec:
 
     @property
     def max_replicas(self) -> Optional[int]:
+        # If None, treated as having the same value of min_replicas.
         return self._max_replicas
 
     @property

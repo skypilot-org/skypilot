@@ -21,7 +21,7 @@ NUM_COST_REPORT_LINES = 5
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
-# A record in global_user_state's 'services' table.
+# A record in serve_state's 'services' table.
 _ServiceRecord = Dict[str, Any]
 _ReplicaRecord = Dict[str, Any]
 

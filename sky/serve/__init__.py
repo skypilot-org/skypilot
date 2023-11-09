@@ -3,13 +3,14 @@ import os
 
 from sky.serve.constants import CONTROLLER_RESOURCES
 from sky.serve.constants import CONTROLLER_TEMPLATE
-from sky.serve.constants import ENDPOINT_PROBE_INTERVAL
-from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL
+from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
+from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import LOAD_BALANCER_PORT_RANGE
 from sky.serve.constants import SERVICES_TASK_CPU_DEMAND
 from sky.serve.constants import SKYSERVE_METADATA_DIR
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
+from sky.serve.serve_utils import generate_remote_config_yaml_file_name
 from sky.serve.serve_utils import generate_remote_controller_log_file_name
 from sky.serve.serve_utils import generate_remote_task_yaml_file_name
 from sky.serve.serve_utils import generate_replica_cluster_name

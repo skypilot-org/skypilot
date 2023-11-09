@@ -112,42 +112,45 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-class RequestInformation:
-    """Base class for request information."""
+class RequestsAggregator:
+    """Base class for request aggregator."""
 
     def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request information."""
+        """Add a request to the request aggregator."""
         raise NotImplementedError
 
     def get(self) -> List[Any]:
-        """Get all current request information."""
+        """Get all current request aggregator."""
         raise NotImplementedError
 
     def clear(self) -> None:
-        """Clear all current request information."""
+        """Clear all current request aggregator."""
         raise NotImplementedError
 
     def __repr__(self) -> str:
         raise NotImplementedError
 
 
-class RequestTimestamp(RequestInformation):
-    """RequestTimestamp: Request information that stores request timestamps."""
+class RequestTimestamp(RequestsAggregator):
+    """RequestTimestamp: Aggregates request timestamps.
+
+    This is useful for QPS-based autoscaling.
+    """
 
     def __init__(self) -> None:
         self.timestamps: List[float] = []
 
     def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request information."""
+        """Add a request to the request aggregator."""
         del request  # unused
         self.timestamps.append(time.time())
 
     def get(self) -> List[float]:
-        """Get all current request information."""
+        """Get all current request aggregator."""
         return self.timestamps
 
     def clear(self) -> None:
-        """Clear all current request information."""
+        """Clear all current request aggregator."""
         self.timestamps = []
 
     def __repr__(self) -> str:
@@ -196,6 +199,12 @@ def generate_remote_task_yaml_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
     return os.path.join(dir_name, 'task.yaml')
+
+
+def generate_remote_config_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'config.yaml')
 
 
 def generate_remote_controller_log_file_name(service_name: str) -> str:
@@ -299,14 +308,14 @@ def get_replica_info(service_name: str,
 
 def get_serve_status(service_name: str,
                      with_replica_info: bool = True) -> Dict[str, Any]:
-    """Get the latest information of the service.
+    """Get the status dict of the service.
 
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
 
     Returns:
-        A dictionary of latest information of the service.
+        A dictionary, describing the status of the service.
     """
     record = serve_state.get_service_from_name(service_name)
     if record is None:

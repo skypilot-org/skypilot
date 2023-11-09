@@ -53,14 +53,14 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
         self.frequency = frequency
-        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL:
+        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
 
-    def update_request_information(
-            self, request_information: serve_utils.RequestInformation) -> None:
-        """Update request information for autoscaling."""
+    def collect_request_information(
+            self, request_aggregator: serve_utils.RequestsAggregator) -> None:
+        """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
     def evaluate_scaling(self, infos: List[Dict[str,
@@ -97,13 +97,13 @@ class RequestRateAutoscaler(Autoscaler):
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
 
-    def update_request_information(
-            self, request_information: serve_utils.RequestInformation) -> None:
-        if not isinstance(request_information, serve_utils.RequestTimestamp):
-            raise ValueError('Request information must be of type '
+    def collect_request_information(
+            self, request_aggregator: serve_utils.RequestsAggregator) -> None:
+        if not isinstance(request_aggregator, serve_utils.RequestTimestamp):
+            raise ValueError('Request aggregator must be of type '
                              'serve_utils.RequestTimestamp for '
                              'RequestRateAutoscaler.')
-        self.request_timestamps.extend(request_information.get())
+        self.request_timestamps.extend(request_aggregator.get())
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.rps_window_size)
