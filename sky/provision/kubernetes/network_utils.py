@@ -67,22 +67,30 @@ def create_or_replace_namespaced_ingress(
     networking_api = kubernetes.networking_api()
 
     try:
-        networking_api.read_namespaced_ingress(ingress_name, namespace)
+        networking_api.read_namespaced_ingress(
+            ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.get_kubernetes().client.ApiException as e:
         if e.status == 404:
-            networking_api.create_namespaced_ingress(namespace, ingress_spec)
+            networking_api.create_namespaced_ingress(
+                namespace,
+                ingress_spec,
+                _request_timeout=kubernetes.API_TIMEOUT)
             return
         raise e
 
-    networking_api.replace_namespaced_ingress(ingress_name, namespace,
-                                              ingress_spec)
+    networking_api.replace_namespaced_ingress(
+        ingress_name,
+        namespace,
+        ingress_spec,
+        _request_timeout=kubernetes.API_TIMEOUT)
 
 
 def delete_namespaced_ingress(namespace: str, ingress_name: str) -> None:
     """Deletes an ingress resource."""
     networking_api = kubernetes.networking_api()
     try:
-        networking_api.delete_namespaced_ingress(ingress_name, namespace)
+        networking_api.delete_namespaced_ingress(
+            ingress_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.get_kubernetes().client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
@@ -97,14 +105,21 @@ def create_or_replace_namespaced_service(
     core_api = kubernetes.core_api()
 
     try:
-        core_api.read_namespaced_service(service_name, namespace)
+        core_api.read_namespaced_service(
+            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.get_kubernetes().client.ApiException as e:
         if e.status == 404:
-            core_api.create_namespaced_service(namespace, service_spec)
+            core_api.create_namespaced_service(
+                namespace,
+                service_spec,
+                _request_timeout=kubernetes.API_TIMEOUT)
             return
         raise e
 
-    core_api.replace_namespaced_service(service_name, namespace, service_spec)
+    core_api.replace_namespaced_service(service_name,
+                                        namespace,
+                                        service_spec,
+                                        _request_timeout=kubernetes.API_TIMEOUT)
 
 
 def delete_namespaced_service(namespace: str, service_name: str) -> None:
@@ -112,7 +127,8 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
     core_api = kubernetes.core_api()
 
     try:
-        core_api.delete_namespaced_service(service_name, namespace)
+        core_api.delete_namespaced_service(
+            service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.get_kubernetes().client.ApiException as e:
         if e.status == 404:
             raise exceptions.PortDoesNotExistError(
@@ -123,7 +139,8 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
 def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
     """Checks if an ingress controller exists in the cluster."""
     networking_api = kubernetes.networking_api()
-    ingress_classes = networking_api.list_ingress_class().items
+    ingress_classes = networking_api.list_ingress_class(
+        _request_timeout=kubernetes.API_TIMEOUT).items
     return any(
         map(lambda item: item.metadata.name == ingress_class_name,
             ingress_classes))
@@ -133,7 +150,8 @@ def get_base_url(namespace: str) -> Tuple[str, str]:
     """Returns the HTTP and HTTPS base url of the ingress controller for the cluster."""
     core_api = kubernetes.core_api()
     ingress_service = [
-        item for item in core_api.list_namespaced_service(namespace).items
+        item for item in core_api.list_namespaced_service(
+            namespace, _request_timeout=kubernetes.API_TIMEOUT).items
         if item.spec.type == "LoadBalancer"
     ][0]
     if ingress_service.status.load_balancer.ingress is None:
@@ -150,5 +168,6 @@ def get_base_url(namespace: str) -> Tuple[str, str]:
 def get_loadbalancer_ip(namespace: str, service_name: str) -> str:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
-    service = core_api.read_namespaced_service(service_name, namespace)
+    service = core_api.read_namespaced_service(
+        service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     return service.status.load_balancer.ingress[0].ip
