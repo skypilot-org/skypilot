@@ -912,7 +912,10 @@ class Optimizer:
     @staticmethod
     def _print_candidates(node_to_candidate_map: _TaskToPerCloudCandidates):
         for node, candidate_set in node_to_candidate_map.items():
-            accelerator = list(node.resources)[0].accelerators
+            if node.best_resources:
+                accelerator = node.best_resources.accelerators
+            else:
+                accelerator = list(node.resources)[0].accelerators
             is_multi_instances = False
             if accelerator:
                 acc_name, acc_count = list(accelerator.items())[0]
@@ -976,7 +979,7 @@ class Optimizer:
                             task = local_task,
                             blocked_resources = blocked_resources,
                             try_fix_with_sky_check = True,
-                            quiet = True
+                            quiet = False
                     )
                     if len(launchable_resources_map[resources]) != 0:
                         break
@@ -1030,20 +1033,19 @@ class Optimizer:
 
         topo_order = list(nx.topological_sort(graph)) if has_resources_ordered \
             else local_topo_order
-        node_to_cost_map, node_to_candidate_map = (
-            Optimizer._estimate_nodes_cost_or_time(
-                topo_order=topo_order,
-                minimize_cost=minimize_cost,
-                blocked_resources=blocked_resources,
-                quiet=True)) if has_resources_ordered else (
-                    local_node_to_cost_map, local_node_to_candidate_map)
+        node_to_cost_map, _ = (Optimizer._estimate_nodes_cost_or_time(
+            topo_order=topo_order,
+            minimize_cost=minimize_cost,
+            blocked_resources=blocked_resources,
+            quiet=True)) if has_resources_ordered else (
+                local_node_to_cost_map, local_node_to_candidate_map)
 
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
                                            node_to_cost_map, minimize_cost)
             if not env_options.Options.MINIMIZE_LOGGING.get():
-                Optimizer._print_candidates(node_to_candidate_map)
+                Optimizer._print_candidates(local_node_to_candidate_map)
         return best_plan
 
 
