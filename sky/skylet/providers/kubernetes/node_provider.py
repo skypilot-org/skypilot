@@ -262,7 +262,7 @@ class KubernetesNodeProvider(NodeProvider):
                         # See list of possible reasons for waiting here:
                         # https://stackoverflow.com/a/57886025
                         waiting = container_status.state.waiting
-                        if waiting and waiting.reason != 'ContainerCreating':
+                        if waiting is not None and waiting.reason != 'ContainerCreating':
                             all_pods_scheduled = False
                             break
 
