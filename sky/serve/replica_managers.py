@@ -379,7 +379,7 @@ class ReplicaInfo:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
-            logger.info(e)
+            logger.info(f'common_utils.format_exception(e)')
             logger.info(f'{replica_identity.capitalize()} is not ready.')
         return self, False, probe_time
 
@@ -572,7 +572,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
-                assert info is not None
+                assert info is not None, replica_id
                 error_in_sky_launch = False
                 if info.status == serve_state.ReplicaStatus.PENDING:
                     # sky.launch not started yet
@@ -615,7 +615,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 del self._down_process_pool[replica_id]
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
-                assert info is not None
+                assert info is not None, replica_id
                 if p.exitcode != 0:
                     logger.error(f'Down process for replica {replica_id} '
                                  f'exited abnormally with code {p.exitcode}.')
