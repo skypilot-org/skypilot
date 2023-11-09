@@ -115,7 +115,6 @@ CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
-
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 

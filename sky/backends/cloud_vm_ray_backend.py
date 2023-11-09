@@ -4557,7 +4557,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-
     def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
                                 storage_mounts: Dict[Path, storage_lib.Storage],
                                 mount_mode: storage_utils.StorageMode):
@@ -4657,10 +4656,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise RuntimeError(error_msg) from None
                 else:
                     if env_options.Options.SHOW_DEBUG_INFO.get():
-                        raise exceptions.CommandError(e.returncode,
-                                                      command=f'to {mode_str}',
-                                                      error_msg=e.error_msg,
-                                                      detailed_reason=e.detailed_reason)
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command=f'to {mode_str}',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
                     else:
                         # Strip the command (a big heredoc) from the exception
                         raise exceptions.CommandError(
@@ -4671,48 +4671,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         end = time.time()
         logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
-
-    def _set_storage_mounts_metadata(
-            self, cluster_name: str,
-            storage_mounts: Dict[Path, storage_lib.Storage]) -> None:
-        """Sets 'storage_mounts' object in cluster's storage_mounts_metadata
-
-        After converting Storage objects in 'storage_mounts' to metadata,
-        it stores {PATH: StorageMetadata} into the table.
-        """
-        if not storage_mounts:
-            return
-        storage_mounts_metadata = {}
-        for dst, storage_obj in storage_mounts.items():
-            storage_mounts_metadata[dst] = storage_obj.handle
-        lock_path = (
-            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name))
-        with filelock.FileLock(lock_path):
-            global_user_state.set_cluster_storage_mounts_metadata(
-                cluster_name, storage_mounts_metadata)
-
-    def _get_storage_mounts_metadata(
-            self,
-            cluster_name: str) -> Optional[Dict[Path, storage_lib.Storage]]:
-        """Gets 'storage_mounts' object from cluster's storage_mounts_metadata
-
-        After retrieving storage_mounts_metadata, it converts back the
-        StorageMetadata to Storage object and restores 'storage_mounts'
-        """
-        lock_path = \
-            backend_utils.CLUSTER_FILE_MOUNTS_LOCK_PATH.format(cluster_name)
-        with filelock.FileLock(lock_path):
-            storage_mounts_metadata = \
-                global_user_state.get_cluster_storage_mounts_metadata(
-                cluster_name)
-        if storage_mounts_metadata is None:
-            return None
-        storage_mounts = {}
-        for dst, storage_metadata in storage_mounts_metadata.items():
-            storage_mounts[dst] = \
-                storage_lib.Storage.from_metadata(storage_metadata,
-                                                  sync_on_reconstruction=False)
-        return storage_mounts
 
     def _has_csync(self, cluster_name: str) -> bool:
         """Chekcs if there are CSYNC mode storages within the cluster."""

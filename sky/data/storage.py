@@ -762,7 +762,6 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
-
     def _add_store_from_metadata(
             self, sky_stores: Dict[StoreType,
                                    AbstractStore.StoreMetadata]) -> None:
@@ -811,7 +810,6 @@ class Storage(object):
     @classmethod
     def from_metadata(cls, metadata: StorageMetadata,
                       **override_args) -> 'Storage':
-
         """Create Storage from StorageMetadata object.
 
         Used when reconstructing Storage object and AbstractStore objects from
@@ -821,16 +819,14 @@ class Storage(object):
         source = override_args.get('source', metadata.source)
         name = override_args.get('name', metadata.storage_name)
         # If the source is a list, it consists of local paths
-        if not isinstance(source,
-                          list) and data_utils.is_cloud_store_url(source):
-            name = None
-        interval_seconds=override_args.get('interval_seconds',
-                                           metadata.interval_seconds)
+        if not isinstance(source, list): 
+            if data_utils.is_cloud_store_url(source):
+                name = None
+
         storage_obj = cls(name=name,
                           source=source,
                           sync_on_reconstruction=override_args.get(
-                              'sync_on_reconstruction', True),
-                          interval_seconds=interval_seconds)
+                              'sync_on_reconstruction', True))
 
         # For backward compatibility
         # TODO(Doyoung): Implement __setstate__ to resolve backwards
@@ -843,7 +839,6 @@ class Storage(object):
                 storage_obj.mode = override_args.get('mode', metadata.mode)
 
         return storage_obj
-
 
     def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
         """Initializes and adds a new store to the storage.
