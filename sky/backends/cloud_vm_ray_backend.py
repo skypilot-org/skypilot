@@ -769,7 +769,7 @@ class RetryingVmProvisioner(object):
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
             elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
-                    in stderr):
+                  in stderr):
                 self._blocked_resources.add(
                     launchable_resources.copy(region=region.name, zone=None))
             elif ('Requested disk size cannot be smaller than the image size'
