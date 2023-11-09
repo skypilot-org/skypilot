@@ -944,6 +944,105 @@ def test_ibm_storage_mounts():
         run_one_test(test)
 
 
+@pytest.mark.aws
+def test_aws_storage_mounts_with_stop():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud aws {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'aws_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_storage_mounts_with_stop():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'gsutil ls gs://{storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_storage_mounts_with_stop():
+    # Tests bucket mounting on k8s, assuming S3 is configured.
+    # This test will fail if run on non x86_64 architecture, since goofys is
+    # built for x86_64 only.
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'kubernetes_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
@@ -3062,7 +3161,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -3094,7 +3193,7 @@ class TestStorageWithCredentials:
         assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd = ['sky', 'storage', 'delete', '--yes']
         delete_cmd += storage_obj_name
         subprocess.check_output(delete_cmd)
 
@@ -3129,7 +3228,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes'])
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
@@ -3147,8 +3246,9 @@ class TestStorageWithCredentials:
         # files and folders to a new bucket, then delete bucket.
         tmp_bulk_del_storage_obj.add_store(store_type)
 
-        subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name])
+        subprocess.check_output([
+            'sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
+        ])
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
@@ -3225,7 +3325,7 @@ class TestStorageWithCredentials:
 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
-                match='Attempted to connect to a non-existent bucket'):
+                match='Attempted to use a non-existent bucket as a source'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 

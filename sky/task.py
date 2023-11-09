@@ -355,8 +355,8 @@ class Task:
         if envs is not None and isinstance(envs, dict):
             config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -445,7 +445,7 @@ class Task:
                         'Cannot specify "any_of" with other resource fields.')
             resources_set = set()
             for resource in resources_config['any_of']:
-                backend_utils.validate_schema(
+                common_utils.validate_schema(
                     config, schemas.get_single_resources_schema(),
                     'Invalid resource YAML: ')
                 resources_set.add(sky.Resources.from_yaml_config(resource))
@@ -457,7 +457,7 @@ class Task:
                         'Cannot specify "ordered" with other resource fields.')
             resources_list = []
             for resource in resources_config['ordered']:
-                backend_utils.validate_schema(
+                common_utils.validate_schema(
                     config, schemas.get_single_resources_schema(),
                     'Invalid resource YAML: ')
                 resources_list.append(sky.Resources.from_yaml_config(resource))

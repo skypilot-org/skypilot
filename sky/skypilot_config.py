@@ -51,6 +51,7 @@ import yaml
 from sky import sky_logging
 from sky.clouds import cloud_registry
 from sky.utils import common_utils
+from sky.utils import schemas
 
 # The config path is discovered in this order:
 #
@@ -160,6 +161,12 @@ def _try_load_config() -> None:
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
+        if _dict is not None:
+            common_utils.validate_schema(
+                _dict,
+                schemas.get_config_schema(),
+                f'Invalid config YAML ({config_path}): ',
+                skip_none=False)
 
         for cloud in cloud_registry.CLOUD_REGISTRY:
             _syntax_check_for_ssh_proxy_command(cloud)
