@@ -429,27 +429,37 @@ class Task:
 
         resources_config = config.pop('resources', None)
         if resources_config and resources_config.get(
-                'all_of') is not None and resources_config.get(
+                'any_of') is not None and resources_config.get(
                     'ordered') is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cannot specify both "all_of" and "ordered" in resources.')
+                    'Cannot specify both "any_of" and "ordered" in resources.')
         if resources_config and resources_config.get('any_of') is not None:
+            # TODO(Ziming) In the future we can consider to allow
+            # additional field when any_of is specified,
+            # which means we override the fields in all the
+            # resources under any_of with the fields specified outsied any_of.
             if len(resources_config) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Cannot specify "any_of" with other resource fields.')
             resources_set = set()
             for resource in resources_config['any_of']:
+                backend_utils.validate_schema(resource,
+                                              schemas.get_resources_schema(),
+                                              'Invalid resource schema: ')
                 resources_set.add(sky.Resources.from_yaml_config(resource))
             task.set_resources(resources_set)
         elif resources_config and resources_config.get('ordered') is not None:
             if len(resources_config) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify "any_of" with other resource fields.')
+                        'Cannot specify "ordered" with other resource fields.')
             resources_list = []
             for resource in resources_config['ordered']:
+                backend_utils.validate_schema(resource,
+                                              schemas.get_resources_schema(),
+                                              'Invalid resource schema: ')
                 resources_list.append(sky.Resources.from_yaml_config(resource))
             task.set_resources(resources_list)
         # Translate accelerators field to potential multiple resources.

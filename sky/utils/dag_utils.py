@@ -7,6 +7,7 @@ from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -114,8 +115,9 @@ def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
         spot_recovery_strategy = new_resources_list[0].spot_recovery
         for resource in new_resources_list:
             if resource.spot_recovery != spot_recovery_strategy:
-                raise ValueError('All resources in the task must have'
-                                 'the same spot recovery strategy.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('All resources in the task must have'
+                                     'the same spot recovery strategy.')
 
         if isinstance(task_.resources, list):
             task_.set_resources(new_resources_list)

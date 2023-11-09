@@ -115,13 +115,13 @@ def get_resources_schema():
             'any_of': {
                 'type': 'array',
                 'items': {
-                    'type': 'string',
+                    'type': 'object',
                 },
             },
             'ordered': {
                 'type': 'array',
                 'items': {
-                    'type': 'string',
+                    'type': 'object',
                 },
             }
         }

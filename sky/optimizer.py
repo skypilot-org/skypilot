@@ -946,8 +946,8 @@ class Optimizer:
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 
-        is_resources_ordered = _is_dag_resources_ordered(dag)
-        if is_resources_ordered:
+        has_resources_ordered = _is_dag_resources_ordered(dag)
+        if has_resources_ordered:
             # Honor the user's choice.
             # The actual task dag can store dummy tasks.
             for task_id, task in enumerate(dag.tasks):
@@ -956,14 +956,14 @@ class Optimizer:
                     accelerators_str = ', '.join(
                         [f'{r}' for r in resources_list])
                     logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th '
-                                'task is using user-specified'
-                                'accelerators list'
+                                'task is using user-specified '
+                                'accelerators list '
                                 f'{colorama.Style.RESET_ALL}'
-                                '(will be tried in the listed order):'
+                                '(will be tried in the listed order): '
                                 f'{accelerators_str}')
 
         graph = dag.get_graph()
-        local_dag = copy.deepcopy(dag) if is_resources_ordered else dag
+        local_dag = copy.deepcopy(dag) if has_resources_ordered else dag
         for task_id in range(len(dag.tasks)):
             task = dag.tasks[task_id]
             if isinstance(task.resources, list):
@@ -1015,8 +1015,12 @@ class Optimizer:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(error_msg)
 
-        if is_resources_ordered:
+        if has_resources_ordered:
             best_plan = {}
+            # We have to manually set the best_resources for the tasks in the
+            # original dag, to pass the optimization results
+            # to the caller, as we deep copied the dag
+            # when the dag has nodes with ordered resources.
             for task, resources in local_best_plan.items():
                 task_idx = local_dag.tasks.index(task)
                 dag.tasks[task_idx].best_resources = resources
@@ -1024,14 +1028,14 @@ class Optimizer:
         else:
             best_plan = local_best_plan
 
-        topo_order = list(nx.topological_sort(graph)) if is_resources_ordered \
+        topo_order = list(nx.topological_sort(graph)) if has_resources_ordered \
             else local_topo_order
         node_to_cost_map, node_to_candidate_map = (
             Optimizer._estimate_nodes_cost_or_time(
                 topo_order=topo_order,
                 minimize_cost=minimize_cost,
                 blocked_resources=blocked_resources,
-                quiet=True)) if is_resources_ordered else (
+                quiet=True)) if has_resources_ordered else (
                     local_node_to_cost_map, local_node_to_candidate_map)
 
         if not quiet:
