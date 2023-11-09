@@ -27,6 +27,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import service_spec
