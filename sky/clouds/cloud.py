@@ -191,7 +191,7 @@ class Cloud:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
-    def get_egress_cost(self, num_gigabytes):
+    def get_egress_cost(self, num_gigabytes: float):
         """Returns the egress cost.
 
         TODO: takes into account "per month" accumulation per account.
@@ -204,6 +204,7 @@ class Cloud:
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -409,8 +410,17 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        """Validates the region and zone."""
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Validates whether region and zone exist in the catalog.
+
+        Returns:
+            A tuple of region and zone, if validated.
+
+        Raises:
+            ValueError: If region or zone is invalid or not supported.
+        """
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds=self._REPR.lower())

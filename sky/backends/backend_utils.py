@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
-import difflib
 import enum
 import getpass
 import json
@@ -8,6 +7,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -19,7 +19,6 @@ import uuid
 import colorama
 import filelock
 import jinja2
-import jsonschema
 from packaging import version
 import requests
 from requests import adapters
@@ -41,6 +40,7 @@ from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
+from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
@@ -52,7 +52,6 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -114,6 +113,9 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
     '~/.sky/.{}_file_mounts.lock')
 
+CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
+
+
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
@@ -127,7 +129,7 @@ _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 #   used for calculating the hash.
 # TODO(zhwu): Keep in sync with the fields used in https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/commands.py#L687-L701
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
-    'cluster_name', 'provider', 'auth', 'node_config'
+    'cluster_name', 'provider', 'auth', 'node_config', 'docker'
 }
 # For these keys, don't use the old yaml's version and instead use the new yaml's.
 #  - zone: The zone field of the old yaml may be '1a,1b,1c' (AWS) while the actual
@@ -135,20 +137,27 @@ _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
 #    it's possible to failover to 1b, which leaves a leaked instance in 1a. Here,
 #    we use the new yaml's zone field, which is guaranteed to be the existing zone
 #    '1a'.
+# - docker_login_config: The docker_login_config field of the old yaml may be
+#   outdated or wrong. Users may want to fix the login config if a cluster fails
+#   to launch due to the login config.
 # - UserData: The UserData field of the old yaml may be outdated, and we want to
 #   use the new yaml's UserData field, which contains the authorized key setup as
 #   well as the disabling of the auto-update with apt-get.
+# - firewall_rule: This is a newly added section for gcp in provider section.
+# - security_group: In #2485 we introduces the changed of security group, so we
+#   should take the latest security group name.
 _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('provider', 'availability_zone'),
+    # AWS with new provisioner has docker_login_config in the
+    # docker field, instead of the provider field.
+    ('docker', 'docker_login_config'),
+    # Other clouds
+    ('provider', 'docker_login_config'),
+    ('provider', 'firewall_rule'),
+    ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
-
-# Command that calls `ray status` with SkyPilot's Ray port set.
-RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
-    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
-    'RAY_ADDRESS=127.0.0.1:$RAY_PORT ray status')
 
 
 def is_ip(s: str) -> bool:
@@ -291,8 +300,12 @@ def path_size_megabytes(path: str) -> int:
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
+        #
+        # We shlex.quote() because the path may contain spaces:
+        #   'my dir/.git/info/exclude'
+        # Without quoting rsync fails.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / command_runner.GIT_EXCLUDE))
+            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{command_runner.RSYNC_FILTER_OPTION} '
                      f'{git_exclude_filter} --dry-run {path!r}')
@@ -871,7 +884,6 @@ def _replace_yaml_dicts(
 def write_cluster_config(
         to_provision: 'resources.Resources',
         num_nodes: int,
-        ports: Optional[List[Union[int, str]]],
         cluster_config_template: str,
         cluster_name: str,
         local_wheel_path: pathlib.Path,
@@ -897,6 +909,10 @@ def write_cluster_config(
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
     assert cloud is not None, to_provision
+
+    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, max_length=cloud.max_cluster_name_length())
+
     # This can raise a ResourcesUnavailableError when:
     #  * The region/zones requested does not appear in the catalog. It can be
     #    triggered if the user changed the catalog file while there is a cluster
@@ -909,7 +925,8 @@ def write_cluster_config(
     # move the check out of this function, i.e. the caller should be responsible
     # for the validation.
     # TODO(tian): Move more cloud agnostic vars to resources.py.
-    resources_vars = to_provision.make_deploy_variables(region, zones)
+    resources_vars = to_provision.make_deploy_variables(cluster_name_on_cloud,
+                                                        region, zones)
     config_dict = {}
 
     azure_subscription_id = None
@@ -990,14 +1007,6 @@ def write_cluster_config(
         f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\''
     )
 
-    cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
-        cluster_name, max_length=cloud.max_cluster_name_length())
-
-    # Only using new security group names for clusters with ports specified.
-    default_aws_sg_name = f'sky-sg-{common_utils.user_and_hostname_hash()}'
-    if ports is not None:
-        default_aws_sg_name = f'sky-sg-{cluster_name_on_cloud}'
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -1008,7 +1017,6 @@ def write_cluster_config(
             **{
                 'cluster_name_on_cloud': cluster_name_on_cloud,
                 'num_nodes': num_nodes,
-                'ports': ports,
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
@@ -1017,13 +1025,6 @@ def write_cluster_config(
                     'SKYPILOT_USER', '')),
 
                 # AWS only:
-                # Temporary measure, as deleting per-cluster SGs is too slow.
-                # See https://github.com/skypilot-org/skypilot/pull/742.
-                # Generate the name of the security group we're looking for.
-                # (username, last 4 chars of hash of hostname): for uniquefying
-                # users on shared-account scenarios.
-                'security_group': skypilot_config.get_nested(
-                    ('aws', 'security_group_name'), default_aws_sg_name),
                 'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                        None),
                 'use_internal_ips': skypilot_config.get_nested(
@@ -1164,22 +1165,16 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, clouds.AWS):
-        config = auth.setup_aws_authentication(config)
+    if isinstance(cloud, (clouds.AWS, clouds.Azure, clouds.OCI, clouds.SCP)):
+        config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    elif isinstance(cloud, clouds.Azure):
-        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
-    elif isinstance(cloud, clouds.SCP):
-        config = auth.setup_scp_authentication(config)
-    elif isinstance(cloud, clouds.OCI):
-        config = auth.setup_oci_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1203,31 +1198,46 @@ def _count_healthy_nodes_from_ray(output: str,
                                  ) -> Tuple[int, int]:
     """Count the number of healthy nodes from the output of `ray status`."""
 
-    def get_ready_nodes(pattern, output):
+    def get_ready_nodes_counts(pattern, output):
         result = pattern.findall(output)
-        # On-prem/local case is handled differently.
-        # `ray status` produces different output for local case, and
-        # we poll for number of nodes launched instead of counting for
-        # head and number of worker nodes separately (it is impossible
-        # to distinguish between head and worker node for local case).
-        if is_local_cloud:
-            # In the local case, ready_workers mean the total number
-            # of nodes launched, including head.
-            return len(result)
-        if len(result) == 0:
+        if not result:
             return 0
         assert len(result) == 1, result
         return int(result[0])
 
-    if is_local_cloud:
+    # Check if the ray cluster is started with ray autoscaler. In new
+    # provisioner (#1702) and local mode, we started the ray cluster without ray
+    # autoscaler.
+    # If ray cluster is started with ray autoscaler, the output will be:
+    #  1 ray.head.default
+    #  ...
+    # TODO(zhwu): once we deprecate the old provisioner, we can remove this
+    # check.
+    ray_autoscaler_head = get_ready_nodes_counts(_LAUNCHED_HEAD_PATTERN, output)
+    is_local_ray_cluster = ray_autoscaler_head == 0
+
+    if is_local_ray_cluster or is_local_cloud:
+        # Ray cluster is launched with new provisioner
+        # For new provisioner and local mode, the output will be:
+        #  1 node_xxxx
+        #  1 node_xxxx
         ready_head = 0
-        ready_workers = get_ready_nodes(_LAUNCHED_LOCAL_WORKER_PATTERN, output)
-    else:
-        ready_head = get_ready_nodes(_LAUNCHED_HEAD_PATTERN, output)
-        ready_workers = get_ready_nodes(_LAUNCHED_WORKER_PATTERN, output)
-        ready_reserved_workers = get_ready_nodes(
-            _LAUNCHED_RESERVED_WORKER_PATTERN, output)
-        ready_workers += ready_reserved_workers
+        ready_workers = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+        ready_workers = len(ready_workers)
+        if is_local_ray_cluster:
+            ready_head = 1
+            ready_workers -= 1
+        return ready_head, ready_workers
+
+    # Count number of nodes by parsing the output of `ray status`. The output
+    # looks like:
+    #   1 ray.head.default
+    #   2 ray.worker.default
+    ready_head = ray_autoscaler_head
+    ready_workers = get_ready_nodes_counts(_LAUNCHED_WORKER_PATTERN, output)
+    ready_reserved_workers = get_ready_nodes_counts(
+        _LAUNCHED_RESERVED_WORKER_PATTERN, output)
+    ready_workers += ready_reserved_workers
     assert ready_head <= 1, f'#head node should be <=1 (Got {ready_head}).'
     return ready_head, ready_workers
 
@@ -1291,14 +1301,14 @@ def wait_until_ray_cluster_ready(
             '[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 log_path=log_path,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
             subprocess_utils.handle_returncode(
-                rc, 'ray status', 'Failed to run ray status on head node.',
-                stderr)
+                rc, instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                'Failed to run ray status on head node.', stderr)
             logger.debug(output)
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(
@@ -1558,7 +1568,9 @@ def get_node_ips(cluster_yaml: str,
             on-prem clusters.
         head_ip_max_attempts: Max attempts to get head ip.
         worker_ip_max_attempts: Max attempts to get worker ips.
-        get_internal_ips: Whether to get internal IPs.
+        get_internal_ips: Whether to get internal IPs. When False, it is still
+            possible to get internal IPs if the cluster does not have external
+            IPs.
 
     Raises:
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
@@ -1569,6 +1581,15 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
+    # Use the new provisioner for AWS.
+    if '.aws' in ray_config['provider']['module']:
+        metadata = provision_lib.get_cluster_info(
+            'aws', ray_config['provider']['region'], ray_config['cluster_name'])
+        if len(metadata.instances) < expected_num_nodes:
+            # Simulate the exception when Ray head node is not up.
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return metadata.get_feasible_ips(get_internal_ips)
+
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
@@ -2038,7 +2059,7 @@ def _update_cluster_status_no_lock(
                                                      **ssh_credentials,
                                                      port=head_ssh_port)
             rc, output, stderr = runner.run(
-                RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True,
                 separate_stderr=True)
@@ -2046,10 +2067,11 @@ def _update_cluster_status_no_lock(
                 raise RuntimeError(
                     f'Refreshing status ({cluster_name!r}): Failed to check '
                     f'ray cluster\'s healthiness with '
-                    f'{RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
+
             if ready_head + ready_workers == handle.launched_nodes:
                 return True
             raise RuntimeError(
@@ -2419,9 +2441,11 @@ def check_cluster_available(
     bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if handle is None:
-        error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
-                     'provider.')
-        if previous_cluster_status is not None:
+        if previous_cluster_status is None:
+            error_msg = f'Cluster {cluster_name!r} does not exist.'
+        else:
+            error_msg = (f'Cluster {cluster_name!r} not found on the cloud '
+                         'provider.')
             assert record is not None, previous_cluster_status
             actions = []
             if record['handle'].launched_resources.use_spot:
@@ -2741,60 +2765,6 @@ def stop_handler(signum, frame):
           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
-    """Validates an object against a given JSON schema.
-
-    Args:
-        obj: The object to validate.
-        schema: The JSON schema against which to validate the object.
-        err_msg_prefix: The string to prepend to the error message if
-          validation fails.
-        skip_none: If True, removes fields with value None from the object
-          before validation. This is useful for objects that will never contain
-          None because yaml.safe_load() loads empty fields as None.
-
-    Raises:
-        ValueError: if the object does not match the schema.
-    """
-    if skip_none:
-        obj = {k: v for k, v in obj.items() if v is not None}
-    err_msg = None
-    try:
-        validator.SchemaValidator(schema).validate(obj)
-    except jsonschema.ValidationError as e:
-        if e.validator == 'additionalProperties':
-            if tuple(e.schema_path) == ('properties', 'envs',
-                                        'additionalProperties'):
-                # Hack. Here the error is Task.envs having some invalid keys. So
-                # we should not print "unsupported field".
-                #
-                # This will print something like:
-                # 'hello world' does not match any of the regexes: <regex>
-                err_msg = (err_msg_prefix +
-                           'The `envs` field contains invalid keys:\n' +
-                           e.message)
-            else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
-                known_fields = set(e.schema.get('properties', {}).keys())
-                for field in e.instance:
-                    if field not in known_fields:
-                        most_similar_field = difflib.get_close_matches(
-                            field, known_fields, 1)
-                        if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
-                        else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
-        else:
-            # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
-                       f'. Check problematic field(s): {e.json_path}')
-
-    if err_msg:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(err_msg)
 
 
 def check_public_cloud_enabled():

@@ -4,11 +4,20 @@ This module provides a standard low-level interface that all
 providers supported by SkyPilot need to follow.
 """
 import functools
-import importlib
 import inspect
 from typing import Any, Dict, List, Optional
 
+from sky import sky_logging
 from sky import status_lib
+# These provision.<cloud> modules should never fail even if underlying cloud SDK
+# dependencies are not installed. This is ensured by using sky.adaptors inside
+# these modules, for lazy loading of cloud SDKs.
+from sky.provision import aws
+from sky.provision import azure
+from sky.provision import common
+from sky.provision import gcp
+
+logger = sky_logging.init_logger(__name__)
 
 
 def _route_to_cloud_impl(func):
@@ -23,8 +32,9 @@ def _route_to_cloud_impl(func):
         else:
             provider_name = kwargs.pop('provider_name')
 
-        module_name = provider_name
-        module = importlib.import_module(f'sky.provision.{module_name.lower()}')
+        module_name = provider_name.lower()
+        module = globals().get(module_name)
+        assert module is not None, f'Unknown provider: {module_name}'
 
         impl = getattr(module, func.__name__)
         return impl(*args, **kwargs)
@@ -33,8 +43,6 @@ def _route_to_cloud_impl(func):
 
 
 # pylint: disable=unused-argument
-
-# TODO(suquark): Bring all other functions here from the
 
 
 @_route_to_cloud_impl
@@ -51,6 +59,30 @@ def query_instances(
     A None status means the instance is marked as "terminated"
     or "terminating".
     """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def bootstrap_instances(
+        provider_name: str, region: str, cluster_name_on_cloud: str,
+        config: common.ProvisionConfig) -> common.ProvisionConfig:
+    """Bootstrap configurations for a cluster.
+
+    This function sets up auxiliary resources for a specified cluster
+    with the provided configuration,
+    and returns a ProvisionConfig object with updated configuration.
+    These auxiliary resources could include security policies, network
+    configurations etc. These resources tend to be free or very cheap,
+    but it takes time to set them up from scratch. So we generally
+    cache or reuse them when possible.
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def run_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """Start instances with bootstrapped configuration."""
     raise NotImplementedError
 
 
@@ -77,10 +109,35 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
+def open_ports(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Open ports for inbound traffic."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def wait_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    """Wait instances until they ends up in the given state."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_cluster_info(provider_name: str, region: str,
+                     cluster_name_on_cloud: str) -> common.ClusterInfo:
+    """Get the metadata of instances in a cluster."""
     raise NotImplementedError

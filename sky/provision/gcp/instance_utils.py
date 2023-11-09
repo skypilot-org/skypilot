@@ -1,14 +1,19 @@
 """Utilities for GCP instances."""
+import re
 from typing import Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
 # Using v2 according to
 # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
 TPU_VERSION = 'v2'
+
+_FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
+    r'The resource \'projects/.*/global/firewalls/.*\' was not found')
 
 
 def instance_to_handler(instance: str):
@@ -56,7 +61,7 @@ class GCPInstance:
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -72,10 +77,40 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> str:
+        raise NotImplementedError
+
+    @classmethod
     def delete_firewall_rule(
         cls,
         project_id: str,
         firewall_rule_name: str,
+    ) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def create_or_update_firewall_rule(
+        cls,
+        firewall_rule_name: str,
+        project_id: str,
+        vpc_name: str,
+        cluster_name_on_cloud: str,
+        ports: List[str],
+    ) -> dict:
+        raise NotImplementedError
+
+    @classmethod
+    def add_network_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
     ) -> None:
         raise NotImplementedError
 
@@ -108,6 +143,11 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             zone=zone,
             instance=instance,
+            # This is needed for the instance that has local SSDs attached by
+            # default, such as a2-highgpu-8g. Otherwise, an error will be
+            # raised. Refer to issue #2586
+            # https://cloud.google.com/compute/docs/disks/local-ssd#stop_instance
+            discardLocalSsd=False,
         ).execute()
         return operation
 
@@ -175,20 +215,83 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
-        result = (cls.load_resource().zoneOperations().get(
-            project=project_id,
-            operation=operation['name'],
-            zone=zone,
-        ).execute())
+                           zone: Optional[str]) -> bool:
+        if zone is not None:
+            op_type = 'zone'
+            result = (cls.load_resource().zoneOperations().get(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            ).execute())
+        else:
+            op_type = 'global'
+            result = (cls.load_resource().globalOperations().get(
+                project=project_id,
+                operation=operation['name'],
+            ).execute())
         if 'error' in result:
             raise Exception(result['error'])
 
         if result['status'] == 'DONE':
-            logger.debug('wait_for_compute_zone_operation: '
+            logger.debug(f'wait_for_compute_{op_type}_operation: '
                          f'Operation {operation["name"]} finished.')
             return True
         return False
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> str:
+        try:
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+            ).execute()
+            # Format: projects/PROJECT_ID/global/networks/VPC_NAME
+            vpc_link = response['networkInterfaces'][0]['network']
+            return vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to get VPC name for instance {instance}') from e
+
+    @classmethod
+    def add_network_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        try:
+            # If we have multiple instances, they are in the same cluster,
+            # i.e. the same VPC. So we can just pick one.
+            response = cls.load_resource().instances().get(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+            ).execute()
+            existing_tags = response['tags'].get('items', [])
+            if tag in existing_tags:
+                return
+            update_body = response['tags']
+            update_body['items'] = existing_tags
+            update_body['items'].append(tag)
+            cls.load_resource().instances().setTags(
+                project=project_id,
+                zone=zone,
+                instance=instance,
+                body=update_body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to add network tags for instance {instance}'
+                ) from e
 
     @classmethod
     def delete_firewall_rule(
@@ -208,6 +311,51 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             firewall=firewall_rule_name,
         ).execute()
+
+    @classmethod
+    def create_or_update_firewall_rule(
+        cls,
+        firewall_rule_name: str,
+        project_id: str,
+        vpc_name: str,
+        cluster_name_on_cloud: str,
+        ports: List[str],
+    ) -> dict:
+        try:
+            body = cls.load_resource().firewalls().get(
+                project=project_id, firewall=firewall_rule_name).execute()
+            body['allowed'][0]['ports'] = ports
+            operation = cls.load_resource().firewalls().update(
+                project=project_id,
+                firewall=firewall_rule_name,
+                body=body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            if _FIREWALL_RESOURCE_NOT_FOUND_PATTERN.search(e.reason) is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Failed to update firewall rule {firewall_rule_name}'
+                    ) from e
+            body = {
+                'name': firewall_rule_name,
+                'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
+                'network': f'projects/{project_id}/global/networks/{vpc_name}',
+                'selfLink': f'projects/{project_id}/global/firewalls/' +
+                            firewall_rule_name,
+                'direction': 'INGRESS',
+                'priority': 65534,
+                'allowed': [{
+                    'IPProtocol': 'tcp',
+                    'ports': ports,
+                }],
+                'sourceRanges': ['0.0.0.0/0'],
+                'targetTags': [cluster_name_on_cloud],
+            }
+            operation = cls.load_resource().firewalls().insert(
+                project=project_id,
+                body=body,
+            ).execute()
+        return operation
 
 
 class GCPTPUVMInstance(GCPInstance):
@@ -232,7 +380,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def wait_for_operation(cls, operation: dict, project_id: str,
-                           zone: str) -> bool:
+                           zone: Optional[str]) -> bool:
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
         result = (cls.load_resource().projects().locations().operations().get(
@@ -315,3 +463,52 @@ class GCPTPUVMInstance(GCPInstance):
         operation = cls.load_resource().projects().locations().nodes().delete(
             name=instance).execute()
         return operation
+
+    @classmethod
+    def add_network_tag_if_not_exist(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+        tag: str,
+    ) -> None:
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes  # pylint: disable=line-too-long
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes/patch  # pylint: disable=line-too-long
+        del project_id, zone  # unused
+        try:
+            response = cls.load_resource().projects().locations().nodes().get(
+                name=instance).execute()
+            existing_tags = response.get('tags', [])
+            if tag in existing_tags:
+                return
+            existing_tags.append(tag)
+            update_body = response
+            update_body['tags'] = existing_tags
+            cls.load_resource().projects().locations().nodes().patch(
+                name=instance,
+                body=update_body,
+                updateMask='tags',
+            ).execute()
+        except gcp.http_error_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to add network tags for instance {instance}'
+                ) from e
+
+    @classmethod
+    def get_vpc_name(
+        cls,
+        project_id: str,
+        zone: str,
+        instance: str,
+    ) -> str:
+        del project_id, zone  # unused
+        try:
+            response = cls.load_resource().projects().locations().nodes().get(
+                name=instance).execute()
+            vpc_link = response['networkConfig']['network']
+            return vpc_link.split('/')[-1]
+        except gcp.http_error_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to get VPC name for instance {instance}') from e

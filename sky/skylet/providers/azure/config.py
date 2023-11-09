@@ -81,32 +81,6 @@ def _configure_resource_group(config):
     with open(template_path, "r") as template_fp:
         template = json.load(template_fp)
 
-    # Setup firewall rules for ports
-    nsg_resource = None
-    for resource in template["resources"]:
-        if resource["type"] == "Microsoft.Network/networkSecurityGroups":
-            nsg_resource = resource
-            break
-    assert nsg_resource is not None, "Could not find NSG resource in template"
-    ports = config["provider"].get("ports", None)
-    if ports is not None:
-        ports = [str(port) for port in ports if port != 22]
-        nsg_resource["properties"]["securityRules"].append(
-            {
-                "name": "user-ports",
-                "properties": {
-                    "priority": 1001,
-                    "protocol": "TCP",
-                    "access": "Allow",
-                    "direction": "Inbound",
-                    "sourceAddressPrefix": "*",
-                    "sourcePortRange": "*",
-                    "destinationAddressPrefix": "*",
-                    "destinationPortRanges": ports,
-                },
-            }
-        )
-
     logger.info("Using cluster name: %s", config["cluster_name"])
 
     # set unique id for resources in this cluster

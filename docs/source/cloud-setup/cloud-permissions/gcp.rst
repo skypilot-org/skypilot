@@ -28,7 +28,7 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/iam.securityAdmin
 
 .. note::
-    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, remove the role from the list above.
+    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, replace the role ``roles/iam.securityAdmin`` with ``roles/iam.roleViewer`` in the list above.
 
 
 Optionally, to use TPUs, add the following role:
@@ -79,6 +79,7 @@ User
     compute.networks.list
     compute.networks.getEffectiveFirewalls
     compute.globalOperations.get
+    compute.reservations.list
     compute.subnetworks.use
     compute.subnetworks.list
     compute.subnetworks.useExternalIp
@@ -125,9 +126,17 @@ User
     compute.images.get
     compute.images.delete
 
-7. Click **Create** to create the role.
-8. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-9. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+7. **Optional**: To enable opening ports on GCP cluster, you need to have the following permissions for the role as well:
+
+.. code-block:: text
+
+    compute.instances.setTags
+    compute.firewalls.list
+    compute.firewalls.update
+
+8. Click **Create** to create the role.
+9. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+10. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -135,7 +144,7 @@ User
     :align: center
     :alt: GCP Grant Access
 
-10. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+11. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 

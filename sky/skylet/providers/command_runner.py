@@ -1,5 +1,4 @@
 """Sky's DockerCommandRunner."""
-import dataclasses
 import json
 import os
 from typing import Dict
@@ -9,23 +8,8 @@ from ray.autoscaler._private.command_runner import DockerCommandRunner
 from ray.autoscaler._private.docker import check_docker_running_cmd
 from ray.autoscaler.sdk import get_docker_host_mount_location
 
+from sky.provision import docker_utils
 from sky.skylet import constants
-
-
-@dataclasses.dataclass
-class DockerLoginConfig:
-    """Config for docker login. Used for pulling from private registries."""
-    username: str
-    password: str
-    server: str
-
-    @classmethod
-    def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
-        return cls(
-            username=d[constants.DOCKER_USERNAME_ENV_VAR],
-            password=d[constants.DOCKER_PASSWORD_ENV_VAR],
-            server=d[constants.DOCKER_SERVER_ENV_VAR],
-        )
 
 
 def docker_start_cmds(
@@ -135,7 +119,7 @@ class SkyDockerCommandRunner(DockerCommandRunner):
         # SkyPilot: Docker login if user specified a private docker registry.
         if "docker_login_config" in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
-            docker_login_config: DockerLoginConfig = self.docker_config[
+            docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
                 "docker_login_config"]
             self.run('{} login --username {} --password {} {}'.format(
                 self.docker_cmd,
@@ -143,7 +127,6 @@ class SkyDockerCommandRunner(DockerCommandRunner):
                 docker_login_config.password,
                 docker_login_config.server,
             ))
-            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

@@ -1,5 +1,4 @@
 """Kubernetes utilities for SkyPilot."""
-import enum
 import math
 import os
 import re
@@ -17,10 +16,10 @@ from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
-LOCAL_PORT_FOR_PORT_FORWARD = 23100
 
 MEMORY_SIZE_UNITS = {
     'B': 1,
@@ -30,35 +29,12 @@ MEMORY_SIZE_UNITS = {
     'T': 2**40,
     'P': 2**50,
 }
+NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
+If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
+(e.g., skypilot.co/accelerators) are setup correctly. \
+To further debug, run: sky check.'
 
 logger = sky_logging.init_logger(__name__)
-
-
-class KubernetesNetworkingMode(enum.Enum):
-    """Enum for the different types of networking modes for accessing
-    jump pods.
-    """
-    NODEPORT = 'nodeport'
-    PORTFORWARD = 'portforward'
-
-    @classmethod
-    def from_str(cls, mode: str) -> 'KubernetesNetworkingMode':
-        """Returns the enum value for the given string."""
-        if mode.lower() == cls.NODEPORT.value:
-            return cls.NODEPORT
-        elif mode.lower() == cls.PORTFORWARD.value:
-            return cls.PORTFORWARD
-        else:
-            raise ValueError(f'Unsupported kubernetes networking mode: '
-                             f'{mode}. The mode must be either '
-                             f'\'{cls.PORTFORWARD.value}\' or '
-                             f'\'{cls.NODEPORT.value}\'. ')
-
-
-class KubernetesServiceType(enum.Enum):
-    """Enum for the different types of services."""
-    NODEPORT = 'NodePort'
-    CLUSTERIP = 'ClusterIP'
 
 
 class GPULabelFormatter:
@@ -79,6 +55,11 @@ class GPULabelFormatter:
         """Given a GPU type, returns the label value to be used"""
         raise NotImplementedError
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        """Given a label value, returns the GPU type"""
+        raise NotImplementedError
+
 
 def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
@@ -91,24 +72,6 @@ def get_gke_accelerator_name(accelerator: str) -> str:
         return 'nvidia-{}'.format(accelerator.lower())
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
-
-
-class GKELabelFormatter(GPULabelFormatter):
-    """GKE label formatter
-
-    GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
-    label, which is used to identify the GPU type.
-    """
-
-    LABEL_KEY = 'cloud.google.com/gke-accelerator'
-
-    @classmethod
-    def get_label_key(cls) -> str:
-        return cls.LABEL_KEY
-
-    @classmethod
-    def get_label_value(cls, accelerator: str) -> str:
-        return get_gke_accelerator_name(accelerator)
 
 
 class SkyPilotLabelFormatter(GPULabelFormatter):
@@ -130,11 +93,67 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
         # See sky.utils.kubernetes.gpu_labeler.
         return accelerator.lower()
 
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.upper()
+
+
+class CoreWeaveLabelFormatter(GPULabelFormatter):
+    """CoreWeave label formatter
+
+    Uses gpu.nvidia.com/class as the key, and the uppercase SkyPilot
+    accelerator str as the value.
+    """
+
+    LABEL_KEY = 'gpu.nvidia.com/class'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return accelerator.upper()
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value
+
+
+class GKELabelFormatter(GPULabelFormatter):
+    """GKE label formatter
+
+    GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
+    label, which is used to identify the GPU type.
+    """
+
+    LABEL_KEY = 'cloud.google.com/gke-accelerator'
+
+    @classmethod
+    def get_label_key(cls) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_value(cls, accelerator: str) -> str:
+        return get_gke_accelerator_name(accelerator)
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        if value.startswith('nvidia-tesla-'):
+            return value.replace('nvidia-tesla-', '').upper()
+        elif value.startswith('nvidia-'):
+            return value.replace('nvidia-', '').upper()
+        else:
+            raise ValueError(
+                f'Invalid accelerator name in GKE cluster: {value}')
+
 
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats.
-LABEL_FORMATTER_REGISTRY = [SkyPilotLabelFormatter, GKELabelFormatter]
+LABEL_FORMATTER_REGISTRY = [
+    SkyPilotLabelFormatter, CoreWeaveLabelFormatter, GKELabelFormatter
+]
 
 
 def detect_gpu_label_formatter(
@@ -160,6 +179,9 @@ def detect_gpu_label_formatter(
             if label.startswith(label_key):
                 label_formatter = lf()
                 break
+
+        if label_formatter is not None:
+            break
 
     return label_formatter, node_labels
 
@@ -386,8 +408,9 @@ def get_port(svc_name: str, namespace: str) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
-    if network_mode == KubernetesNetworkingMode.PORTFORWARD:
+def get_external_ip(
+        network_mode: Optional[kubernetes_enums.KubernetesNetworkingMode]):
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP
     nodes = kubernetes.core_api().list_node().items
@@ -637,14 +660,16 @@ class KubernetesInstanceType:
 
 
 def construct_ssh_jump_command(private_key_path: str,
-                               ssh_jump_port: int,
                                ssh_jump_ip: str,
+                               ssh_jump_port: Optional[int] = None,
                                proxy_cmd_path: Optional[str] = None) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
-                              f'-o IdentitiesOnly=yes -p {ssh_jump_port} '
+                              f'-o IdentitiesOnly=yes '
                               f'-W %h:%p sky@{ssh_jump_ip}')
+    if ssh_jump_port is not None:
+        ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
@@ -653,10 +678,10 @@ def construct_ssh_jump_command(private_key_path: str,
     return ssh_jump_proxy_command
 
 
-def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
-                          network_mode: KubernetesNetworkingMode,
-                          namespace: str, port_fwd_proxy_cmd_path: str,
-                          port_fwd_proxy_cmd_template: str) -> str:
+def get_ssh_proxy_command(
+        private_key_path: str, ssh_jump_name: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode, namespace: str,
+        port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
     By default, establishing an SSH connection creates a communication
@@ -704,29 +729,28 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
-    if network_mode == KubernetesNetworkingMode.NODEPORT:
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_port, ssh_jump_ip)
+            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
     # Setting kubectl port-forward/socat to establish ssh session using
     # ClusterIP service to disallow any ports opened
     else:
-        ssh_jump_port = LOCAL_PORT_FOR_PORT_FORWARD
         vars_to_fill = {
             'ssh_jump_name': ssh_jump_name,
-            'local_port': ssh_jump_port,
         }
         backend_utils.fill_template(port_fwd_proxy_cmd_template,
                                     vars_to_fill,
                                     output_path=port_fwd_proxy_cmd_path)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_port, ssh_jump_ip,
-            port_fwd_proxy_cmd_path)
+            private_key_path,
+            ssh_jump_ip,
+            proxy_cmd_path=port_fwd_proxy_cmd_path)
     return ssh_jump_proxy_command
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
-                       service_type: KubernetesServiceType):
+                       service_type: kubernetes_enums.KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -765,10 +789,14 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                     name=ssh_jump_name, namespace=namespace)
                 kubernetes.core_api().create_namespaced_service(
                     namespace, content['service_spec'])
-                port_forward_mode = KubernetesNetworkingMode.PORTFORWARD.value
-                nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
-                clusterip_svc = KubernetesServiceType.CLUSTERIP.value
-                nodeport_svc = KubernetesServiceType.NODEPORT.value
+                port_forward_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
+                nodeport_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value)
+                clusterip_svc = (
+                    kubernetes_enums.KubernetesServiceType.CLUSTERIP.value)
+                nodeport_svc = (
+                    kubernetes_enums.KubernetesServiceType.NODEPORT.value)
                 curr_network_mode = port_forward_mode \
                     if curr_svc_type == clusterip_svc else nodeport_mode
                 new_network_mode = nodeport_mode \
@@ -895,12 +923,13 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
             ssh_jump_name, namespace)
         cont_ready_cond = find(ssh_jump_pod.status.conditions,
                                lambda c: c.type == 'ContainersReady')
-        if cont_ready_cond and \
-            cont_ready_cond.status == 'False':
-            # The main container is not ready. To be on the safe side
-            # and prevent a dangling ssh jump pod, lets remove it and
-            # the service. Otherwise main container is ready and its lifecycle
-            # management script takes care of the cleaning.
+        if (cont_ready_cond and cont_ready_cond.status
+                == 'False') or ssh_jump_pod.status.phase == 'Pending':
+            # Either the main container is not ready or the pod failed
+            # to schedule. To be on the safe side and prevent a dangling
+            # ssh jump pod, lets remove it and the service. Otherwise, main
+            # container is ready and its lifecycle management script takes
+            # care of the cleaning.
             kubernetes.core_api().delete_namespaced_pod(ssh_jump_name,
                                                         namespace)
             kubernetes.core_api().delete_namespaced_service(
@@ -940,20 +969,25 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
 
 
 def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'lsof' is installed"""
-    for name, option in [('socat', '-V'), ('lsof', '-v')]:
+    """Checks if 'socat' is installed"""
+    # We store the dependency list as a list of lists. Each inner list
+    # contains the name of the dependency, the command to check if it is
+    # installed, and the package name to install it.
+    dependency_list = [['socat', ['socat', '-V'], 'socat'],
+                       ['nc', ['nc', '-h'], 'netcat']]
+    for name, check_cmd, install_cmd in dependency_list:
         try:
-            subprocess.run([name, option],
+            subprocess.run(check_cmd,
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL,
                            check=True)
-        except FileNotFoundError:
+        except (FileNotFoundError, subprocess.CalledProcessError):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
-                    'networking mode and it is not installed. '
+                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+                    'default networking mode and it is not installed. '
                     'On Debian/Ubuntu, install it with:\n'
-                    f'  $ sudo apt install {name}\n'
+                    f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
-                    f'  $ brew install {name}') from None
+                    f'  $ brew install {install_cmd}') from None

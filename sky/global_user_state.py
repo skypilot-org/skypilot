@@ -177,7 +177,8 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata, owner, cluster_hash) '
+        'autostop, to_down, metadata, owner, cluster_hash, '
+        'storage_mounts_metadata) '
         'VALUES ('
         # name
         '?, '
@@ -209,7 +210,10 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT owner FROM clusters WHERE name=?), null),'
         # cluster_hash
-        '?'
+        '?,'
+        # storage_mounts_metadata
+        'COALESCE('
+        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null)'
         ')',
         (
             # name
@@ -236,6 +240,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             # cluster_hash
             cluster_hash,
+            # storage_mounts_metadata
+            cluster_name,
         ))
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
@@ -371,7 +377,7 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
     return None
 
 
-def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
@@ -381,7 +387,7 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
         cluster_name,
@@ -536,6 +542,14 @@ def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
         return [record_owner]
 
 
+def _load_storage_mounts_metadata(
+    record_storage_mounts_metadata: Optional[bytes]
+) -> Optional[Dict[str, 'Storage.StorageMetadata']]:
+    if not record_storage_mounts_metadata:
+        return None
+    return pickle.loads(record_storage_mounts_metadata)
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
@@ -546,8 +560,7 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
-        if not storage_mounts_metadata:
-            storage_mounts_metadata = pickle.dumps({})
+
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -561,6 +574,8 @@ def get_cluster_from_name(
             'metadata': json.loads(metadata),
             'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
         return record
     return None
@@ -573,8 +588,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
-        if not storage_mounts_metadata:
-            storage_mounts_metadata = pickle.dumps({})
+
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -588,6 +602,8 @@ def get_clusters() -> List[Dict[str, Any]]:
             'metadata': json.loads(metadata),
             'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
 
         records.append(record)
