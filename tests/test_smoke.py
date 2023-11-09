@@ -2631,7 +2631,7 @@ def _get_service_name() -> str:
 # `REPLICAS` is in the form of `1/2` where the first number is the number of
 # ready replicas and the second number is the number of total replicas. We
 # grep such format to ensure that the service is ready, and early exit if any
-# failure detected. In the end we sleep for 
+# failure detected. In the end we sleep for
 # serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS to make sure load balancer have
 # enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
