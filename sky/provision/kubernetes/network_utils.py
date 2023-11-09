@@ -1,6 +1,5 @@
-import enum
 import os
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import jinja2
 import yaml
@@ -146,7 +145,7 @@ def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
             ingress_classes))
 
 
-def get_base_url(namespace: str) -> Tuple[str, str]:
+def get_base_url(namespace: str) -> Optional[Tuple[str, str]]:
     """Returns the HTTP and HTTPS base url of the ingress controller for the cluster."""
     core_api = kubernetes.core_api()
     ingress_service = [
@@ -165,9 +164,13 @@ def get_base_url(namespace: str) -> Tuple[str, str]:
     return f'http://{external_ip}', f'https://{external_ip}'
 
 
-def get_loadbalancer_ip(namespace: str, service_name: str) -> str:
+def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
     service = core_api.read_namespaced_service(
         service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+
+    if service.status.load_balancer.ingress is None:
+        return None
+
     return service.status.load_balancer.ingress[0].ip

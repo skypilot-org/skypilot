@@ -188,6 +188,10 @@ def _query_ports_for_loadbalancer(
         cluster_name_on_cloud=cluster_name_on_cloud)
     external_ip = network_utils.get_loadbalancer_ip(
         namespace=provider_config['namespace'], service_name=service_name)
+
+    if external_ip is None:
+        return {}
+
     for port in ports:
         result[port] = [common.SocketEndpoint(host=external_ip, port=port)]
 
@@ -198,7 +202,11 @@ def _query_ports_for_ingress(
     cluster_name_on_cloud: str,
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
-    http_url, https_url = network_utils.get_base_url("ingress-nginx")
+    url_details = network_utils.get_base_url("ingress-nginx")
+    if url_details is None:
+        return {}
+
+    http_url, https_url = url_details
     result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
         path_prefix = _PATH_PREFIX.format(

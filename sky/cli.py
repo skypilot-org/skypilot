@@ -1857,12 +1857,12 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
-                                f'Endpoint for port {endpoint} not found.')
+                                f'Port {endpoint} not exposed yet.')
                     click.echo(port_details[endpoint][0])
                     return -1
 
                 if not port_details:
-                    click.echo('No endpoints exposed.')
+                    click.echo('No endpoints exposed yet.')
 
                 for port, urls in port_details.items():
                     click.echo(
