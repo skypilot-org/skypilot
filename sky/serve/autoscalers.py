@@ -148,57 +148,45 @@ class RequestRateAutoscaler(Autoscaler):
 
         logger.info(f'Requests per replica: {requests_per_replica}')
 
-        # Bootstrap case
         logger.info(f'Number of replicas: {num_replicas}')
+        target_num_replicas = num_replicas
         if num_replicas < self.min_replicas:
-            logger.info('Bootstrapping service.')
-            self.last_scale_operation = current_time
+            target_num_replicas = self.min_replicas
+        elif (self.upper_threshold is not None and
+              requests_per_replica > self.upper_threshold):
+            scale_target = requests_per_replica / self.upper_threshold
+            target_num_replicas = int(scale_target * num_replicas)
+        elif (self.lower_threshold is not None and
+              requests_per_replica < self.lower_threshold):
+            scale_target = requests_per_replica / self.lower_threshold
+            target_num_replicas = int(scale_target * num_replicas)
+
+        target_num_replicas = max(self.min_replicas,
+                                  min(self.max_replicas, target_num_replicas))
+        num_replicas_delta = target_num_replicas - num_replicas
+        if num_replicas_delta == 0:
+            logger.info('No scaling needed.')
+            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
+                                      target=None)
+        elif num_replicas_delta > 0:
+            logger.info(f'Scaling up by {num_replicas_delta} replicas.')
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=self.min_replicas - num_replicas)
-        if (self.upper_threshold is not None and
-                requests_per_replica > self.upper_threshold):
-            if num_replicas < self.max_replicas:
-                scale_target = requests_per_replica / self.upper_threshold
-                num_replicas_to_add = min(
-                    max(int(scale_target * num_replicas), self.min_replicas),
-                    self.max_replicas) - num_replicas
-                if num_replicas_to_add > 0:
-                    plural = 's' if num_replicas_to_add > 1 else ''
-                    logger.info('Requests per replica is above upper threshold '
-                                f'{self.upper_threshold}qps / replica. '
-                                f'Scaling up by {num_replicas_to_add} '
-                                f'replica{plural}.')
-                    self.last_scale_operation = current_time
-                    return AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=num_replicas_to_add)
-        if (self.lower_threshold is not None and
-                requests_per_replica < self.lower_threshold):
-            if num_replicas > self.min_replicas:
-                scale_target = requests_per_replica / self.lower_threshold
-                num_replicas_to_remove = num_replicas - min(
-                    int(scale_target * num_replicas), self.min_replicas)
-                if num_replicas_to_remove > 0:
-                    plural = 's' if num_replicas_to_remove > 1 else ''
-                    logger.info('Requests per replica is below lower threshold '
-                                f'{self.lower_threshold}qps / replica. '
-                                f'Scaling down by {num_replicas_to_remove} '
-                                f'replica{plural}.')
-                    self.last_scale_operation = current_time
-                    # Remove FAILED replicas first.
-                    replica_ids_to_remove: List[int] = []
-                    for info in replica_infos:
-                        if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                            break
-                        if info.status == serve_state.ReplicaStatus.FAILED:
-                            replica_ids_to_remove.append(info.replica_id)
-                    # Then rest of them.
-                    for info in replica_infos:
-                        if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                            break
-                        replica_ids_to_remove.append(info.replica_id)
-                    return AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_DOWN,
-                        target=replica_ids_to_remove)
-        logger.info('No scaling needed.')
-        return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP, target=None)
+                                      target=num_replicas_delta)
+        else:
+            num_replicas_to_remove = -num_replicas_delta
+            # Remove FAILED replicas first.
+            replica_ids_to_remove: List[int] = []
+            for info in replica_infos:
+                if len(replica_ids_to_remove) >= num_replicas_to_remove:
+                    break
+                if info.status == serve_state.ReplicaStatus.FAILED:
+                    replica_ids_to_remove.append(info.replica_id)
+            # Then rest of them.
+            for info in replica_infos:
+                if len(replica_ids_to_remove) >= num_replicas_to_remove:
+                    break
+                replica_ids_to_remove.append(info.replica_id)
+            logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
+                        f'(id: {replica_ids_to_remove}).')
+            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                      target=replica_ids_to_remove)
