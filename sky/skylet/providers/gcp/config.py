@@ -77,7 +77,7 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
-    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
     raise RuntimeError(prefix + error)
 
 
@@ -795,17 +795,21 @@ def get_usable_vpc(config) -> str:
 
         vpcnets_all = _list_vpcnets(config, compute)
     else:
-        vpcnets_all = _list_vpcnets(config, compute, filter=f"name={specific_vpc_to_use}")
-        assert len(vpcnets_all) <= 1, (
-            f"{len(vpcnets_all)} VPCs found with the same name {specific_vpc_to_use}")
+        vpcnets_all = _list_vpcnets(
+            config, compute, filter=f"name={specific_vpc_to_use}"
+        )
+        assert (
+            len(vpcnets_all) <= 1
+        ), f"{len(vpcnets_all)} VPCs found with the same name {specific_vpc_to_use}"
         if len(vpcnets_all) == 1:
             # Skip checking any firewall rules if the user has specified a VPC.
             return specific_vpc_to_use
         else:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
-                f'No VPC with name {specific_vpc_to_use!r} is found. '
-                'To fix: specify a correct VPC name.')
+                f"No VPC with name {specific_vpc_to_use!r} is found. "
+                "To fix: specify a correct VPC name."
+            )
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
@@ -863,7 +867,8 @@ def _configure_subnet(config, compute):
         # subnet in region A.
         _skypilot_log_error_and_exit_for_failover(
             f"No subnet for region {config['provider']['region']} found (VPC {usable_vpc_name!r}). "
-            f"Check the subnets of VPC {usable_vpc_name!r} at https://console.cloud.google.com/networking/networks")
+            f"Check the subnets of VPC {usable_vpc_name!r} at https://console.cloud.google.com/networking/networks"
+        )
 
     default_subnet = subnets[0]
 
