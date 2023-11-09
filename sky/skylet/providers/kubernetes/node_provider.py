@@ -174,9 +174,9 @@ class KubernetesNodeProvider(NodeProvider):
                 new_node.metadata.name, self.namespace)
             pod_status = pod.status.phase
             # When there are multiple pods involved while launching instance,
-            # there may be a single pod causing issue while others successfully
-            # scheduled. In this case, we make sure to not surface the error
-            # message from the pod that is already scheduled.
+            # there may be a single pod causing issue while others are
+            # successfully scheduled. In this case, we make sure to not surface
+            # the error message from the pod that is already scheduled.
             if pod_status != 'Pending':
                 continue
             pod_name = pod._metadata._name
@@ -251,7 +251,7 @@ class KubernetesNodeProvider(NodeProvider):
                 if pod.status.phase == 'Pending':
                     # If container_statuses is None, then the pod hasn't
                     # been scheduled yet.
-                    if not pod.status.container_statuses:
+                    if pod.status.container_statuses is None:
                         all_pods_scheduled = False
                         break
 
@@ -309,7 +309,7 @@ class KubernetesNodeProvider(NodeProvider):
                         if waiting and (waiting.reason == 'ErrImagePull' or
                                         waiting.reason == 'ImagePullBackOff'):
                             raise config.KubernetesError(
-                                'Failed to pull docker image while '
+                                'Failed to pull container image while '
                                 'launching the node. Please check '
                                 'your network connection. Error details: '
                                 f'{container_status.state.waiting.message}.')
