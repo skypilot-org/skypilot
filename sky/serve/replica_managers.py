@@ -92,7 +92,8 @@ def launch_cluster(task_yaml_path: str,
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to launch the sky serve replica cluster with '
                         f'error: {common_utils.format_exception(e)})')
-            logger.info(f'  Traceback: {traceback.format_exc()}')
+            with ux_utils.enable_traceback():
+                logger.info(f'  Traceback: {traceback.format_exc()}')
         else:  # No exception, the launch succeeds.
             return
 
