@@ -253,5 +253,5 @@ class AWSAzFetchingError(Exception):
 
 
 class ServeUserTerminatedError(Exception):
-    """Raised when a user tear down the service."""
+    """Raised by serve controller when a user tear down the service."""
     pass
