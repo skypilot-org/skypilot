@@ -33,7 +33,7 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     name: str
     cluster_name: str
-    sky_status_hint: str
+    in_progress_hint: str
     decline_cancel_hint: str
     decline_down_in_init_status_hint: str
     decline_down_for_dirty_controller_hint: str
@@ -48,9 +48,9 @@ class Controllers(enum.Enum):
     SPOT_CONTROLLER = _ControllerSpec(
         name='managed spot controller',
         cluster_name=spot.SPOT_CONTROLLER_NAME,
-        sky_status_hint=(
-            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
-            f'sky spot queue{colorama.Style.RESET_ALL}'),
+        in_progress_hint=(
+            '* {job_info}To see all spot jobs: '
+            f'{colorama.Style.BRIGHT}sky spot queue{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
             f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
@@ -74,9 +74,9 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         name='sky serve controller',
         cluster_name=serve.SKY_SERVE_CONTROLLER_NAME,
-        sky_status_hint=(
+        in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status{colorama.Style.RESET_ALL}'),
+            f'sky serve status -a{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         decline_down_in_init_status_hint=(

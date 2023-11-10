@@ -262,8 +262,9 @@ def load_add_service_result(payload: str) -> bool:
     return common_utils.decode_payload(payload)
 
 
-def get_serve_status(service_name: str,
-                     with_replica_info: bool = True) -> Dict[str, Any]:
+def _get_serve_status(
+        service_name: str,
+        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
     Args:
@@ -271,11 +272,12 @@ def get_serve_status(service_name: str,
         with_replica_info: Whether to include the information of all replicas.
 
     Returns:
-        A dictionary, describing the status of the service.
+        A dictionary describing the status of the service if the service exists.
+        Otherwise, return None.
     """
     record = serve_state.get_service_from_name(service_name)
     if record is None:
-        raise ValueError(f'Service {service_name!r} does not exist.')
+        return None
     if with_replica_info:
         record['replica_info'] = [
             info.to_info_dict(with_handle=True)
@@ -290,7 +292,9 @@ def get_serve_status_encoded(service_names: Optional[List[str]]) -> str:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        serve_status = get_serve_status(service_name)
+        serve_status = _get_serve_status(service_name)
+        if serve_status is None:
+            continue
         serve_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in serve_status.items()
@@ -313,7 +317,8 @@ def terminate_services(service_names: Optional[List[str]]) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     for service_name in service_names:
-        serve_status = get_serve_status(service_name, with_replica_info=False)
+        serve_status = _get_serve_status(service_name, with_replica_info=False)
+        assert serve_status is not None
         if (serve_status['status']
                 in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
             # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
@@ -330,13 +335,13 @@ def terminate_services(service_names: Optional[List[str]]) -> str:
                 # to the file? It will be helpful for update cases.
                 f.write(UserSignal.TERMINATE.value)
                 f.flush()
-        terminated_service_names.append(service_name)
+        terminated_service_names.append(f'{service_name!r}')
     if len(terminated_service_names) == 0:
         return 'No service to terminate.'
-    identity_str = f'Service with name {terminated_service_names[0]} is'
+    identity_str = f'Service {terminated_service_names[0]} is'
     if len(terminated_service_names) > 1:
         terminated_service_names_str = ', '.join(terminated_service_names)
-        identity_str = f'Services with names {terminated_service_names_str} are'
+        identity_str = f'Services {terminated_service_names_str} are'
     return f'{identity_str} scheduled to be terminated.'
 
 

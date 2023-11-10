@@ -1674,8 +1674,22 @@ def _get_spot_jobs(
 def _get_services(service_names: Optional[List[str]],
                   show_all: bool,
                   show_endpoint: bool,
-                  is_called_by_user: bool = False) -> str:
-    msg = None
+                  is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+    """Get service statuses.
+
+    Args:
+        service_names: If not None, only show the statuses of these services.
+        show_all: Show all information of each service.
+        show_endpoint: If True, only show the endpoint of the service.
+        is_called_by_user: If this function is called by user directly, or an
+            internal call.
+
+    Returns:
+        A tuple of (num_services, msg). If num_services is None, it means there
+        is an error when querying the services. In this case, msg contains the
+        error message. Otherwise, msg contains the formatted service table.
+    """
+    num_services = None
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
@@ -1684,16 +1698,16 @@ def _get_services(service_names: Optional[List[str]],
                 # Change empty list to None
                 service_names = None
             service_records = core.serve_status(service_names)
+            num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         if controller_status == status_lib.ClusterStatus.INIT:
             msg = 'Controller is initializing. Please wait for a while.'
         else:
             assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
-            msg = 'No existing services.'
-            if controller_status is None:
-                msg += (f' (See: {colorama.Style.BRIGHT}sky serve -h'
-                        f'{colorama.Style.RESET_ALL})')
+            msg = ('No existing services. (See: '
+                   f'{colorama.Style.BRIGHT}sky serve -h'
+                   f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to fetch service statuses due to connection issues. '
                'Please try again later. Details: '
@@ -1714,7 +1728,16 @@ def _get_services(service_names: Optional[List[str]],
             msg = status_utils.get_endpoint(service_records[0])
         else:
             msg = status_utils.format_service_table(service_records, show_all)
-    return msg
+            service_not_found_msg = ''
+            if service_names is not None:
+                for service_name in service_names:
+                    if not any(service_name == record['name']
+                               for record in service_records):
+                        service_not_found_msg += (
+                            f'\nService {service_name!r} not found.')
+            if service_not_found_msg:
+                msg += f'\n{service_not_found_msg}'
+    return num_services, msg
 
 
 @cli.command()
@@ -1894,7 +1917,6 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 cluster_name)
             if controller is not None:
                 reserved_clusters.append(cluster_record)
-                hints.append(controller.value.sky_status_hint)
             else:
                 nonreserved_cluster_records.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
@@ -1948,8 +1970,8 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                             'shown)')
                     job_info += '. '
                 hints.append(
-                    f'* {job_info}To see all spot jobs: {colorama.Style.BRIGHT}'
-                    f'sky spot queue{colorama.Style.RESET_ALL}')
+                    controller_utils.Controllers.SPOT_CONTROLLER.value.
+                    in_progress_hint.format(job_info=job_info))
 
         if show_services:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -1959,10 +1981,17 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                 msg = 'KeyboardInterrupt'
             else:
                 with rich_utils.safe_status('[cyan]Checking services[/]'):
-                    interrupted, msg = _try_get_future_result(services_future)
+                    interrupted, result = _try_get_future_result(
+                        services_future)
                     if interrupted:
+                        num_services = -1
                         msg = 'KeyboardInterrupt'
+                    else:
+                        num_services, msg = result
             click.echo(msg)
+            if num_services is not None:
+                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                             value.in_progress_hint)
 
         if show_spot_jobs or show_services:
             try:
@@ -4346,10 +4375,10 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     """
     # This won't pollute the output of --endpoint.
     with rich_utils.safe_status('[cyan]Checking services[/]'):
-        msg = _get_services(service_names,
-                            show_all=all,
-                            show_endpoint=endpoint,
-                            is_called_by_user=True)
+        _, msg = _get_services(service_names,
+                               show_all=all,
+                               show_endpoint=endpoint,
+                               is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'

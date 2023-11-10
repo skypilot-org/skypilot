@@ -150,7 +150,7 @@ def format_service_table(service_records: List[_ServiceRecord],
     replica_table = format_replica_table(replica_infos, show_all)
     return (f'{service_table}\n'
             f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Replicas{colorama.Style.RESET_ALL}\n'
+            f'Service Replicas{colorama.Style.RESET_ALL}\n'
             f'{replica_table}')
 
 

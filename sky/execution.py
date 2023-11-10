@@ -1107,6 +1107,8 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
         )
         # TODO(tian): Use this to check the endpoint and if the
         # service name is duplicated.
+        # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
+        # change after the first time, so there is no consistency issue.
         sn = service_name
         style = colorama.Style
         fore = colorama.Fore
@@ -1136,7 +1138,8 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             '\nTo send a test request:\t\t'
             f'{backend_utils.BOLD}curl -L $(sky serve status {sn} '
             f'--endpoint){backend_utils.RESET_BOLD}'
-            f'\n{fore.GREEN}SkyServe is bootstrapping your service now.'
+            '\n'
+            f'\n{fore.GREEN}SkyServe is spinning up your service now.'
             f'{style.RESET_ALL}'
             f'\n{fore.GREEN}The endpoint and replicas should be ready '
             f'within a short time.{style.RESET_ALL}')
