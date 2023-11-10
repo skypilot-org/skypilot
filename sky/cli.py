@@ -4181,12 +4181,31 @@ def serve_up(
 
     SERVICE_YAML must point to a valid YAML file.
 
+    A regular task YAML can be turned into a service YAML by adding a `service`
+    field. E.g.,
+
+    .. code-block:: yaml
+
+        # service.yaml
+        service:
+          ports: 8080
+          readiness_probe:
+            path: /health
+            initial_delay_seconds: 20
+          replicas: 1
+
+        resources:
+          cpus: 2+
+
+        run: python -m http.server 8080
+
     Example:
 
     .. code-block:: bash
 
         sky serve up service.yaml
     """
+    # TODO(tian): Update the example after we move the ports to resources.
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 

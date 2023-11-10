@@ -1045,6 +1045,10 @@ def serve_status(
     Returns:
         A list of dicts, with each dict containing the information of a service.
         If a service is not found, it will be omitted from the returned list.
+
+    Raises:
+        RuntimeError: if failed to get the service status.
+        exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
     if service_names is not None:
         if isinstance(service_names, str):

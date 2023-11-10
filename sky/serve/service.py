@@ -132,6 +132,8 @@ def _start(service_name: str, task_yaml: str, job_id: int):
     requested_resources = resources.Resources.from_yaml_config(resources_config)
     status = serve_state.ServiceStatus.CONTROLLER_INIT
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+        # TODO(tian): Probably we should raise an error and not pending here.
+        # This busy loop is also a ray job and will take a lot of memory.
         status = serve_state.ServiceStatus.PENDING
     # Here, the service record might already registered in the database if the
     # controller is UP, but also might not if the controller is STOPPED or not
