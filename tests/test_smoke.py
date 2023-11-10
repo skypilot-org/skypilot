@@ -2643,32 +2643,23 @@ def _build(code: List[str]) -> str:
 @pytest.mark.gcp
 def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    code = [
-        f'name = "{name}"',
-        'task = sky.Task(run="whoami")',
-        'task.set_resources(sky.Resources(cloud=sky.GCP()))',
-        'job_id, handle = sky.launch(task, cluster_name=name)',
-        'assert job_id == 1',
-        'assert handle is not None',
-        'assert handle.cluster_name == name',
-        'assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())',
-        'job_id_exec, handle_exec = sky.exec(task, cluster_name=name)',
-        'assert job_id_exec == 2',
-        'assert handle_exec is not None',
-        'assert handle_exec.cluster_name == name',
-        'assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())',
-        # For dummy task (i.e. task.run is None), the job won't be submitted.
-        'dummy_task = sky.Task()',
-        'job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)',
-        'assert job_id_dummy is None',
-    ]
-    cmd = _build(code)
-    test = Test(
-        'core-api-sky-launch-exec',
-        [cmd],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
+    task = sky.Task(run="whoami")
+    task.set_resources(sky.Resources(cloud=sky.GCP()))
+    job_id, handle = sky.launch(task, cluster_name=name)
+    assert job_id == 1
+    assert handle is not None
+    assert handle.cluster_name == name
+    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
+    job_id_exec, handle_exec = sky.exec(task, cluster_name=name)
+    assert job_id_exec == 2
+    assert handle_exec is not None
+    assert handle_exec.cluster_name == name
+    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
+    # For dummy task (i.e. task.run is None), the job won't be submitted.
+    dummy_task = sky.Task()
+    job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
+    assert job_id_dummy is None
+    sky.down(name)
 
 
 # ---------- Testing Storage ----------
