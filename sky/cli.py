@@ -2043,7 +2043,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 @usage_lib.entrypoint
 def logs(
     cluster: str,
-    job_ids: Tuple[str],
+    job_ids: Tuple[str, ...],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
@@ -2082,6 +2082,7 @@ def logs(
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
+    job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
         # in core.tail_logs.
@@ -2091,7 +2092,8 @@ def logs(
                                    'Job ID must be integers.')
         job_ids_to_query = [int(job_id)]
     else:
-        job_ids_to_query = job_ids
+        # job_ids is either None or empty list, so it is safe to cast it here.
+        job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
     if status:
         job_statuses = core.job_status(cluster, job_ids_to_query)
         job_id = list(job_statuses.keys())[0]

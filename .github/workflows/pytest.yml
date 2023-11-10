@@ -17,6 +17,7 @@ jobs:
         python-version: [3.8]
         test-path:
           - tests/unit_tests
+          - tests/test_api.py
           - tests/test_cli.py
           - tests/test_config.py
           - tests/test_global_user_state.py
