@@ -1075,11 +1075,12 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
                                     vars_to_fill,
                                     output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
-        # Choose the same cloud if controller is not launched, controller
-        # resources not specify cloud and replica cloud is specified.
-        controller_cloud = (requested_resources.cloud if status is None and
-                            controller_resources.cloud is None and
-                            requested_resources.cloud is not None else None)
+        # Choose the same cloud if controller is not launched and the
+        # controller resources cloud is not specified.
+        if (status is None and controller_resources.cloud is None):
+            controller_cloud = requested_resources.cloud
+        else:
+            controller_cloud = controller_resources.cloud
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
