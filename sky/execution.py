@@ -8,11 +8,7 @@ import getpass
 import os
 import re
 import tempfile
-<<<<<<< HEAD
 from typing import Any, Dict, List, Optional, Tuple, Union
-=======
-from typing import Any, List, Optional, Tuple, Union
->>>>>>> origin/master
 import uuid
 
 import colorama
@@ -185,12 +181,8 @@ def _execute(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
-<<<<<<< HEAD
     _is_launched_by_sky_serve_controller: bool = False,
-) -> None:
-=======
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
->>>>>>> origin/master
     """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
