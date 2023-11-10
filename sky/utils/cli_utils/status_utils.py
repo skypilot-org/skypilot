@@ -163,6 +163,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
         StatusColumn('IP', _get_head_ip),
+        StatusColumn('LAUNCHED', _get_launched),
         StatusColumn(
             'RESOURCES',
             _get_full_replica_resources if show_all else _get_replica_resources,

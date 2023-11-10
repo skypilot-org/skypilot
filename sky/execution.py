@@ -1109,6 +1109,39 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
         )
         # TODO(tian): Use this to check the endpoint and if the
         # service name is duplicated.
+        sn = service_name
+        style = colorama.Style
+        fore = colorama.Fore
+        sky_logging.print(
+            f'{fore.CYAN}Service name: '
+            f'{style.BRIGHT}{sn}{style.RESET_ALL}'
+            '\nTo see detailed info:\t\t'
+            f'{backend_utils.BOLD}sky serve status {sn} (-a)'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo teardown the service:\t\t'
+            f'{backend_utils.BOLD}sky serve down {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\n'
+            '\nTo see logs of a replica:\t'
+            f'{backend_utils.BOLD}sky serve logs {sn} [REPLICA_ID]'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo see logs of load balancer:\t'
+            f'{backend_utils.BOLD}sky serve logs --load-balancer {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo see logs of controller:\t'
+            f'{backend_utils.BOLD}sky serve logs --controller {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\n'
+            '\nTo monitor replica status:\t'
+            f'{backend_utils.BOLD}watch -n10 sky serve status {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo send a test request:\t\t'
+            f'{backend_utils.BOLD}curl -L $(sky serve status {sn} '
+            f'--endpoint){backend_utils.RESET_BOLD}'
+            f'\n{fore.GREEN}SkyServe is bootstrapping your service now.'
+            f'{style.RESET_ALL}'
+            f'\n{fore.GREEN}The endpoint and replicas should be ready '
+            f'within a short time.{style.RESET_ALL}')
 
 
 @usage_lib.entrypoint

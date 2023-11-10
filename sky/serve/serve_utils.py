@@ -243,6 +243,8 @@ def update_service_status() -> None:
         if controller_job_id is None:
             # The service just registered and the controller job is not
             # scheduled yet.
+            # TODO(tian): Remove this once we merge #2736 and not register
+            # service previous than the controller job.
             continue
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
@@ -283,28 +285,28 @@ def get_serve_status(service_name: str,
 
 
 def get_serve_status_encoded(service_names: Optional[List[str]]) -> str:
-    serve_statuss = []
+    serve_statuses = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
         serve_status = get_serve_status(service_name)
-        serve_statuss.append({
+        serve_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in serve_status.items()
         })
-    return common_utils.encode_payload(serve_statuss)
+    return common_utils.encode_payload(serve_statuses)
 
 
 def load_serve_status(payload: str) -> List[Dict[str, Any]]:
-    serve_statuss_encoded = common_utils.decode_payload(payload)
-    serve_statuss = []
-    for serve_status in serve_statuss_encoded:
-        serve_statuss.append({
+    serve_statuses_encoded = common_utils.decode_payload(payload)
+    serve_statuses = []
+    for serve_status in serve_statuses_encoded:
+        serve_statuses.append({
             k: pickle.loads(base64.b64decode(v))
             for k, v in serve_status.items()
         })
-    return serve_statuss
+    return serve_statuses
 
 
 def terminate_services(service_names: Optional[List[str]]) -> str:

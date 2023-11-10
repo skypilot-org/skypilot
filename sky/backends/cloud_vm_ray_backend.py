@@ -3273,7 +3273,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         executable: str,
         detach_run: bool = False,
         spot_dag: Optional['dag.Dag'] = None,
-        service_name: Optional[str] = None,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3392,40 +3391,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            elif (controller ==
-                  controller_utils.Controllers.SKY_SERVE_CONTROLLER):
-                sn = service_name
-                logger.info(
-                    f'{fore.CYAN}Service name: '
-                    f'{style.BRIGHT}{sn}{style.RESET_ALL}'
-                    '\nTo see detailed info:\t\t'
-                    f'{backend_utils.BOLD}sky serve status {sn} (-a)'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\nTo teardown the service:\t\t'
-                    f'{backend_utils.BOLD}sky serve down {sn}'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\n'
-                    '\nTo see logs of a replica:\t'
-                    f'{backend_utils.BOLD}sky serve logs {sn} [REPLICA_ID]'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\nTo see logs of load balancer:\t'
-                    f'{backend_utils.BOLD}sky serve logs --load-balancer {sn}'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\nTo see logs of controller:\t'
-                    f'{backend_utils.BOLD}sky serve logs --controller {sn}'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\n'
-                    '\nTo monitor replica status:\t'
-                    f'{backend_utils.BOLD}watch -n10 sky serve status {sn}'
-                    f'{backend_utils.RESET_BOLD}'
-                    '\nTo send a test request:\t\t'
-                    f'{backend_utils.BOLD}curl -L $(sky serve status {sn} '
-                    f'--endpoint){backend_utils.RESET_BOLD}'
-                    f'\n{fore.GREEN}SkyServe is bootstrapping your service now.'
-                    f'{style.RESET_ALL}'
-                    f'\n{fore.GREEN}The endpoint and replicas should be ready '
-                    f'within a short time.{style.RESET_ALL}')
-            else:
+            elif controller is None:
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -4759,8 +4725,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag,
-                                service_name=task.service_name)
+                                spot_dag=task.spot_dag)
 
     def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
                               task: task_lib.Task, job_id: int,
@@ -4834,5 +4799,4 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 job_id,
                                 executable='python3',
                                 detach_run=detach_run,
-                                spot_dag=task.spot_dag,
-                                service_name=task.service_name)
+                                spot_dag=task.spot_dag)

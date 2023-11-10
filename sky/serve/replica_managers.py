@@ -309,10 +309,20 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
 
-    @property
-    def handle(self) -> Optional[backends.CloudVmRayResourceHandle]:
-        cluster_record = global_user_state.get_cluster_from_name(
-            self.cluster_name)
+    def handle(
+        self,
+        cluster_record: Optional[Dict[str, Any]] = None
+    ) -> Optional[backends.CloudVmRayResourceHandle]:
+        """Get the handle of the cluster.
+
+        Args:
+            cluster_record: The cluster record in the cluster table. If not
+                provided, will fetch the cluster record from the cluster table
+                based on the cluster name.
+        """
+        if cluster_record is None:
+            cluster_record = global_user_state.get_cluster_from_name(
+                self.cluster_name)
         if cluster_record is None:
             return None
         handle = cluster_record['handle']
@@ -321,7 +331,7 @@ class ReplicaInfo:
 
     @property
     def ip(self) -> Optional[str]:
-        handle = self.handle
+        handle = self.handle()
         if handle is None:
             return None
         return handle.head_ip
@@ -335,13 +345,17 @@ class ReplicaInfo:
         return replica_status
 
     def to_info_dict(self, with_handle: bool) -> Dict[str, Any]:
+        cluster_record = global_user_state.get_cluster_from_name(
+            self.cluster_name)
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
+            'launched_at': (cluster_record['launched_at']
+                            if cluster_record is not None else None),
         }
         if with_handle:
-            info_dict['handle'] = self.handle
+            info_dict['handle'] = self.handle(cluster_record)
         return info_dict
 
     def probe(
@@ -670,7 +684,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.error('Error in process pool refresher: '
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
-                    logger.info(f'  Traceback: {traceback.format_exc()}')
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     @with_lock
@@ -692,7 +706,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             # We use backend API to avoid usage collection in the
             # core.job_status.
             backend = backends.CloudVmRayBackend()
-            handle = info.handle
+            handle = info.handle()
             assert handle is not None, info
             # Use None to fetch latest job, which stands for user task job
             job_statuses = backend.get_job_status(handle,
@@ -722,7 +736,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.error('Error in job status fetcher: '
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
-                    logger.info(f'  Traceback: {traceback.format_exc()}')
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
     @with_lock
@@ -770,7 +784,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     if info.status_property.first_ready_time is None:
                         info.status_property.first_ready_time = probe_time
                 else:
-                    handle = info.handle
+                    handle = info.handle()
                     if handle is None:
                         logger.error('Cannot find handle for '
                                      f'replica {info.replica_id}.')
@@ -862,5 +876,5 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.error('Error in replica prober: '
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
-                    logger.info(f'  Traceback: {traceback.format_exc()}')
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)

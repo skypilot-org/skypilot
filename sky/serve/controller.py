@@ -5,6 +5,7 @@ Responsible for autoscaling and replica management.
 import logging
 import threading
 import time
+import traceback
 
 import fastapi
 import uvicorn
@@ -15,7 +16,9 @@ from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
+from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -76,7 +79,10 @@ class SkyServeController:
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
-                logger.error(f'Error in autoscaler: {e}')
+                logger.error('Error in autoscaler: '
+                             f'{common_utils.format_exception(e)}')
+                with ux_utils.enable_traceback():
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(self._autoscaler.frequency)
 
     def run(self) -> None:

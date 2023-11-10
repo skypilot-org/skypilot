@@ -8,6 +8,7 @@ import os
 import pathlib
 import shutil
 import time
+import traceback
 from typing import Dict, List
 
 import filelock
@@ -98,7 +99,10 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
-        logger.error(f'Failed to clean up storage: {e}')
+        logger.error('Failed to clean up storage: '
+                     f'{common_utils.format_exception(e)}')
+        with ux_utils.enable_traceback():
+            logger.error(f'  Traceback: {traceback.format_exc()}')
         failed = True
     return failed
 
