@@ -63,6 +63,20 @@ def _handle_signal(service_name: str) -> None:
     raise error_type(f'User signal received: {user_signal.value}')
 
 
+def _cleanup_storage(task_yaml: str) -> bool:
+    try:
+        task = task_lib.Task.from_yaml(task_yaml)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        backend.teardown_ephemeral_storage(task)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error('Failed to clean up storage: '
+                     f'{common_utils.format_exception(e)}')
+        with ux_utils.enable_traceback():
+            logger.error(f'  Traceback: {traceback.format_exc()}')
+        return True
+    return False
+
+
 def _cleanup(service_name: str, task_yaml: str) -> bool:
     """Clean up the sky serve replicas, storage, and service record."""
     failed = False
@@ -94,37 +108,19 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    try:
-        task = task_lib.Task.from_yaml(task_yaml)
-        backend = cloud_vm_ray_backend.CloudVmRayBackend()
-        backend.teardown_ephemeral_storage(task)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.error('Failed to clean up storage: '
-                     f'{common_utils.format_exception(e)}')
-        with ux_utils.enable_traceback():
-            logger.error(f'  Traceback: {traceback.format_exc()}')
-        failed = True
+    failed = failed or _cleanup_storage(task_yaml)
     return failed
 
 
-def _start(service_name: str, task_yaml: str, job_id: int):
+def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     """Starts the service."""
-    # Generate log file name.
-    load_balancer_log_file = os.path.expanduser(
-        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
-
-    # Create the service working directory.
-    service_dir = os.path.expanduser(
-        serve_utils.generate_remote_service_dir_name(service_name))
-    os.makedirs(service_dir, exist_ok=True)
-
     # Generate ssh key pair to avoid race condition when multiple sky.launch
     # are executed at the same time.
     authentication.get_or_generate_keys()
 
     # Initialize database record for the service.
-    service_spec = serve.SkyServiceSpec.from_yaml(task_yaml)
-    with open(task_yaml, 'r') as f:
+    service_spec = serve.SkyServiceSpec.from_yaml(tmp_task_yaml)
+    with open(tmp_task_yaml, 'r') as f:
         config = yaml.safe_load(f)
     resources_config = None
     if isinstance(config, dict):
@@ -135,16 +131,36 @@ def _start(service_name: str, task_yaml: str, job_id: int):
         # TODO(tian): Probably we should raise an error and not pending here.
         # This busy loop is also a ray job and will take a lot of memory.
         status = serve_state.ServiceStatus.PENDING
-    # Here, the service record might already registered in the database if the
-    # controller is UP, but also might not if the controller is STOPPED or not
-    # created yet before this service. So we use add_or_update_service here.
-    # See sky.execution._register_service_name for more details.
-    serve_state.add_or_update_service(service_name,
+    success = serve_state.add_service(service_name,
                                       controller_job_id=job_id,
                                       policy=service_spec.policy_str(),
                                       auto_restart=service_spec.auto_restart,
                                       requested_resources=requested_resources,
                                       status=status)
+    # Directly throw an error here. See sky/execution.py::serve_up
+    # for more details.
+    if not success:
+        _cleanup_storage(tmp_task_yaml)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name} already exists.')
+
+    # Create the service working directory.
+    service_dir = os.path.expanduser(
+        serve_utils.generate_remote_service_dir_name(service_name))
+    os.makedirs(service_dir, exist_ok=True)
+
+    # Copy the tmp task yaml file to the final task yaml file.
+    # This is for the service name conflict case. The _execute will
+    # sync file mounts first and then realized a name conflict. We
+    # don't want the new file mounts to overwrite the old one, so we
+    # sync to a tmp file first and then copy it to the final name
+    # if there is no name conflict.
+    task_yaml = serve_utils.generate_task_yaml_file_name(service_name)
+    shutil.copy(tmp_task_yaml, task_yaml)
+
+    # Generate load balancer log file name.
+    load_balancer_log_file = os.path.expanduser(
+        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
 
     controller_process = None
     load_balancer_process = None

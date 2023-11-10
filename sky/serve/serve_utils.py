@@ -166,9 +166,15 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
 
 
-def generate_remote_task_yaml_file_name(service_name: str) -> str:
+def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'task.yaml.tmp')
+
+
+def generate_task_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, 'task.yaml')
 
 
@@ -253,15 +259,6 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def add_service_if_not_exist(service_name: str) -> str:
-    return common_utils.encode_payload(
-        serve_state.add_service_if_not_exist(service_name))
-
-
-def load_add_service_result(payload: str) -> bool:
-    return common_utils.decode_payload(payload)
-
-
 def _get_serve_status(
         service_name: str,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
@@ -343,6 +340,36 @@ def terminate_services(service_names: Optional[List[str]]) -> str:
         terminated_service_names_str = ', '.join(terminated_service_names)
         identity_str = f'Services {terminated_service_names_str} are'
     return f'{identity_str} scheduled to be terminated.'
+
+
+def wait_service_initialization(service_name: str, job_id: int) -> str:
+    """Util function to call at the end of `sky.serve_up()`.
+
+    This function will:
+        (1) Check the name duplication by job id of the controller. If
+            the job id is not the same as the database record, this
+            means another service is already taken that name. See
+            sky/execution.py::serve_up for more details.
+        (2) Wait for the load balancer port to be assigned and return.
+    """
+    cnt = 0
+    while True:
+        record = serve_state.get_service_from_name(service_name)
+        if record is None:
+            continue
+        if job_id != record['controller_job_id']:
+            return common_utils.encode_payload(None)
+        lb_port = record['load_balancer_port']
+        if lb_port is not None:
+            return common_utils.encode_payload(lb_port)
+        time.sleep(1)
+        cnt += 1
+        if cnt > constants.INITIALIZATION_TIMEOUT_SECONDS:
+            raise ValueError(f'Failed to initialize service {service_name!r}.')
+
+
+def load_service_initialization_result(payload: str) -> Optional[int]:
+    return common_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -542,14 +569,6 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def add_service_if_not_exist(cls, service_name: str) -> str:
-        code = [
-            f'msg = serve_utils.add_service_if_not_exist({service_name!r})',
-            'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
     def get_serve_status(cls, service_names: Optional[List[str]]) -> str:
         code = [
             f'msg = serve_utils.get_serve_status_encoded({service_names!r})',
@@ -562,6 +581,14 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.terminate_services({service_names!r})',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
+        code = [
+            'msg = serve_utils.wait_service_initialization('
+            f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

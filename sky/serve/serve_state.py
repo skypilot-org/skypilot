@@ -181,36 +181,30 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
-# === Service functions ===
-def add_service_if_not_exist(name: str) -> bool:
-    """Adds a service to the database."""
+def add_service(name: str, controller_job_id: int, policy: str,
+                auto_restart: bool, requested_resources: 'sky.Resources',
+                status: ServiceStatus) -> bool:
+    """Add a service in the database.
+
+    Returns:
+        True if the service is added successfully, False if the service already
+        exists.
+    """
     try:
         _DB.cursor.execute(
             """\
-            INSERT INTO services (name, status)
-            VALUES (?, ?)""", (name, ServiceStatus.CONTROLLER_INIT.value))
+            INSERT INTO services
+            (name, controller_job_id, status, policy,
+            auto_restart, requested_resources)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, status.value, policy, int(auto_restart),
+             pickle.dumps(requested_resources)))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
             raise RuntimeError('Unexpected database error') from e
         return False
     return True
-
-
-def add_or_update_service(name: str, controller_job_id: int, policy: str,
-                          auto_restart: bool,
-                          requested_resources: 'sky.Resources',
-                          status: ServiceStatus) -> None:
-    """Updates a service in the database."""
-    _DB.cursor.execute(
-        """\
-        INSERT OR REPLACE INTO services
-        (name, controller_job_id, status, policy,
-        auto_restart, requested_resources)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (name, controller_job_id, status.value, policy, int(auto_restart),
-         pickle.dumps(requested_resources)))
-    _DB.conn.commit()
 
 
 def remove_service(service_name: str) -> None:

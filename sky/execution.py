@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
-import filelock
 
 import sky
 from sky import backends
@@ -71,8 +70,6 @@ _CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
-
-_SERVE_UP_NAME_LOCK_PATH = '/tmp/sky_serve_up_{}.lock'
 
 
 def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
@@ -1010,171 +1007,6 @@ def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task,
             storage_obj.force_delete = True
 
 
-def _register_service_name(service_name: str,
-                           handle: backends.CloudVmRayResourceHandle) -> bool:
-    """Register a service name on the controller if it is running.
-
-    Returns:
-        True if the service name is not occupied, False otherwise.
-    """
-    code = serve.ServeCodeGen.add_service_if_not_exist(service_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    returncode, stdout, _ = backend.run_on_head(handle,
-                                                code,
-                                                require_outputs=True,
-                                                stream_logs=False)
-    subprocess_utils.handle_returncode(
-        returncode, code, 'Failed to register service name on controller',
-        stdout)
-    return serve.load_add_service_result(stdout)
-
-
-def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
-
-    assert len(task.resources) == 1, task
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
-
-    with rich_utils.safe_status(
-            '[cyan]Registering service on the controller[/]'):
-        with sky_logging.silent():
-            status, handle = controller_utils.is_controller_up(
-                controller_type=controller_utils.Controllers.
-                SKY_SERVE_CONTROLLER,
-                stopped_message='')
-        if handle is None or handle.head_ip is None:
-            # The sky serve controller is STOPPED, or it is the first time
-            # provisioning either after an AUTOSTOP, or the first time the
-            # controller is created, which means there is no service on the
-            # controller. We will create the service database record in
-            # sky.serve.service._start once the controller is running.
-            logger.info('The sky serve controller is not running. '
-                        'Will register the service once the controller is up.')
-        else:
-            # The sky serve controller is UP, check if the service exists.
-            success = _register_service_name(service_name, handle)
-            if not success:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: `sky serve down` '
-                        'and then `sky serve up` again (in-place update will '
-                        'be supported in the future).')
-
-    _maybe_translate_local_file_mounts_and_sync_up(task, path='serve')
-
-    with tempfile.NamedTemporaryFile(
-            prefix=f'service-task-{service_name}-',
-            mode='w',
-    ) as service_file, tempfile.NamedTemporaryFile(
-            prefix=f'controller-task-{service_name}-',
-            mode='w',
-    ) as controller_file:
-        controller_name = serve.SKY_SERVE_CONTROLLER_NAME
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(service_file.name, task_config)
-        remote_task_yaml_path = (
-            serve.generate_remote_task_yaml_file_name(service_name))
-        remote_config_yaml_path = (
-            serve.generate_remote_config_yaml_file_name(service_name))
-        controller_log_file = (
-            serve.generate_remote_controller_log_file_name(service_name))
-        extra_vars, controller_resources = _controller_skypilot_config_setup(
-            controller_type='serve',
-            controller_resources_config=serve.CONTROLLER_RESOURCES,
-            remote_user_config_path=remote_config_yaml_path)
-        vars_to_fill = {
-            'remote_task_yaml_path': remote_task_yaml_path,
-            'local_task_yaml_path': service_file.name,
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-            'service_name': service_name,
-            'controller_log_file': controller_log_file,
-            **extra_vars,
-        }
-        backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
-                                    vars_to_fill,
-                                    output_path=controller_file.name)
-        controller_task = task_lib.Task.from_yaml(controller_file.name)
-        # Choose the same cloud if controller is not launched and the
-        # controller resources cloud is not specified.
-        if (status is None and controller_resources.cloud is None):
-            controller_cloud = requested_resources.cloud
-        else:
-            controller_cloud = controller_resources.cloud
-        # TODO(tian): Probably run another sky.launch after we get the load
-        # balancer port from the controller? So we don't need to open so many
-        # ports here. Or, we should have a nginx traffic control to refuse
-        # any connection to the unregistered ports.
-        controller_resources = controller_resources.copy(
-            cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
-        controller_task.set_resources(controller_resources)
-
-        # # Set service_name so the backend will know to modify default ray
-        # task CPU usage to custom value instead of default 0.5 vCPU. We need
-        # to set it to a smaller value to support a larger number of services.
-        controller_task.service_name = service_name
-
-        print(f'{colorama.Fore.YELLOW}Launching controller for '
-              f'{service_name!r}...{colorama.Style.RESET_ALL}')
-        _execute(
-            entrypoint=controller_task,
-            stream_logs=False,
-            cluster_name=controller_name,
-            detach_run=True,
-            idle_minutes_to_autostop=controller_utils.
-            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-        )
-        # TODO(tian): Use this to check the endpoint and if the
-        # service name is duplicated.
-        # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
-        # change after the first time, so there is no consistency issue.
-        sn = service_name
-        style = colorama.Style
-        fore = colorama.Fore
-        sky_logging.print(
-            f'{fore.CYAN}Service name: '
-            f'{style.BRIGHT}{sn}{style.RESET_ALL}'
-            '\nTo see detailed info:\t\t'
-            f'{backend_utils.BOLD}sky serve status {sn} (-a)'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo teardown the service:\t'
-            f'{backend_utils.BOLD}sky serve down {sn}'
-            f'{backend_utils.RESET_BOLD}'
-            '\n'
-            '\nTo see logs of a replica:\t'
-            f'{backend_utils.BOLD}sky serve logs {sn} [REPLICA_ID]'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo see logs of load balancer:\t'
-            f'{backend_utils.BOLD}sky serve logs --load-balancer {sn}'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo see logs of controller:\t'
-            f'{backend_utils.BOLD}sky serve logs --controller {sn}'
-            f'{backend_utils.RESET_BOLD}'
-            '\n'
-            '\nTo monitor replica status:\t'
-            f'{backend_utils.BOLD}watch -n10 sky serve status {sn}'
-            f'{backend_utils.RESET_BOLD}'
-            '\nTo send a test request:\t\t'
-            f'{backend_utils.BOLD}curl -L $(sky serve status {sn} '
-            f'--endpoint){backend_utils.RESET_BOLD}'
-            '\n'
-            f'\n{fore.GREEN}SkyServe is spinning up your service now.'
-            f'{style.RESET_ALL}'
-            f'\n{fore.GREEN}The endpoint and replicas should be ready '
-            f'within a short time.{style.RESET_ALL}')
-
-
 @usage_lib.entrypoint
 def serve_up(
     task: 'sky.Task',
@@ -1202,9 +1034,157 @@ def serve_up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    # We need this lock to make sure no two sky.serve_up() with same service
-    # name are running at the same time. It is for the race condition that
-    # two of them are trying to create a record in controller services database
-    # but the controller is not up yet.
-    with filelock.FileLock(_SERVE_UP_NAME_LOCK_PATH.format(service_name)):
-        _serve_up_no_lock(task, service_name)
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    assert len(task.resources) == 1, task
+    requested_resources = list(task.resources)[0]
+    if requested_resources.ports is None or len(requested_resources.ports) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Must only specify one port in resources. Each replica '
+                'will use the port specified as application ingress port.')
+
+    _maybe_translate_local_file_mounts_and_sync_up(task, path='serve')
+
+    with tempfile.NamedTemporaryFile(
+            prefix=f'service-task-{service_name}-',
+            mode='w',
+    ) as service_file, tempfile.NamedTemporaryFile(
+            prefix=f'controller-task-{service_name}-',
+            mode='w',
+    ) as controller_file:
+        controller_name = serve.SKY_SERVE_CONTROLLER_NAME
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(service_file.name, task_config)
+        remote_tmp_task_yaml_path = (
+            serve.generate_remote_tmp_task_yaml_file_name(service_name))
+        remote_config_yaml_path = (
+            serve.generate_remote_config_yaml_file_name(service_name))
+        controller_log_file = (
+            serve.generate_remote_controller_log_file_name(service_name))
+        extra_vars, controller_resources = _controller_skypilot_config_setup(
+            controller_type='serve',
+            controller_resources_config=serve.CONTROLLER_RESOURCES,
+            remote_user_config_path=remote_config_yaml_path)
+        vars_to_fill = {
+            'remote_task_yaml_path': remote_tmp_task_yaml_path,
+            'local_task_yaml_path': service_file.name,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
+            'service_name': service_name,
+            'controller_log_file': controller_log_file,
+            **extra_vars,
+        }
+        backend_utils.fill_template(serve.CONTROLLER_TEMPLATE,
+                                    vars_to_fill,
+                                    output_path=controller_file.name)
+        controller_task = task_lib.Task.from_yaml(controller_file.name)
+        controller_cloud = (requested_resources.cloud
+                            if controller_resources.cloud is None else
+                            controller_resources.cloud)
+        # TODO(tian): Probably run another sky.launch after we get the load
+        # balancer port from the controller? So we don't need to open so many
+        # ports here. Or, we should have a nginx traffic control to refuse
+        # any connection to the unregistered ports.
+        controller_resources = controller_resources.copy(
+            cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
+        controller_task.set_resources(controller_resources)
+
+        # # Set service_name so the backend will know to modify default ray
+        # task CPU usage to custom value instead of default 0.5 vCPU. We need
+        # to set it to a smaller value to support a larger number of services.
+        controller_task.service_name = service_name
+
+        print(f'{colorama.Fore.YELLOW}Launching controller for '
+              f'{service_name!r}...{colorama.Style.RESET_ALL}')
+        # We directly submit the request to the controller and let the
+        # controller to check name conflict. Suppose we have multiple
+        # sky.serve_up() with same service name, the first one will
+        # successfully write its job id to controller service database;
+        # and for all following sky.serve_up, the controller will throw
+        # an exception (name conflict detected) and exit. Therefore the
+        # controller job id in database could be use as an indicator of
+        # whether the service is already running. If the id is the same
+        # with the current job id, we know the service is up and running
+        # for the first time; otherwise it is a name conflict.
+        controller_job_id, controller_handle = _execute(
+            entrypoint=controller_task,
+            stream_logs=False,
+            cluster_name=controller_name,
+            detach_run=True,
+            idle_minutes_to_autostop=controller_utils.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
+        )
+
+        assert controller_job_id is not None and controller_handle is not None
+        # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
+        # change after the first time, so there is no consistency issue.
+        with rich_utils.safe_status(
+                '[cyan]Waiting for the service to initialize[/]'):
+            # This function will check the controller job id in the database
+            # and return the endpoint if the job id matches. Otherwise it will
+            # return None.
+            code = serve.ServeCodeGen.wait_service_initialization(
+                service_name, controller_job_id)
+            backend = backend_utils.get_backend_from_handle(controller_handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
+            assert isinstance(controller_handle,
+                              backends.CloudVmRayResourceHandle)
+            returncode, lb_port_payload, _ = backend.run_on_head(
+                controller_handle,
+                code,
+                require_outputs=True,
+                stream_logs=False)
+            subprocess_utils.handle_returncode(
+                returncode, code, 'Failed to wait for service initialization',
+                lb_port_payload)
+            lb_port = serve.load_service_initialization_result(lb_port_payload)
+            if lb_port is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'The service {service_name!r} is already running. '
+                        'Please specify a different name for your service. '
+                        'To update an existing service, run: `sky serve down` '
+                        'and then `sky serve up` again (in-place update will '
+                        'be supported in the future).')
+            endpoint = f'{controller_handle.head_ip}:{lb_port}'
+
+        sn = service_name
+        style = colorama.Style
+        fore = colorama.Fore
+        sky_logging.print(
+            f'{fore.CYAN}Service name: '
+            f'{style.BRIGHT}{sn}{style.RESET_ALL}'
+            f'\n{fore.CYAN}Endpoint URL: '
+            f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
+            '\nTo see detailed info:\t\t'
+            f'{backend_utils.BOLD}sky serve status {sn} '
+            f'[--endpoint]{backend_utils.RESET_BOLD}'
+            '\nTo teardown the service:\t'
+            f'{backend_utils.BOLD}sky serve down {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\n'
+            '\nTo see logs of a replica:\t'
+            f'{backend_utils.BOLD}sky serve logs {sn} [REPLICA_ID]'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo see logs of load balancer:\t'
+            f'{backend_utils.BOLD}sky serve logs --load-balancer {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo see logs of controller:\t'
+            f'{backend_utils.BOLD}sky serve logs --controller {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\n'
+            '\nTo monitor replica status:\t'
+            f'{backend_utils.BOLD}watch -n10 sky serve status {sn}'
+            f'{backend_utils.RESET_BOLD}'
+            '\nTo send a test request:\t\t'
+            f'{backend_utils.BOLD}curl -L {endpoint}'
+            f'{backend_utils.RESET_BOLD}'
+            '\n'
+            f'\n{fore.GREEN}SkyServe is spinning up your service now.'
+            f'{style.RESET_ALL}'
+            f'\n{fore.GREEN}The replicas should be ready within a '
+            f'short time.{style.RESET_ALL}')

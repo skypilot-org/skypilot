@@ -12,6 +12,9 @@ PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
+# Time to wait in seconds for service to initialize.
+INITIALIZATION_TIMEOUT_SECONDS = 60
+
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
 # replica ips for each service, also send the number of requests in last query

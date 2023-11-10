@@ -576,7 +576,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         for replica_id in replica_ids:
             self._terminate_replica(replica_id, sync_down_logs=False)
 
-    def _recover_from_preemption(self, replica_id: int) -> None:
+    def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning recovery for preempted replica {replica_id}.')
         # TODO(MaoZiming): Support spot recovery policies
         info = serve_state.get_replica_info_from_id(self._service_name,
@@ -824,7 +824,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 f' (status: {cluster_status.value})')
                             logger.info(f'Replica {info.replica_id} '
                                         f'is preempted{cluster_status_str}.')
-                            self._recover_from_preemption(info.replica_id)
+                            self._handle_preemption(info.replica_id)
 
                             continue
 

@@ -1702,9 +1702,10 @@ def _get_services(service_names: Optional[List[str]],
             msg = 'Controller is initializing. Please wait for a while.'
         else:
             assert controller_status in [None, status_lib.ClusterStatus.STOPPED]
-            msg = ('No existing services. (See: '
-                   f'{colorama.Style.BRIGHT}sky serve -h'
-                   f'{colorama.Style.RESET_ALL})')
+            msg = 'No existing services. '
+            if controller_status is None:
+                msg += (f'(See: {colorama.Style.BRIGHT}sky serve -h'
+                        f'{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
         msg = ('Failed to fetch service statuses due to connection issues. '
                'Please try again later. Details: '
