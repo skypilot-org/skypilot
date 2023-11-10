@@ -7,11 +7,11 @@
 #   sky serve status --endpoint sd
 
 service:
-  port: 7860
   readiness_probe: /
   replicas: 2
 
 resources:
+  ports: 7860
   accelerators: V100:1
 
 file_mounts:

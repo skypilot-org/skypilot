@@ -160,12 +160,9 @@ def get_service_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': ['port', 'readiness_probe'],
+        'required': ['readiness_probe'],
         'additionalProperties': False,
         'properties': {
-            'port': {
-                'type': 'integer',
-            },
             'readiness_probe': {
                 'anyOf': [{
                     'type': 'string',

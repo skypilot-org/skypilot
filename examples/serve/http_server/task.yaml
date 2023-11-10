@@ -7,13 +7,13 @@
 #   sky serve status --endpoint http
 
 service:
-  port: 8081
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
   replicas: 2
 
 resources:
+  ports: 8081
   cpus: 2+
 
 workdir: examples/serve/http_server

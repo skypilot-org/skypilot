@@ -4,11 +4,11 @@
 #   sky serve up examples/serve/ray_serve/ray_serve.yaml
 
 service:
-  port: 8000
   readiness_probe: /
   replicas: 1
 
 resources:
+  ports: 8000
   cpus: 2+
 
 workdir: examples/serve/ray_serve

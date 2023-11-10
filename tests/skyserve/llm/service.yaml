@@ -1,12 +1,12 @@
+service:
+  readiness_probe: /v1/models
+  replicas: 1
+
 resources:
+  ports: 8087
   cloud: gcp
   accelerators: T4
   memory: 32+
-
-service:
-  port: 8087
-  readiness_probe: /v1/models
-  replicas: 1
 
 setup: |
   conda activate chatbot

@@ -7,7 +7,6 @@
 #   sky serve status --endpoint vllm
 
 service:
-  port: 8081
   readiness_probe:
     path: /v1/models
     # vllm takes 5-10 minutes to install
@@ -15,6 +14,7 @@ service:
   replicas: 2
 
 resources:
+  ports: 8081
   accelerators: A100:1
 
 setup: |

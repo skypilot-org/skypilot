@@ -13,11 +13,11 @@
 # TODO(tian): Change usage to `HF_TOKEN=<your-token> sky serve up -n llama2 examples/serve/llama2/llama2.yaml --env HF_TOKEN` once we have `--env` enabled.
 
 service:
-  port: 8087
   readiness_probe: /v1/models
   replicas: 2
 
 resources:
+  ports: 8087
   memory: 32+
   accelerators: T4:1
   disk_size: 1024

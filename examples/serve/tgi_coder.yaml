@@ -7,11 +7,11 @@
 #   sky serve status --endpoint tgi
 
 service:
-  port: 8082
   readiness_probe: /health
   replicas: 2
 
 resources:
+  ports: 8082
   accelerators: A100:1
 
 # TODO(tian): Maybe use some small model like 3b.

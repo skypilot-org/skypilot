@@ -174,7 +174,6 @@ def _start(service_name: str, task_yaml: str, job_id: int):
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://localhost:{controller_port}'
-            replica_port = int(service_spec.replica_port)
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
 
@@ -186,7 +185,7 @@ def _start(service_name: str, task_yaml: str, job_id: int):
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, replica_port))
+                args=(controller_addr, load_balancer_port))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)

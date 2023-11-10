@@ -1,4 +1,12 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1
+
+
 resources:
+  ports: 8080
   cloud: gcp
   cpus: 2+
   zone: us-central1-a
@@ -7,10 +15,3 @@ resources:
 workdir: tests/skyserve/spot
 
 run: python3 user_bug.py
-
-service:
-  port: 8080
-  readiness_probe:
-    path: /health
-    initial_delay_seconds: 20
-  replicas: 1

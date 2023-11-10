@@ -95,8 +95,8 @@ class SkyServeController:
                 f'Received inflight request information: {request_aggregator}')
             self._autoscaler.collect_request_information(request_aggregator)
             return {
-                'ready_replica_ips':
-                    self._replica_manager.get_ready_replica_ips()
+                'ready_replica_urls':
+                    self._replica_manager.get_ready_replica_urls()
             }
 
         @self._app.on_event('startup')

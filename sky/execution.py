@@ -1007,14 +1007,11 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
 
     assert len(task.resources) == 1, task
     requested_resources = list(task.resources)[0]
-    if requested_resources.ports is not None:
+    if requested_resources.ports is None or len(requested_resources.ports) != 1:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'Specifying ports in resources is not allowed. SkyServe will '
-                'use the port specified in the service section.')
-
-    task.set_resources(
-        requested_resources.copy(ports=[task.service.replica_port]))
+                'Must only specify one port in resources. Each replica '
+                'will use the port specified as application ingress port.')
 
     with rich_utils.safe_status(
             '[cyan]Registering service on the controller[/]'):
@@ -1118,7 +1115,7 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             '\nTo see detailed info:\t\t'
             f'{backend_utils.BOLD}sky serve status {sn} (-a)'
             f'{backend_utils.RESET_BOLD}'
-            '\nTo teardown the service:\t\t'
+            '\nTo teardown the service:\t'
             f'{backend_utils.BOLD}sky serve down {sn}'
             f'{backend_utils.RESET_BOLD}'
             '\n'

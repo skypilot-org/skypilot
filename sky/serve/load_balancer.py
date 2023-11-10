@@ -26,19 +26,16 @@ class SkyServeLoadBalancer:
     `curl -L`.
     """
 
-    def __init__(self, controller_url: str, load_balancer_port: int,
-                 replica_port: int) -> None:
+    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
         """Initialize the load balancer.
 
         Args:
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
-            replica_port: The port where the replica app listens to.
         """
         self._app = fastapi.FastAPI()
         self._controller_url = controller_url
         self._load_balancer_port = load_balancer_port
-        self._replica_port = replica_port
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
@@ -70,26 +67,27 @@ class SkyServeLoadBalancer:
                     # Clean up after reporting request information to avoid OOM.
                     self._request_aggregator.clear()
                     response.raise_for_status()
-                    ready_replica_ips = response.json().get('ready_replica_ips')
+                    ready_replica_urls = response.json().get(
+                        'ready_replica_urls')
                 except requests.RequestException as e:
                     print(f'An error occurred: {e}')
                 else:
-                    logger.info(f'Available Replica IPs: {ready_replica_ips}')
+                    logger.info(f'Available Replica URLs: {ready_replica_urls}')
                     self._load_balancing_policy.set_ready_replicas(
-                        ready_replica_ips)
+                        ready_replica_urls)
             time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
     async def _redirect_handler(self, request: fastapi.Request):
         self._request_aggregator.add(request)
-        replica_ip = self._load_balancing_policy.select_replica(request)
+        ready_replica_url = self._load_balancing_policy.select_replica(request)
 
-        if replica_ip is None:
+        if ready_replica_url is None:
             raise fastapi.HTTPException(status_code=503,
                                         detail='No available replicas. '
                                         'Use "sky serve status [SERVICE_ID]" '
                                         'to check the replica status.')
 
-        path = f'http://{replica_ip}:{self._replica_port}{request.url.path}'
+        path = f'http://{ready_replica_url}{request.url.path}'
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
@@ -112,9 +110,7 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
-def run_load_balancer(controller_addr: str, load_balancer_port: int,
-                      replica_port: int):
+def run_load_balancer(controller_addr: str, load_balancer_port: int):
     load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port,
-                                         replica_port=replica_port)
+                                         load_balancer_port=load_balancer_port)
     load_balancer.run()

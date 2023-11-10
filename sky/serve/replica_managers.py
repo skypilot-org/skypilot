@@ -146,6 +146,16 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
             time.sleep(gap_seconds)
 
 
+def _get_resources_ports(task_yaml: str) -> str:
+    """Get the resources ports used by the task."""
+    task = sky.Task.from_yaml(task_yaml)
+    assert len(task.resources) == 1, task
+    task_resources = list(task.resources)[0]
+    # Already checked the resources have and only have one port
+    # before upload the task yaml.
+    return task_resources.ports[0]
+
+
 def with_lock(func):
 
     @functools.wraps(func)
@@ -302,9 +312,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str) -> None:
+    def __init__(self, replica_id: int, cluster_name: str,
+                 replica_port: str) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
+        self.replica_port: str = replica_port
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -330,11 +342,11 @@ class ReplicaInfo:
         return handle
 
     @property
-    def ip(self) -> Optional[str]:
+    def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:
             return None
-        return handle.head_ip
+        return f'{handle.head_ip}:{self.replica_port}'
 
     @property
     def status(self) -> serve_state.ReplicaStatus:
@@ -360,7 +372,7 @@ class ReplicaInfo:
 
     def probe(
         self,
-        readiness_route: str,
+        readiness_path: str,
         post_data: Optional[Dict[str, Any]],
     ) -> Tuple['ReplicaInfo', bool, float]:
         """Probe the readiness of the replica.
@@ -368,12 +380,12 @@ class ReplicaInfo:
         Returns:
             Tuple of (self, is_ready, probe_time).
         """
-        replica_identity = f'replica {self.replica_id} with ip {self.ip}'
+        replica_identity = f'replica {self.replica_id} with url {self.url}'
         probe_time = time.time()
         try:
             msg = ''
             # TODO(tian): Support HTTPS in the future.
-            readiness_path = f'http://{self.ip}{readiness_route}'
+            readiness_path = (f'http://{self.url}{readiness_path}')
             if post_data is not None:
                 msg += 'POST'
                 response = requests.post(
@@ -410,15 +422,15 @@ class ReplicaManager:
         self._next_replica_id: int = 1
         self._service_name: str = service_name
         self._auto_restart = spec.auto_restart
-        self._readiness_route: str = spec.readiness_route
+        self._readiness_path: str = spec.readiness_path
         self._initial_delay_seconds: int = spec.initial_delay_seconds
         self._post_data: Optional[Dict[str, Any]] = spec.post_data
         self._uptime: Optional[float] = None
-        logger.info(f'Readiness probe suffix: {self._readiness_route}\n'
+        logger.info(f'Readiness probe path: {self._readiness_path}\n'
                     f'Initial delay seconds: {self._initial_delay_seconds}\n'
                     f'Post data: {self._post_data}')
 
-    def get_ready_replica_ips(self) -> List[str]:
+    def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
 
@@ -460,14 +472,14 @@ class SkyPilotReplicaManager(ReplicaManager):
     # Replica management functions #
     ################################
 
-    def get_ready_replica_ips(self) -> List[str]:
-        ready_replicas = []
+    def get_ready_replica_urls(self) -> List[str]:
+        ready_replica_urls = []
         infos = serve_state.get_replica_infos(self._service_name)
         for info in infos:
             if info.status == serve_state.ReplicaStatus.READY:
-                assert info.ip is not None
-                ready_replicas.append(info.ip)
-        return ready_replicas
+                assert info.url is not None
+                ready_replica_urls.append(info.url)
+        return ready_replica_urls
 
     def _launch_replica(self, replica_id: int) -> None:
         if replica_id in self._launch_process_pool:
@@ -489,7 +501,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
-        info = ReplicaInfo(replica_id, cluster_name)
+        replica_port = _get_resources_ports(self._task_yaml_path)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
 
     def scale_up(self, n: int) -> None:
@@ -757,10 +770,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if not info.status_property.should_track_status():
                     continue
                 replica_to_probe.append(
-                    f'replica_{info.replica_id}(ip={info.ip})')
+                    f'replica_{info.replica_id}(url={info.url})')
                 probe_futures.append(
                     pool.apply_async(info.probe,
-                                     (self._readiness_route, self._post_data)))
+                                     (self._readiness_path, self._post_data)))
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
             # Since futures.as_completed will return futures in the order of
