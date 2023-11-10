@@ -3851,6 +3851,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,
                         replica_id: Optional[int], follow: bool) -> None:
+        """Tail the logs of a service.
+
+        Args:
+            handle: The handle to the sky serve controller.
+            service_name: The name of the service.
+            target: The component to tail the logs of. Could be controller,
+                load balancer, or replica.
+            replica_id: The replica ID to tail the logs of. Only used when
+                target is replica.
+            follow: Whether to follow the logs.
+        """
         if target != serve_lib.ServiceComponent.REPLICA:
             code = serve_lib.ServeCodeGen.stream_serve_process_logs(
                 service_name,

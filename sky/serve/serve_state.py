@@ -21,29 +21,32 @@ _DB_PATH = _DB_PATH.expanduser().absolute()
 _DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
 _DB_PATH = str(_DB_PATH)
 
-# Module-level connection/cursor; thread-safe as the module is only imported
-# once.
-_CONN = sqlite3.connect(_DB_PATH)
-_CURSOR = _CONN.cursor()
 
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS services (
-    name TEXT PRIMARY KEY,
-    controller_job_id INTEGER DEFAULT NULL,
-    controller_port INTEGER DEFAULT NULL,
-    load_balancer_port INTEGER DEFAULT NULL,
-    status TEXT,
-    uptime INTEGER DEFAULT NULL,
-    policy TEXT DEFAULT NULL,
-    auto_restart INTEGER DEFAULT NULL,
-    requested_resources BLOB DEFAULT NULL)""")
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS replicas (
-    service_name TEXT,
-    replica_id INTEGER,
-    replica_info BLOB,
-    PRIMARY KEY (service_name, replica_id))""")
-_CONN.commit()
+def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
+    """Creates the service and replica tables if they do not exist."""
+
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS services (
+        name TEXT PRIMARY KEY,
+        controller_job_id INTEGER DEFAULT NULL,
+        controller_port INTEGER DEFAULT NULL,
+        load_balancer_port INTEGER DEFAULT NULL,
+        status TEXT,
+        uptime INTEGER DEFAULT NULL,
+        policy TEXT DEFAULT NULL,
+        auto_restart INTEGER DEFAULT NULL,
+        requested_resources BLOB DEFAULT NULL)""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS replicas (
+        service_name TEXT,
+        replica_id INTEGER,
+        replica_info BLOB,
+        PRIMARY KEY (service_name, replica_id))""")
+
+    conn.commit()
+
+
+_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -87,7 +90,7 @@ class ReplicaStatus(enum.Enum):
     # The replica is a spot VM and it is preempted by the cloud provider.
     PREEMPTED = 'PREEMPTED'
 
-    # Unknown status. This should never happen.
+    # Unknown. This should never happen (used only for unexpected errors).
     UNKNOWN = 'UNKNOWN'
 
     @classmethod
@@ -181,17 +184,17 @@ _SERVICE_STATUS_TO_COLOR = {
 # === Service functions ===
 def add_service_if_not_exist(name: str) -> bool:
     """Adds a service to the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        try:
-            cursor.execute(
-                """\
-                INSERT INTO services (name, status)
-                VALUES (?, ?)""", (name, ServiceStatus.CONTROLLER_INIT.value))
-        except sqlite3.IntegrityError as e:
-            if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
-                raise RuntimeError('Unexpected database error') from e
-            return False
-        return True
+    try:
+        _DB.cursor.execute(
+            """\
+            INSERT INTO services (name, status)
+            VALUES (?, ?)""", (name, ServiceStatus.CONTROLLER_INIT.value))
+        _DB.conn.commit()
+    except sqlite3.IntegrityError as e:
+        if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
+            raise RuntimeError('Unexpected database error') from e
+        return False
+    return True
 
 
 def add_or_update_service(name: str, controller_job_id: int, policy: str,
@@ -199,62 +202,61 @@ def add_or_update_service(name: str, controller_job_id: int, policy: str,
                           requested_resources: 'sky.Resources',
                           status: ServiceStatus) -> None:
     """Updates a service in the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT OR REPLACE INTO services
-            (name, controller_job_id, status, policy,
-            auto_restart, requested_resources)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, status.value, policy, int(auto_restart),
-             pickle.dumps(requested_resources)))
+    _DB.cursor.execute(
+        """\
+        INSERT OR REPLACE INTO services
+        (name, controller_job_id, status, policy,
+        auto_restart, requested_resources)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (name, controller_job_id, status.value, policy, int(auto_restart),
+         pickle.dumps(requested_resources)))
+    _DB.conn.commit()
 
 
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute("""\
-            DELETE FROM services WHERE name=(?)""", (service_name,))
+    _DB.cursor.execute("""\
+        DELETE FROM services WHERE name=(?)""", (service_name,))
+    _DB.conn.commit()
 
 
 def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            uptime=(?) WHERE name=(?)""", (uptime, service_name))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        uptime=(?) WHERE name=(?)""", (uptime, service_name))
+    _DB.conn.commit()
 
 
 def set_service_status(service_name: str, status: ServiceStatus) -> None:
     """Sets the service status."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            status=(?) WHERE name=(?)""", (status.value, service_name))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        status=(?) WHERE name=(?)""", (status.value, service_name))
+    _DB.conn.commit()
 
 
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            controller_port=(?) WHERE name=(?)""",
-            (controller_port, service_name))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        controller_port=(?) WHERE name=(?)""", (controller_port, service_name))
+    _DB.conn.commit()
 
 
 def set_service_load_balancer_port(service_name: str,
                                    load_balancer_port: int) -> None:
     """Sets the load balancer port of a service."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            UPDATE services SET
-            load_balancer_port=(?) WHERE name=(?)""",
-            (load_balancer_port, service_name))
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        load_balancer_port=(?) WHERE name=(?)""",
+        (load_balancer_port, service_name))
+    _DB.conn.commit()
 
 
 def _get_service_from_row(row) -> Dict[str, Any]:
@@ -276,22 +278,20 @@ def _get_service_from_row(row) -> Dict[str, Any]:
 
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute('SELECT * FROM services').fetchall()
-        records = []
-        for row in rows:
-            records.append(_get_service_from_row(row))
-        return records
+    rows = _DB.cursor.execute('SELECT * FROM services').fetchall()
+    records = []
+    for row in rows:
+        records.append(_get_service_from_row(row))
+    return records
 
 
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute('SELECT * FROM services WHERE name=(?)',
+    rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
                               (service_name,)).fetchall()
-        for row in rows:
-            return _get_service_from_row(row)
-        return None
+    for row in rows:
+        return _get_service_from_row(row)
+    return None
 
 
 def get_glob_service_names(
@@ -305,75 +305,71 @@ def get_glob_service_names(
     Returns:
         A list of non-duplicated service names.
     """
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        if service_names is None:
-            rows = cursor.execute('SELECT name FROM services').fetchall()
-        else:
-            rows = []
-            for service_name in service_names:
-                rows.extend(
-                    cursor.execute(
-                        'SELECT name FROM services WHERE name GLOB (?)',
-                        (service_name,)).fetchall())
-        return list({row[0] for row in rows})
+    if service_names is None:
+        rows = _DB.cursor.execute('SELECT name FROM services').fetchall()
+    else:
+        rows = []
+        for service_name in service_names:
+            rows.extend(
+                _DB.cursor.execute(
+                    'SELECT name FROM services WHERE name GLOB (?)',
+                    (service_name,)).fetchall())
+    return list({row[0] for row in rows})
 
 
 # === Replica functions ===
 def add_or_update_replica(service_name: str, replica_id: int,
                           replica_info: 'replica_managers.ReplicaInfo') -> None:
     """Adds a replica to the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT OR REPLACE INTO replicas
-            (service_name, replica_id, replica_info)
-            VALUES (?, ?, ?)""",
-            (service_name, replica_id, pickle.dumps(replica_info)))
+    _DB.cursor.execute(
+        """\
+        INSERT OR REPLACE INTO replicas
+        (service_name, replica_id, replica_info)
+        VALUES (?, ?, ?)""",
+        (service_name, replica_id, pickle.dumps(replica_info)))
+    _DB.conn.commit()
 
 
 def remove_replica(service_name: str, replica_id: int) -> None:
     """Removes a replica from the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM replicas
-            WHERE service_name=(?)
-            AND replica_id=(?)""", (service_name, replica_id))
+    _DB.cursor.execute(
+        """\
+        DELETE FROM replicas
+        WHERE service_name=(?)
+        AND replica_id=(?)""", (service_name, replica_id))
+    _DB.conn.commit()
 
 
 def get_replica_info_from_id(
         service_name: str,
         replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT replica_info FROM replicas
-            WHERE service_name=(?)
-            AND replica_id=(?)""", (service_name, replica_id)).fetchall()
-        for row in rows:
-            return pickle.loads(row[0])
-        return None
+    rows = _DB.cursor.execute(
+        """\
+        SELECT replica_info FROM replicas
+        WHERE service_name=(?)
+        AND replica_id=(?)""", (service_name, replica_id)).fetchall()
+    for row in rows:
+        return pickle.loads(row[0])
+    return None
 
 
 def get_replica_infos(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT replica_info FROM replicas
-            WHERE service_name=(?)""", (service_name,)).fetchall()
-        return [pickle.loads(row[0]) for row in rows]
+    rows = _DB.cursor.execute(
+        """\
+        SELECT replica_info FROM replicas
+        WHERE service_name=(?)""", (service_name,)).fetchall()
+    return [pickle.loads(row[0]) for row in rows]
 
 
 def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute('SELECT replica_info FROM replicas').fetchall()
-        provisioning_count = 0
-        for row in rows:
-            replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
-            if replica_info.status == ReplicaStatus.PROVISIONING:
-                provisioning_count += 1
-        return provisioning_count
+    rows = _DB.cursor.execute('SELECT replica_info FROM replicas').fetchall()
+    provisioning_count = 0
+    for row in rows:
+        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
+        if replica_info.status == ReplicaStatus.PROVISIONING:
+            provisioning_count += 1
+    return provisioning_count

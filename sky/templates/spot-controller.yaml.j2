@@ -38,6 +38,6 @@ run: |
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
-{%- for env_name, env_value in envs.items() %}
+{%- for env_name, env_value in controller_envs.items() %}
   {{env_name}}: {{env_value}}
 {%- endfor %}

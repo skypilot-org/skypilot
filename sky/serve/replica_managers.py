@@ -382,7 +382,7 @@ class ReplicaInfo:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
-            logger.info(f'Error when probe {replica_identity.capitalize()}: '
+            logger.info(f'Error when probing {replica_identity}: '
                         f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
 
@@ -747,98 +747,102 @@ class SkyPilotReplicaManager(ReplicaManager):
                 probe_futures.append(
                     pool.apply_async(info.probe,
                                      (self._readiness_route, self._post_data)))
-        logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
+            logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
-        # Since futures.as_completed will return futures in the order of
-        # completion, we need the info.probe function to return the info
-        # object as well, so that we could update the info object in the
-        # same order.
-        for future in probe_futures:
-            future_result: Tuple[ReplicaInfo, bool, float] = future.get()
-            info, probe_succeeded, probe_time = future_result
-            info.status_property.service_ready_now = probe_succeeded
-            should_teardown = False
-            if probe_succeeded:
-                if self._uptime is None:
-                    self._uptime = probe_time
-                    logger.info(f'Replica {info.replica_id} is the first ready '
-                                f'replica. Setting uptime to {self._uptime}.')
-                    serve_state.set_service_uptime(self._service_name,
-                                                   int(self._uptime))
-                info.consecutive_failure_times.clear()
-                if info.status_property.first_ready_time is None:
-                    info.status_property.first_ready_time = probe_time
-            else:
-                handle = info.handle
-                if handle is None:
-                    logger.error('Cannot find handle for '
-                                 f'replica {info.replica_id}.')
-                elif handle.launched_resources is None:
-                    logger.error('Cannot find launched_resources in handle'
-                                 f' for replica {info.replica_id}.')
-                elif handle.launched_resources.use_spot:
-                    # Pull the actual cluster status
-                    # from the cloud provider to
-                    # determine whether the cluster is preempted.
-                    (cluster_status,
-                     _) = backend_utils.refresh_cluster_status_handle(
-                         info.cluster_name,
-                         force_refresh_statuses=set(status_lib.ClusterStatus))
-
-                    if cluster_status != status_lib.ClusterStatus.UP:
-                        # The cluster is (partially) preempted.
-                        # It can be down, INIT or STOPPED, based on the
-                        # interruption behavior of the cloud.
-                        # Spot recovery is needed.
-                        cluster_status_str = (
-                            '' if cluster_status is None else
-                            f' (status: {cluster_status.value})')
-                        logger.info(f'Replica {info.replica_id} '
-                                    f'is preempted{cluster_status_str}.')
-                        self._recover_from_preemption(info.replica_id)
-
-                        continue
-
-                if info.first_not_ready_time is None:
-                    info.first_not_ready_time = probe_time
-                if info.status_property.first_ready_time is not None:
-                    info.consecutive_failure_times.append(probe_time)
-                    consecutive_failure_time = (
-                        info.consecutive_failure_times[-1] -
-                        info.consecutive_failure_times[0])
-                    if (consecutive_failure_time >=
-                            _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
+            # Since futures.as_completed will return futures in the order of
+            # completion, we need the info.probe function to return the info
+            # object as well, so that we could update the info object in the
+            # same order.
+            for future in probe_futures:
+                future_result: Tuple[ReplicaInfo, bool, float] = future.get()
+                info, probe_succeeded, probe_time = future_result
+                info.status_property.service_ready_now = probe_succeeded
+                should_teardown = False
+                if probe_succeeded:
+                    if self._uptime is None:
+                        self._uptime = probe_time
                         logger.info(
-                            f'Replica {info.replica_id} is not ready for '
-                            'too long and exceeding consecutive failure '
-                            'threshold. Terminating the replica...')
-                        should_teardown = True
-                    else:
-                        logger.info(
-                            f'Replica {info.replica_id} is not ready '
-                            'but within consecutive failure threshold '
-                            f'({consecutive_failure_time}s / '
-                            f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
-                            'Skipping.')
+                            f'Replica {info.replica_id} is the first ready '
+                            f'replica. Setting uptime to {self._uptime}.')
+                        serve_state.set_service_uptime(self._service_name,
+                                                       int(self._uptime))
+                    info.consecutive_failure_times.clear()
+                    if info.status_property.first_ready_time is None:
+                        info.status_property.first_ready_time = probe_time
                 else:
-                    current_delay_seconds = (probe_time -
-                                             info.first_not_ready_time)
-                    if current_delay_seconds > self._initial_delay_seconds:
-                        logger.info(
-                            f'Replica {info.replica_id} is not ready and '
-                            'exceeding initial delay seconds. Terminating '
-                            'the replica...')
-                        should_teardown = True
+                    handle = info.handle
+                    if handle is None:
+                        logger.error('Cannot find handle for '
+                                     f'replica {info.replica_id}.')
+                    elif handle.launched_resources is None:
+                        logger.error('Cannot find launched_resources in '
+                                     f'handle for replica {info.replica_id}.')
+                    elif handle.launched_resources.use_spot:
+                        # Pull the actual cluster status
+                        # from the cloud provider to
+                        # determine whether the cluster is preempted.
+                        (cluster_status,
+                         _) = backend_utils.refresh_cluster_status_handle(
+                             info.cluster_name,
+                             force_refresh_statuses=set(
+                                 status_lib.ClusterStatus))
+
+                        if cluster_status != status_lib.ClusterStatus.UP:
+                            # The cluster is (partially) preempted.
+                            # It can be down, INIT or STOPPED, based on the
+                            # interruption behavior of the cloud.
+                            # Spot recovery is needed.
+                            cluster_status_str = (
+                                '' if cluster_status is None else
+                                f' (status: {cluster_status.value})')
+                            logger.info(f'Replica {info.replica_id} '
+                                        f'is preempted{cluster_status_str}.')
+                            self._recover_from_preemption(info.replica_id)
+
+                            continue
+
+                    if info.first_not_ready_time is None:
+                        info.first_not_ready_time = probe_time
+                    if info.status_property.first_ready_time is not None:
+                        info.consecutive_failure_times.append(probe_time)
+                        consecutive_failure_time = (
+                            info.consecutive_failure_times[-1] -
+                            info.consecutive_failure_times[0])
+                        if (consecutive_failure_time >=
+                                _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT):
+                            logger.info(
+                                f'Replica {info.replica_id} is not ready for '
+                                'too long and exceeding consecutive failure '
+                                'threshold. Terminating the replica...')
+                            should_teardown = True
+                        else:
+                            logger.info(
+                                f'Replica {info.replica_id} is not ready '
+                                'but within consecutive failure threshold '
+                                f'({consecutive_failure_time}s / '
+                                f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
+                                'Skipping.')
                     else:
-                        current_delay_seconds = int(current_delay_seconds)
-                        logger.info(
-                            f'Replica {info.replica_id} is not ready but within'
-                            f' initial delay seconds ({current_delay_seconds}s '
-                            f'/ {self._initial_delay_seconds}s). Skipping.')
-            serve_state.add_or_update_replica(self._service_name,
-                                              info.replica_id, info)
-            if should_teardown:
-                self._terminate_replica(info.replica_id, sync_down_logs=True)
+                        current_delay_seconds = (probe_time -
+                                                 info.first_not_ready_time)
+                        if current_delay_seconds > self._initial_delay_seconds:
+                            logger.info(
+                                f'Replica {info.replica_id} is not ready and '
+                                'exceeding initial delay seconds. Terminating '
+                                'the replica...')
+                            should_teardown = True
+                        else:
+                            current_delay_seconds = int(current_delay_seconds)
+                            logger.info(f'Replica {info.replica_id} is not '
+                                        'ready but within initial delay '
+                                        f'seconds ({current_delay_seconds}s '
+                                        f'/ {self._initial_delay_seconds}s). '
+                                        'Skipping.')
+                serve_state.add_or_update_replica(self._service_name,
+                                                  info.replica_id, info)
+                if should_teardown:
+                    self._terminate_replica(info.replica_id,
+                                            sync_down_logs=True)
 
     def _replica_prober(self) -> None:
         """Periodically probe replicas."""

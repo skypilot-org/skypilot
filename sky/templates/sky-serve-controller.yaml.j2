@@ -27,6 +27,6 @@ run: |
     > {{controller_log_file}} 2>&1
 
 envs:
-{%- for env_name, env_value in envs.items() %}
+{%- for env_name, env_value in controller_envs.items() %}
   {{env_name}}: {{env_value}}
 {%- endfor %}

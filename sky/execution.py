@@ -702,7 +702,7 @@ def _controller_skypilot_config_setup(
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
 
-    vars_to_fill['envs'] = controller_envs
+    vars_to_fill['controller_envs'] = controller_envs
     return vars_to_fill, controller_resources
 
 
@@ -1091,9 +1091,9 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             cloud=controller_cloud, ports=[serve.LOAD_BALANCER_PORT_RANGE])
         controller_task.set_resources(controller_resources)
 
-        # Set this to modify default ray task CPU usage to custom value
-        # instead of default 0.5 vCPU. We need to set it to a smaller value
-        # to support a larger number of services.
+        # # Set service_name so the backend will know to modify default ray
+        # task CPU usage to custom value instead of default 0.5 vCPU. We need
+        # to set it to a smaller value to support a larger number of services.
         controller_task.service_name = service_name
 
         print(f'{colorama.Fore.YELLOW}Launching controller for '

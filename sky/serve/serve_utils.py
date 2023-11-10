@@ -520,8 +520,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
-# TODO(tian): Use REST API instead of SSH in the future. This will require
-# authentication.
+# TODO(tian): Use REST API instead of SSH in the future. This codegen pattern
+# is to reuse the authentication of ssh. If we want to use REST API, we need
+# to implement some authentication mechanism.
 class ServeCodeGen:
     """Code generator for SkyServe.
 

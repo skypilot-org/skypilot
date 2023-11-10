@@ -18,6 +18,8 @@ class LoadBalancingPolicy:
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
+    # TODO(tian): We should have an abstract class for Request to
+    # compatible with all frameworks.
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         raise NotImplementedError
 

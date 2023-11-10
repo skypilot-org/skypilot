@@ -180,7 +180,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            timeout=15 * 60,  # 15 mins
+            timeout=10 * 60,  # 10 mins
             shell=True,
         )
 
@@ -2874,7 +2874,15 @@ def test_skyserve_auto_restart():
             # be restarted
             f'sleep 20',
             terminate_replica(1),
-            'sleep 180',  # Wait for consecutive failure timeout passed.
+            # Wait for consecutive failure timeout passed.
+            # If the cluster is not using spot, it won't check the cluster status
+            # on the cloud (since manual shutdown is not a common behavior and such
+            # queries takes a lot of time). Instead, we think continuous 3 min probe
+            # failure is not a temporary problem but indeed a failure.
+            'sleep 180',
+            # We cannot use _SERVE_WAIT_UNTIL_READY; there will be a intermediate time
+            # that the output of `sky serve status` shows FAILED and this status will
+            # cause _SERVE_WAIT_UNTIL_READY to early quit.
             '(while true; do'
             f'    output=$(sky serve status {name});'
             '     echo "$output" | grep -q "1/1" && break;'
