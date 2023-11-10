@@ -2644,6 +2644,17 @@ _SERVE_WAIT_UNTIL_READY = (
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
+# Since we don't allow terminate the service if the controller is INIT,
+# which is common for simultaneous pytest, we need to wait until the
+# controller is UP before we can terminate the service.
+# The teardown command has a 10-mins timeout, so we don't need to do
+# the timeout here. See implementation of run_one_test() for details.
+_TEARDOWN_SERVICE = (
+    '(while true; do'
+    '     output=$(sky serve down -y {name});'
+    '     echo "$output" | grep -q "scheduled to be terminated" && break;'
+    '     sleep 10;'
+    'done)')
 
 
 def _get_serve_endpoint(name: str) -> str:
@@ -2669,7 +2680,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=timeout_minutes * 60,
     )
     return test
@@ -2728,7 +2739,7 @@ def test_skyserve_llm():
                 for prompt, output in prompt2output.items()
             ],
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2759,7 +2770,7 @@ def test_skyserve_spot_recovery():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2784,7 +2795,7 @@ def test_skyserve_spot_user_bug():
             '     sleep 10;'
             f'done)',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2840,7 +2851,7 @@ def test_skyserve_replica_failure():
             'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2890,7 +2901,7 @@ def test_skyserve_auto_restart():
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2912,7 +2923,7 @@ def test_skyserve_cancel():
             '--endpoint $endpoint | grep "Request was cancelled"',
             f'sky serve logs {name} 1 --no-follow | grep "Client disconnected, stopping computation"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
