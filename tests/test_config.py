@@ -58,6 +58,31 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     _check_empty_config()
 
 
+def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
+    """Test that the config is not loaded if the config file is empty."""
+    with open(tmp_path / 'valid.yaml', 'w') as f:
+        f.write(f"""\
+        aws:
+            instance_tags:
+                mytag: myvalue
+            ssh_proxy_command:
+                eu-west-1: null
+                us-east-1: null
+            use_internal_ips: true
+            vpc_name: abc
+
+        spot:
+            controller:
+                resources:
+                    disk_size: 256
+        """)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
+    _reload_config()
+    proxy_config = skypilot_config.get_nested(
+        ('aws', 'ssh_proxy_command', 'eu-west-1'), 'default')
+    assert proxy_config is None, proxy_config
+
+
 def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains unknown field."""
     config_path = tmp_path / 'invalid.yaml'
