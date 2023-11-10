@@ -321,8 +321,10 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                                                 stream_logs=False)[1]
 
     # Update the benchmark status.
-    if (cluster_status == status_lib.ClusterStatus.INIT or
-            job_status < job_lib.JobStatus.RUNNING):
+    if job_status is None:
+        benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
+    elif (cluster_status == status_lib.ClusterStatus.INIT or
+          job_status < job_lib.JobStatus.RUNNING):
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
     elif job_status == job_lib.JobStatus.RUNNING:
         benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
