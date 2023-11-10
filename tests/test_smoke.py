@@ -2896,6 +2896,28 @@ def test_skyserve_auto_restart():
     run_one_test(test)
 
 
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_cancel():
+    """Test skyserve with cancel"""
+    name = _get_service_name()
+
+    test = Test(
+        f'test-skyserve-cancel',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/cancel/cancel.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; python3 '
+            'tests/skyserve/cancel/send_cancel_request.py '
+            '--endpoint $endpoint | grep "Request was cancelled"',
+            f'sky serve logs {name} 1 --no-follow | grep "Client disconnected, stopping computation"',
+        ],
+        f'sky serve down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 # ------- Testing user ray cluster --------
 @pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
