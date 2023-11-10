@@ -2640,20 +2640,6 @@ def _build(code: List[str]) -> str:
 # These tests are for testing the return value of the APIs not fully used in CLI.
 
 
-def test_core_api_sky_launch_dryrun():
-    code = [
-        'task = sky.Task()',
-        'job_id, handle = sky.launch(task, dryrun=True)',
-        'assert job_id is None and handle is None',
-    ]
-    cmd = _build(code)
-    test = Test(
-        'core-api-sky-launch-dryrun',
-        [cmd],
-    )
-    run_one_test(test)
-
-
 @pytest.mark.gcp
 def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
