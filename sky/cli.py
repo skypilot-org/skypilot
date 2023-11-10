@@ -4426,9 +4426,8 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
         sky serve down -a
 
     """
-    service_names_str = ','.join(service_names)
     if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'SERVICE_NAMES={service_names_str}' if len(
+        argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
             service_names) > 0 else ''
         argument_str += ' --all' if all else ''
         raise click.UsageError(
@@ -4443,7 +4442,8 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
         sys.exit(1)
 
     if not yes:
-        service_identity_str = f'services with name {service_names_str}'
+        quoted_service_names = [f'{name!r}' for name in service_names]
+        service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
         if all:
             service_identity_str = 'all services'
         click.confirm(f'Terminating {service_identity_str}. Proceed?',
