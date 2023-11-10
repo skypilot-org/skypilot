@@ -1,9 +1,9 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-from concurrent import futures
 import dataclasses
 import enum
 import functools
 import multiprocessing
+from multiprocessing import pool as mp_pool
 import os
 import threading
 import time
@@ -20,6 +20,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
+from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -238,7 +239,7 @@ class ReplicaStatusProperty:
         if self.user_app_failed:
             return False
         if self.preempted:
-            return True
+            return False
         return True
 
     def to_replica_status(self) -> serve_state.ReplicaStatus:
@@ -276,18 +277,20 @@ class ReplicaStatusProperty:
             return serve_state.ReplicaStatus.UNKNOWN
         if self.sky_launch_status == ProcessStatus.FAILED:
             # sky.launch failed
-            # Down process should have been started.
+            # The down process has not been started if it reaches here,
+            # due to the `if self.sky_down_status is not None`` check above.
+            # However, it should have been started by _refresh_process_pool.
             # If not started, this means some bug prevent sky.down from
             # executing. It is also a potential resource leak, so we mark
             # it as FAILED_CLEANUP.
             return serve_state.ReplicaStatus.FAILED_CLEANUP
+        if self.user_app_failed:
+            # Failed on user setup/run
+            # Same as above, the down process should have been started.
+            return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.service_ready_now:
             # Service is ready
             return serve_state.ReplicaStatus.READY
-        if self.user_app_failed:
-            # Failed on user setup/run
-            # Same as above
-            return serve_state.ReplicaStatus.FAILED_CLEANUP
         if self.first_ready_time is not None:
             # Service was ready before but not now
             return serve_state.ReplicaStatus.NOT_READY
@@ -379,8 +382,8 @@ class ReplicaInfo:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
         except requests.exceptions.RequestException as e:
-            logger.info(f'common_utils.format_exception(e)')
-            logger.info(f'{replica_identity.capitalize()} is not ready.')
+            logger.info(f'Error when probe {replica_identity.capitalize()}: '
+                        f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
 
 
@@ -664,7 +667,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # process pool refresher running.
-                logger.error(f'Error in process pool refresher: {e}')
+                logger.error('Error in process pool refresher: '
+                             f'{common_utils.format_exception(e)}')
+                with ux_utils.enable_traceback():
+                    logger.info(f'  Traceback: {traceback.format_exc()}')
             time.sleep(_PROCESS_POOL_REFRESH_INTERVAL)
 
     @with_lock
@@ -674,6 +680,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         This function will monitor the job status of all replicas
         to make sure the service is running correctly. If any of the
         replicas failed, it will terminate the replica.
+
+        It is still needed even if we already keep probing the replicas,
+        since the replica job might launch the API server in the background
+        (using &), and the readiness probe will not detect the worker failure.
         """
         infos = serve_state.get_replica_infos(self._service_name)
         for info in infos:
@@ -709,7 +719,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # job status fetcher running.
-                logger.error(f'Error in job status fetcher: {e}')
+                logger.error('Error in job status fetcher: '
+                             f'{common_utils.format_exception(e)}')
+                with ux_utils.enable_traceback():
+                    logger.info(f'  Traceback: {traceback.format_exc()}')
             time.sleep(_JOB_STATUS_FETCH_INTERVAL)
 
     @with_lock
@@ -724,7 +737,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         """
         probe_futures = []
         replica_to_probe = []
-        with futures.ThreadPoolExecutor() as executor:
+        with mp_pool.ThreadPool() as pool:
             infos = serve_state.get_replica_infos(self._service_name)
             for info in infos:
                 if not info.status_property.should_track_status():
@@ -732,19 +745,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 replica_to_probe.append(
                     f'replica_{info.replica_id}(ip={info.ip})')
                 probe_futures.append(
-                    executor.submit(
-                        info.probe,
-                        self._readiness_route,
-                        self._post_data,
-                    ))
+                    pool.apply_async(info.probe,
+                                     (self._readiness_route, self._post_data)))
         logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
         # Since futures.as_completed will return futures in the order of
         # completion, we need the info.probe function to return the info
         # object as well, so that we could update the info object in the
         # same order.
-        for future in futures.as_completed(probe_futures):
-            future_result: Tuple[ReplicaInfo, bool, float] = future.result()
+        for future in probe_futures:
+            future_result: Tuple[ReplicaInfo, bool, float] = future.get()
             info, probe_succeeded, probe_time = future_result
             info.status_property.service_ready_now = probe_succeeded
             should_teardown = False
@@ -771,7 +781,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # from the cloud provider to
                     # determine whether the cluster is preempted.
                     (cluster_status,
-                     _) = backends.backend_utils.refresh_cluster_status_handle(
+                     _) = backend_utils.refresh_cluster_status_handle(
                          info.cluster_name,
                          force_refresh_statuses=set(status_lib.ClusterStatus))
 
@@ -845,5 +855,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # replica prober running.
-                logger.error(f'Error in replica prober: {e}')
+                logger.error('Error in replica prober: '
+                             f'{common_utils.format_exception(e)}')
+                with ux_utils.enable_traceback():
+                    logger.info(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)

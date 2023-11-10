@@ -1107,6 +1107,8 @@ def _serve_up_no_lock(task: 'sky.Task', service_name: str) -> None:
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
+        # TODO(tian): Use this to check the endpoint and if the
+        # service name is duplicated.
 
 
 @usage_lib.entrypoint
