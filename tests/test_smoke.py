@@ -3533,12 +3533,27 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Resources ----------
+@pytest.mark.gcp
 def test_multiple_resources_ordered():
     name = _get_cluster_name()
     test = Test(
-        'gcp_zone',
+        'multiple-resources-ordered',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_ordered.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_ordered.yaml | grep "is using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_multiple_resources_unordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-resources-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_unordered.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
