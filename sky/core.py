@@ -106,7 +106,7 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    return backend_utils.get_clusters(include_controller=False,
+    return backend_utils.get_clusters(include_controller=True,
                                       refresh=refresh,
                                       cluster_names=cluster_names)
 
