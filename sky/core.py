@@ -1097,7 +1097,7 @@ def serve_status(
                                            code,
                                            'Failed to fetch services',
                                            stderr,
-                                           stream_logs=False)
+                                           stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
