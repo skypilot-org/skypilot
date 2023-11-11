@@ -145,6 +145,8 @@ def get_resources_schema():
                 }],
             },
             'accelerators': {
+                # {'V100:1', 'A100:1'} will be
+                # read as a string and converted to dict.
                 'anyOf': [{
                     'type': 'string',
                 }, {
@@ -219,13 +221,19 @@ def get_resources_schema():
             'any_of': {
                 'type': 'array',
                 'items': {
-                    'type': 'object',
+                    k: v
+                    for k, v in get_single_resources_schema().items()
+                    # Validation may fail if $schema is included.
+                    if k != '$schema'
                 },
             },
             'ordered': {
                 'type': 'array',
                 'items': {
-                    'type': 'object',
+                    k: v
+                    for k, v in get_single_resources_schema().items()
+                    # Validation may fail if $schema is included.
+                    if k != '$schema'
                 },
             }
         }

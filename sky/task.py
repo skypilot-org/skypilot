@@ -445,9 +445,6 @@ class Task:
                         'Cannot specify "any_of" with other resource fields.')
             resources_set = set()
             for resource in resources_config['any_of']:
-                common_utils.validate_schema(
-                    config, schemas.get_single_resources_schema(),
-                    'Invalid resource YAML: ')
                 resources_set.add(sky.Resources.from_yaml_config(resource))
             task.set_resources(resources_set)
         elif resources_config and resources_config.get('ordered') is not None:
@@ -457,9 +454,6 @@ class Task:
                         'Cannot specify "ordered" with other resource fields.')
             resources_list = []
             for resource in resources_config['ordered']:
-                common_utils.validate_schema(
-                    config, schemas.get_single_resources_schema(),
-                    'Invalid resource YAML: ')
                 resources_list.append(sky.Resources.from_yaml_config(resource))
             task.set_resources(resources_list)
         # Translate accelerators field to potential multiple resources.

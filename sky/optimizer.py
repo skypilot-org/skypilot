@@ -946,8 +946,16 @@ class Optimizer:
         The optimal mapping should consider the egress cost/time so that
         the total estimated cost/time of the DAG becomes the minimum.
         """
+
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
+
+        def ordinal_number(n):
+            if 10 <= n % 100 <= 20:
+                suffix = 'th'
+            else:
+                suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+            return str(n) + suffix
 
         has_resources_ordered = _is_dag_resources_ordered(dag)
         if has_resources_ordered:
@@ -958,12 +966,22 @@ class Optimizer:
                     resources_list = task.resources
                     accelerators_str = ', '.join(
                         [f'{r}' for r in resources_list])
-                    logger.info(f'{colorama.Fore.YELLOW}{task_id + 1}-th '
-                                'task is using user-specified '
-                                'accelerators list '
-                                f'{colorama.Style.RESET_ALL}'
-                                '(will be tried in the listed order): '
-                                f'{accelerators_str}')
+                    task_id_str = ordinal_number(task_id + 1)
+                    # Add in dummy tasks
+                    if len(dag.tasks) > 3:
+                        logger.info(f'{colorama.Fore.YELLOW}{task_id_str} '
+                                    'task is using user-specified '
+                                    'accelerators list '
+                                    f'{colorama.Style.RESET_ALL}'
+                                    '(will be tried in the listed order): '
+                                    f'{accelerators_str}')
+                    else:
+                        logger.info(
+                            f'{colorama.Fore.YELLOW}Using user-specified '
+                            'accelerators list '
+                            f'{colorama.Style.RESET_ALL}'
+                            '(will be tried in the listed order): '
+                            f'{accelerators_str}')
 
         graph = dag.get_graph()
         local_dag = copy.deepcopy(dag) if has_resources_ordered else dag
