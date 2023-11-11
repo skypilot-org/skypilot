@@ -786,19 +786,19 @@ def get_usable_vpc(config):
         # the specific region is available.
         if not _check_firewall_rules(vpc["name"], config, compute):
             logger.info(
-                f'get_usable_vpc: VPC network {vpc["name"]} is not usable, due to '
-                "insufficient firewall rules. Skip"
+                f'get_usable_vpc: VPC network {vpc["name"]!r} is not usable, due to '
+                "insufficient firewall rules. Skip."
             )
             continue
 
         if not _list_subnets(config, compute, filter=f'(name="{vpc["name"]}")'):
             logger.info(
-                f'get_usable_vpc: VPC network {vpc["name"]} is not usable, due to no subnet '
-                f'in requested region {config["provider"]["region"]}. Skip'
+                f'get_usable_vpc: VPC network {vpc["name"]!r} is not usable, due to no '
+                f'subnet in requested region {config["provider"]["region"]}. Skip.'
             )
             continue
-
         usable_vpc_name = vpc["name"]
+        logger.info(f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}.")
         break
 
     proj_id = config["provider"]["project_id"]
