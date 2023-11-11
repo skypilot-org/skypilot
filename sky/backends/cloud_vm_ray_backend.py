@@ -3503,6 +3503,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task_copy = copy.copy(task)
         # Handle multiple resources exec case.
         task_copy.set_resources(valid_resource)
+        logger.info(valid_resource)
         task_copy.best_resources = None
         resources_str = backend_utils.get_task_resources_str(task_copy)
 
@@ -4344,7 +4345,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            assert len(task.resources) == 1
+            # Assume resources share the same ports.
+            for resource in task.resources:
+                assert resource.ports == list(task.resources)[0].ports
             all_ports = resources_utils.port_set_to_ranges(
                 resources_utils.port_ranges_to_set(
                     handle.launched_resources.ports) |
