@@ -235,7 +235,7 @@ class ReplicaStatusProperty:
             return False
         return self.first_ready_time is not None
 
-    def should_track_status(self) -> bool:
+    def should_track_service_status(self) -> bool:
         """Should we track the status of the replica.
 
         This includes:
@@ -381,6 +381,9 @@ class ReplicaInfo:
             Tuple of (self, is_ready, probe_time).
         """
         replica_identity = f'replica {self.replica_id} with url {self.url}'
+        # # TODO(tian): This requiring the clock on each replica to be aligned,
+        # which may not be true when the GCP VMs have run for a long time. We
+        # should have a better way to do this. See #2539 for more information.
         probe_time = time.time()
         try:
             msg = ''
@@ -459,6 +462,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                  task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self._task_yaml_path = task_yaml_path
+        # TODO(tian): Store launch/down pid in the replica table, to make the
+        # manager more persistent. Current blocker is that we need to manually
+        # poll the Process (by join or is_alive), otherwise, it will never
+        # finish and become a zombie process. Probably we could use
+        # psutil.Process(p.pid).status() == psutil.STATUS_ZOMBIE to check
+        # such cases.
         self._launch_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
@@ -714,7 +723,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         """
         infos = serve_state.get_replica_infos(self._service_name)
         for info in infos:
-            if not info.status_property.should_track_status():
+            if not info.status_property.should_track_service_status():
                 continue
             # We use backend API to avoid usage collection in the
             # core.job_status.
@@ -767,7 +776,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         with mp_pool.ThreadPool() as pool:
             infos = serve_state.get_replica_infos(self._service_name)
             for info in infos:
-                if not info.status_property.should_track_status():
+                if not info.status_property.should_track_service_status():
                     continue
                 replica_to_probe.append(
                     f'replica_{info.replica_id}(url={info.url})')

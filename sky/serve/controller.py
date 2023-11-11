@@ -113,6 +113,8 @@ class SkyServeController:
         uvicorn.run(self._app, host='localhost', port=self._port)
 
 
+# TODO(tian): Probably we should support service that will stop the VM in
+# specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
                    task_yaml: str, controller_port: int):
     controller = SkyServeController(service_name, service_spec, task_yaml,
