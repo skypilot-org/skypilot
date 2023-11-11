@@ -846,6 +846,11 @@ def _configure_subnet(config, compute):
     # SkyPilot: make sure there's a usable VPC
     usable_vpc_name = get_usable_vpc(config)
     subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
+    if not subnets:
+        raise RuntimeError(
+            f"No subnet found in VPC network {usable_vpc_name!r} for "
+            f'region {config["provider"]["region"]}.'
+        )
     default_subnet = subnets[0]
 
     default_interfaces = [
