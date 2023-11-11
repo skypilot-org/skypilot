@@ -116,7 +116,9 @@ Available fields and semantics:
     # firewall rules. If no region restrictions are given, SkyPilot only
     # provisions in regions for which a subnet of this VPC exists. Errors are
     # thrown if VPC with this name is not found. The VPC does not get modified
-    # in any way.
+    # in any way, except when opening ports (e.g., via `resources.ports`) in
+    # which case new firewall rules permitting public traffic to those ports
+    # will be added.
     vpc_name: skypilot-vpc
 
     # Reserved capacity (optional).

@@ -90,10 +90,12 @@ FIREWALL_RULES_TEMPLATE = [
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
     "compute.disks.list",
+    # TODO(skypilot): some users reported that firewalls changes
+    # (create/delete/update) should be removed if VPC/firewalls are separately
+    # set up. It is undesirable for a normal account to have these permissions.
+    # Note that if these permissions are removed, opening ports (e.g., via
+    # `resources.ports`) would fail.
     "compute.firewalls.create",
-    # TODO(skypilot): some users reported that firewalls.{delete,get} should be
-    # removed if VPC/firewalls are separately set up. It is undesirable for a
-    # normal account to have these permissions.
     "compute.firewalls.delete",
     "compute.firewalls.get",
     "compute.instances.create",
