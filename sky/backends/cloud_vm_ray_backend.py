@@ -769,7 +769,7 @@ class RetryingVmProvisioner(object):
                     'having the required permissions and the user '
                     'account does not have enough permission to '
                     'update it. Please contact your administrator and '
-                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
                     f'Details: {httperror_str[0]}')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
@@ -3490,10 +3490,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task: task_lib.Task,
         detach_run: bool,
         dryrun: bool = False,
-    ) -> None:
+    ) -> Optional[int]:
+        """Executes the task on the cluster.
+
+        Returns:
+            Job id if the task is submitted to the cluster, None otherwise.
+        """
         if task.run is None:
             logger.info('Run commands not specified or empty.')
-            return
+            return None
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
@@ -3508,8 +3513,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         resources_str = backend_utils.get_task_resources_str(task_copy)
 
         if dryrun:
-            logger.info(f'Dryrun complete. Would have run:\n{task_copy}')
-            return
+            logger.info(f'Dryrun complete. Would have run:\n{task}')
+            return None
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
@@ -3520,6 +3525,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+
+        return job_id
 
     def _post_execute(self, handle: CloudVmRayResourceHandle,
                       down: bool) -> None:
