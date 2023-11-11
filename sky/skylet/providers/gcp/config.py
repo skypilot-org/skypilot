@@ -371,11 +371,15 @@ def _is_permission_satisfied(
         for binding in policy["bindings"]:
             if binding["role"] == role:
                 if member_id not in binding["members"]:
+                    logger.info(
+                        f"_configure_iam_role: role {role} is not attached to {member_id}..."
+                    )
                     binding["members"].append(member_id)
                     already_configured = False
                 role_exists = True
 
         if not role_exists:
+            logger.info(f"_configure_iam_role: role {role} does not exist.")
             already_configured = False
             policy["bindings"].append(
                 {
@@ -778,7 +782,11 @@ def get_usable_vpc(config):
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
-        if _check_firewall_rules(vpc["name"], config, compute):
+        # Check if the firewall rules are sufficient and the subnet for
+        # the specific region is available.
+        if _check_firewall_rules(vpc["name"], config, compute) and _list_subnets(
+            config, compute, filter=f'(name="{vpc["name"]}")'
+        ):
             usable_vpc_name = vpc["name"]
             break
 
