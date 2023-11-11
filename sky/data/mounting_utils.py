@@ -57,10 +57,10 @@ def get_mounting_command(
 
         MOUNT_MODE={mount_mode.value}
         MOUNT_PATH='{mount_path}'
+        MOUNT_BINARY={mount_binary}
         echo "MOUNT_MODE is: $MOUNT_MODE"
 
         if [ "$MOUNT_MODE" = "MOUNT" ]; then
-            MOUNT_BINARY={mount_binary}
             # Check if path is already mounted
             if grep -q $MOUNT_PATH /proc/mounts ; then
               echo "Path already mounted - unmounting..."

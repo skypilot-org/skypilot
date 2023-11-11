@@ -21,7 +21,7 @@ _CURSOR = None
 _CONN = None
 _DB = None
 _MAX_SYNC_RETRIES = 10
-# Allowing minimal seconds of inteval between SYNC calls.
+# Allowing minimal seconds of interval between SYNC calls.
 _MIN_SYNC_CALL_INTERVAL = 3
 _DEFAULT_S3_NUM_THREAD = 10
 CSYNC_DEFAULT_INTERVAL_SECONDS = 600
@@ -70,7 +70,7 @@ def _add_running_csync(csync_pid: int, source_path: str):
 
 @connect_db
 def _get_all_running_csync_pid() -> List[Any]:
-    """Returns all the registerd pid of CSYNC processes"""
+    """Returns all the registered pid of CSYNC processes"""
     assert _CURSOR is not None
     _CURSOR.execute('SELECT csync_pid FROM running_csync WHERE boot_time=(?)',
                     (_BOOT_TIME,))

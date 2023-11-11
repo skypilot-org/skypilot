@@ -4674,7 +4674,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         logger.debug(f'Setting storage {mode_str} took {end - start} seconds.')
 
     def _has_csync(self, cluster_name: str) -> bool:
-        """Chekcs if there are CSYNC mode storages within the cluster."""
+        """Checks if there are CSYNC mode storages within the cluster."""
         storage_mounts = self.get_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:
             for _, storage_obj in storage_mounts.items():
