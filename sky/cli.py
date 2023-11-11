@@ -60,12 +60,12 @@ from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
+from sky.data import storage_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_utils
@@ -1398,7 +1398,7 @@ def launch(
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     env = _merge_env_vars(env_file, env)
-    controller_utils.check_cluster_name_not_reserved(
+    backend_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
@@ -1568,7 +1568,7 @@ def exec(
         raise ValueError('`ports` is not supported by `sky exec`.')
 
     env = _merge_env_vars(env_file, env)
-    controller_utils.check_cluster_name_not_reserved(
+    backend_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
@@ -1907,22 +1907,21 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
             click.echo(head_ip)
             return
         hints = []
-        nonreserved_cluster_records = []
-        reserved_clusters = []
+        normal_clusters = []
+        controllers = []
         for cluster_record in cluster_records:
             cluster_name = cluster_record['name']
-            controller = controller_utils.Controllers.check_cluster_name(
-                cluster_name)
+            controller = backend_utils.Controllers.from_name(cluster_name)
             if controller is not None:
-                reserved_clusters.append(cluster_record)
+                controllers.append(cluster_record)
             else:
-                nonreserved_cluster_records.append(cluster_record)
+                normal_clusters.append(cluster_record)
         local_clusters = onprem_utils.check_and_get_local_clusters(
             suppress_error=True)
 
         num_pending_autostop = 0
         num_pending_autostop += status_utils.show_status_table(
-            nonreserved_cluster_records + reserved_clusters, all)
+            normal_clusters + controllers, all)
         status_utils.show_local_status_table(local_clusters)
 
         def _try_get_future_result(future) -> Tuple[bool, Any]:
@@ -1968,7 +1967,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                             'shown)')
                     job_info += '. '
                 hints.append(
-                    controller_utils.Controllers.SPOT_CONTROLLER.value.
+                    backend_utils.Controllers.SPOT_CONTROLLER.value.
                     in_progress_hint.format(job_info=job_info))
 
         if show_services:
@@ -1988,7 +1987,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
                         num_services, msg = result
             click.echo(msg)
             if num_services is not None:
-                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                hints.append(backend_utils.Controllers.SKY_SERVE_CONTROLLER.
                              value.in_progress_hint)
 
         if show_spot_jobs or show_services:
@@ -2046,25 +2045,24 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     """
     cluster_records = core.cost_report()
 
-    nonreserved_cluster_records = []
+    normal_cluster_records = []
     controllers = dict()
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
-        controller = controller_utils.Controllers.check_cluster_name(
-            cluster_name)
+        controller = backend_utils.Controllers.from_name(cluster_name)
         if controller is not None:
             controller_name = controller.value.name
-            # to display most recent entry for each reserved cluster
+            # to display most recent entry for each controller cluster
             # TODO(sgurram): fix assumption of sorted order of clusters
             if controller_name not in controllers:
                 controllers[controller_name] = cluster_record
         else:
-            nonreserved_cluster_records.append(cluster_record)
+            normal_cluster_records.append(cluster_record)
 
     total_cost = status_utils.get_total_cost_of_displayed_records(
-        nonreserved_cluster_records, all)
+        normal_cluster_records, all)
 
-    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+    status_utils.show_cost_report_table(normal_cluster_records, all)
     for controller_name, cluster_record in controllers.items():
         status_utils.show_cost_report_table(
             [cluster_record], all, controller_name=controller_name.capitalize())
@@ -2321,7 +2319,7 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     try:
         core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
     except exceptions.NotSupportedError:
-        controller = controller_utils.Controllers.check_cluster_name(cluster)
+        controller = backend_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
         click.echo(controller.value.decline_cancel_hint)
         sys.exit(1)
@@ -2611,12 +2609,11 @@ def start(
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
-        # Get all clusters that are not reserved names.
+        # Get all clusters that are not controllers.
         clusters = [
             cluster['name']
             for cluster in global_user_state.get_clusters()
-            if controller_utils.Controllers.check_cluster_name(cluster['name'])
-            is None
+            if backend_utils.Controllers.from_name(cluster['name']) is None
         ]
 
     if not clusters:
@@ -2684,7 +2681,7 @@ def start(
     # Checks for controller clusters (spot controller / sky serve controller).
     controllers, normal_clusters = [], []
     for name in to_start:
-        if controller_utils.Controllers.check_cluster_name(name) is not None:
+        if backend_utils.Controllers.from_name(name) is not None:
             controllers.append(name)
         else:
             normal_clusters.append(name)
@@ -2806,8 +2803,7 @@ def _hint_or_raise_for_down_spot_controller(controller_name: str):
         click.echo('Managed spot controller has already been torn down.')
         return
 
-    controller = controller_utils.Controllers.check_cluster_name(
-        controller_name)
+    controller = backend_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     if cluster_status == status_lib.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
@@ -2859,8 +2855,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         click.echo('Sky serve controller has already been torn down.')
         return
 
-    controller = controller_utils.Controllers.check_cluster_name(
-        controller_name)
+    controller = backend_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     if cluster_status == status_lib.ClusterStatus.INIT:
         with ux_utils.print_exception_no_traceback():
@@ -2886,9 +2881,9 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
 
 
 _CONTROLLER_TO_HINT_OR_RAISE = {
-    controller_utils.Controllers.SPOT_CONTROLLER:
+    backend_utils.Controllers.SPOT_CONTROLLER:
         (_hint_or_raise_for_down_spot_controller),
-    controller_utils.Controllers.SKY_SERVE_CONTROLLER:
+    backend_utils.Controllers.SKY_SERVE_CONTROLLER:
         (_hint_or_raise_for_down_sky_serve_controller),
 }
 
@@ -2902,7 +2897,7 @@ def _down_or_stop_clusters(
         idle_minutes_to_autostop: Optional[int] = None) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
-    Reserved clusters (spot controller and sky serve controller) can only be
+    Controllers (spot controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
     via glob) and purge is set to True.
     """
@@ -2934,14 +2929,14 @@ def _down_or_stop_clusters(
         operation = f'{verb} auto{option_str} on'
 
     if len(names) > 0:
-        reserved_clusters = [
+        controllers = [
             name for name in names
-            if controller_utils.Controllers.check_cluster_name(name) is not None
+            if backend_utils.Controllers.from_name(name) is not None
         ]
-        reserved_clusters_str = ', '.join(map(repr, reserved_clusters))
+        controllers_str = ', '.join(map(repr, controllers))
         names = [
             name for name in _get_glob_clusters(names)
-            if controller_utils.Controllers.check_cluster_name(name) is None
+            if backend_utils.Controllers.from_name(name) is None
         ]
         if not down:
             local_clusters = onprem_utils.check_and_get_local_clusters()
@@ -2954,32 +2949,32 @@ def _down_or_stop_clusters(
                     f'Skipping local cluster {c}, as it does not support '
                     '`sky stop/autostop`.'))
             ]
-        # Make sure the reserved clusters are explicitly specified without other
+        # Make sure the controllers are explicitly specified without other
         # normal clusters.
-        if reserved_clusters:
+        if controllers:
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
-                    f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} with other cluster(s) '
+                    f'{operation} controller(s) '
+                    f'{controllers_str} with other cluster(s) '
                     f'{names_str} is currently not supported.\n'
-                    f'Please omit the reserved cluster(s) {reserved_clusters}.')
-            if len(reserved_clusters) > 1:
+                    f'Please omit the controller(s) {controllers}.')
+            if len(controllers) > 1:
                 raise click.UsageError(
-                    f'{operation} multiple reserved clusters '
-                    f'{reserved_clusters_str} is currently not supported.\n'
-                    f'Please specify only one reserved cluster.')
-            reserved_cluster = reserved_clusters[0]
+                    f'{operation} multiple controllers '
+                    f'{controllers_str} is currently not supported.\n'
+                    f'Please specify only one controller.')
+            controller_name = controllers[0]
             if not down:
                 raise click.UsageError(
-                    f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} is currently not supported.')
+                    f'{operation} controller(s) '
+                    f'{controllers_str} is currently not supported.')
             else:
-                controller = controller_utils.Controllers.check_cluster_name(
-                    reserved_cluster)
+                controller = backend_utils.Controllers.from_name(
+                    controller_name)
                 assert controller is not None
                 hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
-                hint_or_raise(reserved_cluster)
+                hint_or_raise(controller_name)
                 confirm_str = 'delete'
                 user_input = click.prompt(
                     f'To proceed, please type {colorama.Style.BRIGHT}'
@@ -2988,7 +2983,7 @@ def _down_or_stop_clusters(
                 if user_input != confirm_str:
                     raise click.Abort()
                 no_confirm = True
-        names += reserved_clusters
+        names += controllers
 
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
@@ -2996,14 +2991,12 @@ def _down_or_stop_clusters(
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
-        # We should not remove reserved clusters when --all is specified.
-        # Otherwise, it would be very easy to accidentally delete a reserved
-        # cluster.
+        # We should not remove controllers when --all is specified.
+        # Otherwise, it would be very easy to accidentally delete a controller.
         names = [
             record['name']
             for record in all_clusters
-            if controller_utils.Controllers.check_cluster_name(record['name'])
-            is None
+            if backend_utils.Controllers.from_name(record['name']) is None
         ]
 
     clusters = []
@@ -3615,7 +3608,7 @@ def storage():
 def storage_ls(all: bool):
     """List storage objects managed by SkyPilot."""
     storages = sky.storage_ls()
-    storage_table = status_utils.format_storage_table(storages, show_all=all)
+    storage_table = storage_utils.format_storage_table(storages, show_all=all)
     click.echo(storage_table)
 
 
@@ -4071,8 +4064,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed spot jobs with IDs 1, 2, 3
       $ sky spot cancel 1 2 3
     """
-    _, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+    _, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.')
     if handle is None:
         # Hint messages already printed by the call above.
@@ -4156,8 +4149,8 @@ def spot_dashboard(port: Optional[int]):
     hint = (
         'Dashboard is not available if spot controller is not up. Run a spot '
         'job first.')
-    _, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+    _, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=hint,
         non_existent_message=hint)
     if handle is None:
@@ -4452,8 +4445,8 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
 
-    _, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    _, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have been terminated.')
     if handle is None:
         # Hint messages already printed by the call above.

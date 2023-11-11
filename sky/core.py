@@ -106,7 +106,8 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    return backend_utils.get_clusters(refresh=refresh,
+    return backend_utils.get_clusters(include_controller=False,
+                                      refresh=refresh,
                                       cluster_names=cluster_names)
 
 
@@ -183,8 +184,7 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if controller_utils.Controllers.check_cluster_name(
-            cluster_name) is not None:
+    if backend_utils.Controllers.from_name(cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
                              'supported for SkyPilot controllers. Pass '
@@ -306,10 +306,9 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed spot controller.
     """
-    if controller_utils.Controllers.check_cluster_name(
-            cluster_name) is not None:
+    if backend_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(
-            f'Stopping sky reserved cluster {cluster_name!r} '
+            f'Stopping SkyPilot controller {cluster_name!r} '
             f'is not supported.')
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -430,10 +429,9 @@ def autostop(
     if is_cancel:
         option_str = '{stop,down}'
     operation = f'{verb} auto{option_str}'
-    if controller_utils.Controllers.check_cluster_name(
-            cluster_name) is not None:
+    if backend_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(
-            f'{operation} sky reserved cluster {cluster_name!r} '
+            f'{operation} SkyPilot controller {cluster_name!r} '
             f'is not supported.')
     handle = backend_utils.check_cluster_available(
         cluster_name,
@@ -560,13 +558,13 @@ def cancel(
         ValueError: if arguments are invalid, or the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the specified cluster is a
-          reserved cluster that does not support this operation.
+          controller that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    controller_utils.check_cluster_name_not_reserved(
+    backend_utils.check_cluster_name_not_controller(
         cluster_name, operation_str='Cancelling jobs')
 
     if all and job_ids:
@@ -800,8 +798,8 @@ def spot_queue(refresh: bool,
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=stop_msg)
 
     if (refresh and controller_status in [
@@ -873,12 +871,12 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    cluster_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SPOT_CONTROLLER,
         stopped_message='All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in
-        # controller_utils.is_controller_up
+        # backend_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(message='',
@@ -933,8 +931,8 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    controller_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SPOT_CONTROLLER,
         stopped_message=('Please restart the spot controller with '
                          f'`sky start {spot.SPOT_CONTROLLER_NAME}`.'))
     if handle is None or handle.head_ip is None:
@@ -1069,8 +1067,8 @@ def serve_status(
 
     # TODO(tian): This is so slow... It will take ~10s to refresh the status
     # of controller. Can we optimize this?
-    controller_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
 
     if handle is None or handle.head_ip is None:
@@ -1086,7 +1084,7 @@ def serve_status(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
-    code = serve.ServeCodeGen.get_serve_status(service_names)
+    code = serve.ServeCodeGen.get_service_status(service_names)
     returncode, serve_status_payload, stderr = backend.run_on_head(
         handle,
         code,
@@ -1126,12 +1124,12 @@ def serve_down(service_names: Optional[Union[str, List[str]]] = None,
         service_names = []
     if isinstance(service_names, str):
         service_names = [service_names]
-    cluster_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='All services should have terminated.')
     if handle is None or handle.head_ip is None:
         # The error message is already printed in
-        # controller_utils.is_controller_up
+        # backend_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(message='',
@@ -1230,8 +1228,8 @@ def serve_tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
-    controller_status, handle = controller_utils.is_controller_up(
-        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=backend_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message='No service is found.')
     if handle is None or handle.head_ip is None:
         msg = 'No service is found.'

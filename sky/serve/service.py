@@ -108,7 +108,8 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    failed = failed or _cleanup_storage(task_yaml)
+    if _cleanup_storage(task_yaml):
+        failed = True
     return failed
 
 

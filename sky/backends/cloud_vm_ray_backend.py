@@ -52,7 +52,6 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -3370,8 +3369,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            controller = controller_utils.Controllers.check_cluster_name(name)
-            if controller == controller_utils.Controllers.SPOT_CONTROLLER:
+            controller = backend_utils.Controllers.from_name(name)
+            if controller == backend_utils.Controllers.SPOT_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Spot Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
@@ -3514,7 +3513,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        controller = controller_utils.Controllers.check_cluster_name(name)
+        controller = backend_utils.Controllers.from_name(name)
         if controller is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'

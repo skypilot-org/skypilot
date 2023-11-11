@@ -332,30 +332,28 @@ def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
 
-    def _get_controller_resources_schema(is_serve: bool = False):
-        resources_schema = {
-            k: v
-            for k, v in get_resources_schema().items()
-            # Validation may fail if $schema is included.
-            if k != '$schema'
+    resources_schema = {
+        k: v
+        for k, v in get_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    resources_schema['properties'].pop('ports')
+    controller_resources_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                }
+            },
         }
-        if is_serve:
-            resources_schema['properties'].pop('ports')
-        return {
-            'type': 'object',
-            'required': [],
-            'additionalProperties': False,
-            'properties': {
-                'controller': {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'resources': resources_schema,
-                    }
-                },
-            }
-        }
+    }
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -363,8 +361,8 @@ def get_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'spot': _get_controller_resources_schema(),
-            'serve': _get_controller_resources_schema(is_serve=True),
+            'spot': controller_resources_schema,
+            'serve': controller_resources_schema,
             'aws': {
                 'type': 'object',
                 'required': [],

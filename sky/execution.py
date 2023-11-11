@@ -381,8 +381,7 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = controller_utils.Controllers.check_cluster_name(
-            cluster_name)
+        controller = backend_utils.Controllers.from_name(cluster_name)
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
@@ -512,8 +511,8 @@ def launch(
         if dryrun.
     """
     entrypoint = task
-    controller_utils.check_cluster_name_not_reserved(cluster_name,
-                                                     operation_str='sky.launch')
+    backend_utils.check_cluster_name_not_controller(cluster_name,
+                                                    operation_str='sky.launch')
 
     return _execute(
         entrypoint=entrypoint,
@@ -589,7 +588,7 @@ def exec(  # pylint: disable=redefined-builtin
         ValueError: if the specified cluster does not exist or is not in UP
             status.
         sky.exceptions.NotSupportedError: if the specified cluster is a
-            reserved cluster that does not support this operation.
+            controller that does not support this operation.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -604,8 +603,8 @@ def exec(  # pylint: disable=redefined-builtin
             f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
             'deprecated. Pass sky.Task instead.'
             f'{colorama.Style.RESET_ALL}')
-    controller_utils.check_cluster_name_not_reserved(cluster_name,
-                                                     operation_str='sky.exec')
+    backend_utils.check_cluster_name_not_controller(cluster_name,
+                                                    operation_str='sky.exec')
 
     handle = backend_utils.check_cluster_available(
         cluster_name,

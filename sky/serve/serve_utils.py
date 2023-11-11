@@ -259,7 +259,7 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def _get_serve_status(
+def _get_service_status(
         service_name: str,
         with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
@@ -283,13 +283,13 @@ def _get_serve_status(
     return record
 
 
-def get_serve_status_encoded(service_names: Optional[List[str]]) -> str:
+def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
     serve_statuses = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        serve_status = _get_serve_status(service_name)
+        serve_status = _get_service_status(service_name)
         if serve_status is None:
             continue
         serve_statuses.append({
@@ -314,7 +314,8 @@ def terminate_services(service_names: Optional[List[str]]) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     for service_name in service_names:
-        serve_status = _get_serve_status(service_name, with_replica_info=False)
+        serve_status = _get_service_status(service_name,
+                                           with_replica_info=False)
         assert serve_status is not None
         if (serve_status['status']
                 in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
@@ -561,7 +562,7 @@ class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_serve_status(service_name)
+      >> code = ServeCodeGen.get_service_status(service_name)
     """
     _PREFIX = [
         'from sky.serve import serve_state',
@@ -569,9 +570,9 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def get_serve_status(cls, service_names: Optional[List[str]]) -> str:
+    def get_service_status(cls, service_names: Optional[List[str]]) -> str:
         code = [
-            f'msg = serve_utils.get_serve_status_encoded({service_names!r})',
+            f'msg = serve_utils.get_service_status_encoded({service_names!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
