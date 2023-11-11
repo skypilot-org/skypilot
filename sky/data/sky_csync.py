@@ -251,7 +251,7 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     """Runs daemon to sync the source to the bucket every INTERVAL seconds.
 
     Creates an entry of pid of the sync process in local database while sync
-    command is runninng and removes it when completed.
+    command is running and removes it when completed.
 
     Args:
         source (str): The local path to the directory that you want to sync.

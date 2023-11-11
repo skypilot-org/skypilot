@@ -4557,14 +4557,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-    def _execute_storage_mounts(self, handle: CloudVmRayResourceHandle,
-                                storage_mounts: Dict[Path, storage_lib.Storage],
-                                mount_mode: storage_utils.StorageMode):
+    def _execute_storage_mounts(
+            self, handle: CloudVmRayResourceHandle,
+            storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
+            mount_mode: storage_utils.StorageMode):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4674,7 +4675,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     def _has_csync(self, cluster_name: str) -> bool:
         """Chekcs if there are CSYNC mode storages within the cluster."""
-        storage_mounts = self._get_storage_mounts_metadata(cluster_name)
+        storage_mounts = self.get_storage_mounts_metadata(cluster_name)
         if storage_mounts is not None:
             for _, storage_obj in storage_mounts.items():
                 if storage_obj.mode == storage_utils.StorageMode.CSYNC:
