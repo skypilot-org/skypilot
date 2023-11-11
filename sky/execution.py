@@ -718,6 +718,10 @@ def _controller_skypilot_config_setup(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+    else:
+        # If the user config is not loaded, manually set this to None
+        # so that the template won't render this.
+        vars_to_fill['user_config_path'] = None
     try:
         controller_resources = sky.Resources.from_yaml_config(
             controller_resources_config_copied)
@@ -791,7 +795,6 @@ def spot_launch(
         vars_to_fill = {
             'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
             'user_yaml_path': f.name,
-            'user_config_path': None,
             'spot_controller': controller_name,
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
