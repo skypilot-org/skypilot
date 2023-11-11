@@ -80,7 +80,7 @@ FIREWALL_RULES_TEMPLATE = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp # pylint: disable=line-too-long
+# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
     "compute.disks.list",
