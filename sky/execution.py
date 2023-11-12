@@ -1083,9 +1083,12 @@ def serve_up(
                                     vars_to_fill,
                                     output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
-        controller_cloud = (requested_resources.cloud
-                            if controller_resources.cloud is None else
-                            controller_resources.cloud)
+        controller_exist = (
+            global_user_state.get_cluster_from_name(controller_name)
+            is not None)
+        controller_cloud = (
+            requested_resources.cloud if not controller_exist and
+            controller_resources.cloud is None else controller_resources.cloud)
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
