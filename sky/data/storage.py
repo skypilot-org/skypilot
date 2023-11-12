@@ -880,6 +880,7 @@ class Storage(object):
                     f'{store_type} not supported as a Store.')
 
         if self.mode == StorageMode.CSYNC:
+            # TODO(doyoung): add CSYNC support for R2 and IBM COS
             if store_type in (StoreType.R2, StoreType.IBM):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSpecError(

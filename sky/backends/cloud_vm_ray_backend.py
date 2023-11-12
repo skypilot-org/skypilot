@@ -4656,6 +4656,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
                     if env_options.Options.SHOW_DEBUG_INFO.get():
                         raise exceptions.CommandError(
                             e.returncode,

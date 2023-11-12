@@ -2870,15 +2870,15 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     try:
         ip_list = handle.external_ips()
     # When cluster is in INIT status, attempt to fetch IP fails raising an error
-    except exceptions.FetchIPError:
+    except exceptions.FetchIPError as e:
+        logger.error(common_utils.format_exception(e))
         return
     port_list = handle.external_ssh_ports()
     ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                handle.docker_user)
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ip_list, port_list=port_list, **ssh_credentials)
-    csync_terminate_cmd = ('python -m sky.data.sky_csync terminate -a '
-                           '>/dev/null')
+    csync_terminate_cmd = ('python -m sky.data.sky_csync terminate -a')
 
     def _run_csync_terminate(runner):
 
