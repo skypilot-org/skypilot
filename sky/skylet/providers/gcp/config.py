@@ -847,6 +847,11 @@ def _configure_subnet(config, compute):
     usable_vpc_name = get_usable_vpc(config)
     subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
     if not subnets:
+        # SkyPilot: in get_usable_vpc, we already checked if there's a subnet
+        # in the requested region. If there's no subnet, it means even though
+        # we create a VPC with subnet auto creation enabled, the subnet is not
+        # created yet. This can hapen, when the user does not have the quota for
+        # TPU v4 and the us-central2 region is not enabled.
         raise RuntimeError(
             f"No subnet found in VPC network {usable_vpc_name!r} for "
             f'region {config["provider"]["region"]}.'

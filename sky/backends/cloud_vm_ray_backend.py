@@ -690,15 +690,15 @@ class RetryingVmProvisioner(object):
                     self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
                     return
-                elif ('No subnet found in VPC network' in exception_str and
-                      region.name == 'us-central2'):
-                    # us-central2 is a TPU v4 only region. The subnet for this
-                    # region may not exist when the user does not have the TPU
-                    # v4 quota. We should skip this region.
+                elif 'No subnet found in VPC network' in exception_str:
                     logger.error('Got the following exception, continuing: '
                                  f'{exception_str}')
-                    if any(acc.lower().startswith('tpu-v4')
-                           for acc in launchable_resources.accelerators.keys()):
+                    if (any(acc.lower().startswith('tpu-v4')
+                            for acc in launchable_resources.accelerators.keys())
+                            and region.name == 'us-central2'):
+                        # us-central2 is a TPU v4 only region. The subnet for
+                        # this region may not exist when the user does not have
+                        # the TPU v4 quota. We should skip this region.
                         logger.error(
                             'Please check if you have the TPU v4 quota '
                             f'in {region}.')
