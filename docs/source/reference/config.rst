@@ -57,7 +57,7 @@ Available fields and semantics:
     # with this name (provisioner automatically looks for such regions).
     # Regions without a VPC with this name will not be used to launch nodes.
     #
-    # Default: None (use the default VPC in each region).
+    # Default: null (use the default VPC in each region).
     vpc_name: skypilot-vpc
 
     # Should instances be assigned private IPs only? (optional)
@@ -88,7 +88,7 @@ Available fields and semantics:
     # and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
     # since they are behind the proxy / may not have such a proxy set up.)
     #
-    # Optional; default: None.
+    # Optional; default: null.
     ### Format 1 ###
     # A string; the same proxy command is used for all regions.
     ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
@@ -105,7 +105,7 @@ Available fields and semantics:
   gcp:
     # VPC to use (optional).
     #
-    # Default: None, which implies the following behavior. First, the VPC named
+    # Default: null, which implies the following behavior. First, the VPC named
     # 'default' is checked against minimal recommended firewall rules for
     # SkyPilot to function. If it satisfies these rules, this VPC is used.
     # Otherwise, a new VPC named 'skypilot-vpc' is automatically created with
