@@ -335,11 +335,18 @@ class AbstractStore:
         if data_utils.is_cloud_store_url(self.source):
             if self.source is not None:
                 if isinstance(self.source, (str, Path)):
-                    if store_type == StoreType.GCS:
-                        destination = str(self.source).replace('gs://', '')
+                    if store_type == StoreType.S3:
+                        bucket_name, path = data_utils.split_s3_path(
+                            self.source)
+                    elif store_type == StoreType.GCS:
+                        bucket_name, path = data_utils.split_gcs_path(
+                            self.source)
                     else:
-                        destination = str(self.source).replace(
-                            f'{store_type_str}://', '')
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageSpecError(
+                                f'Currently, {store_type} does not support '
+                                'CSYNC mode.')
+                    destination = '/'.join([bucket_name, path])
                 elif isinstance(self.source, list):
                     raise TypeError(
                         'CSYNC mode does not supprot multiple sources '
@@ -822,21 +829,23 @@ class Storage(object):
         if not isinstance(source, list):
             if data_utils.is_cloud_store_url(source):
                 name = None
+        
+        mode = StorageMode.MOUNT
+        if hasattr(metadata, 'mode'):
+            if metadata.mode:
+                mode = override_args.get('mode', metadata.mode)
 
         storage_obj = cls(name=name,
                           source=source,
                           sync_on_reconstruction=override_args.get(
-                              'sync_on_reconstruction', True))
+                              'sync_on_reconstruction', True),
+                          mode=mode)
 
         # For backward compatibility
         # TODO(Doyoung): Implement __setstate__ to resolve backwards
         # compatibility issue
         if hasattr(metadata, 'interval_seconds'):
             storage_obj.interval_seconds = metadata.interval_seconds
-
-        if hasattr(metadata, 'mode'):
-            if metadata.mode:
-                storage_obj.mode = override_args.get('mode', metadata.mode)
 
         return storage_obj
 
