@@ -48,7 +48,6 @@ AUTOSCALER_COOLDOWN_SECONDS = 60
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
 # A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
-# TODO(tian): Stress test for 16 services on default controller resources.
 SERVICES_MEMORY_USAGE_GB = 1.0
 SERVICES_TASK_CPU_DEMAND = 0.25
 

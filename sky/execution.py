@@ -1184,7 +1184,7 @@ def serve_up(
         sky_logging.print(
             f'{fore.CYAN}Service name: '
             f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
-            f'{fore.CYAN}Endpoint URL: '
+            f'\n{fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
             '\nTo see detailed info:\t\t'
             f'{backend_utils.BOLD}sky serve status {service_name} '
