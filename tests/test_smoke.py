@@ -804,7 +804,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 # ---------- storage ----------
 @pytest.mark.aws
-def test_aws_storage_mounts():
+def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -820,6 +820,11 @@ def test_aws_storage_mounts():
             f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
         test = Test(
             'aws_storage_mounts',
@@ -831,7 +836,7 @@ def test_aws_storage_mounts():
 
 
 @pytest.mark.gcp
-def test_gcp_storage_mounts():
+def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -847,6 +852,11 @@ def test_gcp_storage_mounts():
             f'sky launch -y -c {name} --cloud gcp {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
         test = Test(
             'gcp_storage_mounts',
@@ -938,70 +948,6 @@ def test_ibm_storage_mounts():
         ]
         test = Test(
             'ibm_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.aws
-def test_aws_storage_mounts_with_stop():
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud aws {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
-        test = Test(
-            'aws_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.gcp
-def test_gcp_storage_mounts_with_stop():
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud gcp {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'gsutil ls gs://{storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
-        test = Test(
-            'gcp_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
