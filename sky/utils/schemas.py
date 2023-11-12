@@ -349,6 +349,13 @@ def get_config_schema():
                         'minItems': 1,
                         'maxItems': 1,
                     },
+                    'vpc_name': {
+                        'oneOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'null',
+                        }],
+                    },
                 }
             },
             'kubernetes': {

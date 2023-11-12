@@ -25,6 +25,7 @@
 import inspect
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2724,13 +2725,40 @@ def test_user_ray_cluster(generic_cloud: str):
     run_one_test(test)
 
 
+_CODE_PREFIX = ['import sky']
+
+
+def _build(code: List[str]) -> str:
+    code = _CODE_PREFIX + code
+    code = ';'.join(code)
+    return f'python3 -u -c {shlex.quote(code)}'
+
+
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
-def test_core_api():
+
+
+@pytest.mark.gcp
+def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    sky.launch
-    # TODO(zhwu): Add a test for core api.
+    task = sky.Task(run="whoami")
+    task.set_resources(sky.Resources(cloud=sky.GCP()))
+    job_id, handle = sky.launch(task, cluster_name=name)
+    assert job_id == 1
+    assert handle is not None
+    assert handle.cluster_name == name
+    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
+    job_id_exec, handle_exec = sky.exec(task, cluster_name=name)
+    assert job_id_exec == 2
+    assert handle_exec is not None
+    assert handle_exec.cluster_name == name
+    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
+    # For dummy task (i.e. task.run is None), the job won't be submitted.
+    dummy_task = sky.Task()
+    job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
+    assert job_id_dummy is None
+    sky.down(name)
 
 
 # ---------- Testing Storage ----------

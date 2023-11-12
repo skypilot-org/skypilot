@@ -66,7 +66,7 @@ User
     compute.firewalls.create
     compute.firewalls.delete
     compute.firewalls.get
-    compute.instances.create 
+    compute.instances.create
     compute.instances.delete
     compute.instances.get
     compute.instances.list
@@ -148,8 +148,8 @@ User
 
 .. note::
 
-    The user created with the above minimal permissions will not be able to create service accounts to be assigned to SkyPilot instances. 
-    
+    The user created with the above minimal permissions will not be able to create service accounts to be assigned to SkyPilot instances.
+
     The admin needs to follow the :ref:`instruction below <gcp-service-account-creation>` to create a service account to be shared by all users in the project.
 
 
@@ -182,3 +182,51 @@ Service Account
     :align: center
     :alt: Set Service Account Role
 
+
+.. _gcp-minimum-firewall-rules:
+
+Firewall Rules
+~~~~~~~~~~~~~~~~~~~
+
+By default, users do not need to set up any special firewall rules to start
+using SkyPilot. If the default VPC does not satisfy the minimal required rules,
+a new VPC ``skypilot-vpc`` with sufficient rules will be automatically created
+and used.
+
+However, if you manually set up and instruct SkyPilot to use a VPC (see
+:ref:`here <config-yaml>`), ensure it has the following required firewall rules:
+
+.. code-block:: python
+
+    # Allow internal connections between SkyPilot VMs:
+    #
+    #   controller -> head node of a cluster
+    #   head node of a cluster <-> worker node(s) of a cluster
+    #
+    # NOTE: these ports are more relaxed than absolute minimum, but the
+    # sourceRanges restrict the traffic to internal IPs.
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {"IPProtocol": "tcp", "ports": ["0-65535"]},
+            {"IPProtocol": "udp", "ports": ["0-65535"]},
+        ],
+        "sourceRanges": ["10.128.0.0/9"],
+    },
+
+    # Allow SSH connections from user machine(s)
+    #
+    # NOTE: This can be satisfied using the following relaxed sourceRanges
+    # (0.0.0.0/0), but you can customize it if you want to restrict to certain
+    # known public IPs (useful when using internal VPN or proxy solutions).
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {"IPProtocol": "tcp", "ports": ["22"]},
+        ],
+        "sourceRanges": ["0.0.0.0/0"],
+    },
+
+You can inspect and manage firewall rules at
+``https://console.cloud.google.com/net-security/firewall-manager/firewall-policies/list?project=<your-project-id>``
+or using any of GCP's SDKs.
