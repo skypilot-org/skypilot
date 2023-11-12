@@ -64,6 +64,14 @@ def _handle_signal(service_name: str) -> None:
 
 
 def _cleanup_storage(task_yaml: str) -> bool:
+    """Clean up the storage for the service.
+
+    Args:
+        task_yaml: The task yaml file.
+
+    Returns:
+        True if the storage is cleaned up successfully, False otherwise.
+    """
     try:
         task = task_lib.Task.from_yaml(task_yaml)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -73,12 +81,12 @@ def _cleanup_storage(task_yaml: str) -> bool:
                      f'{common_utils.format_exception(e)}')
         with ux_utils.enable_traceback():
             logger.error(f'  Traceback: {traceback.format_exc()}')
-        return True
-    return False
+        return False
+    return True
 
 
 def _cleanup(service_name: str, task_yaml: str) -> bool:
-    """Clean up the sky serve replicas, storage, and service record."""
+    """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
@@ -108,7 +116,8 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    if _cleanup_storage(task_yaml):
+    success = _cleanup_storage(task_yaml)
+    if not success:
         failed = True
     return failed
 
