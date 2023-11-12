@@ -164,8 +164,16 @@ class KubernetesNodeProvider(NodeProvider):
 
     def _raise_pod_scheduling_errors(self, new_nodes):
         for new_node in new_nodes:
-            pod_status = new_node.status.phase
-            pod_name = new_node._metadata._name
+            pod = kubernetes.core_api().read_namespaced_pod(
+                new_node.metadata.name, self.namespace)
+            pod_status = pod.status.phase
+            # When there are multiple pods involved while launching instance,
+            # there may be a single pod causing issue while others are
+            # scheduled. In this case, we make sure to not surface the error
+            # message from the pod that is already scheduled.
+            if pod_status != 'Pending':
+                continue
+            pod_name = pod._metadata._name
             events = kubernetes.core_api().list_namespaced_event(
                 self.namespace,
                 field_selector=(f'involvedObject.name={pod_name},'
@@ -173,8 +181,8 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = \
-                sorted(events.items,
+            events_desc_by_time = sorted(
+                events.items,
                 key=lambda e: e.metadata.creation_timestamp,
                 reverse=True)
             for event in events_desc_by_time:
@@ -200,8 +208,8 @@ class KubernetesNodeProvider(NodeProvider):
                         lf.get_label_key()
                         for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     ]
-                    if new_node.spec.node_selector:
-                        for label_key in new_node.spec.node_selector.keys():
+                    if pod.spec.node_selector:
+                        for label_key in pod.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
@@ -210,7 +218,7 @@ class KubernetesNodeProvider(NodeProvider):
                                     'didn\'t match Pod\'s node affinity/selector' in event_message:
                                     raise config.KubernetesError(
                                         f'{lack_resource_msg.format(resource="GPU")} '
-                                        f'Verify if {new_node.spec.node_selector[label_key]}'
+                                        f'Verify if {pod.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
                 raise config.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
@@ -257,9 +265,14 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
-        # Wait for all pods to be ready, and if it exceeds the timeout, raise an
-        # exception. If pod's container is ContainerCreating, then we can assume
-        # that resources have been allocated and we can exit.
+        # Wait for all pods including jump pod to be ready, and if it
+        # exceeds the timeout, raise an exception. If pod's container
+        # is ContainerCreating, then we can assume that resources have been
+        # allocated and we can exit.
+        ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, self.namespace)
+        new_nodes.append(jump_pod)
         start = time.time()
         while True:
             if time.time() - start > self.timeout:

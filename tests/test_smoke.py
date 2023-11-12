@@ -25,6 +25,7 @@
 import inspect
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -937,6 +938,105 @@ def test_ibm_storage_mounts():
         ]
         test = Test(
             'ibm_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.aws
+def test_aws_storage_mounts_with_stop():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud aws {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'aws_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.gcp
+def test_gcp_storage_mounts_with_stop():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'gsutil ls gs://{storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'gcp_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_storage_mounts_with_stop():
+    # Tests bucket mounting on k8s, assuming S3 is configured.
+    # This test will fail if run on non x86_64 architecture, since goofys is
+    # built for x86_64 only.
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
+        ]
+        test = Test(
+            'kubernetes_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -2625,13 +2725,40 @@ def test_user_ray_cluster(generic_cloud: str):
     run_one_test(test)
 
 
+_CODE_PREFIX = ['import sky']
+
+
+def _build(code: List[str]) -> str:
+    code = _CODE_PREFIX + code
+    code = ';'.join(code)
+    return f'python3 -u -c {shlex.quote(code)}'
+
+
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
-def test_core_api():
+
+
+@pytest.mark.gcp
+def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    sky.launch
-    # TODO(zhwu): Add a test for core api.
+    task = sky.Task(run="whoami")
+    task.set_resources(sky.Resources(cloud=sky.GCP()))
+    job_id, handle = sky.launch(task, cluster_name=name)
+    assert job_id == 1
+    assert handle is not None
+    assert handle.cluster_name == name
+    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
+    job_id_exec, handle_exec = sky.exec(task, cluster_name=name)
+    assert job_id_exec == 2
+    assert handle_exec is not None
+    assert handle_exec.cluster_name == name
+    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
+    # For dummy task (i.e. task.run is None), the job won't be submitted.
+    dummy_task = sky.Task()
+    job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
+    assert job_id_dummy is None
+    sky.down(name)
 
 
 # ---------- Testing Storage ----------
@@ -3062,7 +3189,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -3094,7 +3221,7 @@ class TestStorageWithCredentials:
         assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd = ['sky', 'storage', 'delete', '--yes']
         delete_cmd += storage_obj_name
         subprocess.check_output(delete_cmd)
 
@@ -3129,7 +3256,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes'])
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
@@ -3147,8 +3274,9 @@ class TestStorageWithCredentials:
         # files and folders to a new bucket, then delete bucket.
         tmp_bulk_del_storage_obj.add_store(store_type)
 
-        subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name])
+        subprocess.check_output([
+            'sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
+        ])
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
@@ -3225,7 +3353,7 @@ class TestStorageWithCredentials:
 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
-                match='Attempted to connect to a non-existent bucket'):
+                match='Attempted to use a non-existent bucket as a source'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
@@ -3417,6 +3545,7 @@ class TestYamlSpecs:
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
         # d1 <= d2
+        print(origin_task_config, new_task_config)
         self._is_dict_subset(origin_task_config, new_task_config)
 
     def test_load_dump_yaml_config_equivalent(self):
@@ -3430,3 +3559,43 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
+
+# ---------- Testing Multiple Accelerators ----------
+def test_multiple_accelerators_ordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_resources():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-resources',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)

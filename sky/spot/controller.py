@@ -50,7 +50,6 @@ class SpotController:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
-
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
