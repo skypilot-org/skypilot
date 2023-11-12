@@ -967,8 +967,10 @@ class Optimizer:
                     accelerators_str = ', '.join(
                         [f'{r}' for r in resources_list])
                     task_id_str = ordinal_number(task_id + 1)
-                    # Add in dummy tasks
                     if len(dag.tasks) > 3:
+                        # User-provided dag has more than one task.
+                        # Comparing with 3,
+                        # as there are two dummy tasks added by the optimizer.
                         logger.info(f'{colorama.Fore.YELLOW}{task_id_str} '
                                     'task is using user-specified '
                                     'accelerators list '

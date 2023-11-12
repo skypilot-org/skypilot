@@ -3560,14 +3560,13 @@ class TestYamlSpecs:
             self._check_equivalent(yaml_path)
 
 
-# ---------- Testing Multiple Resources ----------
-@pytest.mark.gcp
-def test_multiple_resources_ordered():
+# ---------- Testing Multiple Accelerators ----------
+def test_multiple_accelerators_ordered():
     name = _get_cluster_name()
     test = Test(
-        'multiple-resources-ordered',
+        'multiple-accelerators-ordered',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_ordered.yaml | grep "is using user-specified accelerators list"',
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "is using user-specified accelerators list"',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -3575,13 +3574,25 @@ def test_multiple_resources_ordered():
     run_one_test(test)
 
 
-@pytest.mark.gcp
-def test_multiple_resources_unordered():
+def test_multiple_accelerators_unordered():
     name = _get_cluster_name()
     test = Test(
-        'multiple-resources-unordered',
+        'multiple-accelerators-unordered',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources_unordered.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_resources():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-resources',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
