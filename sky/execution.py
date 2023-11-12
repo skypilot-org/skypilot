@@ -381,7 +381,7 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = backend_utils.Controllers.from_name(cluster_name)
+        controller = controller_utils.Controllers.from_name(cluster_name)
         if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
@@ -511,8 +511,8 @@ def launch(
         if dryrun.
     """
     entrypoint = task
-    backend_utils.check_cluster_name_not_controller(cluster_name,
-                                                    operation_str='sky.launch')
+    controller_utils.check_cluster_name_not_controller(
+        cluster_name, operation_str='sky.launch')
 
     return _execute(
         entrypoint=entrypoint,
@@ -603,8 +603,8 @@ def exec(  # pylint: disable=redefined-builtin
             f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
             'deprecated. Pass sky.Task instead.'
             f'{colorama.Style.RESET_ALL}')
-    backend_utils.check_cluster_name_not_controller(cluster_name,
-                                                    operation_str='sky.exec')
+    controller_utils.check_cluster_name_not_controller(cluster_name,
+                                                       operation_str='sky.exec')
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
