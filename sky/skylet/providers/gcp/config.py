@@ -812,6 +812,7 @@ def get_usable_vpc(config) -> str:
                 f"No VPC with name {specific_vpc_to_use!r} is found. "
                 "To fix: specify a correct VPC name."
             )
+            # Should not reach here.
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
