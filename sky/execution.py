@@ -1124,6 +1124,9 @@ def serve_up(
             retry_until_up=True,
         )
 
+        style = colorama.Style
+        fore = colorama.Fore
+
         assert controller_job_id is not None and controller_handle is not None
         # TODO(tian): Cache endpoint locally to speedup. Endpoint won't
         # change after the first time, so there is no consistency issue.
@@ -1143,47 +1146,65 @@ def serve_up(
                 code,
                 require_outputs=True,
                 stream_logs=False)
+        try:
             subprocess_utils.handle_returncode(
                 returncode, code, 'Failed to wait for service initialization',
                 lb_port_payload)
-            lb_port = serve.load_service_initialization_result(lb_port_payload)
-            if lb_port is None:
+        except exceptions.CommandError:
+            statuses = backend.get_job_status(controller_handle,
+                                              [controller_job_id],
+                                              stream_logs=False)
+            controller_job_status = list(statuses.values())[0]
+            if controller_job_status == sky.JobStatus.PENDING:
+                # Max number of services reached due to vCPU constraint.
+                # The controller job is pending due to ray job scheduling.
+                # We manually cancel the job here.
+                backend.cancel_jobs(controller_handle, [controller_job_id])
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        f'The service {service_name!r} is already running. '
-                        'Please specify a different name for your service. '
-                        'To update an existing service, run: `sky serve down` '
-                        'and then `sky serve up` again (in-place update will '
-                        'be supported in the future).')
+                        'Max number of services reached. '
+                        'To spin up more services, please '
+                        'tear down some existing services.') from None
+            else:
+                # Possible cases:
+                # (1) name conflict;
+                # (2) max number of services reached due to memory
+                # constraint. The job will successfully run on the
+                # controller, but there will be an error thrown due
+                # to memory constraint check in the controller.
+                # See sky/serve/service.py for more details.
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Failed to spin up the service. Please '
+                        'check the logs above for more details.') from None
+        else:
+            lb_port = serve.load_service_initialization_result(lb_port_payload)
             endpoint = f'{controller_handle.head_ip}:{lb_port}'
 
-        sn = service_name
-        style = colorama.Style
-        fore = colorama.Fore
         sky_logging.print(
             f'{fore.CYAN}Service name: '
-            f'{style.BRIGHT}{sn}{style.RESET_ALL}'
-            f'\n{fore.CYAN}Endpoint URL: '
+            f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
+            f'{fore.CYAN}Endpoint URL: '
             f'{style.BRIGHT}{endpoint}{style.RESET_ALL}'
             '\nTo see detailed info:\t\t'
-            f'{backend_utils.BOLD}sky serve status {sn} '
+            f'{backend_utils.BOLD}sky serve status {service_name} '
             f'[--endpoint]{backend_utils.RESET_BOLD}'
             '\nTo teardown the service:\t'
-            f'{backend_utils.BOLD}sky serve down {sn}'
+            f'{backend_utils.BOLD}sky serve down {service_name}'
             f'{backend_utils.RESET_BOLD}'
             '\n'
             '\nTo see logs of a replica:\t'
-            f'{backend_utils.BOLD}sky serve logs {sn} [REPLICA_ID]'
+            f'{backend_utils.BOLD}sky serve logs {service_name} [REPLICA_ID]'
             f'{backend_utils.RESET_BOLD}'
             '\nTo see logs of load balancer:\t'
-            f'{backend_utils.BOLD}sky serve logs --load-balancer {sn}'
+            f'{backend_utils.BOLD}sky serve logs --load-balancer {service_name}'
             f'{backend_utils.RESET_BOLD}'
             '\nTo see logs of controller:\t'
-            f'{backend_utils.BOLD}sky serve logs --controller {sn}'
+            f'{backend_utils.BOLD}sky serve logs --controller {service_name}'
             f'{backend_utils.RESET_BOLD}'
             '\n'
             '\nTo monitor replica status:\t'
-            f'{backend_utils.BOLD}watch -n10 sky serve status {sn}'
+            f'{backend_utils.BOLD}watch -n10 sky serve status {service_name}'
             f'{backend_utils.RESET_BOLD}'
             '\nTo send a test request:\t\t'
             f'{backend_utils.BOLD}curl -L {endpoint}'

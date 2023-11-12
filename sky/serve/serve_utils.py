@@ -25,6 +25,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
@@ -356,20 +357,32 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
     cnt = 0
     while True:
         record = serve_state.get_service_from_name(service_name)
-        if record is None:
-            continue
-        if job_id != record['controller_job_id']:
-            return common_utils.encode_payload(None)
-        lb_port = record['load_balancer_port']
-        if lb_port is not None:
-            return common_utils.encode_payload(lb_port)
+        if record is not None:
+            if job_id != record['controller_job_id']:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The service {service_name!r} is already running. '
+                        'Please specify a different name for your service. '
+                        'To update an existing service, run: `sky serve down` '
+                        'and then `sky serve up` again (in-place update will '
+                        'be supported in the future).')
+            lb_port = record['load_balancer_port']
+            if lb_port is not None:
+                return common_utils.encode_payload(lb_port)
+        elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Max number of services reached. '
+                                   'To spin up more services, please '
+                                   'tear down some existing services.')
         time.sleep(1)
         cnt += 1
         if cnt > constants.INITIALIZATION_TIMEOUT_SECONDS:
-            raise ValueError(f'Failed to initialize service {service_name!r}.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Initialization of service {service_name!r} timeout.')
 
 
-def load_service_initialization_result(payload: str) -> Optional[int]:
+def load_service_initialization_result(payload: str) -> int:
     return common_utils.decode_payload(payload)
 
 

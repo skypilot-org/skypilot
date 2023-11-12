@@ -108,9 +108,9 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.STARTING: colorama.Fore.CYAN,
     ReplicaStatus.READY: colorama.Fore.GREEN,
     ReplicaStatus.NOT_READY: colorama.Fore.YELLOW,
-    ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
+    ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
     ReplicaStatus.PREEMPTED: colorama.Fore.MAGENTA,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
@@ -140,9 +140,6 @@ class ServiceStatus(enum.Enum):
 
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
-
-    # Max service number is reached and the service is pending
-    PENDING = 'PENDING'
 
     @classmethod
     def failed_statuses(cls) -> List['ServiceStatus']:
@@ -175,7 +172,6 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.CONTROLLER_FAILED: colorama.Fore.RED,
     ServiceStatus.READY: colorama.Fore.GREEN,
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
-    ServiceStatus.PENDING: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
 }

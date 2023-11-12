@@ -4339,6 +4339,10 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
 
       - User code failed.
 
+    - ``FAILED_CLEANUP``: Some error occurred while the service was being shut
+      down. This usually indicates resource leakages. If you see such status,
+      please login to the cloud console and double-check
+
     Each replica can have one of the following statuses:
 
     - ``PENDING``: The maximum number of simultaneous launches has been reached
@@ -4371,6 +4375,10 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       down. This usually indicates resource leakages since the termination
       did not finish correctly. When seeing this status, please login to the
       cloud console and check whether there are some leaked VMs/resources.
+
+    - ``PREEMPTED``: The replica was preempted by the cloud provider and sky
+      serve is recovering this replica. This only happens when the replica is
+      a spot instance.
 
     Examples:
 

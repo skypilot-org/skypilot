@@ -507,12 +507,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             ).run,
             args=(self._task_yaml_path, cluster_name),
         )
-        # Don't start right now; we will start it later in _refresh_process_pool
-        # to avoid too many sky.launch running at the same time.
-        self._launch_process_pool[replica_id] = p
         replica_port = _get_resources_ports(self._task_yaml_path)
         info = ReplicaInfo(replica_id, cluster_name, replica_port)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
+        # Don't start right now; we will start it later in _refresh_process_pool
+        # to avoid too many sky.launch running at the same time.
+        self._launch_process_pool[replica_id] = p
 
     def scale_up(self, n: int) -> None:
         for _ in range(n):
@@ -576,17 +576,17 @@ class SkyPilotReplicaManager(ReplicaManager):
             ).run,
             args=(info.cluster_name,),
         )
-        p.start()
-        self._down_process_pool[replica_id] = p
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
+        p.start()
+        self._down_process_pool[replica_id] = p
 
     def scale_down(self, replica_ids: List[int]) -> None:
         for replica_id in replica_ids:
             self._terminate_replica(replica_id, sync_down_logs=False)
 
     def _handle_preemption(self, replica_id: int) -> None:
-        logger.info(f'Beginning recovery for preempted replica {replica_id}.')
+        logger.info(f'Beginning handle for preempted replica {replica_id}.')
         # TODO(MaoZiming): Support spot recovery policies
         info = serve_state.get_replica_info_from_id(self._service_name,
                                                     replica_id)

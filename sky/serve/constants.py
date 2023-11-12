@@ -40,26 +40,17 @@ AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
 # scale up/down is within this cooldown time.
 AUTOSCALER_COOLDOWN_SECONDS = 60
 
-# The default controller resources.
-# We need 200 GB disk space to enable using Azure as controller, since its image
-# size is 150 GB. Also, we need 32 GB memory to run our controller and load
-# balancer jobs since it is very memory demanding.
+# The default controller resources. We need 200 GB disk space to enable using
+# Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
-CONTROLLER_RESOURCES = {'disk_size': 200, 'memory': '32+'}
+CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
-# Our ray jobs is very memory demanding and number of services on a single
-# controller is limited by memory. Rough benchmark result shows each service
-# needs ~0.6 GB to run only for controller and load balancer process.
-# Considering there will be some sky launch and sky down process on the fly, we
-# set the memory usage to 1 GB to be safe.
-# In this setup, a default highmem controller with 4 vCPU and 32 GB memory can
-# run 32 services.
-# TODO(tian): Since now we only have one job, we set this to 1 GB. Should do
-# some benchmark to make sure this is safe.
+# A default controller with 4 vCPU and 16 GB memory can run up to 16 services.
+# TODO(tian): Stress test for 16 services on default controller resources.
 SERVICES_MEMORY_USAGE_GB = 1.0
-SERVICES_TASK_CPU_DEMAND = 0.125
+SERVICES_TASK_CPU_DEMAND = 0.25
 
 # A period of time to initialize your service. Any readiness probe failures
 # during this period will be ignored.

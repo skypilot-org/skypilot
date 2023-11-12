@@ -136,17 +136,17 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     if isinstance(config, dict):
         resources_config = config.get('resources')
     requested_resources = resources.Resources.from_yaml_config(resources_config)
-    status = serve_state.ServiceStatus.CONTROLLER_INIT
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
-        # TODO(tian): Probably we should raise an error and not pending here.
-        # This busy loop is also a ray job and will take a lot of memory.
-        status = serve_state.ServiceStatus.PENDING
-    success = serve_state.add_service(service_name,
-                                      controller_job_id=job_id,
-                                      policy=service_spec.policy_str(),
-                                      auto_restart=service_spec.auto_restart,
-                                      requested_resources=requested_resources,
-                                      status=status)
+        _cleanup_storage(tmp_task_yaml)
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Max number of services reached.')
+    success = serve_state.add_service(
+        service_name,
+        controller_job_id=job_id,
+        policy=service_spec.policy_str(),
+        auto_restart=service_spec.auto_restart,
+        requested_resources=requested_resources,
+        status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/execution.py::serve_up
     # for more details.
     if not success:
@@ -175,17 +175,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     controller_process = None
     load_balancer_process = None
     try:
-        # Wait until there is a service slot available.
-        while True:
-            _handle_signal(service_name)
-            # Use <= here since we already add this service to database.
-            if (len(serve_state.get_services()) <=
-                    serve_utils.NUM_SERVICE_THRESHOLD):
-                serve_state.set_service_status(
-                    service_name, serve_state.ServiceStatus.CONTROLLER_INIT)
-                break
-            time.sleep(1)
-
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
             controller_port = common_utils.find_free_port(
