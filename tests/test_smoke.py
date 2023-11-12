@@ -3545,6 +3545,7 @@ class TestYamlSpecs:
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
         # d1 <= d2
+        print(origin_task_config, new_task_config)
         self._is_dict_subset(origin_task_config, new_task_config)
 
     def test_load_dump_yaml_config_equivalent(self):

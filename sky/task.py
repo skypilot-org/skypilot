@@ -1034,7 +1034,7 @@ class Task:
         add_if_not_none('name', self.name)
 
         tmp_resource_config = {}
-        if isinstance(self.resources, (list, set)):
+        if len(self.resources) > 1:
             resource_list = []
             for r in self.resources:
                 resource_list.append(r.to_yaml_config())
