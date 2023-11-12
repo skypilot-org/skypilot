@@ -664,8 +664,6 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
-
-        del region  # unused
         style = colorama.Style
         assert zones and len(zones) == 1, zones
         zone = zones[0]
@@ -673,7 +671,12 @@ class RetryingVmProvisioner(object):
         exception_list = [s for s in splits if s.startswith('Exception: ')]
         httperror_str = [
             s for s in splits
-            if s.startswith('googleapiclient.errors.HttpError: ')
+            # GCP API errors
+            if s.startswith('googleapiclient.errors.HttpError: ') or
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': skypilot's changes to the
+            # underlying provisioner provider; for errors prior to provisioning
+            # like VPC setup.
+            'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' in s
         ]
         if len(exception_list) == 1:
             # Parse structured response {'errors': [...]}.
@@ -756,9 +759,21 @@ class RetryingVmProvisioner(object):
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
-            logger.info(f'Got {httperror_str[0]}')
-            if ('Requested disk size cannot be smaller than the image size'
-                    in httperror_str[0]):
+            messages = '\n\t'.join(httperror_str)
+            logger.warning(
+                f'Got error(s):\n\t{style.DIM}{messages}{style.RESET_ALL}')
+            if ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No VPC with name '
+                    in stderr):
+                # User has specified a VPC that does not exist. On GCP, VPC is
+                # global. So we skip the entire cloud.
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+            elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
+                  in stderr):
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=region.name, zone=None))
+            elif ('Requested disk size cannot be smaller than the image size'
+                  in httperror_str[0]):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
@@ -773,7 +788,6 @@ class RetryingVmProvisioner(object):
                     f'Details: {httperror_str[0]}')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
-
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
@@ -4383,10 +4397,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The cluster is recently terminated either by autostop or manually
             # terminated on the cloud. We should use the previously terminated
             # resources to provision the cluster.
+            #
+            # FIXME(zongheng): this assert can be hit by using two terminals.
+            # First, create a 'dbg' cluster. Then:
+            #   Terminal 1: sky down dbg -y
+            #   Terminal 2: sky launch -c dbg -- echo
+            # Run it in order. Terminal 2 will show this error after terminal 1
+            # succeeds in downing the cluster and releasing the lock.
             assert isinstance(
                 handle_before_refresh, CloudVmRayResourceHandle), (
                     f'Trying to launch cluster {cluster_name!r} recently '
-                    'terminated  on the cloud, but the handle is not a '
+                    'terminated on the cloud, but the handle is not a '
                     f'CloudVmRayResourceHandle ({handle_before_refresh}).')
             status_before_refresh_str = None
             if status_before_refresh is not None:
