@@ -257,17 +257,6 @@ class KubernetesNodeProvider(NodeProvider):
                         all_pods_scheduled = False
                         break
 
-                    for container_status in pod.status.container_statuses:
-                        # If the container wasn't in 'ContainerCreating'
-                        # state, then we know pod wasn't scheduled or
-                        # had some other error, such as image pull error.
-                        # See list of possible reasons for waiting here:
-                        # https://stackoverflow.com/a/57886025
-                        waiting = container_status.state.waiting
-                        if waiting is not None and waiting.reason != 'ContainerCreating':
-                            all_pods_scheduled = False
-                            break
-
             if all_pods_scheduled:
                 return
             time.sleep(1)
@@ -308,18 +297,16 @@ class KubernetesNodeProvider(NodeProvider):
                 if pod.status.phase == 'Pending':
                     # Iterate over each container in pod to check their status
                     for container_status in pod.status.container_statuses:
+                        # If the container wasn't in 'ContainerCreating'
+                        # state, then we know pod wasn't scheduled or
+                        # had some other error, such as image pull error.
+                        # See list of possible reasons for waiting here:
+                        # https://stackoverflow.com/a/57886025
                         waiting = container_status.state.waiting
-                        if waiting and (
-                                waiting.reason == 'ErrImagePull' or
-                                waiting.reason == 'ImagePullBackOff' or
-                                waiting.reason == 'CrashLoopBackOff' or
-                                waiting.reason == 'CreateContainerConfigError'
-                                or waiting.reason == 'InvalidImageName' or
-                                waiting.reason == 'CreateContainerError'):
+                        if waiting is not None and waiting.reason != 'ContainerCreating':
                             raise config.KubernetesError(
-                                'Failed to pull container image while '
-                                'launching the node. Please check '
-                                'your network connection. Error details: '
+                                'Failed to create container while launcing '
+                                'the node. Error details: '
                                 f'{container_status.state.waiting.message}.')
                 # Reaching this point means that one of the pods had an issue,
                 # so break out of the loop
