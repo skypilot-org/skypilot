@@ -824,7 +824,7 @@ def test_aws_storage_mounts():
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -851,7 +851,7 @@ def test_gcp_storage_mounts():
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -881,7 +881,7 @@ def test_kubernetes_storage_mounts():
         test = Test(
             'kubernetes_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -910,7 +910,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         test = Test(
             'cloudflare_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -939,7 +939,7 @@ def test_ibm_storage_mounts():
         test = Test(
             'ibm_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -971,7 +971,7 @@ def test_aws_storage_mounts_with_stop():
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1003,7 +1003,7 @@ def test_gcp_storage_mounts_with_stop():
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1038,7 +1038,7 @@ def test_kubernetes_storage_mounts_with_stop():
         test = Test(
             'kubernetes_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
