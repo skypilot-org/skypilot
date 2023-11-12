@@ -3566,7 +3566,7 @@ def test_multiple_accelerators_ordered():
     test = Test(
         'multiple-accelerators-ordered',
         [
-            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "is using user-specified accelerators list"',
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
