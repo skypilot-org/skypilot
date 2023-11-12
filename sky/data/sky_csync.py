@@ -147,7 +147,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         thread_configure_cmd = (
             'aws configure set default.s3.max_concurrent_requests '
             '{num_threads}')
-        user_configured_thread_cmd = build_command(
+        user_configured_thread_cmd = (
             thread_configure_cmd.format(num_threads=num_threads))
 
         # Construct the main sync command
@@ -156,13 +156,13 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
             base_sync_cmd.append('--delete')
         if no_follow_symlinks:
             base_sync_cmd.append('--no-follow-symlinks')
-        main_sync_cmd = build_command(*base_sync_cmd)
+        main_sync_cmd = ' '.join(base_sync_cmd)
 
         # Reset the number of threads back to its default value after the sync
-        reset_thread_cmd = build_command(
+        reset_thread_cmd = (
             thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
 
-        full_cmd = ' '.join(
+        full_cmd = '; '.join(
             [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])
 
     elif storetype == 'gcs':
@@ -177,7 +177,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
             base_sync_cmd.append('-e')
 
         base_sync_cmd.extend([source, f'gs://{destination}'])
-        full_cmd = build_command(*base_sync_cmd)
+        full_cmd = ' '.join(base_sync_cmd)
     else:
         raise ValueError(f'Unsupported store type: {storetype}')
 
