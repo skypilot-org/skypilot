@@ -222,8 +222,10 @@ class KubernetesNodeProvider(NodeProvider):
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
                                 #  case we will need to update this logic.
-                                if 'Insufficient nvidia.com/gpu' in event_message or \
-                                    'didn\'t match Pod\'s node affinity/selector' in event_message:
+                                if ('Insufficient nvidia.com/gpu'
+                                        in event_message or
+                                        'didn\'t match Pod\'s node affinity/selector'
+                                        in event_message):
                                     raise config.KubernetesError(
                                         f'{lack_resource_msg.format(resource="GPU")} '
                                         f'Verify if {pod.spec.node_selector[label_key]}'
@@ -236,7 +238,7 @@ class KubernetesNodeProvider(NodeProvider):
     def _wait_for_pods_to_schedule(self, new_nodes):
         """Wait for all pods to be scheduled.
         
-        Wait for all pods including jump pod to be ready, and if it
+        Wait for all pods including jump pod to be scheduled, and if it
         exceeds the timeout, raise an exception. If pod's container
         is ContainerCreating, then we can assume that resources have been
         allocated and we can exit.
@@ -296,9 +298,10 @@ class KubernetesNodeProvider(NodeProvider):
 
                 # Continue if pod and all the containers within the
                 # pod are succesfully created and running.
-                if pod.status.phase == 'Running' \
-                    and all([container.state.running
-                             for container in pod.status.container_statuses]):
+                if pod.status.phase == 'Running' and all([
+                        container.state.running
+                        for container in pod.status.container_statuses
+                ]):
                     continue
 
                 all_pods_running = False
@@ -306,14 +309,19 @@ class KubernetesNodeProvider(NodeProvider):
                     # Iterate over each container in pod to check their status
                     for container_status in pod.status.container_statuses:
                         waiting = container_status.state.waiting
-                        if waiting and (waiting.reason == 'ErrImagePull' or
-                                        waiting.reason == 'ImagePullBackOff'):
+                        if waiting and (
+                                waiting.reason == 'ErrImagePull' or
+                                waiting.reason == 'ImagePullBackOff' or
+                                waiting.reason == 'CrashLoopBackOff' or
+                                waiting.reason == 'CreateContainerConfigError'
+                                or waiting.reason == 'InvalidImageName' or
+                                waiting.reason == 'CreateContainerError'):
                             raise config.KubernetesError(
                                 'Failed to pull container image while '
                                 'launching the node. Please check '
                                 'your network connection. Error details: '
                                 f'{container_status.state.waiting.message}.')
-                # If we reached here, one of the pods had an issue,
+                # Reaching this point means that one of the pods had an issue,
                 # so break out of the loop
                 break
 
