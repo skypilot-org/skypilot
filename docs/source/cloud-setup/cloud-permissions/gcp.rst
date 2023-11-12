@@ -222,10 +222,7 @@ However, if you manually set up and instruct SkyPilot to use a VPC (see
     {
         "direction": "INGRESS",
         "allowed": [
-            {
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }
+            {"IPProtocol": "tcp", "ports": ["22"]},
         ],
         "sourceRanges": ["0.0.0.0/0"],
     },
