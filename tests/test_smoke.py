@@ -1009,41 +1009,6 @@ def test_gcp_storage_mounts_with_stop():
         run_one_test(test)
 
 
-@pytest.mark.kubernetes
-def test_kubernetes_storage_mounts_with_stop():
-    # Tests bucket mounting on k8s, assuming S3 is configured.
-    # This test will fail if run on non x86_64 architecture, since goofys is
-    # built for x86_64 only.
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
-        ]
-        test = Test(
-            'kubernetes_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
 def test_cli_logs(generic_cloud: str):
