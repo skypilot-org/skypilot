@@ -1,0 +1,18 @@
+name: multi-resources
+
+resources:
+  ordered:
+    - cloud: AWS
+      accelerators: A10g
+    - cloud: GCP
+      accelerators: L4
+
+# resources:
+#   any_of:
+    # - cloud: AWS
+    #   accelerators: A10g
+    # - cloud: GCP
+    #   accelerators: L4
+
+run: |
+  nvidia-smi
