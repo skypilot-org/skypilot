@@ -829,7 +829,7 @@ class Storage(object):
         if not isinstance(source, list):
             if data_utils.is_cloud_store_url(source):
                 name = None
-        
+
         mode = StorageMode.MOUNT
         if hasattr(metadata, 'mode'):
             if metadata.mode:

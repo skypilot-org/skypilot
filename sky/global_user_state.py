@@ -572,7 +572,6 @@ def get_cluster_from_name(
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
-            'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),
@@ -600,7 +599,6 @@ def get_clusters() -> List[Dict[str, Any]]:
             'to_down': bool(to_down),
             'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
-            'storage_mounts_metadata': pickle.loads(storage_mounts_metadata),
             'cluster_hash': cluster_hash,
             'storage_mounts_metadata':
                 _load_storage_mounts_metadata(storage_mounts_metadata),

@@ -131,11 +131,6 @@ def main():
     pass
 
 
-def build_command(*args) -> str:
-    """Helper function to construct a command with a terminating semicolon."""
-    return ' '.join(args) + ' ;'
-
-
 def get_upload_cmd(storetype: str, source: str, destination: str,
                    num_threads: int, delete: bool,
                    no_follow_symlinks: bool) -> str:
@@ -147,8 +142,8 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         thread_configure_cmd = (
             'aws configure set default.s3.max_concurrent_requests '
             '{num_threads}')
-        user_configured_thread_cmd = (
-            thread_configure_cmd.format(num_threads=num_threads))
+        user_configured_thread_cmd = thread_configure_cmd.format(
+            num_threads=num_threads)
 
         # Construct the main sync command
         base_sync_cmd = ['aws', 's3', 'sync', source, f's3://{destination}']
@@ -159,8 +154,8 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         main_sync_cmd = ' '.join(base_sync_cmd)
 
         # Reset the number of threads back to its default value after the sync
-        reset_thread_cmd = (
-            thread_configure_cmd.format(num_threads=_DEFAULT_S3_NUM_THREAD))
+        reset_thread_cmd = thread_configure_cmd.format(
+            num_threads=_DEFAULT_S3_NUM_THREAD)
 
         full_cmd = '; '.join(
             [user_configured_thread_cmd, main_sync_cmd, reset_thread_cmd])

@@ -2866,8 +2866,7 @@ def wait_and_terminate_csync(cluster_name: str) -> None:
     record = global_user_state.get_cluster_from_name(cluster_name)
     assert record is not None, cluster_name
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayResourceHandle):
-        return
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
     try:
         ip_list = handle.external_ips()
     # When cluster is in INIT status, attempt to fetch IP fails raising an error
