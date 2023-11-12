@@ -585,7 +585,7 @@ class Storage(object):
         Returns:
           Tuple[source, is_local_source]
           source: str; The source path.
-          is_local_path: bool; Whether the source is a local path.
+          is_local_source: bool; Whether the source is a local path.
             False if URI.
         """
 
@@ -1070,9 +1070,6 @@ class Storage(object):
         if self.force_delete:
             config['_force_delete'] = True
         return config
-
-    def get_storage_name(self):
-        return self.name
 
 
 class S3Store(AbstractStore):
