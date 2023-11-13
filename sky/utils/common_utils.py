@@ -20,7 +20,6 @@ import colorama
 import jsonschema
 import yaml
 
-from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
