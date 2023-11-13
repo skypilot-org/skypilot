@@ -1018,8 +1018,8 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # AWS only:
-                'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                       None),
+                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
+                                                           None),
                 'use_internal_ips': skypilot_config.get_nested(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
@@ -1033,6 +1033,8 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
+                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
+                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1121,10 +1123,21 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
 
+        # We do not import the module under sky.skylet.providers globally as we
+        # need to avoid importing ray module (extras like skypilot[aws] has
+        # removed the Ray dependency).
         # pylint: disable=import-outside-toplevel
         from sky.skylet.providers.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = gcp_config.get_usable_vpc(config)
+        vpc_name = None
+        try:
+            vpc_name = gcp_config.get_usable_vpc(config)
+        except RuntimeError as e:
+            # Launching a TPU and encountering a bootstrap-phase error, no point
+            # in failover unless:
+            # TODO(zongheng): handle failover when multi-resource is added.
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
         scripts = []
         for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
@@ -1949,43 +1962,66 @@ def check_can_clone_disk_and_override_task(
                     'disk is only supported when creating a new cluster. To fix: specify '
                     'a new target cluster name.')
 
-    assert len(task.resources) == 1, task.resources
-    task_resources = list(task.resources)[0]
-    if handle.launched_resources.disk_size > task_resources.disk_size:
-        # The target cluster's disk should be at least as large as the source.
-        with ux_utils.print_exception_no_traceback():
-            target_cluster_name_str = f' {target_cluster_name!r}'
-            if target_cluster_name is None:
-                target_cluster_name_str = ''
-            raise exceptions.NotSupportedError(
-                f'The target cluster{target_cluster_name_str} should have a disk size '
-                f'of at least {handle.launched_resources.disk_size} GB to clone the '
-                f'disk from {cluster_name!r}.')
-    override_param = {}
+    new_task_resources = []
     original_cloud = handle.launched_resources.cloud
-    assert original_cloud is not None, handle.launched_resources
-    if task_resources.cloud is None:
-        override_param['cloud'] = original_cloud
-    else:
-        if not original_cloud.is_same_cloud(task_resources.cloud):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources.cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    if task_resources.region is None:
-        override_param['region'] = handle.launched_resources.region
+    assert original_cloud is not None, handle.launched_resources
+    has_override = False
+    has_disk_size_met = False
+    has_cloud_met = False
+    for task_resources in task.resources:
+        if handle.launched_resources.disk_size > task_resources.disk_size:
+            # The target cluster's disk should be at least as large as the source.
+            continue
+        has_disk_size_met = True
+        if task_resources.cloud is not None and not original_cloud.is_same_cloud(
+                task_resources.cloud):
+            continue
+        has_cloud_met = True
 
-    if override_param:
-        logger.info(
-            f'No cloud/region specified for the task. Using the same region '
-            f'as source cluster {cluster_name!r}: '
-            f'{handle.launched_resources.cloud}'
-            f'({handle.launched_resources.region}).')
+        override_param = {}
+        if task_resources.cloud is None:
+            override_param['cloud'] = original_cloud
+        if task_resources.region is None:
+            override_param['region'] = handle.launched_resources.region
+
+        if override_param:
+            logger.info(
+                f'No cloud/region specified for the task {task_resources}. Using the same region '
+                f'as source cluster {cluster_name!r}: '
+                f'{handle.launched_resources.cloud}'
+                f'({handle.launched_resources.region}).')
+            has_override = True
         task_resources = task_resources.copy(**override_param)
-        task.set_resources({task_resources})
+        new_task_resources.append(task_resources)
+
+    if not new_task_resources:
+        if not has_disk_size_met:
+            with ux_utils.print_exception_no_traceback():
+                target_cluster_name_str = f' {target_cluster_name!r}'
+                if target_cluster_name is None:
+                    target_cluster_name_str = ''
+                raise exceptions.NotSupportedError(
+                    f'The target cluster{target_cluster_name_str} should have a disk size '
+                    f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                    f'disk from {cluster_name!r}.')
+        if not has_cloud_met:
+            task_resources_cloud_str = '[' + ','.join(
+                [f'{res.cloud}' for res in task.resources]) + ']'
+            task_resources_str = '[' + ','.join(
+                [f'{res}' for res in task.resources]) + ']'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot clone disk across cloud from {original_cloud} to '
+                    f'{task_resources_cloud_str} for resources {task_resources_str}.'
+                )
+        assert False, 'Should not reach here.'
+    # set the new_task_resources to be the same type (list or set) as the
+    # original task.resources
+    if has_override:
+        task.set_resources(type(task.resources)(new_task_resources))
         # Reset the best_resources to triger re-optimization
         # later, so that the new task_resources will be used.
         task.best_resources = None
@@ -2796,10 +2832,34 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     The resources string is only used as a display purpose, so we only show
     the accelerator demands (if any). Otherwise, the CPU demand is shown.
     """
-    resources_dict = get_task_demands_dict(task)
-    if len(resources_dict) > 1:
-        resources_dict.pop('CPU')
-    resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
+                       is not None else DEFAULT_TASK_CPU_DEMAND)
+    if task.best_resources is not None:
+        accelerator_dict = task.best_resources.accelerators
+        if accelerator_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in accelerator_dict.items())
+    elif len(task.resources) == 1:
+        resources_dict = list(task.resources)[0].accelerators
+        if resources_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in resources_dict.items())
+    else:
+        resource_accelerators = []
+        for resource in task.resources:
+            if resource.accelerators is None:
+                continue
+            for k, v in resource.accelerators.items():
+                resource_accelerators.append(f'{k}:{v}')
+
+        if resource_accelerators:
+            resources_str = ', '.join(set(resource_accelerators))
+        else:
+            resources_str = f'CPU:{task_cpu_demand}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
 

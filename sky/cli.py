@@ -1136,11 +1136,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if spot_recovery is not None:
         override_params['spot_recovery'] = spot_recovery
 
-    assert len(task.resources) == 1
-    old_resources = list(task.resources)[0]
-    new_resources = old_resources.copy(**override_params)
-
-    task.set_resources({new_resources})
+    task.set_resources_override(override_params)
 
     if num_nodes is not None:
         task.num_nodes = num_nodes
@@ -1148,11 +1144,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         task.name = name
     task.update_envs(env)
     # TODO(wei-lin): move this validation into Python API.
-    if new_resources.accelerators is not None:
-        acc, _ = list(new_resources.accelerators.items())[0]
-        if acc.startswith('tpu-') and task.num_nodes > 1:
-            raise ValueError('Multi-node TPU cluster is not supported. '
-                             f'Got num_nodes={task.num_nodes}.')
+    for resource in task.resources:
+        if resource.accelerators is not None:
+            acc, _ = list(resource.accelerators.items())[0]
+            if acc.startswith('tpu-') and task.num_nodes > 1:
+                raise ValueError('Multi-node TPU cluster is not supported. '
+                                 f'Got num_nodes={task.num_nodes}.')
     return task
 
 
@@ -3922,10 +3919,10 @@ def spot_launch(
         # cluster name against the regex, and the cloud-specific validation will
         # be done by the spot controller when actually launching the spot
         # cluster.
-        resources = list(task.resources)[0]
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
-        task_cloud.check_cluster_name_is_valid(name)
+        for resources in task.resources:
+            task_cloud = (resources.cloud
+                          if resources.cloud is not None else clouds.Cloud)
+            task_cloud.check_cluster_name_is_valid(name)
 
     sky.spot_launch(dag,
                     name,

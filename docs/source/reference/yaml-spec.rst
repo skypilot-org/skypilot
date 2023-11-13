@@ -43,8 +43,16 @@ Available fields:
       # Accelerator name and count per node (optional).
       #
       # Use `sky show-gpus` to view available accelerator configurations.
-      #
-      # Format: <name>:<count> (or simply <name>, short for a count of 1).
+      # The following three ways are valid for specifying accelerators for a cluster:
+      #   To specify a single accelerator:
+      #     Format: <name>:<count> (or simply <name>, short for a count of 1).
+      #     accelerators: V100:4
+      #   To specify a ordered list of accelerators: Try the accelerators in the specified order.
+      #     Format: [<name>:<count>, ...]
+      #     accelerators: ['K80:1', 'V100:1', 'T4:1']
+      #   To specify an unordered set of accelerators: Optimize all specified accelerators together, and try accelerator with lowest cost first.
+      #     Format: {<name>:<count>, ...}
+      #     accelerators: {'K80:1', 'V100:1', 'T4:1'}
       accelerators: V100:4
 
       # Number of vCPUs per node (optional).

@@ -71,6 +71,16 @@ HAS_TPU_PROVIDER_FIELD = "_has_tpus"
 # with ServiceAccounts.
 
 
+def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
+    """Logs an message then raises a specific RuntimeError to trigger failover.
+
+    Mainly used for handling VPC/subnet errors before nodes are launched.
+    """
+    # NOTE: keep. The backend looks for this to know no nodes are launched.
+    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+    raise RuntimeError(prefix + error)
+
+
 def get_node_type(node: dict) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
 
@@ -753,28 +763,56 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
         wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
 
 
-def get_usable_vpc(config):
+def get_usable_vpc(config) -> str:
     """Return a usable VPC.
 
+    If config['provider']['vpc_name'] is set, return the VPC with the name
+    (errors out if not found). When this field is set, no firewall rules
+    checking or overrides will take place; it is the user's responsibility to
+    properly set up the VPC.
+
     If not found, create a new one with sufficient firewall rules.
+
+    Raises:
+      RuntimeError: if the user has specified a VPC name but the VPC is not found.
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
+    specific_vpc_to_use = config["provider"].get("vpc_name", None)
+    if specific_vpc_to_use is None:
+        # For backward compatibility, reuse the VPC if the VM is launched.
+        resource = GCPCompute(
+            compute,
+            config["provider"]["project_id"],
+            config["provider"]["availability_zone"],
+            config["cluster_name"],
+        )
+        node = resource._list_instances(label_filters=None, status_filter=None)
+        if len(node) > 0:
+            netInterfaces = node[0].get("networkInterfaces", [])
+            if len(netInterfaces) > 0:
+                vpc_name = netInterfaces[0]["network"].split("/")[-1]
+                return vpc_name
 
-    # For backward compatibility, reuse the VPC if the VM is launched.
-    resource = GCPCompute(
-        compute,
-        config["provider"]["project_id"],
-        config["provider"]["availability_zone"],
-        config["cluster_name"],
-    )
-    node = resource._list_instances(label_filters=None, status_filter=None)
-    if len(node) > 0:
-        netInterfaces = node[0].get("networkInterfaces", [])
-        if len(netInterfaces) > 0:
-            vpc_name = netInterfaces[0]["network"].split("/")[-1]
-            return vpc_name
-
-    vpcnets_all = _list_vpcnets(config, compute)
+        vpcnets_all = _list_vpcnets(config, compute)
+    else:
+        vpcnets_all = _list_vpcnets(
+            config, compute, filter=f"name={specific_vpc_to_use}"
+        )
+        # On GCP, VPC names are unique, so it'd be 0 or 1 VPC found.
+        assert (
+            len(vpcnets_all) <= 1
+        ), f"{len(vpcnets_all)} VPCs found with the same name {specific_vpc_to_use}"
+        if len(vpcnets_all) == 1:
+            # Skip checking any firewall rules if the user has specified a VPC.
+            logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
+            return specific_vpc_to_use
+        else:
+            # VPC with this name not found. Error out and let SkyPilot failover.
+            _skypilot_log_error_and_exit_for_failover(
+                f"No VPC with name {specific_vpc_to_use!r} is found. "
+                "To fix: specify a correct VPC name."
+            )
+            # Should not reach here.
 
     usable_vpc_name = None
     for vpc in vpcnets_all:
@@ -827,6 +865,14 @@ def _configure_subnet(config, compute):
     # SkyPilot: make sure there's a usable VPC
     usable_vpc_name = get_usable_vpc(config)
     subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
+    if not subnets:
+        # This can happen when e.g., region A is specified but the VPC has no
+        # subnet in region A.
+        _skypilot_log_error_and_exit_for_failover(
+            f"No subnet for region {config['provider']['region']} found (VPC {usable_vpc_name!r}). "
+            f"Check the subnets of VPC {usable_vpc_name!r} at https://console.cloud.google.com/networking/networks"
+        )
+
     default_subnet = subnets[0]
 
     default_interfaces = [

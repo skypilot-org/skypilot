@@ -667,8 +667,6 @@ class RetryingVmProvisioner(object):
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
             stdout: str, stderr: str):
-
-        del region  # unused
         style = colorama.Style
         assert zones and len(zones) == 1, zones
         zone = zones[0]
@@ -676,7 +674,12 @@ class RetryingVmProvisioner(object):
         exception_list = [s for s in splits if s.startswith('Exception: ')]
         httperror_str = [
             s for s in splits
-            if s.startswith('googleapiclient.errors.HttpError: ')
+            # GCP API errors
+            if s.startswith('googleapiclient.errors.HttpError: ') or
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': skypilot's changes to the
+            # underlying provisioner provider; for errors prior to provisioning
+            # like VPC setup.
+            'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' in s
         ]
         if len(exception_list) == 1:
             # Parse structured response {'errors': [...]}.
@@ -759,9 +762,21 @@ class RetryingVmProvisioner(object):
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
-            logger.info(f'Got {httperror_str[0]}')
-            if ('Requested disk size cannot be smaller than the image size'
-                    in httperror_str[0]):
+            messages = '\n\t'.join(httperror_str)
+            logger.warning(
+                f'Got error(s):\n\t{style.DIM}{messages}{style.RESET_ALL}')
+            if ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No VPC with name '
+                    in stderr):
+                # User has specified a VPC that does not exist. On GCP, VPC is
+                # global. So we skip the entire cloud.
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+            elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
+                  in stderr):
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=region.name, zone=None))
+            elif ('Requested disk size cannot be smaller than the image size'
+                  in httperror_str[0]):
                 logger.info('Skipping all regions due to disk size issue.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
@@ -772,11 +787,10 @@ class RetryingVmProvisioner(object):
                     'having the required permissions and the user '
                     'account does not have enough permission to '
                     'update it. Please contact your administrator and '
-                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp\n'  # pylint: disable=line-too-long
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
                     f'Details: {httperror_str[0]}')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
-
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
@@ -2188,7 +2202,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_zones(
                     to_provision,
                     num_nodes,
-                    requested_resources=task.resources,
+                    requested_resources=set(task.resources),
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -2695,21 +2709,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         handle: CloudVmRayResourceHandle,
         task: task_lib.Task,
         check_ports: bool = False,
-    ):
+    ) -> resources_lib.Resources:
         """Check if resources requested by the task fit the cluster.
 
         The resources requested by the task should be smaller than the existing
         cluster.
+        If multiple resources are specified, this checking will pass when
+        at least one resource fits the cluster.
 
         Raises:
             exceptions.ResourcesMismatchError: If the resources in the task
                 does not match the existing cluster.
         """
-        assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources
-        task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
+
+        # Usage Collection:
         usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
         record = global_user_state.get_cluster_from_name(cluster_name)
@@ -2728,40 +2744,55 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 launched_resources)
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
-        # Requested_resources <= actual_resources.
-        # Special handling for local cloud case, which assumes a cluster can
-        # be heterogeneous. Here, launched_resources is a list of custom
-        # accelerators per node, and Resources.less_demanding_than determines
-        # how many nodes satisfy task resource requirements.
-        if not (task.num_nodes <= handle.launched_nodes and
-                task_resources.less_demanding_than(
-                    launched_resources,
-                    requested_num_nodes=task.num_nodes,
-                    check_ports=check_ports)):
-            if (task_resources.region is not None and
-                    task_resources.region != launched_resources.region):
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in region '
-                        f'{task_resources.region!r}, but the existing cluster '
-                        f'is in region {launched_resources.region!r}.')
-            if (task_resources.zone is not None and
-                    task_resources.zone != launched_resources.zone):
-                zone_str = (f'is in zone {launched_resources.zone!r}.'
-                            if launched_resources.zone is not None else
-                            'does not have zone specified.')
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        'Task requested resources in zone '
-                        f'{task_resources.zone!r}, but the existing cluster '
-                        f'{zone_str}')
+
+        valid_resource = None
+        requested_resource_list = []
+        for resource in task.resources:
+            if (task.num_nodes <= handle.launched_nodes and
+                    resource.less_demanding_than(
+                        launched_resources,
+                        requested_num_nodes=task.num_nodes,
+                        check_ports=check_ports)):
+                valid_resource = resource
+                break
+            else:
+                requested_resource_list.append(f'{task.num_nodes}x {resource}')
+
+        if valid_resource is None:
+            for example_resource in task.resources:
+                if (example_resource.region is not None and
+                        example_resource.region != launched_resources.region):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            f'Task requested resources {example_resource} in region '  # pylint: disable=line-too-long
+                            f'{example_resource.region!r}'
+                            ', but the existing cluster '
+                            f'is in region {launched_resources.region!r}.')
+                if (example_resource.zone is not None and
+                        example_resource.zone != launched_resources.zone):
+                    zone_str = (f'is in zone {launched_resources.zone!r}.'
+                                if launched_resources.zone is not None else
+                                'does not have zone specified.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesMismatchError(
+                            f'Task requested resources {example_resource} in zone '  # pylint: disable=line-too-long
+                            f'{example_resource.zone!r},'
+                            'but the existing cluster '
+                            f'{zone_str}')
+            requested_resource_str = ', '.join(requested_resource_list)
+            if isinstance(task.resources, list):
+                requested_resource_str = f'[{requested_resource_str}]'
+            elif isinstance(task.resources, set):
+                requested_resource_str = f'{{{requested_resource_str}}}'
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
-                    'Requested resources do not match the existing cluster.\n'
-                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                    'Requested resources do not match the existing '
+                    'cluster.\n'
+                    f'  Requested:\t{requested_resource_str}\n'
                     f'  Existing:\t{handle.launched_nodes}x '
                     f'{handle.launched_resources}\n'
                     f'{mismatch_str}')
+        return valid_resource
 
     def _provision(
             self,
@@ -3081,7 +3112,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             global_user_state.add_or_update_cluster(
                 handle.cluster_name,
                 handle,
-                task.resources,
+                set(task.resources),
                 ready=True,
             )
             usage_lib.messages.usage.update_final_cluster_status(
@@ -3489,23 +3520,31 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         # We need to check ports here since sky.exec shouldn't change resources
-        self.check_resources_fit_cluster(handle, task, check_ports=True)
-
-        resources_str = backend_utils.get_task_resources_str(task)
+        valid_resource = self.check_resources_fit_cluster(handle,
+                                                          task,
+                                                          check_ports=True)
+        task_copy = copy.copy(task)
+        # Handle multiple resources exec case.
+        task_copy.set_resources(valid_resource)
+        if len(task.resources) > 1:
+            logger.info('Multiple resources are specified'
+                        f'for the task, using: {valid_resource}')
+        task_copy.best_resources = None
+        resources_str = backend_utils.get_task_resources_str(task_copy)
 
         if dryrun:
             logger.info(f'Dryrun complete. Would have run:\n{task}')
             return None
 
-        job_id = self._add_job(handle, task.name, resources_str)
+        job_id = self._add_job(handle, task_copy.name, resources_str)
 
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if task.num_nodes > 1 or is_tpu_vm_pod:
-            self._execute_task_n_nodes(handle, task, job_id, detach_run)
+        if task_copy.num_nodes > 1 or is_tpu_vm_pod:
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task, job_id, detach_run)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
 
         return job_id
 
@@ -4371,7 +4410,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            assert len(task.resources) == 1
+            # Assume resources share the same ports.
+            for resource in task.resources:
+                assert resource.ports == list(task.resources)[0].ports
             all_ports = resources_utils.port_set_to_ranges(
                 resources_utils.port_ranges_to_set(
                     handle.launched_resources.ports) |
@@ -4387,22 +4428,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 prev_cluster_status=prev_cluster_status,
                 prev_handle=handle)
         usage_lib.messages.usage.set_new_cluster()
-        assert len(task.resources) == 1, task.resources
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        resources = list(task.resources)[0]
-        task_cloud = (resources.cloud
-                      if resources.cloud is not None else clouds.Cloud)
-        task_cloud.check_cluster_name_is_valid(cluster_name)
+        for resources in task.resources:
+            task_cloud = (resources.cloud
+                          if resources.cloud is not None else clouds.Cloud)
+            task_cloud.check_cluster_name_is_valid(cluster_name)
 
         if to_provision is None:
             # The cluster is recently terminated either by autostop or manually
             # terminated on the cloud. We should use the previously terminated
             # resources to provision the cluster.
+            #
+            # FIXME(zongheng): this assert can be hit by using two terminals.
+            # First, create a 'dbg' cluster. Then:
+            #   Terminal 1: sky down dbg -y
+            #   Terminal 2: sky launch -c dbg -- echo
+            # Run it in order. Terminal 2 will show this error after terminal 1
+            # succeeds in downing the cluster and releasing the lock.
             assert isinstance(
                 handle_before_refresh, CloudVmRayResourceHandle), (
                     f'Trying to launch cluster {cluster_name!r} recently '
-                    'terminated  on the cloud, but the handle is not a '
+                    'terminated on the cloud, but the handle is not a '
                     f'CloudVmRayResourceHandle ({handle_before_refresh}).')
             status_before_refresh_str = None
             if status_before_refresh is not None:
