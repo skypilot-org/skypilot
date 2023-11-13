@@ -731,7 +731,7 @@ class Storage(object):
             # Following error is raised from _get_bucket and caught only when
             # an externally removed storage is attempted to be fetched.
             except exceptions.StorageExternalDeletionError:
-                logger.debug(f'Storage object {self.name} was attempted to '
+                logger.debug(f'Storage object {self.name!r} was attempted to '
                              'be reconstructed while the corresponding bucket'
                              ' was externally deleted.')
                 continue
