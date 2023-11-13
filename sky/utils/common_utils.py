@@ -29,6 +29,10 @@ _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
+# Arbitrary letter to prepend to cloud cluster name if proposed cluster name does not start with a letter. Certain
+# clouds require a name that starts with a letter
+CLUSTER_NAME_PLACEHOLDER_PREFIX = "x"
+
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
 # possibilities. considering the final cluster name contains the prefix as well,
 # we should be fine with 2 chars.
@@ -116,7 +120,17 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def make_cluster_name_on_cloud(cluster_name: str,
+def adjust_cluster_name(cluster_name: str) -> str:
+    cleaned_cluster_name_arr = []
+    for ch in cluster_name:
+        if ch.isalnum() or ch == "-":
+            cleaned_cluster_name_arr.append(ch.lower())
+    if not cleaned_cluster_name_arr[0].isalpha():
+        cleaned_cluster_name_arr.insert(0, CLUSTER_NAME_PLACEHOLDER_PREFIX)
+    return "".join(cleaned_cluster_name_arr)
+
+
+def make_cluster_name_on_cloud(local_cluster_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
@@ -128,11 +142,12 @@ def make_cluster_name_on_cloud(cluster_name: str,
       2. Append the hash of the cluster name
 
     Args:
-        cluster_name: The cluster name to be truncated and hashed.
+        local_cluster_name: The cluster name to be truncated and hashed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
+    cluster_name = adjust_cluster_name(local_cluster_name)
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
