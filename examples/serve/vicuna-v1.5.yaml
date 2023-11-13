@@ -44,5 +44,5 @@ run: |
   echo 'Waiting for model worker to start...'
   while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
 
-  echo 'Starting openai api server server...'
+  echo 'Starting openai api server...'
   python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log
