@@ -128,3 +128,14 @@ def is_silent():
         # threads.
         _logging_config.is_silent = False
     return _logging_config.is_silent
+
+
+def reload_logger():
+    """Reload the logger.
+    This is useful when the logging configuration is changed.
+    e.g., the logging level is changed or stdout/stderr is reset.
+    """
+    global _default_handler
+    _root_logger.removeHandler(_default_handler)
+    _default_handler = None
+    _setup_logger()

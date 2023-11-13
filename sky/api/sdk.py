@@ -127,23 +127,24 @@ def launch(
 
     # TODO(zhwu): For all the file_mounts, we need to handle them properly
     # similarly to how we deal with it for spot_launch.
+    body = {
+        'task': dag_str,
+        'cluster_name': cluster_name,
+        'retry_until_up': retry_until_up,
+        'idle_minutes_to_autostop': idle_minutes_to_autostop,
+        'dryrun': dryrun,
+        'down': down,
+        'backend': backend.NAME if backend else None,
+        'optimize_target': optimize_target.value,
+        'detach_setup': detach_setup,
+        'detach_run': detach_run,
+        'no_setup': no_setup,
+        'clone_disk_from': clone_disk_from,
+        '_is_launched_by_spot_controller': _is_launched_by_spot_controller,
+    }
     response = requests.post(
         f'{_get_server_url()}/launch',
-        json={
-            'task': dag_str,
-            'cluster_name': cluster_name,
-            'retry_until_up': retry_until_up,
-            'idle_minutes_to_autostop': idle_minutes_to_autostop,
-            'dryrun': dryrun,
-            'down': down,
-            'backend': backend.NAME if backend else None,
-            'optimize_target': optimize_target,
-            'detach_setup': detach_setup,
-            'detach_run': detach_run,
-            'no_setup': no_setup,
-            'clone_disk_from': clone_disk_from,
-            '_is_launched_by_spot_controller': _is_launched_by_spot_controller,
-        },
+        json=body,
         timeout=5,
     )
     return response.headers['X-Request-ID']
@@ -159,8 +160,7 @@ def status(cluster_names: Optional[List[str]] = None,
                             json={
                                 'cluster_names': cluster_names,
                                 'refresh': refresh,
-                            },
-                            timeout=30)
+                            })
     request_id, _ = _handle_response(response)
     return request_id
 
@@ -170,7 +170,7 @@ def status(cluster_names: Optional[List[str]] = None,
 def get(request_id: str) -> Any:
     response = requests.get(f'{_get_server_url()}/get',
                             json={'request_id': request_id},
-                            timeout=30)
+                            timeout=300)
     _, return_value = _handle_response(response)
     request_task = tasks.RequestTask(**return_value)
     if request_task.error:
@@ -178,6 +178,22 @@ def get(request_id: str) -> Any:
         # Is it possible to raise the original exception?
         raise RuntimeError(request_task.error)
     return request_task.get_return_value()
+
+
+@usage_lib.entrypoint
+@_check_health
+def stream_and_get(request_id: str) -> Any:
+    response = requests.get(f'{_get_server_url()}/stream',
+                            json={'request_id': request_id},
+                            timeout=300,
+                            stream=True)
+
+    if response.status_code != 200:
+        return get(request_id)
+    for line in response.iter_lines():
+        if line:
+            print(line.decode('utf-8'))
+    return get(request_id)
 
 
 @usage_lib.entrypoint

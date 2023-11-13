@@ -595,7 +595,7 @@ def _launch_with_confirm(
     if not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
-    sky.launch(
+    request_id = sdk.launch(
         dag,
         dryrun=dryrun,
         stream_logs=True,
@@ -608,6 +608,9 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+    )
+    sdk.stream_and_get(
+        request_id
     )
 
 
