@@ -353,8 +353,11 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
             means another service is already taken that name. See
             sky/execution.py::serve_up for more details.
         (2) Wait for the load balancer port to be assigned and return.
+
+    Returns:
+        Encoded load balancer port assigned to the service.
     """
-    cnt = 0
+    start_time = time.time()
     while True:
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
@@ -374,12 +377,11 @@ def wait_service_initialization(service_name: str, job_id: int) -> str:
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '
                                    'tear down some existing services.')
-        time.sleep(1)
-        cnt += 1
-        if cnt > constants.INITIALIZATION_TIMEOUT_SECONDS:
+        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Initialization of service {service_name!r} timeout.')
+        time.sleep(1)
 
 
 def load_service_initialization_result(payload: str) -> int:
