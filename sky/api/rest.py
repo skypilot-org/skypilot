@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import json
 import multiprocessing
+import pathlib
 import sys
 import tempfile
 from typing import Any, Callable, Dict, List, Optional
@@ -16,6 +17,7 @@ import starlette.middleware.base
 from sky import core
 from sky import execution
 from sky import optimizer
+from sky import sky_logging
 from sky.api.requests import tasks
 from sky.utils import dag_utils
 from sky.utils import registry
@@ -61,27 +63,35 @@ events = [
 
 def wrapper(func: Callable[P, Any], request_id: str, *args: P.args,
             **kwargs: P.kwargs):
+    """Wrapper for a request task."""
     print(f'Running task {request_id}')
     with tasks.update_rest_task(request_id) as request_task:
         assert request_task is not None, request_id
+        log_path = request_task.log_path
         request_task.pid = multiprocessing.current_process().pid
         request_task.status = tasks.RequestStatus.RUNNING
-    try:
-        return_value = func(*args, **kwargs)
-    except Exception as e:  # pylint: disable=broad-except
-        with tasks.update_rest_task(request_id) as request_task:
-            assert request_task is not None, request_id
-            request_task.status = tasks.RequestStatus.FAILED
-            request_task.set_error(e)
-        print(f'Task {request_id} failed')
-        raise
-    else:
-        with tasks.update_rest_task(request_id) as request_task:
-            assert request_task is not None, request_id
-            request_task.status = tasks.RequestStatus.SUCCEEDED
-            request_task.set_return_value(return_value)
-        print(f'Task {request_id} finished')
-    return return_value
+    with log_path.open('w') as f:
+        # Redirect stdout and stderr to the log file.
+        sys.stdout = sys.stderr = f
+        # reconfigure logger since the logger is initialized before
+        # with previous stdout/stderr
+        sky_logging.reload_logger()
+        try:
+            return_value = func(*args, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            with tasks.update_rest_task(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = tasks.RequestStatus.FAILED
+                request_task.set_error(e)
+            print(f'Task {request_id} failed')
+            raise
+        else:
+            with tasks.update_rest_task(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = tasks.RequestStatus.SUCCEEDED
+                request_task.set_return_value(return_value)
+            print(f'Task {request_id} finished')
+        return return_value
 
 
 def _start_background_request(request_id: str, request_name: str,
@@ -212,19 +222,45 @@ class RequestIdBody(pydantic.BaseModel):
 
 
 @app.get('/get')
-async def get(wait_body: RequestIdBody) -> tasks.RequestTask:
+async def get(get_body: RequestIdBody) -> tasks.RequestTask:
     while True:
-        request_task = tasks.get_request(wait_body.request_id)
+        request_task = tasks.get_request(get_body.request_id)
         if request_task is None:
-            print(f'No task with request ID {wait_body.request_id}')
+            print(f'No task with request ID {get_body.request_id}')
             raise fastapi.HTTPException(
                 status_code=404,
-                detail=f'Request {wait_body.request_id} not found')
+                detail=f'Request {get_body.request_id} not found')
         if request_task.status > tasks.RequestStatus.RUNNING:
             return request_task
         await asyncio.sleep(1)
 
-        # TODO(zhwu): stream the logs and handle errors.
+
+async def log_streamer(request_id: str, log_path: pathlib.Path):
+    with log_path.open('rb') as f:
+        while True:
+            line = f.readline()
+            if not line:
+                request_task = tasks.get_request(request_id)
+                if request_task.status > tasks.RequestStatus.RUNNING:
+                    break
+                await asyncio.sleep(1)
+                continue
+            yield line
+
+
+@app.get('/stream')
+async def stream(
+        stream_body: RequestIdBody) -> fastapi.responses.StreamingResponse:
+    request_id = stream_body.request_id
+    request_task = tasks.get_request(request_id)
+    if request_task is None:
+        print(f'No task with request ID {request_id}')
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Request {request_id} not found')
+    log_path = request_task.log_path
+    return fastapi.responses.StreamingResponse(log_streamer(
+        request_id, log_path),
+                                               media_type='text/plain')
 
 
 @app.post('/abort')

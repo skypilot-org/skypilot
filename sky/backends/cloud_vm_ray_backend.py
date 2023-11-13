@@ -57,6 +57,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import status_lib
@@ -2572,6 +2573,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return result
 
 
+@registry.BACKEND_REGISTRY.register
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
@@ -2580,7 +2582,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
       * Cloud providers' implementations under clouds/
     """
 
-    NAME = 'cloudvmray'
+    NAME = 'cloudvmraybackend'
 
     # Backward compatibility, with the old name of the handle.
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name

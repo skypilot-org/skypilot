@@ -17,6 +17,8 @@ from sky.api.requests import encoders
 from sky.utils import common_utils
 from sky.utils import db_utils
 
+TASK_LOG_PATH_PREFIX = '~/sky_logs/requests'
+
 
 class RequestStatus(enum.Enum):
     """The status of a task."""
@@ -40,7 +42,6 @@ REQUEST_TASK_COLUMNS = [
     'status',
     'return_value',
     'error',
-    'log_path',
     'pid',
 ]
 
@@ -56,8 +57,15 @@ class RequestTask:
     status: RequestStatus
     return_value: Any = None
     error: Optional[Dict[str, Any]] = None
-    log_path: Optional[str] = None
     pid: Optional[int] = None
+
+    @property
+    def log_path(self) -> pathlib.Path:
+        log_path_prefix = pathlib.Path(
+            TASK_LOG_PATH_PREFIX).expanduser().absolute()
+        log_path_prefix.mkdir(parents=True, exist_ok=True)
+        log_path = (log_path_prefix / self.request_id).with_suffix('.log')
+        return log_path
 
     def set_error(self, error: Exception):
         """Set the error."""
@@ -86,15 +94,13 @@ class RequestTask:
             status=RequestStatus(row[4]),
             return_value=json.loads(row[5]),
             error=json.loads(row[6]),
-            log_path=row[7],
-            pid=row[8],
+            pid=row[7],
         )
 
     def to_row(self) -> Tuple[Any, ...]:
         return (self.request_id, self.name, self.entrypoint,
                 json.dumps(self.request_body), self.status.value,
-                json.dumps(self.return_value), json.dumps(self.error),
-                self.log_path, self.pid)
+                json.dumps(self.return_value), json.dumps(self.error), self.pid)
 
 
 _DB_PATH = os.path.expanduser('~/.sky/api_server/tasks.db')
@@ -127,7 +133,6 @@ def create_table(cursor, conn):
         status TEXT,
         return_value TEXT,
         error BLOB,
-        log_path TEXT,
         pid INTEGER)""")
 
 
