@@ -21,6 +21,7 @@ import jsonschema
 import yaml
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
@@ -131,6 +132,26 @@ def _adjust_cluster_name(cluster_name: str) -> str:
         adjusted_cluster_name_arr.insert(0, CLUSTER_NAME_VALID_PREFIX)
     return ''.join(adjusted_cluster_name_arr)
 
+def check_cluster_name_is_valid(cluster_name: str) -> None:
+    """Errors out on invalid cluster names not supported by cloud providers.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - contain underscore (_)
+
+    Raises:
+        exceptions.InvalidClusterNameError: If the cluster name is invalid.
+    """
+    if cluster_name is None:
+        return
+    valid_regex = constants.CLUSTER_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidClusterNameError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains lower letters, numbers and dash): '
+                f'{valid_regex}')
 
 def make_cluster_name_on_cloud(local_cluster_name: str,
                                max_length: Optional[int] = 15,
@@ -150,7 +171,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
         add_user_hash: Whether to append user hash to the cluster name.
     """
     cluster_name = _adjust_cluster_name(local_cluster_name)
-    clouds.Cloud.check_cluster_name_is_valid(local_cluster_name)
+    check_cluster_name_is_valid(local_cluster_name)
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
