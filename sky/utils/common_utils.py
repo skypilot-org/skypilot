@@ -121,7 +121,7 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def adjust_cluster_name(cluster_name: str) -> str:
+def _adjust_cluster_name(cluster_name: str) -> str:
     adjusted_cluster_name_arr = []
     for ch in cluster_name:
         if ch.isalnum() or ch == "-":
@@ -148,7 +148,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
-    cluster_name = adjust_cluster_name(local_cluster_name)
+    cluster_name = _adjust_cluster_name(local_cluster_name)
     Cloud.check_cluster_name_is_valid(cluster_name)
     user_hash = ''
     if add_user_hash:
