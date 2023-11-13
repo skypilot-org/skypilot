@@ -1,0 +1,13 @@
+name: multi-resources
+
+resources:
+  any_of:
+    - cloud: aws
+      region: us-east-1
+      accelerators: A100:8
+    - cloud: gcp
+      accelerators: T4:4
+    - cloud: aws
+
+run:
+  echo hi

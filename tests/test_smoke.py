@@ -3545,6 +3545,7 @@ class TestYamlSpecs:
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
         # d1 <= d2
+        print(origin_task_config, new_task_config)
         self._is_dict_subset(origin_task_config, new_task_config)
 
     def test_load_dump_yaml_config_equivalent(self):
@@ -3558,3 +3559,43 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
+
+# ---------- Testing Multiple Accelerators ----------
+def test_multiple_accelerators_ordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_resources():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-resources',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)

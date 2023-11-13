@@ -97,7 +97,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
         # NOTE: Here we assume that the Sky DAG is topologically sorted.
         nonlocal final_plan, min_objective
         task = tasks[0]
-        for resources in task.get_resources():
+        for resources in task.resources:
             assert task.name in DUMMY_NODES or resources.is_launchable()
             plan[task] = resources
             resources_stack.append(resources)
@@ -125,8 +125,12 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
 
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     copy_dag = copy.deepcopy(dag)
-
-    optimizer_plan = sky.Optimizer._optimize_objective(dag, minimize_cost)
+    if minimize_cost:
+        optimizer_plan = sky.Optimizer._optimize_dag(dag,
+                                                     sky.OptimizeTarget.COST)
+    else:
+        optimizer_plan = sky.Optimizer._optimize_dag(dag,
+                                                     sky.OptimizeTarget.TIME)
     if minimize_cost:
         objective = sky.Optimizer._compute_total_cost(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)

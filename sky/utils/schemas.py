@@ -5,7 +5,7 @@ https://json-schema.org/
 """
 
 
-def get_resources_schema():
+def get_single_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.clouds import service_catalog
@@ -105,6 +105,136 @@ def get_resources_schema():
                     'type': 'object',
                     'required': [],
                 }]
+            }
+        }
+    }
+
+
+def get_resources_schema():
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.clouds import service_catalog
+    return {
+        '$schema': 'http://json-schema.org/draft-07/schema#',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'cloud': {
+                'type': 'string',
+                'case_insensitive_enum': list(service_catalog.ALL_CLOUDS)
+            },
+            'region': {
+                'type': 'string',
+            },
+            'zone': {
+                'type': 'string',
+            },
+            'cpus': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'memory': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
+            'accelerators': {
+                # {'V100:1', 'A100:1'} will be
+                # read as a string and converted to dict.
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'maxProperties': 1,
+                    'additionalProperties': {
+                        'type': 'number'
+                    }
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    }
+                }]
+            },
+            'instance_type': {
+                'type': 'string',
+            },
+            'use_spot': {
+                'type': 'boolean',
+            },
+            'spot_recovery': {
+                'type': 'string',
+            },
+            'disk_size': {
+                'type': 'integer',
+            },
+            'disk_tier': {
+                'type': 'string',
+            },
+            'ports': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'integer',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'integer',
+                        }]
+                    }
+                }],
+            },
+            'accelerator_args': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'runtime_version': {
+                        'type': 'string',
+                    },
+                    'tpu_name': {
+                        'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
+                    }
+                }
+            },
+            'image_id': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                }]
+            },
+            'any_of': {
+                'type': 'array',
+                'items': {
+                    k: v
+                    for k, v in get_single_resources_schema().items()
+                    # Validation may fail if $schema is included.
+                    if k != '$schema'
+                },
+            },
+            'ordered': {
+                'type': 'array',
+                'items': {
+                    k: v
+                    for k, v in get_single_resources_schema().items()
+                    # Validation may fail if $schema is included.
+                    if k != '$schema'
+                },
             }
         }
     }
@@ -348,6 +478,13 @@ def get_config_schema():
                         },
                         'minItems': 1,
                         'maxItems': 1,
+                    },
+                    'vpc_name': {
+                        'oneOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'null',
+                        }],
                     },
                 }
             },

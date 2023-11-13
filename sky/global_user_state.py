@@ -166,10 +166,6 @@ def add_or_update_cluster(cluster_name: str,
             cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
 
-    if requested_resources:
-        assert len(requested_resources) == 1, requested_resources
-        requested_resources = list(requested_resources)[0]
-
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         # All the fields need to exist here, even if they don't need
