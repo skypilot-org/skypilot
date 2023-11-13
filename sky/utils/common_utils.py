@@ -13,14 +13,15 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import colorama
 import jsonschema
 import yaml
 
 from sky import sky_logging
+from sky.clouds import Cloud
 from sky.skylet import constants
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -148,6 +149,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
         add_user_hash: Whether to append user hash to the cluster name.
     """
     cluster_name = adjust_cluster_name(local_cluster_name)
+    Cloud.check_cluster_name_is_valid(cluster_name)
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
