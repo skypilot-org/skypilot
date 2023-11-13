@@ -7,6 +7,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
+import networkx as nx
 import numpy as np
 import prettytable
 

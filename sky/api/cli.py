@@ -2010,7 +2010,7 @@ def logs(
             raise click.UsageError(f'Invalid job ID {job_id}. '
                                    'Job ID must be integers.')
         job_id = int(job_ids[0])
-        job_ids_to_query: Optional[Tuple[str, ...]] = (job_ids[0],)
+        job_ids_to_query = [int(job_ids[0])]
     else:
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
