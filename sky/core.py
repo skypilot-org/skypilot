@@ -219,6 +219,12 @@ def _start(
                                stream_logs=True,
                                cluster_name=cluster_name,
                                retry_until_up=retry_until_up)
+    storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
+    # Passing all_file_mounts as None ensures the local source set in Storage
+    # to not redundantly sync source to the bucket.
+    backend.sync_file_mounts(handle=handle,
+                             all_file_mounts=None,
+                             storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
         backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
     return handle
