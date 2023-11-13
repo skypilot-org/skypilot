@@ -32,7 +32,7 @@ USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
 # Arbitrary letter to prepend to cloud cluster name if proposed cluster name does not start with a letter. Certain
 # clouds require a name that starts with a letter
-CLUSTER_NAME_PLACEHOLDER_PREFIX = 'x'
+CLUSTER_NAME_VALID_PREFIX = 'x'
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
 # possibilities. considering the final cluster name contains the prefix as well,
@@ -122,13 +122,13 @@ def base36_encode(hex_str: str) -> str:
 
 
 def adjust_cluster_name(cluster_name: str) -> str:
-    cleaned_cluster_name_arr = []
+    adjusted_cluster_name_arr = []
     for ch in cluster_name:
         if ch.isalnum() or ch == "-":
-            cleaned_cluster_name_arr.append(ch.lower())
-    if not cleaned_cluster_name_arr[0].isalpha():
-        cleaned_cluster_name_arr.insert(0, CLUSTER_NAME_PLACEHOLDER_PREFIX)
-    return ''.join(cleaned_cluster_name_arr)
+            adjusted_cluster_name_arr.append(ch.lower())
+    if not adjusted_cluster_name_arr[0].isalpha():
+        adjusted_cluster_name_arr.insert(0, CLUSTER_NAME_VALID_PREFIX)
+    return ''.join(adjusted_cluster_name_arr)
 
 
 def make_cluster_name_on_cloud(local_cluster_name: str,
