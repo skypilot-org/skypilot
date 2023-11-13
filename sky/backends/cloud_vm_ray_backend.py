@@ -777,7 +777,7 @@ class RetryingVmProvisioner(object):
                     # this region may not exist when the user does not have
                     # the TPU v4 quota. We should skip this region.
                     logger.warning('Please check if you have the TPU v4 quota '
-                                 f'in {region.name}.')
+                                   f'in {region.name}.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=region.name, zone=None))
             elif ('Requested disk size cannot be smaller than the image size'
