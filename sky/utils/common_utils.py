@@ -131,6 +131,7 @@ def _adjust_cluster_name(cluster_name: str) -> str:
         adjusted_cluster_name_arr.insert(0, CLUSTER_NAME_VALID_PREFIX)
     return ''.join(adjusted_cluster_name_arr)
 
+
 def check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
@@ -151,6 +152,7 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
                 'ensure it is fully matched by regex (e.g., '
                 'only contains lower letters, numbers and dash): '
                 f'{valid_regex}')
+
 
 def make_cluster_name_on_cloud(local_cluster_name: str,
                                max_length: Optional[int] = 15,
