@@ -30,8 +30,9 @@ _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
 USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
-# Arbitrary letter to prepend to cloud cluster name if proposed cluster name does not
-# start with a letter. Certain clouds require a name that starts with a letter
+# Arbitrary letter to prepend to cloud cluster name if proposed
+# cluster name does not start with a letter. Certain clouds
+# require a name that starts with a letter
 CLUSTER_NAME_VALID_PREFIX = 'x'
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
