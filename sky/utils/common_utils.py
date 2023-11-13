@@ -124,7 +124,7 @@ def base36_encode(hex_str: str) -> str:
 def _adjust_cluster_name(cluster_name: str) -> str:
     adjusted_cluster_name_arr = []
     for ch in cluster_name:
-        if ch.isalnum() or ch == "-":
+        if ch.isalnum() or ch == '-':
             adjusted_cluster_name_arr.append(ch.lower())
     if not adjusted_cluster_name_arr[0].isalpha():
         adjusted_cluster_name_arr.insert(0, CLUSTER_NAME_VALID_PREFIX)
