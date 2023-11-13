@@ -13,8 +13,8 @@ import re
 import socket
 import sys
 import time
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
+import uuid
 
 import colorama
 import jsonschema
