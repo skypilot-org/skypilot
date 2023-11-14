@@ -663,11 +663,14 @@ def spot_launch(
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
+        prefix = spot.SPOT_TASK_YAML_PREFIX
+        remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
+        remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
         extra_vars, controller_resources_config = (
             controller_utils.skypilot_config_setup(
                 controller_type='spot',
                 controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
-                remote_user_config_path=f'{dag.name}-{dag_uuid}.config_yaml'))
+                remote_user_config_path=remote_user_config_path))
         try:
             controller_resources = sky.Resources.from_yaml_config(
                 controller_resources_config)
@@ -679,12 +682,11 @@ def spot_launch(
                            err=common_utils.format_exception(
                                e, use_bracket=True))) from e
         vars_to_fill = {
-            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+            'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
             'spot_controller': controller_name,
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
-            'uuid': dag_uuid,
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
