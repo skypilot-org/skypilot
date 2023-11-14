@@ -55,8 +55,8 @@ GCP
 GCP Service Account
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`GCP Service Account
-<https://cloud.google.com/iam/docs/service-account-overview>`__ is supported.
+`GCP Service Accounts
+<https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
 
 .. tip::
     A long-lived service account on your local machine can avoid the periodic
