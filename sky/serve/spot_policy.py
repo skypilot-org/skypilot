@@ -11,6 +11,7 @@ class SpotPolicyName(enum.Enum):
 
     EVEN_SPREAD = 'EvenSpread'
     EAGER_FAILOVER = 'EagerFailover'
+    DYNAMIC_FAILOVER = 'DynamicFailover'
 
 
 class MixPolicyName(enum.Enum):
@@ -29,6 +30,8 @@ class SpotPolicy:
             self.spot_placement = SpotPolicyName.EVEN_SPREAD
         elif spot_placement == 'EagerFailover':
             self.spot_placement = SpotPolicyName.EAGER_FAILOVER
+        elif spot_placement == 'DynamicFailover':
+            self.spot_placement = SpotPolicyName.DYNAMIC_FAILOVER
         else:
             raise NotImplementedError(
                 f'Unknown spot_placement: {spot_placement}')
@@ -42,6 +45,9 @@ class SpotPolicy:
 
         self.zones = zones
         self.current_zone_idx: int = 0
+
+        # self.active_zones only used for DynamicFailover
+        self.active_zones: List[str] = zones
         self.preempted_zones: List[str] = []
 
     def get_next_zone(self) -> str:
@@ -53,8 +59,17 @@ class SpotPolicy:
             zone = random.choice(self.zones)
             while zone in self.preempted_zones:
                 zone = random.choice(self.zones)
+            self._clear_preempted_zones()
+        elif self.spot_placement == SpotPolicyName.DYNAMIC_FAILOVER:
+            if len(self.active_zones) > 0:
+                zone = random.choice(self.active_zones)
+            else:
+                zone = random.choice(self.preempted_zones)
+                self._move_zone_to_active(zone)
+            assert len(self.active_zones) + len(self.preempted_zones) == len(
+                self.zones)
         logger.info(f'Chosen zone: {zone}, policy: {self.spot_placement}')
-        self._clear_preempted_zones()
+
         return zone
 
     def is_fallback_on_demand(self) -> bool:
@@ -66,7 +81,19 @@ class SpotPolicy:
 
     def handle_preemption(self, zone):
         logger.info(f'handle_preemption: {zone}')
-        self.preempted_zones.append(zone)
+        self._move_zone_to_preempted(zone)
 
     def _clear_preempted_zones(self):
         self.preempted_zones = []
+
+    def _move_zone_to_active(self, zone):
+        if zone in self.preempted_zones:
+            self.preempted_zones.remove(zone)
+        if zone not in self.active_zones:
+            self.active_zones.append(zone)
+
+    def _move_zone_to_preempted(self, zone):
+        if zone in self.active_zones:
+            self.active_zones.remove(zone)
+        if zone not in self.preempted_zones:
+            self.preempted_zones.append(zone)
