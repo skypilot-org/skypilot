@@ -4409,6 +4409,11 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               is_flag=True,
               help='Tear down all services.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              help='Tear down services in failed status.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4416,7 +4421,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               required=False,
               help='Skip confirmation prompt.')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, yes: bool):
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
     """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
@@ -4440,6 +4445,9 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
         \b
         # Tear down all existing services.
         sky serve down -a
+        \b
+        # Forcefully tear down a service in failed status.
+        sky serve down failed-service --purge
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
@@ -4466,7 +4474,7 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    sky.serve_down(service_names=service_names, all=all)
+    sky.serve_down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)

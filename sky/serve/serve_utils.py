@@ -6,6 +6,7 @@ import pathlib
 import pickle
 import re
 import shlex
+import shutil
 import threading
 import time
 import typing
@@ -58,7 +59,7 @@ class UserSignal(enum.Enum):
     # Stop the controller, load balancer and all replicas.
     TERMINATE = 'terminate'
 
-    # TODO(tian): Add more signals, such as update or pause.
+    # TODO(tian): Add more signals, such as pause.
 
     def error_type(self) -> Type[Exception]:
         """Get the error corresponding to the signal."""
@@ -280,63 +281,119 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    serve_statuses = []
+    service_statuses = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        serve_status = _get_service_status(service_name)
-        if serve_status is None:
+        service_status = _get_service_status(service_name)
+        if service_status is None:
             continue
-        serve_statuses.append({
+        service_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in serve_status.items()
+            for k, v in service_status.items()
         })
-    return common_utils.encode_payload(serve_statuses)
+    return common_utils.encode_payload(service_statuses)
 
 
-def load_serve_status(payload: str) -> List[Dict[str, Any]]:
-    serve_statuses_encoded = common_utils.decode_payload(payload)
-    serve_statuses = []
-    for serve_status in serve_statuses_encoded:
-        serve_statuses.append({
+def load_service_status(payload: str) -> List[Dict[str, Any]]:
+    service_statuses_encoded = common_utils.decode_payload(payload)
+    service_statuses = []
+    for service_status in service_statuses_encoded:
+        service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
-            for k, v in serve_status.items()
+            for k, v in service_status.items()
         })
-    return serve_statuses
+    return service_statuses
 
 
-def terminate_services(service_names: Optional[List[str]]) -> str:
+def _terminate_failed_services(
+        service_name: str,
+        service_status: serve_state.ServiceStatus) -> Optional[str]:
+    """Terminate service in failed status.
+
+    Services included in ServiceStatus.failed_statuses() do not have an
+    active controller process, so we can't send a file terminate signal
+    to the controller. Instead, we manually cleanup database record for
+    the service and alert the user about a potential resource leak.
+
+    Returns:
+        A message indicating potential resource leak (if any). If no
+        resource leak is detected, return None.
+    """
+    remaining_replica_clusters = []
+    # The controller should have already attempted to terminate those
+    # replicas, so we don't need to try again here.
+    for replica_info in serve_state.get_replica_infos(service_name):
+        # TODO(tian): Refresh latest status of the cluster.
+        if global_user_state.get_cluster_from_name(
+                replica_info.cluster_name) is not None:
+            remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
+        serve_state.remove_replica(service_name, replica_info.replica_id)
+
+    service_dir = os.path.expanduser(
+        generate_remote_service_dir_name(service_name))
+    shutil.rmtree(service_dir)
+    serve_state.remove_service(service_name)
+
+    if not remaining_replica_clusters:
+        return None
+    remaining_identity = ', '.join(remaining_replica_clusters)
+    return (f'{colorama.Fore.YELLOW}terminate service {service_name!r} with '
+            f'failed status ({service_status}). This may indicate a resource '
+            'leak. Please check the following SkyPilot clusters on the '
+            f'controller: {remaining_identity}{colorama.Style.RESET_ALL}')
+
+
+def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
+    messages = []
     for service_name in service_names:
-        serve_status = _get_service_status(service_name,
-                                           with_replica_info=False)
-        assert serve_status is not None
-        if (serve_status['status']
-                in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
-            # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
-            # like spot doesn't implement this yet?
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        assert service_status is not None
+        if service_status['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+            # Already scheduled to be terminated.
             continue
-        # Send the terminate signal to controller.
-        signal_file = pathlib.Path(
-            constants.SIGNAL_FILE_PATH.format(service_name))
-        # Filelock is needed to prevent race condition between signal
-        # check/removal and signal writing.
-        with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='w') as f:
-                # TODO(tian): Probably write a dict instead of bare string
-                # to the file? It will be helpful for update cases.
-                f.write(UserSignal.TERMINATE.value)
-                f.flush()
+        if (service_status['status']
+                in serve_state.ServiceStatus.failed_statuses()):
+            if purge:
+                message = _terminate_failed_services(service_name,
+                                                     service_status['status'])
+                if message is not None:
+                    messages.append(message)
+            else:
+                messages.append(
+                    f'{colorama.Fore.YELLOW}Service {service_name!r} is in '
+                    f'failed status ({service_status["status"]}). Skipping '
+                    'its termination as it could lead to a resource leak. '
+                    f'(Use `sky serve down {service_name} --purge` to '
+                    'forcefully terminate the service.)'
+                    f'{colorama.Style.RESET_ALL}')
+                # Don't add to terminated_service_names since it's not
+                # actually terminated.
+                continue
+        else:
+            # Send the terminate signal to controller.
+            signal_file = pathlib.Path(
+                constants.SIGNAL_FILE_PATH.format(service_name))
+            # Filelock is needed to prevent race condition between signal
+            # check/removal and signal writing.
+            with filelock.FileLock(str(signal_file) + '.lock'):
+                with signal_file.open(mode='w') as f:
+                    f.write(UserSignal.TERMINATE.value)
+                    f.flush()
         terminated_service_names.append(f'{service_name!r}')
     if len(terminated_service_names) == 0:
-        return 'No service to terminate.'
-    identity_str = f'Service {terminated_service_names[0]} is'
-    if len(terminated_service_names) > 1:
-        terminated_service_names_str = ', '.join(terminated_service_names)
-        identity_str = f'Services {terminated_service_names_str} are'
-    return f'{identity_str} scheduled to be terminated.'
+        messages.append('No service to terminate.')
+    else:
+        identity_str = f'Service {terminated_service_names[0]} is'
+        if len(terminated_service_names) > 1:
+            terminated_service_names_str = ', '.join(terminated_service_names)
+            identity_str = f'Services {terminated_service_names_str} are'
+        messages.append(f'{identity_str} scheduled to be terminated.')
+    return '\n'.join(messages)
 
 
 def wait_service_initialization(service_name: str, job_id: int) -> str:
@@ -588,10 +645,11 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def terminate_services(cls, service_names: Optional[List[str]]) -> str:
+    def terminate_services(cls, service_names: Optional[List[str]],
+                           purge: bool) -> str:
         code = [
-            f'msg = serve_utils.terminate_services({service_names!r})',
-            'print(msg, end="", flush=True)'
+            f'msg = serve_utils.terminate_services({service_names!r}, '
+            f'purge={purge})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

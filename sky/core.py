@@ -1036,6 +1036,7 @@ def serve_status(
             'replica_id': (int) replica id,
             'name': (str) replica name,
             'status': (sky.serve.ReplicaStatus) replica status,
+            'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
         }
 
@@ -1101,19 +1102,25 @@ def serve_status(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    return serve.load_serve_status(serve_status_payload)
+    return serve.load_service_status(serve_status_payload)
 
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_down(service_names: Optional[Union[str, List[str]]] = None,
-               all: bool = False) -> None:
+def serve_down(
+    service_names: Optional[Union[str, List[str]]] = None,
+    all: bool = False,
+    purge: bool = False,
+) -> None:
     """Teardown a service.
 
     Please refer to the sky.cli.serve_down for the docs.
 
     Args:
         service_names: Name of the service(s).
+        all: Whether to terminate all services.
+        purge: Whether to terminate services in a failed status. These services
+          may potentially lead to resource leaks.
 
     Raises:
         sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
@@ -1145,10 +1152,8 @@ def serve_down(service_names: Optional[Union[str, List[str]]] = None,
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    if all:
-        code = serve.ServeCodeGen.terminate_services(None)
-    else:
-        code = serve.ServeCodeGen.terminate_services(service_names)
+    service_names = None if all else service_names
+    code = serve.ServeCodeGen.terminate_services(service_names, purge)
 
     try:
         returncode, stdout, _ = backend.run_on_head(handle,
