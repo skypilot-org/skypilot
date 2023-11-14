@@ -2,6 +2,7 @@ resources:
   cloud: gcp
   cpus: 2+
   use_spot: true
+  ports: 8080
 
 workdir: examples/serve/http_server
 
@@ -9,7 +10,6 @@ workdir: examples/serve/http_server
 run: python3 server.py --port 8080
 
 service:
-  port: 8080
   readiness_probe:
     path: /health
     initial_delay_seconds: 20

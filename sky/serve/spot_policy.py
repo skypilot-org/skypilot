@@ -15,7 +15,7 @@ class SpotPolicyName(enum.Enum):
 
 class MixPolicyName(enum.Enum):
 
-    ONLY_SPOT = 'OnlySpot'
+    SPOT_ONLY = 'SpotOnly'
     FALLBACK_ON_DEMAND = 'FallbackOnDemand'
 
 
@@ -33,8 +33,8 @@ class SpotPolicy:
             raise NotImplementedError(
                 f'Unknown spot_placement: {spot_placement}')
 
-        if mix_policy == 'OnlySpot':
-            self.mix_policy = MixPolicyName.ONLY_SPOT
+        if mix_policy == 'SpotOnly':
+            self.mix_policy = MixPolicyName.SPOT_ONLY
         elif mix_policy == 'FallbackOnDemand':
             self.mix_policy = MixPolicyName.FALLBACK_ON_DEMAND
         else:
@@ -47,7 +47,7 @@ class SpotPolicy:
     def get_next_zone(self) -> str:
         assert self.zones is not None
         if self.spot_placement == SpotPolicyName.EVEN_SPREAD:
-            zone = self.zones[self.current_zone_idx]
+            zone = self.zones[self.current_zone_idx % len(self.zones)]
             self.current_zone_idx += 1
         elif self.spot_placement == SpotPolicyName.EAGER_FAILOVER:
             zone = random.choice(self.zones)
@@ -58,7 +58,7 @@ class SpotPolicy:
         return zone
 
     def is_fallback_on_demand(self) -> bool:
-        if self.mix_policy == MixPolicyName.ONLY_SPOT:
+        if self.mix_policy == MixPolicyName.SPOT_ONLY:
             return False
         else:
             raise NotImplementedError(

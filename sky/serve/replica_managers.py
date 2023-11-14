@@ -517,14 +517,14 @@ class SkyPilotReplicaManager(ReplicaManager):
         cluster_name = serve_utils.generate_replica_cluster_name(
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
-            self.service_name, replica_id)
+            self._service_name, replica_id)
         overwrite_dict = self._generate_launch_overwrite_dict()
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self.task_yaml_path, cluster_name, overwrite_dict),
+            args=(self._task_yaml_path, cluster_name, overwrite_dict),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         info = ReplicaInfo(replica_id, cluster_name, replica_port)
@@ -611,11 +611,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                     replica_id)
         assert info is not None
         info.status_property.preempted = True
-        serve_state.add_or_update_replica(self.service_name, replica_id, info)
-        if (self.spot_policy is not None and info.handle is not None and
-                info.handle.launched_resources is not None):
-            self.spot_policy.handle_preemption(
-                info.handle.launched_resources.zone)
+        serve_state.add_or_update_replica(self._service_name, replica_id, info)
+        handle = info.handle()
+        assert handle is not None
+        if (self.spot_policy is not None and
+                handle.launched_resources is not None):
+            self.spot_policy.handle_preemption(handle.launched_resources.zone)
         self._terminate_replica(replica_id, sync_down_logs=False)
 
         if (self.spot_policy is not None and
