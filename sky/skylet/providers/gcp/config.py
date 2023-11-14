@@ -877,7 +877,7 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
         if not subnets:
             _skypilot_log_error_and_exit_for_failover(
                 f"No subnet for region {config['provider']['region']} found for generated VPC {usable_vpc_name!r}. "
-                "This is probably due to the region is not enabled by the user account."
+                "This is probably due to the region being disabled in the account/project_id."
             )
         usable_subnet = subnets[0]
         logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
@@ -988,7 +988,7 @@ def _list_vpcnets(config, compute, filter=None):
     )
 
     return (
-        sorted(response["items"], key=lambda x: x["name"])
+        list(sorted(response["items"], key=lambda x: x["name"]))
         if "items" in response
         else []
     )

@@ -776,7 +776,7 @@ class RetryingVmProvisioner(object):
                     # us-central2 is a TPU v4 only region. The subnet for
                     # this region may not exist when the user does not have
                     # the TPU v4 quota. We should skip this region.
-                    logger.warning('Please check if you have the TPU v4 quota '
+                    logger.warning('Please check if you have TPU v4 quotas '
                                    f'in {region.name}.')
                 self._blocked_resources.add(
                     launchable_resources.copy(region=region.name, zone=None))
