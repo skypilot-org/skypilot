@@ -4917,7 +4917,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 env_vars=task.envs,
                 task_name=task.name,
                 job_run_id=job_run_id,
-                ray_resources_dict=resources_dict,
+                ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
