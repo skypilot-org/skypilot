@@ -989,7 +989,7 @@ def _list_vpcnets(config, compute, filter=None):
     )
 
     return (
-        sorted(response["items"], key=lambda x: x["name"])
+        list(sorted(response["items"], key=lambda x: x["name"]))
         if "items" in response
         else []
     )
