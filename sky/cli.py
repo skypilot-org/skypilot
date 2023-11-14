@@ -4511,13 +4511,13 @@ def serve_logs(
     .. code-block:: bash
 
         # Tail the controller logs of a service
-        sky serve logs --controller [SERVICE_ID]
+        sky serve logs --controller [SERVICE_NAME]
         \b
         # Print the load balancer logs so far and exit
-        sky serve logs --load-balancer --no-follow [SERVICE_ID]
+        sky serve logs --load-balancer --no-follow [SERVICE_NAME]
         \b
         # Tail the logs of replica 1
-        sky serve logs [SERVICE_ID] 1
+        sky serve logs [SERVICE_NAME] 1
     """
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)

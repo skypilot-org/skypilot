@@ -38,9 +38,10 @@ NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
+# TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
-    '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
+    '{replica_id}. Please use `sky serve status [SERVICE_NAME]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
 
 

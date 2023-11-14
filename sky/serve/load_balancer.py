@@ -84,7 +84,7 @@ class SkyServeLoadBalancer:
         if ready_replica_url is None:
             raise fastapi.HTTPException(status_code=503,
                                         detail='No available replicas. '
-                                        'Use "sky serve status [SERVICE_ID]" '
+                                        'Use "sky serve status [SERVICE_NAME]" '
                                         'to check the replica status.')
 
         path = f'http://{ready_replica_url}{request.url.path}'
