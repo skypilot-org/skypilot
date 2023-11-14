@@ -237,8 +237,9 @@ Using a specific VPC
 -----------------------
 By default, SkyPilot uses the following behavior to get a VPC to use for all GCP instances:
 
-- First, the VPC named ``default`` is checked against minimal recommended firewall rules for
-  SkyPilot to function. If it satisfies these rules, this VPC is used.
+- First, all existing VPCs in the project are checked against the minimal
+  recommended firewall rules for SkyPilot to function. If any VPC satisfies these
+  rules, it is used.
 - Otherwise, a new VPC named ``skypilot-vpc`` is automatically created with the
   minimal recommended firewall rules and will be used. It is an auto mode VPC that
   automatically starts with one subnet per region.
@@ -249,7 +250,7 @@ file ``~/.sky/config.yaml`` to specify the VPC name in the ``gcp.vpc_name`` fiel
 .. code-block:: yaml
 
     gcp:
-      vpc_name: my-vpc
+      vpc_name: my-vpc-name
 
 See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
 VPC with fine-grained constraints, typically created via Terraform or manually.
