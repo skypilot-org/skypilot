@@ -844,16 +844,14 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
             )
         if vpcnet_has_sufficient_rules[vpc_name]:
             sufficient_subnets.append(subnet)
-    sufficient_subnets = list(sorted(
-        sufficient_subnets, key=lambda subnet: subnet["network"]
-    ))
+    sufficient_subnets = list(
+        sorted(sufficient_subnets, key=lambda subnet: subnet["network"])
+    )
 
     if sufficient_subnets:
         usable_subnet = sufficient_subnets[0]
         usable_vpc_name = usable_subnet["network"].split("/")[-1]
-        logger.info(
-            f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
-        )
+        logger.info(f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}.")
         return usable_vpc_name, usable_subnet
 
     proj_id = config["provider"]["project_id"]
