@@ -32,7 +32,7 @@ logger = sky_logging.init_logger(__name__)
 # controller and sky serve controller.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 
-# Message thrown when APIs sky.{spot_launch,serve_up}() received an invalid
+# Message thrown when APIs sky.spot_launch(),sky.serve.up() received an invalid
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '

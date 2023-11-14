@@ -147,7 +147,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         auto_restart=service_spec.auto_restart,
         requested_resources=requested_resources,
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
-    # Directly throw an error here. See sky/execution.py::serve_up
+    # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
         _cleanup_storage(tmp_task_yaml)

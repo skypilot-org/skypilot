@@ -397,13 +397,13 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
 
 
 def wait_service_initialization(service_name: str, job_id: int) -> str:
-    """Util function to call at the end of `sky.serve_up()`.
+    """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
         (1) Check the name duplication by job id of the controller. If
             the job id is not the same as the database record, this
             means another service is already taken that name. See
-            sky/execution.py::serve_up for more details.
+            sky/serve/api.py::up for more details.
         (2) Wait for the load balancer port to be assigned and return.
 
     Returns:

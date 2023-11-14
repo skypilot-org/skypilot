@@ -1692,7 +1692,7 @@ def _get_services(service_names: Optional[List[str]],
             if not service_names:
                 # Change empty list to None
                 service_names = None
-            service_records = core.serve_status(service_names)
+            service_records = sky.serve.status(service_names)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -2863,7 +2863,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         with rich_utils.safe_status(
                 '[bold cyan]Checking for running services[/]'):
             try:
-                services = core.serve_status()
+                services = sky.serve.status()
             except exceptions.ClusterNotUpError:
                 cluster_status = backend_utils.refresh_cluster_status_handle(
                     controller_name)
@@ -4282,7 +4282,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name)
+    sky.serve.up(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4474,7 +4474,7 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    sky.serve_down(service_names=service_names, all=all, purge=purge)
+    sky.serve.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4536,10 +4536,10 @@ def serve_logs(
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:
-        core.serve_tail_logs(service_name,
-                             target=target_component,
-                             replica_id=replica_id,
-                             follow=follow)
+        sky.serve.tail_logs(service_name,
+                            target=target_component,
+                            replica_id=replica_id,
+                            follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)
