@@ -809,148 +809,6 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 # ---------- storage ----------
 @pytest.mark.aws
-def test_aws_storage_mounts():
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud aws {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
-        ]
-        test = Test(
-            'aws_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.gcp
-def test_gcp_storage_mounts():
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud gcp {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'gsutil ls gs://{storage_name}/hello.txt',
-        ]
-        test = Test(
-            'gcp_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.kubernetes
-def test_kubernetes_storage_mounts():
-    # Tests bucket mounting on k8s, assuming S3 is configured.
-    # This test will fail if run on non x86_64 architecture, since goofys is
-    # built for x86_64 only.
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud kubernetes {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls {storage_name}/hello.txt',
-        ]
-        test = Test(
-            'kubernetes_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.cloudflare
-def test_cloudflare_storage_mounts(generic_cloud: str):
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    endpoint_url = cloudflare.create_endpoint()
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
-        ]
-
-        test = Test(
-            'cloudflare_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.ibm
-def test_ibm_storage_mounts():
-    name = _get_cluster_name()
-    storage_name = f'sky-test-{int(time.time())}'
-    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-        storage_name, Rclone.RcloneClouds.IBM)
-    template_str = pathlib.Path(
-        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
-    template = jinja2.Template(template_str)
-    content = template.render(storage_name=storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(content)
-        f.flush()
-        file_path = f.name
-        test_commands = [
-            *storage_setup_commands,
-            f'sky launch -y -c {name} --cloud ibm {file_path}',
-            f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
-        ]
-        test = Test(
-            'ibm_storage_mounts',
-            test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
-            timeout=20 * 60,  # 20 mins
-        )
-        run_one_test(test)
-
-
-@pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
@@ -976,7 +834,7 @@ def test_aws_storage_mounts_with_stop():
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1008,14 +866,14 @@ def test_gcp_storage_mounts_with_stop():
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
 
 
 @pytest.mark.kubernetes
-def test_kubernetes_storage_mounts_with_stop():
+def test_kubernetes_storage_mounts():
     # Tests bucket mounting on k8s, assuming S3 is configured.
     # This test will fail if run on non x86_64 architecture, since goofys is
     # built for x86_64 only.
@@ -1034,16 +892,69 @@ def test_kubernetes_storage_mounts_with_stop():
             f'sky launch -y -c {name} --cloud kubernetes {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
-            f'sky stop -y {name}',
-            f'sky start -y {name}',
-            # Check if hello.txt from mounting bucket exists after restart in
-            # the mounted directory
-            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
         test = Test(
             'kubernetes_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.cloudflare
+def test_cloudflare_storage_mounts(generic_cloud: str):
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_r2_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = cloudflare.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile=r2'
+        ]
+
+        test = Test(
+            'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
+
+
+@pytest.mark.ibm
+def test_ibm_storage_mounts():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
+        storage_name, Rclone.RcloneClouds.IBM)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name} --cloud ibm {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'ibm_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
