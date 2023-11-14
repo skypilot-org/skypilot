@@ -44,7 +44,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # e.g., when we add new events to skylet, or we fix a bug in skylet.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '5'
+SKYLET_VERSION = '4'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
@@ -96,8 +96,11 @@ USER_ENV_VAR = 'SKYPILOT_USER'
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
 
+# Used for translate local file mounts to cloud storage. Please refer to
+# sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
+# more details.
 WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
-FM_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
-FM_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
-FM_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
-FM_REMOTE_TMP_DIR = '/tmp/sky-{prefix}-filemounts-files'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
+FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
+FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'

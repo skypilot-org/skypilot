@@ -1,9 +1,23 @@
+# SkyServe YAML to run Llama2 LLM.
+#
+# Usage: replace the <your-huggingface-token> with
+# your huggingface token, and run:
+#   sky serve up -n llama2 examples/serve/llama2/llama2.yaml
+# Then run the following command to interact with
+# the model:
+#   python3 examples/serve/llama2/chat.py
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint llama2
+
+# TODO(tian): Change usage to `HF_TOKEN=<your-token> sky serve up -n llama2 examples/serve/llama2/llama2.yaml --env HF_TOKEN` once we have `--env` enabled.
+
 service:
-  port: 8087
   readiness_probe: /v1/models
   replicas: 2
 
 resources:
+  ports: 8087
   memory: 32+
   accelerators: T4:1
   disk_size: 1024
@@ -39,5 +53,5 @@ run: |
   echo 'Waiting for model worker to start...'
   while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
 
-  echo 'Starting openai api server server...'
+  echo 'Starting openai api server...'
   python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log

@@ -1,10 +1,12 @@
+# Usage: Please refer to the README.md in this directory.
+
 service:
-  port: 9000
   readiness_probe:
     path: /health
     initial_delay_seconds: 120
 
 resources:
+  ports: 9000
   cpus: 2+
 
 workdir: examples/serve/misc/cancel

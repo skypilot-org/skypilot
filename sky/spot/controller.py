@@ -22,6 +22,7 @@ from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -50,7 +51,6 @@ class SpotController:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
-
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -87,12 +87,9 @@ class SpotController:
         """
         spot_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                          'spot_jobs')
-        backend_utils.download_and_stream_latest_job_log(
-            self._backend,
-            handle,
-            spot_job_logs_dir,
-            log_position_hint='spot cluster',
-            log_finish_hint=f'ID: {self._job_id}')
+        controller_utils.download_and_stream_latest_job_log(
+            self._backend, handle, spot_job_logs_dir)
+        logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
         """Busy loop monitoring spot cluster status and handling recovery.

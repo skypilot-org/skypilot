@@ -19,12 +19,18 @@ import os
 import platform
 import re
 import subprocess
+import sys
 from typing import Dict, List
 
 import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 INIT_FILE_PATH = os.path.join(ROOT_DIR, 'sky', '__init__.py')
+_COMMIT_FAILURE_MESSAGE = (
+    'WARNING: SkyPilot fail to {verb} the commit hash in '
+    f'{INIT_FILE_PATH!r} (SkyPilot can still be normally used): '
+    '{error}')
+
 original_init_content = None
 
 system = platform.system()
@@ -70,28 +76,43 @@ def get_commit_hash():
         if changes:
             commit_hash += '-dirty'
         return commit_hash
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='get', error=str(e)),
+              file=sys.stderr)
         return commit_hash
 
 
 def replace_commit_hash():
     """Fill in the commit hash in the __init__.py file."""
-    with open(INIT_FILE_PATH, 'r') as fp:
-        content = fp.read()
-        global original_init_content
-        original_init_content = content
-        content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
-                         f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
-                         content,
-                         flags=re.M)
-    with open(INIT_FILE_PATH, 'w') as fp:
-        fp.write(content)
+    try:
+        with open(INIT_FILE_PATH, 'r') as fp:
+            content = fp.read()
+            global original_init_content
+            original_init_content = content
+            content = re.sub(r'^_SKYPILOT_COMMIT_SHA = [\'"]([^\'"]*)[\'"]',
+                             f'_SKYPILOT_COMMIT_SHA = \'{get_commit_hash()}\'',
+                             content,
+                             flags=re.M)
+        with open(INIT_FILE_PATH, 'w') as fp:
+            fp.write(content)
+    except Exception as e:  # pylint: disable=broad-except
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
+        pass
 
 
 def revert_commit_hash():
-    if original_init_content is not None:
-        with open(INIT_FILE_PATH, 'w') as fp:
-            fp.write(original_init_content)
+    try:
+        if original_init_content is not None:
+            with open(INIT_FILE_PATH, 'w') as fp:
+                fp.write(original_init_content)
+    except Exception as e:  # pylint: disable=broad-except
+        # Avoid breaking the installation when there is no permission to write
+        # the file.
+        print(_COMMIT_FAILURE_MESSAGE.format(verb='replace', error=str(e)),
+              file=sys.stderr)
 
 
 def parse_readme(readme: str) -> str:
@@ -124,7 +145,7 @@ install_requires = [
     'jinja2 >= 3.0',
     'jsonschema',
     'networkx',
-    'pandas',
+    'pandas>=1.3.0',
     'pendulum',
     # PrettyTable with version >=2.0.0 is required for the support of
     # `add_rows` method.
@@ -198,9 +219,10 @@ extras_require: Dict[str, List[str]] = {
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
     ] + local_ray,
-    # We need google-api-python-client>=2.19.1 to enable 'reason' attribute
-    # of googleapiclient.errors.HttpError, which is widely used in our system.
-    'gcp': ['google-api-python-client>=2.19.1', 'google-cloud-storage'] +
+    # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
+    # parameter for stopping instances.
+    # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
            local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'

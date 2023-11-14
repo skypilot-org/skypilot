@@ -9,17 +9,12 @@ from typing import Any, Dict, List, Optional, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
-from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
+    from sky.serve import replica_managers
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
-
-# Since sky.launch is very resource demanding, we limit the number of
-# concurrent sky.launch process to avoid overloading the machine.
-# TODO(tian): determine this value based on controller resources.
-_MAX_BOOTSTRAPPING_NUM = 5
 
 
 class AutoscalerDecisionOperator(enum.Enum):
@@ -30,6 +25,18 @@ class AutoscalerDecisionOperator(enum.Enum):
 
 @dataclasses.dataclass
 class AutoscalerDecision:
+    """Autoscaling decisions.
+
+    |---------------------------------------------------------|
+    | Operator   | TargetType | Meaning                       |
+    |------------|------------|-------------------------------|
+    | SCALE_UP   | int        | Number of replicas to add     |
+    |------------|------------|-------------------------------|
+    | SCALE_DOWN | List[int]  | List of replica ids to remove |
+    |------------|------------|-------------------------------|
+    | NO_OP      | None       | No scaling needed             |
+    |---------------------------------------------------------|
+    """
     operator: AutoscalerDecisionOperator
     target: Optional[Union[int, List[int]]]
 
@@ -53,18 +60,20 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
         self.frequency = frequency
-        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL:
+        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
 
-    def update_request_information(
-            self, request_information: serve_utils.RequestInformation) -> None:
-        """Update request information for autoscaling."""
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
-    def evaluate_scaling(self, infos: List[Dict[str,
-                                                Any]]) -> AutoscalerDecision:
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> AutoscalerDecision:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
@@ -97,13 +106,18 @@ class RequestRateAutoscaler(Autoscaler):
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
 
-    def update_request_information(
-            self, request_information: serve_utils.RequestInformation) -> None:
-        if not isinstance(request_information, serve_utils.RequestTimestamp):
-            raise ValueError('Request information must be of type '
-                             'serve_utils.RequestTimestamp for '
-                             'RequestRateAutoscaler.')
-        self.request_timestamps.extend(request_information.get())
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling.
+
+        request_aggregator_info should be a dict with the following format:
+
+        {
+            'timestamps': [timestamp1 (float), timestamp2 (float), ...]
+        }
+        """
+        self.request_timestamps.extend(
+            request_aggregator_info.get('timestamps', []))
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
                                    current_time - self.rps_window_size)
@@ -111,10 +125,10 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(
         self,
-        infos: List[Dict[str, Any]],
+        replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> AutoscalerDecision:
         current_time = time.time()
-        num_replicas = len(infos)
+        num_replicas = len(replica_infos)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -138,58 +152,45 @@ class RequestRateAutoscaler(Autoscaler):
 
         logger.info(f'Requests per replica: {requests_per_replica}')
 
-        # Bootstrap case
         logger.info(f'Number of replicas: {num_replicas}')
+        target_num_replicas = num_replicas
         if num_replicas < self.min_replicas:
-            logger.info('Bootstrapping service.')
-            self.last_scale_operation = current_time
+            target_num_replicas = self.min_replicas
+        elif (self.upper_threshold is not None and
+              requests_per_replica > self.upper_threshold):
+            scale_target = requests_per_replica / self.upper_threshold
+            target_num_replicas = int(scale_target * num_replicas)
+        elif (self.lower_threshold is not None and
+              requests_per_replica < self.lower_threshold):
+            scale_target = requests_per_replica / self.lower_threshold
+            target_num_replicas = int(scale_target * num_replicas)
+
+        target_num_replicas = max(self.min_replicas,
+                                  min(self.max_replicas, target_num_replicas))
+        num_replicas_delta = target_num_replicas - num_replicas
+        if num_replicas_delta == 0:
+            logger.info('No scaling needed.')
+            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
+                                      target=None)
+        elif num_replicas_delta > 0:
+            logger.info(f'Scaling up by {num_replicas_delta} replicas.')
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=min(
-                                          self.min_replicas - num_replicas,
-                                          _MAX_BOOTSTRAPPING_NUM))
-        if (self.upper_threshold is not None and
-                requests_per_replica > self.upper_threshold):
-            if num_replicas < self.max_replicas:
-                scale_target = requests_per_replica / self.upper_threshold
-                num_replicas_to_add = max(int(scale_target * num_replicas),
-                                          self.max_replicas) - num_replicas
-                if num_replicas_to_add > 0:
-                    plural = 's' if num_replicas_to_add > 1 else ''
-                    logger.info('Requests per replica is above upper threshold '
-                                f'{self.upper_threshold}qps / replica. '
-                                f'Scaling up by {num_replicas_to_add} '
-                                f'replica{plural}.')
-                    self.last_scale_operation = current_time
-                    return AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=num_replicas_to_add)
-        if (self.lower_threshold is not None and
-                requests_per_replica < self.lower_threshold):
-            if num_replicas > self.min_replicas:
-                scale_target = requests_per_replica / self.lower_threshold
-                num_replicas_to_remove = num_replicas - min(
-                    int(scale_target * num_replicas), self.min_replicas)
-                if num_replicas_to_remove > 0:
-                    plural = 's' if num_replicas_to_remove > 1 else ''
-                    logger.info('Requests per replica is below lower threshold '
-                                f'{self.lower_threshold}qps / replica. '
-                                f'Scaling down by {num_replicas_to_remove} '
-                                f'replica{plural}.')
-                    self.last_scale_operation = current_time
-                    # Remove FAILED replicas first.
-                    replica_ids_to_remove: List[int] = []
-                    for i in infos:
-                        if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                            break
-                        if i['status'] == serve_state.ReplicaStatus.FAILED:
-                            replica_ids_to_remove.append(i['replica_id'])
-                    # Then rest of them.
-                    for i in infos:
-                        if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                            break
-                        replica_ids_to_remove.append(i['replica_id'])
-                    return AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_DOWN,
-                        target=replica_ids_to_remove)
-        logger.info('No scaling needed.')
-        return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP, target=None)
+                                      target=num_replicas_delta)
+        else:
+            num_replicas_to_remove = -num_replicas_delta
+            # Remove FAILED replicas first.
+            replica_ids_to_remove: List[int] = []
+            for info in replica_infos:
+                if len(replica_ids_to_remove) >= num_replicas_to_remove:
+                    break
+                if info.status == serve_state.ReplicaStatus.FAILED:
+                    replica_ids_to_remove.append(info.replica_id)
+            # Then rest of them.
+            for info in replica_infos:
+                if len(replica_ids_to_remove) >= num_replicas_to_remove:
+                    break
+                replica_ids_to_remove.append(info.replica_id)
+            logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
+                        f'(id: {replica_ids_to_remove}).')
+            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                      target=replica_ids_to_remove)

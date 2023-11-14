@@ -1,9 +1,17 @@
+# SkyServe YAML to run Vicuna LLM.
+#
+# Usage:
+#   sky serve up -n vicuna examples/serve/vicuna-v1.5.yaml
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint vicuna
+
 service:
-  port: 8087
   readiness_probe: /v1/models
   replicas: 2
 
 resources:
+  ports: 8087
   accelerators: A100:1
   disk_size: 1024
   disk_tier: high
@@ -36,5 +44,5 @@ run: |
   echo 'Waiting for model worker to start...'
   while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
 
-  echo 'Starting openai api server server...'
+  echo 'Starting openai api server...'
   python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log

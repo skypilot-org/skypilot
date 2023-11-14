@@ -11,6 +11,7 @@ from sky import serve
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 
 COMMAND_TRUNC_LENGTH = 25
@@ -21,7 +22,7 @@ NUM_COST_REPORT_LINES = 5
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
-# A record in global_user_state's 'services' table.
+# A record in serve_state's 'services' table.
 _ServiceRecord = Dict[str, Any]
 _ReplicaRecord = Dict[str, Any]
 
@@ -149,7 +150,7 @@ def format_service_table(service_records: List[_ServiceRecord],
     replica_table = format_replica_table(replica_infos, show_all)
     return (f'{service_table}\n'
             f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Replicas{colorama.Style.RESET_ALL}\n'
+            f'Service Replicas{colorama.Style.RESET_ALL}\n'
             f'{replica_table}')
 
 
@@ -162,6 +163,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
         StatusColumn('SERVICE_NAME', _get_service_name),
         StatusColumn('ID', _get_replica_id),
         StatusColumn('IP', _get_head_ip),
+        StatusColumn('LAUNCHED', _get_launched),
         StatusColumn(
             'RESOURCES',
             _get_full_replica_resources if show_all else _get_replica_resources,
@@ -174,7 +176,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
     truncate_hint = ''
     if not show_all:
         if len(replica_records) > REPLICA_TRUNC_NUM:
-            truncate_hint = '... (use --all to show all replicas)\n'
+            truncate_hint = '\n... (use --all to show all replicas)'
         replica_records = replica_records[:REPLICA_TRUNC_NUM]
 
     columns = []
@@ -189,7 +191,7 @@ def format_replica_table(replica_records: List[_ReplicaRecord],
                 row.append(status_column.calc(record))
         replica_table.add_row(row)
 
-    return f'{replica_table}\n{truncate_hint}'
+    return f'{replica_table}{truncate_hint}'
 
 
 def get_total_cost_of_displayed_records(
@@ -208,7 +210,7 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           reserved_group_name: Optional[str] = None):
+                           controller_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -271,10 +273,11 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
-        if reserved_group_name is not None:
-            autostop_minutes = backend_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        if controller_name is not None:
+            autostop_minutes = (
+                controller_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
@@ -296,7 +299,7 @@ def show_local_status_table(local_clusters: List[str]):
     has ran at least one job on the cluster.
     """
     clusters_status = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [

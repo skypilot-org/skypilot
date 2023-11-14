@@ -70,9 +70,6 @@ from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
-from sky.serve import ReplicaStatus
-from sky.serve import ServiceComponent
-from sky.serve import ServiceStatus
 from sky.skylet.job_lib import JobStatus
 from sky.status_lib import ClusterStatus
 from sky.task import Task
@@ -109,10 +106,7 @@ __all__ = [
     'Storage',
     'StorageMode',
     'StoreType',
-    'ServiceComponent',
     'ClusterStatus',
-    'ReplicaStatus',
-    'ServiceStatus',
     'JobStatus',
     # APIs
     'Dag',

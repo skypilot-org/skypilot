@@ -11,6 +11,7 @@ import time
 import typing
 from typing import (Any, Callable, Dict, Generic, Iterator, List, Optional,
                     TextIO, Type, TypeVar)
+import uuid
 
 import colorama
 import filelock
@@ -24,11 +25,12 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
 
-SKY_SERVE_CONTROLLER_NAME = (
+SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
@@ -111,72 +113,53 @@ class ThreadSafeDict(Generic[KeyType, ValueType]):
             return self._dict.values()
 
 
-class RequestInformation:
-    """Base class for request information."""
+class RequestsAggregator:
+    """Base class for request aggregator."""
 
     def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request information."""
-        raise NotImplementedError
-
-    def get(self) -> List[Any]:
-        """Get all current request information."""
+        """Add a request to the request aggregator."""
         raise NotImplementedError
 
     def clear(self) -> None:
-        """Clear all current request information."""
+        """Clear all current request aggregator."""
+        raise NotImplementedError
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
         raise NotImplementedError
 
     def __repr__(self) -> str:
         raise NotImplementedError
 
 
-class RequestTimestamp(RequestInformation):
-    """RequestTimestamp: Request information that stores request timestamps."""
+class RequestTimestamp(RequestsAggregator):
+    """RequestTimestamp: Aggregates request timestamps.
+
+    This is useful for QPS-based autoscaling.
+    """
 
     def __init__(self) -> None:
         self.timestamps: List[float] = []
 
     def add(self, request: 'fastapi.Request') -> None:
-        """Add a request to the request information."""
+        """Add a request to the request aggregator."""
         del request  # unused
         self.timestamps.append(time.time())
 
-    def get(self) -> List[float]:
-        """Get all current request information."""
-        return self.timestamps
-
     def clear(self) -> None:
-        """Clear all current request information."""
+        """Clear all current request aggregator."""
         self.timestamps = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
+        return {'timestamps': self.timestamps}
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
-class RedirectOutputTo:
-    """Redirect stdout and stderr to a file."""
-
-    def __init__(self, func: Callable, file: str) -> None:
-        self.func = func
-        self.file = file
-
-    def run(self, *args, **kwargs):
-        import sys  # pylint: disable=import-outside-toplevel
-
-        from sky import sky_logging  # pylint: disable=import-outside-toplevel
-
-        with open(self.file, 'w') as f:
-            sys.stdout = f
-            sys.stderr = f
-            # reconfigure logger since the logger is initialized before
-            # with previous stdout/stderr
-            sky_logging.reload_logger()
-            # The subprocess_util.run('sky status') inside
-            # sky.execution::_execute cannot be redirect, since we cannot
-            # directly operate on the stdout/stderr of the subprocess. This
-            # is because some code in skypilot will specify the stdout/stderr
-            # of the subprocess.
-            self.func(*args, **kwargs)
+def generate_service_name():
+    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def generate_remote_service_dir_name(service_name: str) -> str:
@@ -184,10 +167,22 @@ def generate_remote_service_dir_name(service_name: str) -> str:
     return os.path.join(constants.SKYSERVE_METADATA_DIR, service_name)
 
 
-def generate_remote_task_yaml_file_name(service_name: str) -> str:
+def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'task.yaml.tmp')
+
+
+def generate_task_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, 'task.yaml')
+
+
+def generate_remote_config_yaml_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'config.yaml')
 
 
 def generate_remote_controller_log_file_name(service_name: str) -> str:
@@ -252,10 +247,7 @@ def update_service_status() -> None:
             # Skip services that is shutting down.
             continue
         controller_job_id = record['controller_job_id']
-        if controller_job_id is None:
-            # The service just registered and the controller job is not
-            # scheduled yet.
-            continue
+        assert controller_job_id is not None
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.
@@ -263,83 +255,65 @@ def update_service_status() -> None:
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
 
 
-def add_service_if_not_exist(service_name: str) -> str:
-    return common_utils.encode_payload(
-        serve_state.add_service_if_not_exist(service_name))
-
-
-def load_add_service_result(payload: str) -> bool:
-    return common_utils.decode_payload(payload)
-
-
-def get_replica_info(service_name: str,
-                     with_handle: bool) -> List[Dict[str, Any]]:
-    """Get the information of all replicas of the service.
-
-    Args:
-        service_name: The name of the service.
-        with_handle: Whether to include the handle of the replica.
-
-    Returns:
-        A list of dictionaries of replica information.
-    """
-    return [
-        info.to_info_dict(with_handle=with_handle)
-        for info in serve_state.get_replica_infos(service_name)
-    ]
-
-
-def get_latest_info(service_name: str,
-                    with_replica_info: bool = True) -> Dict[str, Any]:
-    """Get the latest information of the service.
+def _get_service_status(
+        service_name: str,
+        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
+    """Get the status dict of the service.
 
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
 
     Returns:
-        A dictionary of latest information of the service.
+        A dictionary describing the status of the service if the service exists.
+        Otherwise, return None.
     """
     record = serve_state.get_service_from_name(service_name)
     if record is None:
-        raise ValueError(f'Service {service_name!r} does not exist.')
+        return None
     if with_replica_info:
-        record['replica_info'] = get_replica_info(service_name,
-                                                  with_handle=True)
+        record['replica_info'] = [
+            info.to_info_dict(with_handle=True)
+            for info in serve_state.get_replica_infos(service_name)
+        ]
     return record
 
 
-def get_latest_info_encoded(service_names: Optional[List[str]]) -> str:
-    latest_infos = []
+def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
+    serve_statuses = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        latest_info = get_latest_info(service_name)
-        latest_infos.append({
+        serve_status = _get_service_status(service_name)
+        if serve_status is None:
+            continue
+        serve_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in latest_info.items()
+            for k, v in serve_status.items()
         })
-    return common_utils.encode_payload(latest_infos)
+    return common_utils.encode_payload(serve_statuses)
 
 
-def load_latest_info(payload: str) -> List[Dict[str, Any]]:
-    latest_infos_encoded = common_utils.decode_payload(payload)
-    latest_infos = []
-    for latest_info in latest_infos_encoded:
-        latest_infos.append({
+def load_serve_status(payload: str) -> List[Dict[str, Any]]:
+    serve_statuses_encoded = common_utils.decode_payload(payload)
+    serve_statuses = []
+    for serve_status in serve_statuses_encoded:
+        serve_statuses.append({
             k: pickle.loads(base64.b64decode(v))
-            for k, v in latest_info.items()
+            for k, v in serve_status.items()
         })
-    return latest_infos
+    return serve_statuses
 
 
 def terminate_services(service_names: Optional[List[str]]) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
     for service_name in service_names:
-        latest_info = get_latest_info(service_name, with_replica_info=False)
-        if (latest_info['status']
+        serve_status = _get_service_status(service_name,
+                                           with_replica_info=False)
+        assert serve_status is not None
+        if (serve_status['status']
                 in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
             # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
             # like spot doesn't implement this yet?
@@ -355,14 +329,58 @@ def terminate_services(service_names: Optional[List[str]]) -> str:
                 # to the file? It will be helpful for update cases.
                 f.write(UserSignal.TERMINATE.value)
                 f.flush()
-        terminated_service_names.append(service_name)
+        terminated_service_names.append(f'{service_name!r}')
     if len(terminated_service_names) == 0:
         return 'No service to terminate.'
-    identity_str = f'Service with name {terminated_service_names[0]} is'
+    identity_str = f'Service {terminated_service_names[0]} is'
     if len(terminated_service_names) > 1:
         terminated_service_names_str = ', '.join(terminated_service_names)
-        identity_str = f'Services with names {terminated_service_names_str} are'
+        identity_str = f'Services {terminated_service_names_str} are'
     return f'{identity_str} scheduled to be terminated.'
+
+
+def wait_service_initialization(service_name: str, job_id: int) -> str:
+    """Util function to call at the end of `sky.serve_up()`.
+
+    This function will:
+        (1) Check the name duplication by job id of the controller. If
+            the job id is not the same as the database record, this
+            means another service is already taken that name. See
+            sky/execution.py::serve_up for more details.
+        (2) Wait for the load balancer port to be assigned and return.
+
+    Returns:
+        Encoded load balancer port assigned to the service.
+    """
+    start_time = time.time()
+    while True:
+        record = serve_state.get_service_from_name(service_name)
+        if record is not None:
+            if job_id != record['controller_job_id']:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The service {service_name!r} is already running. '
+                        'Please specify a different name for your service. '
+                        'To update an existing service, run: `sky serve down` '
+                        'and then `sky serve up` again (in-place update will '
+                        'be supported in the future).')
+            lb_port = record['load_balancer_port']
+            if lb_port is not None:
+                return common_utils.encode_payload(lb_port)
+        elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Max number of services reached. '
+                                   'To spin up more services, please '
+                                   'tear down some existing services.')
+        if time.time() - start_time > constants.INITIALIZATION_TIMEOUT_SECONDS:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Initialization of service {service_name!r} timeout.')
+        time.sleep(1)
+
+
+def load_service_initialization_result(payload: str) -> int:
+    return common_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -474,10 +492,10 @@ def stream_replica_logs(service_name: str,
                 f'{colorama.Style.RESET_ALL}')
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = get_replica_info(service_name, with_handle=False)
+        replica_info = serve_state.get_replica_infos(service_name)
         for info in replica_info:
-            if info['replica_id'] == replica_id:
-                return info['status']
+            if info.replica_id == replica_id:
+                return info.status
         raise ValueError(
             _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id))
 
@@ -547,11 +565,14 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+# TODO(tian): Use REST API instead of SSH in the future. This codegen pattern
+# is to reuse the authentication of ssh. If we want to use REST API, we need
+# to implement some authentication mechanism.
 class ServeCodeGen:
     """Code generator for SkyServe.
 
     Usage:
-      >> code = ServeCodeGen.get_latest_info(service_name)
+      >> code = ServeCodeGen.get_service_status(service_name)
     """
     _PREFIX = [
         'from sky.serve import serve_state',
@@ -559,17 +580,9 @@ class ServeCodeGen:
     ]
 
     @classmethod
-    def add_service_if_not_exist(cls, service_name: str) -> str:
+    def get_service_status(cls, service_names: Optional[List[str]]) -> str:
         code = [
-            f'msg = serve_utils.add_service_if_not_exist({service_name!r})',
-            'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_latest_info(cls, service_names: Optional[List[str]]) -> str:
-        code = [
-            f'msg = serve_utils.get_latest_info_encoded({service_names!r})',
+            f'msg = serve_utils.get_service_status_encoded({service_names!r})',
             'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
@@ -579,6 +592,14 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.terminate_services({service_names!r})',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def wait_service_initialization(cls, service_name: str, job_id: int) -> str:
+        code = [
+            'msg = serve_utils.wait_service_initialization('
+            f'{service_name!r}, {job_id})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

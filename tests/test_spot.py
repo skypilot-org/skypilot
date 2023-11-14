@@ -29,8 +29,8 @@ def test_spot_nonexist_strategy():
             sky.Task.from_yaml(f.name)
 
 
-class TestReservedClustersOperations:
-    """Test operations on reserved clusters."""
+class TestControllerOperations:
+    """Test operations on controllers."""
 
     @pytest.fixture
     def _mock_db_conn(self, monkeypatch, tmp_path):
@@ -147,9 +147,8 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert (
-            f'Stopping reserved cluster(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
-            'currently not supported' in result.output)
+        assert (f'Stopping controller(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
+                'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
         assert not result.exception
@@ -164,7 +163,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Scheduling autostop on reserved cluster(s) '
+        assert ('Scheduling autostop on controller(s) '
                 f'\'{spot.SPOT_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 

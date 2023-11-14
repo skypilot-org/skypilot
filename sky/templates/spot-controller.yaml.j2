@@ -5,7 +5,7 @@ name: {{dag_name}}
 file_mounts:
   {{remote_user_yaml_prefix}}/{{dag_name}}-{{uuid}}.yaml: {{user_yaml_path}}
 {% if user_config_path is not none %}
-  {{remote_user_config_path}}: {{user_config_path}}
+  {{remote_user_yaml_prefix}}/{{remote_user_config_path}}: {{user_config_path}}
 {% endif %}
 
 setup: |
@@ -38,6 +38,6 @@ run: |
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
-{%- for env_name, env_value in envs.items() %}
+{%- for env_name, env_value in controller_envs.items() %}
   {{env_name}}: {{env_value}}
 {%- endfor %}

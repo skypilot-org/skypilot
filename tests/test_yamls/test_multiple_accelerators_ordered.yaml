@@ -1,0 +1,7 @@
+name: multi-accelerators-ordered
+
+resources:
+  accelerators: ['A100-40GB:1', 'T4:1', 'V100:1', 'K80:1']
+
+run: |
+  nvidia-smi

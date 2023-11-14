@@ -923,12 +923,13 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
             ssh_jump_name, namespace)
         cont_ready_cond = find(ssh_jump_pod.status.conditions,
                                lambda c: c.type == 'ContainersReady')
-        if cont_ready_cond and \
-            cont_ready_cond.status == 'False':
-            # The main container is not ready. To be on the safe side
-            # and prevent a dangling ssh jump pod, lets remove it and
-            # the service. Otherwise main container is ready and its lifecycle
-            # management script takes care of the cleaning.
+        if (cont_ready_cond and cont_ready_cond.status
+                == 'False') or ssh_jump_pod.status.phase == 'Pending':
+            # Either the main container is not ready or the pod failed
+            # to schedule. To be on the safe side and prevent a dangling
+            # ssh jump pod, lets remove it and the service. Otherwise, main
+            # container is ready and its lifecycle management script takes
+            # care of the cleaning.
             kubernetes.core_api().delete_namespaced_pod(ssh_jump_name,
                                                         namespace)
             kubernetes.core_api().delete_namespaced_service(

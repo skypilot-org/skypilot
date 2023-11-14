@@ -180,7 +180,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            timeout=15 * 60,  # 15 mins
+            timeout=10 * 60,  # 10 mins
             shell=True,
         )
 
@@ -809,7 +809,7 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 
 # ---------- storage ----------
 @pytest.mark.aws
-def test_aws_storage_mounts():
+def test_aws_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -825,18 +825,23 @@ def test_aws_storage_mounts():
             f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
 
 
 @pytest.mark.gcp
-def test_gcp_storage_mounts():
+def test_gcp_storage_mounts_with_stop():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
@@ -852,11 +857,16 @@ def test_gcp_storage_mounts():
             f'sky launch -y -c {name} --cloud gcp {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
+            f'sky stop -y {name}',
+            f'sky start -y {name}',
+            # Check if hello.txt from mounting bucket exists after restart in
+            # the mounted directory
+            f'sky exec {name} -- "set -ex; ls /mount_private_mount/hello.txt"'
         ]
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -886,7 +896,7 @@ def test_kubernetes_storage_mounts():
         test = Test(
             'kubernetes_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -915,7 +925,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         test = Test(
             'cloudflare_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -944,7 +954,7 @@ def test_ibm_storage_mounts():
         test = Test(
             'ibm_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -2631,19 +2641,30 @@ def _get_service_name() -> str:
 # `REPLICAS` is in the form of `1/2` where the first number is the number of
 # ready replicas and the second number is the number of total replicas. We
 # grep such format to ensure that the service is ready, and early exit if any
-# failure detected. In the end we sleep for serve.LB_CONTROLLER_SYNC_INTERVAL to
-# make sure load balancer have enough time to sync with the controller and get
-# all ready replica IPs.
+# failure detected. In the end we sleep for
+# serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS to make sure load balancer have
+# enough time to sync with the controller and get all ready replica IPs.
 _SERVE_WAIT_UNTIL_READY = (
     '(while true; do'
     '     output=$(sky serve status {name});'
     '     echo "$output" | grep -q "{replica_num}/{replica_num}" && break;'
     '     echo "$output" | grep -q "FAILED" && exit 1;'
     '     sleep 10;'
-    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL};')
+    f' done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};')
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _ENDPOINT_REGEX = _IP_REGEX + r':[0-9]{1,5}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
+# Since we don't allow terminate the service if the controller is INIT,
+# which is common for simultaneous pytest, we need to wait until the
+# controller is UP before we can terminate the service.
+# The teardown command has a 10-mins timeout, so we don't need to do
+# the timeout here. See implementation of run_one_test() for details.
+_TEARDOWN_SERVICE = (
+    '(while true; do'
+    '     output=$(sky serve down -y {name});'
+    '     echo "$output" | grep -q "scheduled to be terminated" && break;'
+    '     sleep 10;'
+    'done)')
 
 
 def _get_serve_endpoint(name: str) -> str:
@@ -2669,7 +2690,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=timeout_minutes * 60,
     )
     return test
@@ -2728,7 +2749,7 @@ def test_skyserve_llm():
                 for prompt, output in prompt2output.items()
             ],
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2759,7 +2780,7 @@ def test_skyserve_spot_recovery():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2784,7 +2805,7 @@ def test_skyserve_spot_user_bug():
             '     sleep 10;'
             f'done)',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2806,12 +2827,14 @@ def test_skyserve_replica_failure():
         return (f'gcloud compute instances delete --zone={zone}'
                 f' --quiet $({query_cmd})')
 
-    # In the worst case, the controller will first wait ENDPOINT_PROBE_INTERVAL
-    # for next probe, and wait LB_CONTROLLER_SYNC_INTERVAL for load balancer's
-    # next sync with controller. We add 5s more for any overhead, such as
-    # database read/write.
-    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL +
-                                    serve.LB_CONTROLLER_SYNC_INTERVAL + 5)
+    # In the worst case, the controller will first wait
+    # ENDPOINT_PROBE_INTERVAL_SECONDS for next probe, and wait
+    # LB_CONTROLLER_SYNC_INTERVAL_SECONDS for load balancer's
+    # next sync with controller. We add 5s more for any overhead,
+    # such as database read/write.
+    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL_SECONDS +
+                                    serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS +
+                                    5)
 
     test = Test(
         f'test-skyserve-replica-failure',
@@ -2838,7 +2861,7 @@ def test_skyserve_replica_failure():
             'python tests/skyserve/replica_failure/test_round_robin.py '
             '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2872,15 +2895,45 @@ def test_skyserve_auto_restart():
             # be restarted
             f'sleep 20',
             terminate_replica(1),
-            'sleep 180',  # Wait for consecutive failure timeout passed.
+            # Wait for consecutive failure timeout passed.
+            # If the cluster is not using spot, it won't check the cluster status
+            # on the cloud (since manual shutdown is not a common behavior and such
+            # queries takes a lot of time). Instead, we think continuous 3 min probe
+            # failure is not a temporary problem but indeed a failure.
+            'sleep 180',
+            # We cannot use _SERVE_WAIT_UNTIL_READY; there will be a intermediate time
+            # that the output of `sky serve status` shows FAILED and this status will
+            # cause _SERVE_WAIT_UNTIL_READY to early quit.
             '(while true; do'
             f'    output=$(sky serve status {name});'
             '     echo "$output" | grep -q "1/1" && break;'
             '     sleep 10;'
-            f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL};',
+            f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_get_serve_endpoint(name)}; curl -L http://$endpoint | grep "Hi, SkyPilot here"',
         ],
-        f'sky serve down -y {name}',
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
+def test_skyserve_cancel():
+    """Test skyserve with cancel"""
+    name = _get_service_name()
+
+    test = Test(
+        f'test-skyserve-cancel',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/cancel/cancel.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_get_serve_endpoint(name)}; python3 '
+            'tests/skyserve/cancel/send_cancel_request.py '
+            '--endpoint $endpoint | grep "Request was cancelled"',
+            f'sky serve logs {name} 1 --no-follow | grep "Client disconnected, stopping computation"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
     )
     run_one_test(test)
@@ -2905,13 +2958,40 @@ def test_user_ray_cluster(generic_cloud: str):
     run_one_test(test)
 
 
+_CODE_PREFIX = ['import sky']
+
+
+def _build(code: List[str]) -> str:
+    code = _CODE_PREFIX + code
+    code = ';'.join(code)
+    return f'python3 -u -c {shlex.quote(code)}'
+
+
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
-def test_core_api():
+
+
+@pytest.mark.gcp
+def test_core_api_sky_launch_exec():
     name = _get_cluster_name()
-    sky.launch
-    # TODO(zhwu): Add a test for core api.
+    task = sky.Task(run="whoami")
+    task.set_resources(sky.Resources(cloud=sky.GCP()))
+    job_id, handle = sky.launch(task, cluster_name=name)
+    assert job_id == 1
+    assert handle is not None
+    assert handle.cluster_name == name
+    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
+    job_id_exec, handle_exec = sky.exec(task, cluster_name=name)
+    assert job_id_exec == 2
+    assert handle_exec is not None
+    assert handle_exec.cluster_name == name
+    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
+    # For dummy task (i.e. task.run is None), the job won't be submitted.
+    dummy_task = sky.Task()
+    job_id_dummy, _ = sky.exec(dummy_task, cluster_name=name)
+    assert job_id_dummy is None
+    sky.down(name)
 
 
 # ---------- Testing Storage ----------
@@ -3342,7 +3422,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_local_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_local_storage_obj.name, '--yes'])
 
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -3374,7 +3454,7 @@ class TestStorageWithCredentials:
         assert all([item in out for item in storage_obj_name])
 
         # Run sky storage delete all to delete all storage objects
-        delete_cmd = ['sky', 'storage', 'delete']
+        delete_cmd = ['sky', 'storage', 'delete', '--yes']
         delete_cmd += storage_obj_name
         subprocess.check_output(delete_cmd)
 
@@ -3409,7 +3489,7 @@ class TestStorageWithCredentials:
 
         # Run sky storage delete to delete the storage object
         out = subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name])
+            ['sky', 'storage', 'delete', tmp_scratch_storage_obj.name, '--yes'])
         # Make sure bucket was not created during deletion (see issue #1322)
         assert 'created' not in out.decode('utf-8').lower()
 
@@ -3427,8 +3507,9 @@ class TestStorageWithCredentials:
         # files and folders to a new bucket, then delete bucket.
         tmp_bulk_del_storage_obj.add_store(store_type)
 
-        subprocess.check_output(
-            ['sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name])
+        subprocess.check_output([
+            'sky', 'storage', 'delete', tmp_bulk_del_storage_obj.name, '--yes'
+        ])
 
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
@@ -3505,7 +3586,7 @@ class TestStorageWithCredentials:
 
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
-                match='Attempted to connect to a non-existent bucket'):
+                match='Attempted to use a non-existent bucket as a source'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
                 random_name=nonexist_bucket_name))
 
@@ -3697,6 +3778,7 @@ class TestYamlSpecs:
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
         # d1 <= d2
+        print(origin_task_config, new_task_config)
         self._is_dict_subset(origin_task_config, new_task_config)
 
     def test_load_dump_yaml_config_equivalent(self):
@@ -3710,3 +3792,43 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
+
+# ---------- Testing Multiple Accelerators ----------
+def test_multiple_accelerators_ordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_resources():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-resources',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_resources.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)

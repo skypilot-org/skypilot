@@ -74,7 +74,11 @@ class SpotJobUpdateEvent(SkyletEvent):
 
 
 class ServiceUpdateEvent(SkyletEvent):
-    """Skylet event for updating sky serve service status."""
+    """Skylet event for updating sky serve service status.
+
+    This is needed to handle the case that controller process is somehow
+    terminated and the service status is not updated.
+    """
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):

@@ -99,7 +99,7 @@ def kill_children_processes(
          This is for guaranteeing the order of cleaning up and suppress
          flaky errors.
     """
-    first_to_kill_pid_to_processes = dict()
+    pid_to_proc = dict()
     child_processes = []
     if isinstance(first_pid_to_kill, int):
         first_pid_to_kill = [first_pid_to_kill]
@@ -120,14 +120,12 @@ def kill_children_processes(
     parent_process = psutil.Process()
     for child in parent_process.children(recursive=True):
         if child.pid in first_pid_to_kill:
-            first_to_kill_pid_to_processes[child.pid] = child
+            pid_to_proc[child.pid] = child
         else:
             child_processes.append(child)
 
     _kill_processes([
-        first_to_kill_pid_to_processes[proc]
-        for proc in first_pid_to_kill
-        if proc in first_to_kill_pid_to_processes
+        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
     ])
     _kill_processes(child_processes)
 

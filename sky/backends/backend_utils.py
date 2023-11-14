@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import dataclasses
 from datetime import datetime
 import enum
 import getpass
@@ -8,6 +7,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -38,7 +38,6 @@ from sky import provision as provision_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.provision import instance_setup
@@ -47,6 +46,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -99,99 +99,14 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# The default idle timeout for skypilot controllers. This include spot
-# controller and sky serve controller.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
-
-@dataclasses.dataclass
-class ControllerSpec:
-    """Spec for skypilot controllers."""
-    name: str
-    cluster_name: str
-    sky_status_hint: str
-    decline_cancel_hint: str
-    decline_down_in_init_status_hint: str
-    decline_down_for_dirty_controller_hint: str
-    check_cluster_name_hint: str
-    default_hint_if_non_existent: str
-
-
-class Controllers(enum.Enum):
-    """Skypilot controllers."""
-    # NOTE(dev): Keep this align with
-    # sky/cli.py::_CONTROLLER_TO_HINT_OR_RAISE
-    SPOT_CONTROLLER = ControllerSpec(
-        name='managed spot controller',
-        cluster_name=spot_lib.SPOT_CONTROLLER_NAME,
-        sky_status_hint=(
-            f'* To see detailed spot job status: {colorama.Style.BRIGHT}'
-            f'sky spot queue{colorama.Style.RESET_ALL}'),
-        decline_cancel_hint=(
-            'Cancelling the spot controller\'s jobs is not allowed.\nTo cancel '
-            f'spot jobs, use: {colorama.Style.BRIGHT}sky spot cancel <spot '
-            f'job IDs> [--all]{colorama.Style.RESET_ALL}'),
-        decline_down_in_init_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the spot controller while '
-            'it is in INIT state is not supported (this means a spot launch '
-            'is in progress or the previous launch failed), as we cannot '
-            'guarantee that all the spot jobs are finished. Please wait '
-            'until the spot controller is UP or fix it with '
-            f'{colorama.Style.BRIGHT}sky start '
-            f'{spot_lib.SPOT_CONTROLLER_NAME}{colorama.Style.RESET_ALL}.'),
-        decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}In-progress spot jobs found. To avoid '
-            f'resource leakage, cancel all jobs first: {colorama.Style.BRIGHT}'
-            f'sky spot cancel -a{colorama.Style.RESET_ALL}\n'),
-        check_cluster_name_hint=(
-            f'Cluster {spot_lib.SPOT_CONTROLLER_NAME} is reserved for '
-            'managed spot controller. '),
-        default_hint_if_non_existent='No managed spot jobs are found.')
-    SKY_SERVE_CONTROLLER = ControllerSpec(
-        name='sky serve controller',
-        cluster_name=serve_lib.SKY_SERVE_CONTROLLER_NAME,
-        sky_status_hint=(
-            f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status{colorama.Style.RESET_ALL}'),
-        decline_cancel_hint=(
-            'Cancelling the sky serve controller\'s jobs is not allowed.'),
-        decline_down_in_init_status_hint=(
-            f'{colorama.Fore.RED}Tearing down the sky serve controller '
-            'while it is in INIT state is not supported (this means a sky '
-            'serve up is in progress or the previous launch failed), as we '
-            'cannot guarantee that all the services are terminated. Please '
-            'wait until the sky serve controller is UP or fix it with '
-            f'{colorama.Style.BRIGHT}sky start '
-            f'{serve_lib.SKY_SERVE_CONTROLLER_NAME}'
-            f'{colorama.Style.RESET_ALL}.'),
-        decline_down_for_dirty_controller_hint=(
-            f'{colorama.Fore.RED}Tearing down the sky serve controller is not '
-            'supported, as it is currently serving the following services: '
-            '{service_names}. Please terminate the services first with '
-            f'{colorama.Style.BRIGHT}sky serve down -a'
-            f'{colorama.Style.RESET_ALL}.'),
-        check_cluster_name_hint=(
-            f'Cluster {serve_lib.SKY_SERVE_CONTROLLER_NAME} is reserved for '
-            'sky serve controller. '),
-        default_hint_if_non_existent='No service is found.')
-
-    @classmethod
-    def check_cluster_name(cls, name: Optional[str]) -> Optional['Controllers']:
-        """Check if the cluster name is a controller name.
-
-        Returns:
-            The controller if the cluster name is a controller name.
-            Otherwise, returns None.
-        """
-        for controller in cls:
-            if controller.value.cluster_name == name:
-                return controller
-        return None
-
-
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Filelocks for updating cluster's file_mounts.
+CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
+    '~/.sky/.{}_file_mounts.lock')
+CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -377,8 +292,12 @@ def path_size_megabytes(path: str) -> int:
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
+        #
+        # We shlex.quote() because the path may contain spaces:
+        #   'my dir/.git/info/exclude'
+        # Without quoting rsync fails.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / command_runner.GIT_EXCLUDE))
+            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{command_runner.RSYNC_FILTER_OPTION} '
                      f'{git_exclude_filter} --dry-run {path!r}')
@@ -1099,8 +1018,8 @@ def write_cluster_config(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # AWS only:
-                'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                       None),
+                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
+                                                           None),
                 'use_internal_ips': skypilot_config.get_nested(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
@@ -1114,6 +1033,8 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
+                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
+                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1202,10 +1123,21 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
 
+        # We do not import the module under sky.skylet.providers globally as we
+        # need to avoid importing ray module (extras like skypilot[aws] has
+        # removed the Ray dependency).
         # pylint: disable=import-outside-toplevel
         from sky.skylet.providers.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = gcp_config.get_usable_vpc(config)
+        vpc_name = None
+        try:
+            vpc_name = gcp_config.get_usable_vpc(config)
+        except RuntimeError as e:
+            # Launching a TPU and encountering a bootstrap-phase error, no point
+            # in failover unless:
+            # TODO(zongheng): handle failover when multi-resource is added.
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
         scripts = []
         for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
@@ -1558,10 +1490,6 @@ def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
     return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
-
-
-def generate_service_name():
-    return f'sky-service-{uuid.uuid4().hex[:4]}'
 
 
 def get_cleaned_username(username: str = '') -> str:
@@ -2034,43 +1962,66 @@ def check_can_clone_disk_and_override_task(
                     'disk is only supported when creating a new cluster. To fix: specify '
                     'a new target cluster name.')
 
-    assert len(task.resources) == 1, task.resources
-    task_resources = list(task.resources)[0]
-    if handle.launched_resources.disk_size > task_resources.disk_size:
-        # The target cluster's disk should be at least as large as the source.
-        with ux_utils.print_exception_no_traceback():
-            target_cluster_name_str = f' {target_cluster_name!r}'
-            if target_cluster_name is None:
-                target_cluster_name_str = ''
-            raise exceptions.NotSupportedError(
-                f'The target cluster{target_cluster_name_str} should have a disk size '
-                f'of at least {handle.launched_resources.disk_size} GB to clone the '
-                f'disk from {cluster_name!r}.')
-    override_param = {}
+    new_task_resources = []
     original_cloud = handle.launched_resources.cloud
-    assert original_cloud is not None, handle.launched_resources
-    if task_resources.cloud is None:
-        override_param['cloud'] = original_cloud
-    else:
-        if not original_cloud.is_same_cloud(task_resources.cloud):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources.cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    if task_resources.region is None:
-        override_param['region'] = handle.launched_resources.region
+    assert original_cloud is not None, handle.launched_resources
+    has_override = False
+    has_disk_size_met = False
+    has_cloud_met = False
+    for task_resources in task.resources:
+        if handle.launched_resources.disk_size > task_resources.disk_size:
+            # The target cluster's disk should be at least as large as the source.
+            continue
+        has_disk_size_met = True
+        if task_resources.cloud is not None and not original_cloud.is_same_cloud(
+                task_resources.cloud):
+            continue
+        has_cloud_met = True
 
-    if override_param:
-        logger.info(
-            f'No cloud/region specified for the task. Using the same region '
-            f'as source cluster {cluster_name!r}: '
-            f'{handle.launched_resources.cloud}'
-            f'({handle.launched_resources.region}).')
+        override_param = {}
+        if task_resources.cloud is None:
+            override_param['cloud'] = original_cloud
+        if task_resources.region is None:
+            override_param['region'] = handle.launched_resources.region
+
+        if override_param:
+            logger.info(
+                f'No cloud/region specified for the task {task_resources}. Using the same region '
+                f'as source cluster {cluster_name!r}: '
+                f'{handle.launched_resources.cloud}'
+                f'({handle.launched_resources.region}).')
+            has_override = True
         task_resources = task_resources.copy(**override_param)
-        task.set_resources({task_resources})
+        new_task_resources.append(task_resources)
+
+    if not new_task_resources:
+        if not has_disk_size_met:
+            with ux_utils.print_exception_no_traceback():
+                target_cluster_name_str = f' {target_cluster_name!r}'
+                if target_cluster_name is None:
+                    target_cluster_name_str = ''
+                raise exceptions.NotSupportedError(
+                    f'The target cluster{target_cluster_name_str} should have a disk size '
+                    f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                    f'disk from {cluster_name!r}.')
+        if not has_cloud_met:
+            task_resources_cloud_str = '[' + ','.join(
+                [f'{res.cloud}' for res in task.resources]) + ']'
+            task_resources_str = '[' + ','.join(
+                [f'{res}' for res in task.resources]) + ']'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot clone disk across cloud from {original_cloud} to '
+                    f'{task_resources_cloud_str} for resources {task_resources_str}.'
+                )
+        assert False, 'Should not reach here.'
+    # set the new_task_resources to be the same type (list or set) as the
+    # original task.resources
+    if has_override:
+        task.set_resources(type(task.resources)(new_task_resources))
         # Reset the best_resources to triger re-optimization
         # later, so that the new task_resources will be used.
         task.best_resources = None
@@ -2585,8 +2536,9 @@ def check_cluster_available(
     return handle
 
 
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 def is_controller_up(
-    controller_type: Controllers,
+    controller_type: controller_utils.Controllers,
     stopped_message: str,
     non_existent_message: Optional[str] = None,
 ) -> Tuple[Optional[status_lib.ClusterStatus],
@@ -2616,7 +2568,8 @@ def is_controller_up(
           identity.
     """
     if non_existent_message is None:
-        non_existent_message = controller_type.value.default_hint_if_non_existent
+        non_existent_message = (
+            controller_type.value.default_hint_if_non_existent)
     cluster_name = controller_type.value.cluster_name
     controller_name = controller_type.value.name.replace(' controller', '')
     try:
@@ -2666,7 +2619,7 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-    include_reserved: bool,
+    include_controller: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -2679,8 +2632,8 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_reserved: Whether to include reserved clusters, e.g. spot
-            controller.
+        include_controller: Whether to include controllers, e.g. spot controller
+            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
@@ -2695,10 +2648,10 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
 
-    if not include_reserved:
+    if not include_controller:
         records = [
             record for record in records
-            if Controllers.check_cluster_name(record['name']) is None
+            if controller_utils.Controllers.from_name(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2808,51 +2761,6 @@ def get_clusters(
     return kept_records
 
 
-# Internal only:
-def download_and_stream_latest_job_log(
-        backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
-        handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle', local_dir: str,
-        log_position_hint: str, log_finish_hint: str) -> Optional[str]:
-    """Downloads and streams the latest job log.
-
-    This function is only used by spot controller and sky serve controller.
-    """
-    os.makedirs(local_dir, exist_ok=True)
-    log_file = None
-    try:
-        log_dirs = backend.sync_down_logs(
-            handle,
-            # Download the log of the latest job.
-            # The job_id for the spot job running on the spot cluster is not
-            # necessarily 1, as it is possible that the worker node in a
-            # multi-node cluster is preempted, and we recover the spot job
-            # on the existing cluster, which leads to a larger job_id. Those
-            # job_ids all represent the same logical spot job.
-            job_ids=None,
-            local_dir=local_dir)
-    except exceptions.CommandError as e:
-        logger.info(f'Failed to download the logs: '
-                    f'{common_utils.format_exception(e)}')
-    else:
-        if not log_dirs:
-            logger.error('Failed to find the logs for the user program in '
-                         f'the {log_position_hint}.')
-        else:
-            log_dir = list(log_dirs.values())[0]
-            log_file = os.path.join(log_dir, 'run.log')
-
-            # Print the logs to the console.
-            try:
-                with open(log_file) as f:
-                    print(f.read())
-            except FileNotFoundError:
-                logger.error('Failed to find the logs for the user '
-                             f'program at {log_file}.')
-            else:
-                logger.info(f'\n== End of logs ({log_finish_hint}) ==')
-    return log_file
-
-
 @typing.overload
 def get_backend_from_handle(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
@@ -2891,12 +2799,18 @@ def get_backend_from_handle(
 
 
 def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
-    """Returns the resources dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet
-    # except for sky serve controller task.
+    """Returns the resources dict of the task.
+
+    Returns:
+        A dict of the resources of the task. The keys are the resource names
+        and the values are the number of the resources. It always contains
+        the CPU resource (to control the maximum number of tasks), and
+        optionally accelerator demands.
+    """
+    # TODO: Custom CPU and other memory resources are not supported yet.
+    # For sky serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of services.
     resources_dict = {
-        # We set CPU resource for sky serve controller to a smaller value
-        # to support a larger number of services.
         'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
                 if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
     }
@@ -2913,36 +2827,41 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
-    resources_dict = get_task_demands_dict(task)
-    if len(resources_dict) > 1:
-        resources_dict.pop('CPU')
-    resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+    """Returns the resources string of the task.
+
+    The resources string is only used as a display purpose, so we only show
+    the accelerator demands (if any). Otherwise, the CPU demand is shown.
+    """
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
+                       is not None else DEFAULT_TASK_CPU_DEMAND)
+    if task.best_resources is not None:
+        accelerator_dict = task.best_resources.accelerators
+        if accelerator_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in accelerator_dict.items())
+    elif len(task.resources) == 1:
+        resources_dict = list(task.resources)[0].accelerators
+        if resources_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in resources_dict.items())
+    else:
+        resource_accelerators = []
+        for resource in task.resources:
+            if resource.accelerators is None:
+                continue
+            for k, v in resource.accelerators.items():
+                resource_accelerators.append(f'{k}:{v}')
+
+        if resource_accelerators:
+            resources_str = ', '.join(set(resource_accelerators))
+        else:
+            resources_str = f'CPU:{task_cpu_demand}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_not_reserved(
-        cluster_name: Optional[str],
-        operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster name is reserved.
-
-    Currently, all reserved cluster names are skypilot controller, i.e.
-    spot controller/sky serve controller.
-
-    Raises:
-      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
-        with an error message explaining 'operation_str' is not allowed.
-
-    Returns:
-      None, if the cluster name is not reserved.
-    """
-    controller = Controllers.check_cluster_name(cluster_name)
-    if controller is not None:
-        msg = controller.value.check_cluster_name_hint
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c
