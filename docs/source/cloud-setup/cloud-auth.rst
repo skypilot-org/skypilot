@@ -78,4 +78,4 @@ Set up a service account as follows:
        $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
        $ gcloud config set project your-project-id
 
-   You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in any terminal window.
+   You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in all new terminal sessions.
