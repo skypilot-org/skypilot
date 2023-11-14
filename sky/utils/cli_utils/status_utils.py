@@ -1,5 +1,6 @@
 """Utilities for sky status."""
 import re
+import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
@@ -7,12 +8,14 @@ import colorama
 
 from sky import backends
 from sky import global_user_state
-from sky import serve
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import log_utils
+
+if typing.TYPE_CHECKING:
+    from sky import serve
 
 COMMAND_TRUNC_LENGTH = 25
 REPLICA_TRUNC_NUM = 10
@@ -114,6 +117,7 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     return num_pending_autostop
 
 
+# TODO(tian): Refactor to sky/serve.
 def format_service_table(service_records: List[_ServiceRecord],
                          show_all: bool) -> str:
     if not service_records:
@@ -410,6 +414,9 @@ def _get_uptime(service_record: _ServiceRecord) -> str:
 
 
 def _get_replicas(service_record: _ServiceRecord) -> str:
+    # Import here to avoid circular import
+    from sky import serve  # pylint: disable=import-outside-toplevel
+
     ready_replica_num, total_replica_num = 0, 0
     for info in service_record['replica_info']:
         if _get_status(info) == serve.ReplicaStatus.READY:
@@ -422,6 +429,9 @@ def _get_replicas(service_record: _ServiceRecord) -> str:
 
 
 def get_endpoint(service_record: _ServiceRecord) -> str:
+    # Import here to avoid circular import
+    from sky import serve  # pylint: disable=import-outside-toplevel
+
     # Don't use backend_utils.is_controller_up since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         serve.SKY_SERVE_CONTROLLER_NAME)
@@ -434,7 +444,8 @@ def get_endpoint(service_record: _ServiceRecord) -> str:
     return f'{handle.head_ip}:{load_balancer_port}'
 
 
-def _get_service_status(service_record: _ServiceRecord) -> serve.ServiceStatus:
+def _get_service_status(
+        service_record: _ServiceRecord) -> 'serve.ServiceStatus':
     return service_record['status']
 
 

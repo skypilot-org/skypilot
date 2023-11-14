@@ -18,6 +18,7 @@ from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -40,7 +41,6 @@ def up(
     # pylint: disable=import-outside-toplevel
     from sky import execution
     from sky import task as task_lib
-    from sky.utils import controller_utils
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -272,9 +272,6 @@ def down(
         ValueError: if the arguments are invalid.
         RuntimeError: if failed to terminate the service.
     """
-    # Import here to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
     if service_names is None:
         service_names = []
     if isinstance(service_names, str):
@@ -379,9 +376,6 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
-    # Import here to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
     if service_names is not None:
         if isinstance(service_names, str):
             service_names = [service_names]
@@ -473,9 +467,6 @@ def tail_logs(
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
-    # Import here to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
     if isinstance(target, str):
         target = serve_utils.ServiceComponent(target)
     if not isinstance(target, serve_utils.ServiceComponent):
