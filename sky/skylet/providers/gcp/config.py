@@ -766,6 +766,7 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
     for op in opertaions:
         wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
 
+
 def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
     """Returns the VPC name of the subnet."""
     return network_interface["network"].split("/")[-1]
