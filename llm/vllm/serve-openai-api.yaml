@@ -20,6 +20,11 @@ setup: |
   pip install accelerate
 
   cd vllm
+  # NOTE(skypilot): This is the last commit before the vLLM commit
+  # (06458a0b42449398aa2ba001d9dbaff256159448) that upgraded its requirements to
+  # PyTorch 2.1 which uses CUDA 12.1.  Since currently our default GCP image
+  # uses CUDA 11.8, we use this commit to avoid the CUDA version mismatch.
+  git checkout 1a2bbc930135cd3b94fbff2aafbdf5c568acc8bd
   pip list | grep vllm || pip install .
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
