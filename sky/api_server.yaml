@@ -1,6 +1,0 @@
-resources:
-  ports: 8000
-  cpus: 2
-
-run: |
-  sky api start
