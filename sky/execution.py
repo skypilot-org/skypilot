@@ -417,6 +417,16 @@ def launch(
     usage) a sky.Dag. In the latter case, currently it must contain a single
     task; support for pipelines/general DAGs are in experimental branches.
 
+    Example:
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
+
+
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
@@ -455,15 +465,6 @@ def launch(
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
 
-    Example:
-        .. code-block:: python
-
-            import sky
-            task = sky.Task(run='echo hello SkyPilot')
-            task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
-            sky.launch(task, cluster_name='my-cluster')
-
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
             owned by another user.
@@ -492,6 +493,7 @@ def launch(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+
     entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
