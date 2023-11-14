@@ -31,7 +31,6 @@ def set_port(self, port):
 
 SSHCommandRunner.set_port = set_port
 
-
 # Monkey patch SSHCommandRunner to use a larger timeout when running uptime to
 # check cluster liveness. This is needed because the default timeout of 5s is
 # too short when the cluster is accessed from different geographical
@@ -46,6 +45,7 @@ SSHCommandRunner.set_port = set_port
 #
 # Fortunately, Ray uses a timeout of 120s for running commands after the
 # cluster is ready, so we do not need to modify that.
+
 
 def run_override_timeout(*args, **kwargs):
     # If command is `uptime`, change timeout to 10s
