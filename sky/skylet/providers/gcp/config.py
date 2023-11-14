@@ -786,24 +786,22 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
       RuntimeError: if the user has specified a VPC name but the VPC is not found.
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
-    specific_vpc_to_use = config["provider"].get("vpc_name", None)
-    if specific_vpc_to_use is None:
-        # For backward compatibility, reuse the VPC if the VM is launched.
-        resource = GCPCompute(
-            compute,
-            config["provider"]["project_id"],
-            config["provider"]["availability_zone"],
-            config["cluster_name"],
-        )
-        node = resource._list_instances(label_filters=None, status_filter=None)
-        if len(node) > 0:
-            netInterfaces = node[0].get("networkInterfaces", [])
-            if len(netInterfaces) > 0:
-                vpc_name = netInterfaces[0]["network"].split("/")[-1]
-                return vpc_name
+    # For backward compatibility, reuse the VPC if the VM is launched.
+    resource = GCPCompute(
+        compute,
+        config["provider"]["project_id"],
+        config["provider"]["availability_zone"],
+        config["cluster_name"],
+    )
+    node = resource._list_instances(label_filters=None, status_filter=None)
+    if len(node) > 0:
+        netInterfaces = node[0].get("networkInterfaces", [])
+        if len(netInterfaces) > 0:
+            vpc_name = netInterfaces[0]["network"].split("/")[-1]
+            return vpc_name
 
-        vpcnets_all = _list_vpcnets(config, compute)
-    else:
+    specific_vpc_to_use = config["provider"].get("vpc_name", None)
+    if specific_vpc_to_use is not None:
         vpcnets_all = _list_vpcnets(
             config, compute, filter=f"name={specific_vpc_to_use}"
         )
@@ -831,29 +829,32 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
             )
             # Should not reach here.
 
+    subnets_all = _list_subnets(config, compute)
+
+    # Check if VPC for subnet has sufficient firewall rules.
     usable_vpc_name = None
     usable_subnet = None
-    for vpc in vpcnets_all:
-        # Check if the firewall rules are sufficient and the subnet for
-        # the specific region is available.
-        if not _check_firewall_rules(vpc["name"], config, compute):
-            logger.info(
-                f'get_usable_vpc: VPC network {vpc["name"]!r} is not usable, due to '
-                "insufficient firewall rules. Skip."
+    sufficient_subnets = []
+    vpcnet_has_sufficient_rules = {}
+    for subnet in subnets_all:
+        vpc_name = subnet["network"].split("/")[-1]
+        if vpc_name not in vpcnet_has_sufficient_rules:
+            vpcnet_has_sufficient_rules[vpc_name] = _check_firewall_rules(
+                vpc_name, config, compute
             )
-            continue
+        if vpcnet_has_sufficient_rules[vpc_name]:
+            sufficient_subnets.append(subnet)
+    sufficient_subnets = list(sorted(
+        sufficient_subnets, key=lambda subnet: subnet["network"]
+    ))
 
-        subnets = _list_subnets(config, compute, filter=f'(name="{vpc["name"]}")')
-        if not subnets:
-            logger.info(
-                f'get_usable_vpc: VPC network {vpc["name"]!r} is not usable, due to no '
-                f'subnet in requested region {config["provider"]["region"]}. Skip.'
-            )
-            continue
-        usable_vpc_name = vpc["name"]
-        usable_subnet = subnets[0]
-        logger.info(f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}.")
-        break
+    if sufficient_subnets:
+        usable_subnet = sufficient_subnets[0]
+        usable_vpc_name = usable_subnet["network"].split("/")[-1]
+        logger.info(
+            f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
+        )
+        return usable_vpc_name, usable_subnet
 
     proj_id = config["provider"]["project_id"]
     if usable_vpc_name is None:
