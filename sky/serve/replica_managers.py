@@ -381,7 +381,7 @@ class ReplicaInfo:
             Tuple of (self, is_ready, probe_time).
         """
         replica_identity = f'replica {self.replica_id} with url {self.url}'
-        # # TODO(tian): This requiring the clock on each replica to be aligned,
+        # TODO(tian): This requiring the clock on each replica to be aligned,
         # which may not be true when the GCP VMs have run for a long time. We
         # should have a better way to do this. See #2539 for more information.
         probe_time = time.time()

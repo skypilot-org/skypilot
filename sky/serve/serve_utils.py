@@ -247,12 +247,7 @@ def update_service_status() -> None:
             # Skip services that is shutting down.
             continue
         controller_job_id = record['controller_job_id']
-        if controller_job_id is None:
-            # The service just registered and the controller job is not
-            # scheduled yet.
-            # TODO(tian): Remove this once we merge #2736 and not register
-            # service previous than the controller job.
-            continue
+        assert controller_job_id is not None
         controller_status = job_lib.get_status(controller_job_id)
         if controller_status is None or controller_status.is_terminal():
             # If controller job is not running, set it as controller failed.

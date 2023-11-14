@@ -1,10 +1,12 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
 import random
+import typing
 from typing import List, Optional
 
-import fastapi
-
 from sky import sky_logging
+
+if typing.TYPE_CHECKING:
+    import fastapi
 
 logger = sky_logging.init_logger(__name__)
 
@@ -20,7 +22,7 @@ class LoadBalancingPolicy:
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def select_replica(self, request: fastapi.Request) -> Optional[str]:
+    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         raise NotImplementedError
 
 
@@ -40,7 +42,7 @@ class RoundRobinPolicy(LoadBalancingPolicy):
             self.ready_replicas = ready_replicas
             self.index = 0
 
-    def select_replica(self, request: fastapi.Request) -> Optional[str]:
+    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         if not self.ready_replicas:
             return None
         ready_replica_url = self.ready_replicas[self.index]
