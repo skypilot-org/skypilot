@@ -105,11 +105,11 @@ Available fields and semantics:
   gcp:
     # VPC to use (optional).
     #
-    # Default: null, which implies the following behavior. First, the VPC named
-    # 'default' is checked against minimal recommended firewall rules for
-    # SkyPilot to function. If it satisfies these rules, this VPC is used.
-    # Otherwise, a new VPC named 'skypilot-vpc' is automatically created with
-    # the minimal recommended firewall rules and will be used.
+    # Default: null, which implies the following behavior. First, all existing
+    # VPCs in the project are checked against the minimal recommended firewall
+    # rules for SkyPilot to function. If any VPC satisfies these rules, it is
+    # used. Otherwise, a new VPC named 'skypilot-vpc' is automatically created
+    # with the minimal recommended firewall rules and will be used.
     #
     # If this field is set, SkyPilot will use the VPC with this name. Useful for
     # when users want to manually set up a VPC and precisely control its
