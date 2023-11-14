@@ -161,7 +161,7 @@ Service Account
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Service Accounts" tab in the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__, and click on the **CREATE SERVICE ACCOUNT**.
+1. Click the "Service Accounts" tab in the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__, and click on **CREATE SERVICE ACCOUNT**.
 
 .. image:: ../../images/screenshots/gcp/create-service-account.png
     :width: 80%
