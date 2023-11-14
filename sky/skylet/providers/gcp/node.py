@@ -650,19 +650,25 @@ class GCPCompute(GCPResource):
         )
         disk_name = response["disks"][0]["source"].split("/")[-1]
 
-        # Execute the resize request and return the response
-        operation = (
-            self.resource.disks()
-            .resize(
-                project=self.project_id,
-                zone=self.availability_zone,
-                disk=disk_name,
-                body={
-                    "sizeGb": str(new_size_gb),
-                },
+        try:
+            # Execute the resize request and return the response
+            operation = (
+                self.resource.disks()
+                .resize(
+                    project=self.project_id,
+                    zone=self.availability_zone,
+                    disk=disk_name,
+                    body={
+                        "sizeGb": str(new_size_gb),
+                    },
+                )
+                .execute()
             )
-            .execute()
-        )
+        except HttpError as e:
+            # Catch HttpError when provided with invalid value for new disk size.
+            # Allowing users to create instances with the same size as the image
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            return {}
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)
