@@ -766,6 +766,10 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
     for op in opertaions:
         wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
 
+def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
+    """Returns the VPC name of the subnet."""
+    return network_interface["network"].split("/")[-1]
+
 
 def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
     """Return a usable VPC and the subnet in it.
@@ -797,7 +801,7 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
     if len(node) > 0:
         netInterfaces = node[0].get("networkInterfaces", [])
         if len(netInterfaces) > 0:
-            vpc_name = netInterfaces[0]["network"].split("/")[-1]
+            vpc_name = _network_interface_to_vpc_name(netInterfaces[0])
             return vpc_name
 
     specific_vpc_to_use = config["provider"].get("vpc_name", None)
@@ -837,7 +841,7 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
     sufficient_subnets = []
     vpcnet_has_sufficient_rules = {}
     for subnet in subnets_all:
-        vpc_name = subnet["network"].split("/")[-1]
+        vpc_name = _network_interface_to_vpc_name(subnet)
         if vpc_name not in vpcnet_has_sufficient_rules:
             vpcnet_has_sufficient_rules[vpc_name] = _check_firewall_rules(
                 vpc_name, config, compute
@@ -850,7 +854,7 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
 
     if sufficient_subnets:
         usable_subnet = sufficient_subnets[0]
-        usable_vpc_name = usable_subnet["network"].split("/")[-1]
+        usable_vpc_name = _network_interface_to_vpc_name(usable_subnet)
         logger.info(f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}.")
         return usable_vpc_name, usable_subnet
 
