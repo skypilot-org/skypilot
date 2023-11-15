@@ -216,7 +216,7 @@ def _usable_subnets(
     """
 
     # For existing cluster, it is ok to return a VPC and subnet not used by
-    # the cluster, as GCP will ignore them.
+    # the cluster, as AWS will ignore them.
     # There is a corner case where the multi-node cluster was partially
     # launched, launching the cluster again can cause the nodes located on
     # different VPCs, if VPCs in the project have changed. It should be fine to
