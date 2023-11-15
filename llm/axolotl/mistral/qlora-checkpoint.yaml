@@ -16,7 +16,7 @@ val_set_size: 0.05
 output_dir: /sky-notebook/alpaca_2k_test
 
 # hub_model_id: manishiitg/mistral-alpaca_2k_test # TODO: Replace with hub model id
-hf_use_auth_token: false # TODO: push as private or public model
+# hf_use_auth_token: false # TODO: push as private or public model
 
 adapter: qlora
 lora_model_dir:
