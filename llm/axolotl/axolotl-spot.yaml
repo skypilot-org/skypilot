@@ -11,6 +11,7 @@ name: axolotl
 resources:
   accelerators: A100:1
   cloud: gcp # optional
+  use_spot: True
 
 workdir: mistral
 
