@@ -18,7 +18,7 @@ ssh -L 8888:localhost:8888 axolotl-spot
 ```
 
 
-Launch spot instances
+Launch managed spot instances (auto-recovery; for full runs):
 ```
 HF_TOKEN=abc BUCKET=<unique-name> sky spot launch -n axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET
 ```

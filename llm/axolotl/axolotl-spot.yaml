@@ -17,7 +17,7 @@ workdir: mistral
 
 file_mounts:
   /sky-notebook:
-    source: gs://sky-notebook
+    name: ${BUCKET}
     mode: MOUNT
 
 setup: |
