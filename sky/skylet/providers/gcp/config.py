@@ -840,25 +840,13 @@ def get_usable_vpc_and_subnet(
     # Check if VPC for subnet has sufficient firewall rules.
     usable_vpc_name = None
     usable_subnet = None
-    sufficient_subnets = []
-    vpcnet_has_sufficient_rules = {}
     for subnet in subnets_all:
         vpc_name = _network_interface_to_vpc_name(subnet)
-        if vpc_name not in vpcnet_has_sufficient_rules:
-            vpcnet_has_sufficient_rules[vpc_name] = _check_firewall_rules(
-                vpc_name, config, compute
+        if _check_firewall_rules(vpc_name, config, compute):
+            logger.info(
+                f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
             )
-        if vpcnet_has_sufficient_rules[vpc_name]:
-            sufficient_subnets.append(subnet)
-    sufficient_subnets = list(
-        sorted(sufficient_subnets, key=lambda subnet: subnet["network"])
-    )
-
-    if sufficient_subnets:
-        usable_subnet = sufficient_subnets[0]
-        usable_vpc_name = _network_interface_to_vpc_name(usable_subnet)
-        logger.info(f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}.")
-        return usable_vpc_name, usable_subnet
+            return vpc_name, subnet
 
     proj_id = config["provider"]["project_id"]
     if usable_vpc_name is None:
