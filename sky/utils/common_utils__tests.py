@@ -1,3 +1,4 @@
+"""Tests for methods in common_utils.py"""
 from sky.utils.common_utils import _adjust_cluster_name
 
 
