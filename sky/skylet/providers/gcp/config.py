@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import partial
+import typing
 from typing import Dict, List, Set, Tuple
 
 from cryptography.hazmat.backends import default_backend
@@ -12,6 +13,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
+
+if typing.TYPE_CHECKING:
+    import google
 
 from sky.skylet.providers.gcp.node import (
     MAX_POLLS,
@@ -768,11 +772,13 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
 
 
 def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
-    """Returns the VPC name of the subnet."""
+    """Returns the VPC name of a network interface."""
     return network_interface["network"].split("/")[-1]
 
 
-def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
+def get_usable_vpc_and_subnet(
+    config,
+) -> Tuple[str, "google.cloud.compute_v1.types.compute.Subnetwork"]:
     """Return a usable VPC and the subnet in it.
 
     If config['provider']['vpc_name'] is set, return the VPC with the name
@@ -791,19 +797,14 @@ def get_usable_vpc_and_subnet(config) -> Tuple[str, str]:
       RuntimeError: if the user has specified a VPC name but the VPC is not found.
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
-    # For backward compatibility, reuse the VPC if the VM is launched.
-    resource = GCPCompute(
-        compute,
-        config["provider"]["project_id"],
-        config["provider"]["availability_zone"],
-        config["cluster_name"],
-    )
-    node = resource._list_instances(label_filters=None, status_filter=None)
-    if len(node) > 0:
-        netInterfaces = node[0].get("networkInterfaces", [])
-        if len(netInterfaces) > 0:
-            vpc_name = _network_interface_to_vpc_name(netInterfaces[0])
-            return vpc_name
+
+    # For existing cluster, it is ok to return a VPC and subnet not used by
+    # the cluster, as AWS will ignore them.
+    # There is a corner case where the multi-node cluster was partially
+    # launched, launching the cluster again can cause the nodes located on
+    # different VPCs, if VPCs in the project have changed. It should be fine to
+    # not handle this special case as we don't want to sacrifice the performance
+    # for every launch just for this rare case.
 
     specific_vpc_to_use = config["provider"].get("vpc_name", None)
     if specific_vpc_to_use is not None:
@@ -999,7 +1000,9 @@ def _list_vpcnets(config, compute, filter=None):
     )
 
 
-def _list_subnets(config, compute, filter=None):
+def _list_subnets(
+    config, compute, filter=None
+) -> List["google.cloud.compute_v1.types.compute.Subnetwork"]:
     response = (
         compute.subnetworks()
         .list(
