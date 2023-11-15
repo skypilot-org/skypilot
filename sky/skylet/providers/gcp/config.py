@@ -799,7 +799,7 @@ def get_usable_vpc_and_subnet(
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
 
     # For existing cluster, it is ok to return a VPC and subnet not used by
-    # the cluster, as GCP will ignore them.
+    # the cluster, as AWS will ignore them.
     # There is a corner case where the multi-node cluster was partially
     # launched, launching the cluster again can cause the nodes located on
     # different VPCs, if VPCs in the project have changed. It should be fine to
@@ -840,13 +840,18 @@ def get_usable_vpc_and_subnet(
     # Check if VPC for subnet has sufficient firewall rules.
     usable_vpc_name = None
     usable_subnet = None
+    insufficient_vpcs = set()
     for subnet in subnets_all:
         vpc_name = _network_interface_to_vpc_name(subnet)
-        if _check_firewall_rules(vpc_name, config, compute):
+        if vpc_name not in insufficient_vpcs and _check_firewall_rules(
+            vpc_name, config, compute
+        ):
             logger.info(
                 f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
             )
             return vpc_name, subnet
+        else:
+            insufficient_vpcs.add(vpc_name)
 
     proj_id = config["provider"]["project_id"]
     if usable_vpc_name is None:
