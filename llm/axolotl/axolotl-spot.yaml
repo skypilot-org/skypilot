@@ -39,6 +39,7 @@ run: |
 
 envs:
   HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+  BUCKET: <a-unique-bucket-name-to-use>
   
   
 
