@@ -843,9 +843,9 @@ def get_usable_vpc_and_subnet(
     insufficient_vpcs = set()
     for subnet in subnets_all:
         vpc_name = _network_interface_to_vpc_name(subnet)
-        if vpc_name not in insufficient_vpcs and _check_firewall_rules(
-            vpc_name, config, compute
-        ):
+        if vpc_name in insufficient_vpcs:
+            continue
+        if _check_firewall_rules(vpc_name, config, compute):
             logger.info(
                 f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
             )
