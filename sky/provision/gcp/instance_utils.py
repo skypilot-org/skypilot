@@ -1024,15 +1024,6 @@ class GCPNodeType(enum.Enum):
     COMPUTE = "compute"
     TPU = "tpu"
 
-    @staticmethod
-    def name_to_type(name: str):
-        """Provided a node name, determine the type.
-
-        This expects the name to be in format '[NAME]-[UUID]-[TYPE]',
-        where [TYPE] is either 'compute' or 'tpu'.
-        """
-        return GCPNodeType(name.split("-")[-1])
-
 
 def get_node_type(node: dict) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
