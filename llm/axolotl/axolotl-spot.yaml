@@ -1,3 +1,11 @@
+# Usage:
+#
+#  Unmanaged spot (no auto-recovery; for debugging):
+#   HF_TOKEN=abc BUCKET=<unique-name> sky launch -c axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET -i30 --down
+#
+#  Managed spot (auto-recovery; for full runs):
+#   HF_TOKEN=abc BUCKET=<unique-name> sky spot launch -n axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET
+
 name: axolotl
 
 resources:
