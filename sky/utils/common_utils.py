@@ -172,7 +172,7 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
         add_user_hash: Whether to append user hash to the cluster name.
     """
     cluster_name = _adjust_cluster_name(local_cluster_name)
-    check_cluster_name_is_valid(local_cluster_name)
+    check_cluster_name_is_valid(cluster_name)
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
