@@ -134,9 +134,18 @@ User
     compute.firewalls.list
     compute.firewalls.update
 
-8. Click **Create** to create the role.
-9. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-10. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
+
+.. code-block:: text
+    
+    compute.disks.get
+    compute.disks.resize
+    compute.images.get
+    compute.images.useReadOnly
+
+9. Click **Create** to create the role.
+10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -144,7 +153,7 @@ User
     :align: center
     :alt: GCP Grant Access
 
-11. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
