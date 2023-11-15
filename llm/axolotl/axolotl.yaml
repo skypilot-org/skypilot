@@ -1,3 +1,6 @@
+# Usage:
+#   HF_TOKEN=abc sky launch -c axolotl axolotl.yaml --env HF_TOKEN -y -i30 --down
+
 name: axolotl
 
 resources:
