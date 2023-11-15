@@ -1,14 +1,14 @@
 """Modules for SkyServe services."""
 import os
 
-from sky.serve.api import down
-from sky.serve.api import status
-from sky.serve.api import tail_logs
-from sky.serve.api import up
 from sky.serve.constants import ENDPOINT_PROBE_INTERVAL_SECONDS
 from sky.serve.constants import LB_CONTROLLER_SYNC_INTERVAL_SECONDS
 from sky.serve.constants import SERVICES_TASK_CPU_DEMAND
 from sky.serve.constants import SKYSERVE_METADATA_DIR
+from sky.serve.core import down
+from sky.serve.core import status
+from sky.serve.core import tail_logs
+from sky.serve.core import up
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
 from sky.serve.serve_utils import format_service_table

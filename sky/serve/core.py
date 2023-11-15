@@ -139,7 +139,7 @@ def up(
         # controller to check name conflict. Suppose we have multiple
         # sky.serve.up() with same service name, the first one will
         # successfully write its job id to controller service database;
-        # and for all following sky.serve.up, the controller will throw
+        # and for all following sky.serve.up(), the controller will throw
         # an exception (name conflict detected) and exit. Therefore the
         # controller job id in database could be use as an indicator of
         # whether the service is already running. If the id is the same

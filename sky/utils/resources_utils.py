@@ -91,8 +91,8 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
-def get_cloud_resources_str(handle: 'backends.CloudVmRayResourceHandle',
-                            simplify: bool = False) -> str:
+def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
+                                simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
         if simplify:

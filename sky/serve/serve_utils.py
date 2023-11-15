@@ -733,7 +733,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         if replica_handle is not None:
             if replica_handle.head_ip is not None:
                 replica_ip = replica_handle.head_ip
-            resources_str = resources_utils.get_cloud_resources_str(
+            resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
             if replica_handle.launched_resources.region is not None:
                 region = replica_handle.launched_resources.region

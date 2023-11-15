@@ -323,7 +323,7 @@ def _get_resources(cluster_record: _ClusterRecord) -> str:
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
     elif isinstance(handle, backends.CloudVmRayResourceHandle):
-        resources_str = resources_utils.get_cloud_resources_str(handle)
+        resources_str = resources_utils.get_readable_resources_repr(handle)
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
