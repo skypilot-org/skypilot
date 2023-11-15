@@ -838,48 +838,42 @@ def get_usable_vpc_and_subnet(
     subnets_all = _list_subnets(config, compute)
 
     # Check if VPC for subnet has sufficient firewall rules.
-    usable_vpc_name = None
-    usable_subnet = None
     insufficient_vpcs = set()
     for subnet in subnets_all:
         vpc_name = _network_interface_to_vpc_name(subnet)
         if vpc_name in insufficient_vpcs:
             continue
         if _check_firewall_rules(vpc_name, config, compute):
-            logger.info(
-                f"get_usable_vpc: Found a usable VPC network {usable_vpc_name!r}."
-            )
+            logger.info(f"get_usable_vpc: Found a usable VPC network {vpc_name!r}.")
             return vpc_name, subnet
         else:
             insufficient_vpcs.add(vpc_name)
 
+    # No usable VPC found. Try to create one.
     proj_id = config["provider"]["project_id"]
-    if usable_vpc_name is None:
-        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+    logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
-        # Create a SkyPilot VPC network if it doesn't exist
-        vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
-        if len(vpc_list) == 0:
-            body = VPC_TEMPLATE.copy()
-            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            body["selfLink"] = body["selfLink"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
-            )
-            _create_vpcnet(config, compute, body)
-
-        _create_rules(
-            config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id
+    # Create a SkyPilot VPC network if it doesn't exist
+    vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+    if len(vpc_list) == 0:
+        body = VPC_TEMPLATE.copy()
+        body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+        body["selfLink"] = body["selfLink"].format(
+            PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
         )
+        _create_vpcnet(config, compute, body)
 
-        usable_vpc_name = SKYPILOT_VPC_NAME
-        subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
-        if not subnets:
-            _skypilot_log_error_and_exit_for_failover(
-                f"No subnet for region {config['provider']['region']} found for generated VPC {usable_vpc_name!r}. "
-                "This is probably due to the region being disabled in the account/project_id."
-            )
-        usable_subnet = subnets[0]
-        logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+    _create_rules(config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id)
+
+    usable_vpc_name = SKYPILOT_VPC_NAME
+    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
+    if not subnets:
+        _skypilot_log_error_and_exit_for_failover(
+            f"No subnet for region {config['provider']['region']} found for generated VPC {usable_vpc_name!r}. "
+            "This is probably due to the region being disabled in the account/project_id."
+        )
+    usable_subnet = subnets[0]
+    logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
 
     return usable_vpc_name, usable_subnet
 
