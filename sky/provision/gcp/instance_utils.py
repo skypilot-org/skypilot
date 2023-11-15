@@ -49,16 +49,16 @@ def _retry_on_http_exception(
         def wrapper(*args, **kwargs):
             from googleapiclient.errors import HttpError
 
-            exception = HttpError
+            exception_type = HttpError
 
             def try_catch_exc():
                 try:
                     value = func(*args, **kwargs)
                     return value
                 except Exception as e:
-                    if not isinstance(e, exception) or (
+                    if not isinstance(e, exception_type) or (
                             regex and not re.search(regex, str(e))):
-                        raise e
+                        raise
                     return e
 
             for _ in range(max_retries):

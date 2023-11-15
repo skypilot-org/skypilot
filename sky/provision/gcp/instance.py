@@ -11,19 +11,6 @@ from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision.gcp import instance_utils
 
-# Tag for user defined node types (e.g., m4xl_spot). This is used for multi
-# node type clusters.
-TAG_RAY_USER_NODE_TYPE = "ray-user-node-type"
-# Hash of the node launch config, used to identify out-of-date nodes
-TAG_RAY_LAUNCH_CONFIG = "ray-launch-config"
-# Tag for autofilled node types for legacy cluster yamls without multi
-# node type defined in the cluster configs.
-NODE_TYPE_LEGACY_HEAD = "ray-legacy-head-node-type"
-NODE_TYPE_LEGACY_WORKER = "ray-legacy-worker-node-type"
-
-# Tag that reports the current state of the node (e.g. Updating, Up-to-date)
-TAG_RAY_NODE_STATUS = "ray-node-status"
-
 logger = sky_logging.init_logger(__name__)
 
 MAX_POLLS = 12
@@ -140,6 +127,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         )
         if not instances:
             break
+        logger.info(
+            f'Waiting for {len(instances)} instances in STOPPING status')
         time.sleep(POLL_INTERVAL)
 
     exist_instances = resource.filter(
@@ -190,7 +179,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     if stopping_instances:
         raise RuntimeError(
-            f'Some instances are being stopped during provisioning.')
+            'Some instances are being stopped during provisioning. '
+            'Please wait a while and retry.')
 
     if head_instance_id is None:
         if running_instances:
@@ -265,6 +255,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         )
         if not instances:
             break
+
+    # Check if the number of running instances is the same as the requested.
+    instances = resource.filter(
+        project_id=project_id,
+        zone=availability_zone,
+        label_filters=filter_labels,
+        status_filters=['RUNNING'],
+    )
+    if len(instances) != config.count:
+        logger.warning('The number of running instances is different from '
+                       'the requested number after provisioning '
+                       f'(requested: {config.count}, '
+                       f'observed: {len(instances)}). '
+                       'This could be some instances failed to start '
+                       'or some resource leak.')
 
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
