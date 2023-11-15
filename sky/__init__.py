@@ -41,6 +41,7 @@ __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 from sky import backends
 from sky import benchmark
 from sky import clouds
+from sky.api.sdk import status
 from sky.clouds.service_catalog import list_accelerators
 from sky.core import autostop
 from sky.core import cancel
@@ -52,8 +53,8 @@ from sky.core import queue
 from sky.core import spot_cancel
 from sky.core import spot_queue
 from sky.core import spot_status
+from sky.core import spot_tail_logs
 from sky.core import start
-from sky.core import status
 from sky.core import stop
 from sky.core import storage_delete
 from sky.core import storage_ls
@@ -69,8 +70,8 @@ from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
-from sky.status_lib import ClusterStatus
 from sky.task import Task
+from sky.utils.status_lib import ClusterStatus
 
 # Aliases.
 IBM = clouds.IBM
@@ -110,11 +111,10 @@ __all__ = [
     'Dag',
     'Task',
     'Resources',
-    # execution APIs
+    # core APIs
     'launch',
     'exec',
     'spot_launch',
-    # core APIs
     'status',
     'start',
     'stop',
@@ -131,6 +131,7 @@ __all__ = [
     'spot_queue',
     'spot_status',  # Deprecated (alias for spot_queue)
     'spot_cancel',
+    'spot_tail_logs',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',

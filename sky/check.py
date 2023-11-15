@@ -6,6 +6,7 @@ import click
 from sky import clouds
 from sky import global_user_state
 from sky.adaptors import cloudflare
+from sky.utils import registry
 
 
 # TODO(zhwu): add check for a single cloud to improve performance
@@ -14,7 +15,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
     echo('Checking credentials to enable clouds for SkyPilot.')
 
     enabled_clouds = []
-    for cloud in clouds.CLOUD_REGISTRY.values():
+    for cloud in registry.CLOUD_REGISTRY.values():
         if not isinstance(cloud, clouds.Local):
             echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
@@ -36,7 +37,7 @@ def check(quiet: bool = False, verbose: bool = False) -> None:
         else:
             echo(f'    Reason: {reason}')
 
-    # Currently, clouds.CLOUD_REGISTRY.values() does not
+    # Currently, registry.CLOUD_REGISTRY.values() does not
     # support r2 as only clouds with computing instances
     # are added as 'cloud'. This will be removed when
     # cloudflare/r2 is added as a 'cloud'.

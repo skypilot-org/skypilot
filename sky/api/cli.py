@@ -53,7 +53,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import status_lib
+from sky.api import sdk
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.benchmark import benchmark_state
@@ -69,8 +69,10 @@ from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -650,7 +652,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -838,10 +840,9 @@ def _launch_with_confirm(
 
     if node_type is None or maybe_status != status_lib.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
-        sky.launch(
+        request_id = sdk.launch(
             dag,
             dryrun=dryrun,
-            stream_logs=True,
             cluster_name=cluster,
             detach_setup=detach_setup,
             detach_run=detach_run,
@@ -851,6 +852,9 @@ def _launch_with_confirm(
             retry_until_up=retry_until_up,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
+        )
+        sdk.stream_and_get(
+            request_id
         )
 
 
@@ -1151,7 +1155,7 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
-    @usage_lib.entrypoint('sky.cli', fallback=True)
+    @usage_lib.entrypoint('sky.api.cli', fallback=True)
     def invoke(self, ctx):
         return super().invoke(ctx)
 
@@ -1775,8 +1779,9 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         query_clusters: Optional[List[str]] = None
         if clusters:
             query_clusters = _get_glob_clusters(clusters, silent=ip)
-        cluster_records = core.status(cluster_names=query_clusters,
+        request = sdk.status(cluster_names=query_clusters,
                                       refresh=refresh)
+        cluster_records = sdk.get(request)
         if ip:
             if len(cluster_records) != 1:
                 with ux_utils.print_exception_no_traceback():
@@ -2066,7 +2071,7 @@ def logs(
             'Both --sync_down and --status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
-    if len(job_ids) > 1 and not sync_down:
+    if job_ids and not sync_down:
         raise click.UsageError(
             f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
             '\nPass -s/--sync-down to download the logs instead.')
@@ -2083,11 +2088,11 @@ def logs(
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
         # in core.tail_logs.
-        job_id = job_ids[0]
-        if not job_id.isdigit():
+        if not job_ids[0].isdigit():
             raise click.UsageError(f'Invalid job ID {job_id}. '
                                    'Job ID must be integers.')
-        job_ids_to_query = [int(job_id)]
+        job_id = int(job_ids[0])
+        job_ids_to_query = [int(job_ids[0])]
     else:
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
@@ -2888,7 +2893,7 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    core.down(name, purge=purge)
+                    sdk.get(sdk.down(name, purge=purge))
                 else:
                     core.stop(name, purge=purge)
             except RuntimeError as e:
@@ -2975,7 +2980,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                                     cpus is None and memory is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_provider = registry.CLOUD_REGISTRY.from_str(cloud)
     if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
@@ -3059,7 +3064,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                                     cpus is None and memory is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_provider = registry.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if use_spot is None:
@@ -3253,7 +3258,7 @@ def show_gpus(
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
     # This will validate 'cloud' and raise if not found.
-    clouds.CLOUD_REGISTRY.from_str(cloud)
+    registry.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -4725,6 +4730,39 @@ def local_down():
         with rich_utils.safe_status('Running sky check...'):
             sky_check.check(quiet=True)
         click.echo('Local cluster removed.')
+
+@cli.group(cls=_NaturalOrderGroup)
+def api():
+    """Managed Spot commands (spot instances with auto-recovery)."""
+    pass
+
+@api.command('start', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def api_start():
+    """Starts the API server locally."""
+    sdk.api_start()
+
+@api.command('stop', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def api_stop():
+    """Stops the API server locally."""
+    sdk.api_stop()
+
+@api.command('logs', cls=_DocumentedCodeCommand)
+@click.option('--follow',
+              '-f',
+                is_flag=True,
+                default=False,
+                required=False,
+                help='Follow the logs.')
+@click.option('--tail', '-n', default='all',
+              help=('Number of lines to show from the end of the logs '
+              '(default "all")'))
+# Follow the arguments of `docker logs` command.
+@usage_lib.entrypoint
+def api_logs(follow: bool, tail: str):
+    """Shows the API server logs."""
+    sdk.api_logs(follow, tail)
 
 
 def main():

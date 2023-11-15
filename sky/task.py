@@ -22,6 +22,7 @@ from sky.data import storage as storage_lib
 from sky.provision import docker_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -904,7 +905,7 @@ class Task:
                 storage_cloud = None
 
         if storage_cloud is None:
-            storage_cloud = clouds.CLOUD_REGISTRY.from_str(
+            storage_cloud = registry.CLOUD_REGISTRY.from_str(
                 enabled_storage_clouds[0])
             assert storage_cloud is not None, enabled_storage_clouds[0]
 

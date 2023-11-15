@@ -82,7 +82,8 @@ def handle_returncode(returncode: int,
 
 
 def kill_children_processes(first_pid_to_kill: Optional[int] = None,
-                            force: bool = False):
+                            force: bool = False,
+                            parent_pid: Optional[int] = None):
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -96,31 +97,36 @@ def kill_children_processes(first_pid_to_kill: Optional[int] = None,
          This is for guaranteeing the order of cleaning up and suppress
          flaky errors.
     """
-    parent_process = psutil.Process()
-    child_processes = []
-    for child in parent_process.children(recursive=True):
-        if child.pid == first_pid_to_kill:
-            try:
-                if force:
-                    child.kill()
-                else:
-                    child.terminate()
-                child.wait()
-            except psutil.NoSuchProcess:
-                # The child process may have already been terminated.
-                pass
-        else:
-            child_processes.append(child)
 
-    for child in child_processes:
+    def kill(proc: psutil.Process):
         try:
             if force:
-                child.kill()
+                proc.kill()
             else:
-                child.terminate()
+                proc.terminate()
+            proc.wait()
         except psutil.NoSuchProcess:
             # The child process may have already been terminated.
             pass
+
+    if parent_pid is None:
+        parent_process = psutil.Process()
+    else:
+        parent_process = psutil.Process(parent_pid)
+
+    child_processes = parent_process.children(recursive=True)
+    if parent_pid is not None:
+        kill(parent_process)
+
+    remaining_child_processes = []
+    for child in child_processes:
+        if child.pid == first_pid_to_kill:
+            kill(child)
+        else:
+            remaining_child_processes.append(child)
+
+    for child in remaining_child_processes:
+        kill(child)
 
 
 def run_with_retries(

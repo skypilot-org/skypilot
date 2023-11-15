@@ -51,7 +51,7 @@ pytest tests/test_smoke.py --generic-cloud aws
 For profiling code, use:
 ```
 pip install tuna # Tuna is used for visualization of profiling data.
-python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
+python3 -m cProfile -o sky.prof -m sky.api.cli status # Or some other command
 tuna sky.prof
 ```
 

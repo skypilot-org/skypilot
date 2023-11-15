@@ -13,16 +13,22 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
-from sky import status_lib
-from sky import task
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
+
+try:
+    import fastapi
+    app_router = fastapi.APIRouter()
+except ImportError:
+    app_router = None
 
 logger = sky_logging.init_logger(__name__)
 
@@ -30,7 +36,12 @@ logger = sky_logging.init_logger(__name__)
 # = Cluster Management =
 # ======================
 
-# pylint: disable=redefined-builtin
+
+def router(name, *args, **kwargs):
+    """Decorator for adding a function to the API router."""
+    if app_router is None:
+        return lambda func: func
+    return getattr(app_router, name)(*args, **kwargs)
 
 
 @usage_lib.entrypoint
@@ -200,7 +211,7 @@ def _start(
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag.Dag():
-        dummy_task = task.Task().set_resources(handle.launched_resources)
+        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
                                to_provision=handle.launched_resources,
@@ -477,24 +488,31 @@ def queue(cluster_name: str,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the job queue of a cluster.
 
-    Please refer to the sky.cli.queue for the document.
+    Please refer to the sky.api.cli.queue for the document.
+
+    Args:
+        cluster_name: name of the cluster.
+        skip_finished: whether to skip finished jobs.
+        all_users: whether to get jobs from all users.
 
     Returns:
-        List[dict]:
-        [
-            {
-                'job_id': (int) job id,
-                'job_name': (str) job name,
-                'username': (str) username,
-                'submitted_at': (int) timestamp of submitted,
-                'start_at': (int) timestamp of started,
-                'end_at': (int) timestamp of ended,
-                'resources': (str) resources,
-                'status': (job_lib.JobStatus) job status,
-                'log_path': (str) log path,
-            }
-        ]
-    raises:
+        .. code-block:: python
+
+            [
+                {
+                    'job_id': (int) job id,
+                    'job_name': (str) job name,
+                    'username': (str) username,
+                    'submitted_at': (int) timestamp of submitted,
+                    'start_at': (int) timestamp of started,
+                    'end_at': (int) timestamp of ended,
+                    'resources': (str) resources,
+                    'status': (sky.JobStatus) job status,
+                    'log_path': (str) log path,
+                }
+            ]
+
+    Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -541,12 +559,15 @@ def cancel(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
-    Please refer to the sky.cli.cancel for the document.
+    Please refer to the sky.api.cli.cancel for the document.
 
     When `all` is False and `job_ids` is None, cancel the latest running job.
 
-    Additional arguments:
-        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+    Args:
+        cluster_name: name of the cluster.
+        all: whether to cancel all jobs on the cluster.
+        job_ids: a list of job ids to cancel.
+        _try_cancel_if_cluster_is_init: whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the spot controller to cancel the job when the
             worker node is preempted in the spot cluster.
@@ -624,7 +645,12 @@ def tail_logs(cluster_name: str,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
-    Please refer to the sky.cli.tail_logs for the document.
+    Please refer to the sky.api.cli.tail_logs for the document.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_id: job id. If None, tail logs of the last job.
+        follow: whether to follow the logs.
 
     Raises:
         ValueError: arguments are invalid or the cluster is not supported or
@@ -665,10 +691,11 @@ def download_logs(
     """Download the logs of jobs.
 
     Args:
-        cluster_name: (str) name of the cluster.
-        job_ids: (List[str]) job ids.
+        cluster_name: name of the cluster.
+        job_ids: job ids. If None, download the logs for the last job.
+        local_dir: local directory to download the logs to.
     Returns:
-        Dict[str, str]: a mapping of job_id to local log path.
+        A mapping of job_id to local log path.
     Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
@@ -707,13 +734,13 @@ def job_status(cluster_name: str,
     """Get the status of jobs.
 
     Args:
-        cluster_name: (str) name of the cluster.
-        job_ids: (List[str]) job ids. If None, get the status of the last job.
+        cluster_name: name of the cluster.
+        job_ids: job ids. If None, get the status of the last job.
+        stream_logs: whether to stream logs.
     Returns:
-        Dict[Optional[int], Optional[job_lib.JobStatus]]: A mapping of job_id to
-        job statuses. The status will be None if the job does not exist.
-        If job_ids is None and there is no job on the cluster, it will return
-        {None: None}.
+        A mapping of job_id to job statuses. The status will be None if the job
+        does not exist. If job_ids is None and there is no job on the cluster,
+        it will return {None: None}.
     Raises:
         ValueError: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
@@ -769,23 +796,30 @@ def spot_queue(refresh: bool,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
-    Please refer to the sky.cli.spot_queue for the documentation.
+    Please refer to the sky.api.cli.spot_queue for the documentation.
+
+    Args:
+        refresh: whether to restart the spot controller if it is not UP.
+        skip_finished: whether to skip finished jobs.
 
     Returns:
-        [
-            {
-                'job_id': int,
-                'job_name': str,
-                'resources': str,
-                'submitted_at': (float) timestamp of submission,
-                'end_at': (float) timestamp of end,
-                'duration': (float) duration in seconds,
-                'retry_count': int Number of retries,
-                'status': sky.JobStatus status of the job,
-                'cluster_resources': (str) resources of the cluster,
-                'region': (str) region of the cluster,
-            }
-        ]
+        .. code-block:: python
+
+            [
+                {
+                    'job_id': (int),
+                    'job_name': (str),
+                    'resources': (str),
+                    'submitted_at': (float) timestamp of submission,
+                    'end_at': (float) timestamp of end,
+                    'duration': (float) duration in seconds,
+                    'retry_count': int Number of retries,
+                    'status': (sky.JobStatus) status of the job,
+                    'cluster_resources': (str) resources of the cluster,
+                    'region': (str) region of the cluster,
+                }
+            ]
+
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up or
             does not exist.
@@ -859,7 +893,12 @@ def spot_cancel(name: Optional[str] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed spot jobs.
 
-    Please refer to the sky.cli.spot_cancel for the document.
+    Please refer to the sky.api.cli.spot_cancel for the document.
+
+    Args:
+        name: name of the job to cancel.
+        job_ids: a list of job ids to cancel.
+        all: whether to cancel all jobs.
 
     Raises:
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
@@ -912,12 +951,18 @@ def spot_cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def spot_tail_logs(name: Optional[str], job_id: Optional[int],
-                   follow: bool) -> None:
+def spot_tail_logs(name: Optional[str],
+                   job_id: Optional[int] = None,
+                   follow: bool = True) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed spot jobs.
 
-    Please refer to the sky.cli.spot_logs for the document.
+    Please refer to the sky.api.cli.spot_logs for the document.
+
+    Args:
+        name: name of the job to tail.
+        job_id: job id to tail. If None, tail the last job.
+        follow: whether to follow the logs.
 
     Raises:
         ValueError: invalid arguments.

@@ -3,7 +3,6 @@ from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import Zone
-from sky.clouds.cloud_registry import CLOUD_REGISTRY
 
 # NOTE: import the above first to avoid circular imports.
 # isort: split
@@ -31,5 +30,4 @@ __all__ = [
     'CloudImplementationFeatures',
     'Region',
     'Zone',
-    'CLOUD_REGISTRY',
 ]
