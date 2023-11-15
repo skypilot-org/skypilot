@@ -188,7 +188,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 
     if cluster_records:
         if controller_name is not None:
-            autostop_minutes = (constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+            autostop_minutes = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
