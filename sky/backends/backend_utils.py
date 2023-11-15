@@ -1131,7 +1131,7 @@ def write_cluster_config(
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = None
         try:
-            vpc_name = gcp_config.get_usable_vpc(config)
+            vpc_name, _ = gcp_config.get_usable_vpc_and_subnet(config)
         except RuntimeError as e:
             # Launching a TPU and encountering a bootstrap-phase error, no point
             # in failover unless:
