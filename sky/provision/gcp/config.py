@@ -6,54 +6,10 @@ from typing import Dict, List, Set, Tuple
 
 from sky.adaptors import gcp
 from sky.provision import common
+from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
-from sky.provision.gcp.constants import FIREWALL_RULES_REQUIRED
-from sky.provision.gcp.constants import FIREWALL_RULES_TEMPLATE
-from sky.provision.gcp.constants import MAX_POLLS
-from sky.provision.gcp.constants import POLL_INTERVAL
-from sky.provision.gcp.constants import SKYPILOT_VPC_NAME
-from sky.provision.gcp.constants import TPU_MINIMAL_PERMISSIONS
-from sky.provision.gcp.constants import VM_MINIMAL_PERMISSIONS
-from sky.provision.gcp.constants import VPC_TEMPLATE
 
 logger = logging.getLogger(__name__)
-
-VERSION = 'v1'
-TPU_VERSION = 'v2alpha'  # change once v2 is stable
-
-RAY = 'ray-autoscaler'
-DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
-SERVICE_ACCOUNT_EMAIL_TEMPLATE = '{account_id}@{project_id}.iam.gserviceaccount.com'
-DEFAULT_SERVICE_ACCOUNT_CONFIG = {
-    'displayName': f'Ray Autoscaler Service Account ({VERSION})',
-}
-
-SKYPILOT = 'skypilot'
-SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + '-' + VERSION
-SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
-    '{account_id}@{project_id}.iam.gserviceaccount.com')
-SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
-    'displayName': f'SkyPilot Service Account ({VERSION})',
-}
-
-# Those roles will be always added.
-# NOTE: `serviceAccountUser` allows the head node to create workers with
-# a serviceAccount. `roleViewer` allows the head node to run bootstrap_gcp.
-DEFAULT_SERVICE_ACCOUNT_ROLES = [
-    'roles/storage.objectAdmin',
-    'roles/compute.admin',
-    'roles/iam.serviceAccountUser',
-    'roles/iam.roleViewer',
-]
-# Those roles will only be added if there are TPU nodes defined in config.
-TPU_SERVICE_ACCOUNT_ROLES = ['roles/tpu.admin']
-
-# If there are TPU nodes in config, this field will be set
-# to True in config['provider'].
-HAS_TPU_PROVIDER_FIELD = '_has_tpus'
-
-# NOTE: iam.serviceAccountUser allows the Head Node to create worker nodes
-# with ServiceAccounts.
 
 
 def wait_for_crm_operation(operation, crm):
@@ -61,7 +17,7 @@ def wait_for_crm_operation(operation, crm):
     logger.info('wait_for_crm_operation: '
                 'Waiting for operation {} to finish...'.format(operation))
 
-    for _ in range(MAX_POLLS):
+    for _ in range(constants.MAX_POLLS):
         result = crm.operations().get(name=operation['name']).execute()
         if 'error' in result:
             raise Exception(result['error'])
@@ -70,7 +26,7 @@ def wait_for_crm_operation(operation, crm):
             logger.info('wait_for_crm_operation: Operation done.')
             break
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
 
     return result
 
@@ -81,7 +37,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
                 'Waiting for operation {} to finish...'.format(
                     operation['name']))
 
-    for _ in range(MAX_POLLS):
+    for _ in range(constants.MAX_POLLS):
         result = (compute.globalOperations().get(
             project=project_name,
             operation=operation['name'],
@@ -93,7 +49,7 @@ def wait_for_compute_global_operation(project_name, operation, compute):
             logger.info('wait_for_compute_global_operation: Operation done.')
             break
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
 
     return result
 
@@ -122,7 +78,7 @@ def _create_compute(gcp_credentials=None):
 def _create_tpu(gcp_credentials=None):
     return gcp.build(
         'tpu',
-        TPU_VERSION,
+        constants.TPU_VERSION,
         credentials=gcp_credentials,
         cache_discovery=False,
         discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest',
@@ -143,7 +99,7 @@ def construct_clients_from_provider_config(provider_config):
                      'Falling back to GOOGLE_APPLICATION_CREDENTIALS '
                      'environment variable.')
         tpu_resource = (_create_tpu() if provider_config.get(
-            HAS_TPU_PROVIDER_FIELD, False) else None)
+            constants.HAS_TPU_PROVIDER_FIELD, False) else None)
         # If gcp_credentials is None, then discovery.build will search for
         # credentials in the local environment.
         return _create_crm(), _create_iam(), _create_compute(), tpu_resource
@@ -158,7 +114,7 @@ def construct_clients_from_provider_config(provider_config):
     credentials = gcp.get_credentials(cred_type, credentials_field)
 
     tpu_resource = (_create_tpu(credentials) if provider_config.get(
-        HAS_TPU_PROVIDER_FIELD, False) else None)
+        constants.HAS_TPU_PROVIDER_FIELD, False) else None)
 
     return (
         _create_crm(credentials),
@@ -175,7 +131,7 @@ def bootstrap_instances(
     # insert that information into the provider config
     if instance_utils.get_node_type(
             config.node_config) == instance_utils.GCPNodeType.TPU:
-        config.provider_config[HAS_TPU_PROVIDER_FIELD] = True
+        config.provider_config[constants.HAS_TPU_PROVIDER_FIELD] = True
 
     crm, iam, compute, tpu = construct_clients_from_provider_config(
         config.provider_config)
@@ -299,17 +255,17 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
     TODO: Allow the name/id of the service account to be configured
     """
     project_id = config.provider_config['project_id']
-    email = SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-        account_id=SKYPILOT_SERVICE_ACCOUNT_ID,
+    email = constants.SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+        account_id=constants.SKYPILOT_SERVICE_ACCOUNT_ID,
         project_id=project_id,
     )
     service_account = _get_service_account(email, project_id, iam)
 
-    permissions = VM_MINIMAL_PERMISSIONS
-    roles = DEFAULT_SERVICE_ACCOUNT_ROLES
-    if config.provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
-        roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
-        permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
+    permissions = constants.VM_MINIMAL_PERMISSIONS
+    roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES
+    if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
+        roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES + constants.TPU_SERVICE_ACCOUNT_ROLES
+        permissions = constants.VM_MINIMAL_PERMISSIONS + constants.TPU_MINIMAL_PERMISSIONS
 
     satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
                                                  permissions, roles)
@@ -321,8 +277,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         # and the user may not have the permissions to create the
         # new service account. This is to ensure that the old service
         # account is still usable.
-        email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
-            account_id=DEFAULT_SERVICE_ACCOUNT_ID,
+        email = constants.SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
+            account_id=constants.DEFAULT_SERVICE_ACCOUNT_ID,
             project_id=project_id,
         )
         logger.info(f'_configure_iam_role: Fallback to service account {email}')
@@ -340,12 +296,12 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         elif service_account is None:
             logger.info('_configure_iam_role: '
                         'Creating new service account {}'.format(
-                            SKYPILOT_SERVICE_ACCOUNT_ID))
+                            constants.SKYPILOT_SERVICE_ACCOUNT_ID))
             # SkyPilot: a GCP user without the permission to create a service
             # account will fail here.
             service_account = _create_service_account(
-                SKYPILOT_SERVICE_ACCOUNT_ID,
-                SKYPILOT_SERVICE_ACCOUNT_CONFIG,
+                constants.SKYPILOT_SERVICE_ACCOUNT_ID,
+                constants.SKYPILOT_SERVICE_ACCOUNT_CONFIG,
                 project_id,
                 iam,
             )
@@ -383,7 +339,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
 def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
                           compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = FIREWALL_RULES_REQUIRED.copy()
+    required_rules = constants.FIREWALL_RULES_REQUIRED.copy()
 
     operation = compute.networks().getEffectiveFirewalls(project=project_id,
                                                          network=vpc_name)
@@ -551,24 +507,26 @@ def get_usable_vpc(cluster_name: str, config: common.ProvisionConfig):
             break
 
     if usable_vpc_name is None:
-        logger.info(f'Creating a default VPC network, {SKYPILOT_VPC_NAME}...')
+        logger.info(
+            f'Creating a default VPC network, {constants.SKYPILOT_VPC_NAME}...')
 
         # Create a SkyPilot VPC network if it doesn't exist
         vpc_list = _list_vpcnets(project_id,
                                  compute,
-                                 filter=f'name={SKYPILOT_VPC_NAME}')
+                                 filter=f'name={constants.SKYPILOT_VPC_NAME}')
         if len(vpc_list) == 0:
-            body = VPC_TEMPLATE.copy()
-            body['name'] = body['name'].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body = constants.VPC_TEMPLATE.copy()
+            body['name'] = body['name'].format(
+                VPC_NAME=constants.SKYPILOT_VPC_NAME)
             body['selfLink'] = body['selfLink'].format(
-                PROJ_ID=project_id, VPC_NAME=SKYPILOT_VPC_NAME)
+                PROJ_ID=project_id, VPC_NAME=constants.SKYPILOT_VPC_NAME)
             _create_vpcnet(project_id, compute, body)
 
-        _create_rules(project_id, compute, FIREWALL_RULES_TEMPLATE,
-                      SKYPILOT_VPC_NAME)
+        _create_rules(project_id, compute, constants.FIREWALL_RULES_TEMPLATE,
+                      constants.SKYPILOT_VPC_NAME)
 
-        usable_vpc_name = SKYPILOT_VPC_NAME
-        logger.info(f'A VPC network {SKYPILOT_VPC_NAME} created.')
+        usable_vpc_name = constants.SKYPILOT_VPC_NAME
+        logger.info(f'A VPC network {constants.SKYPILOT_VPC_NAME} created.')
 
     return usable_vpc_name
 

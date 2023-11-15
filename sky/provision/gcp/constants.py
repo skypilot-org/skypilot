@@ -1,3 +1,40 @@
+VERSION = 'v1'
+TPU_VERSION = 'v2'  # change once v2 is stable
+
+RAY = 'ray-autoscaler'
+DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
+SERVICE_ACCOUNT_EMAIL_TEMPLATE = '{account_id}@{project_id}.iam.gserviceaccount.com'
+DEFAULT_SERVICE_ACCOUNT_CONFIG = {
+    'displayName': f'Ray Autoscaler Service Account ({VERSION})',
+}
+
+SKYPILOT = 'skypilot'
+SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + '-' + VERSION
+SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
+    '{account_id}@{project_id}.iam.gserviceaccount.com')
+SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
+    'displayName': f'SkyPilot Service Account ({VERSION})',
+}
+
+# Those roles will be always added.
+# NOTE: `serviceAccountUser` allows the head node to create workers with
+# a serviceAccount. `roleViewer` allows the head node to run bootstrap_gcp.
+DEFAULT_SERVICE_ACCOUNT_ROLES = [
+    'roles/storage.objectAdmin',
+    'roles/compute.admin',
+    'roles/iam.serviceAccountUser',
+    'roles/iam.roleViewer',
+]
+# Those roles will only be added if there are TPU nodes defined in config.
+TPU_SERVICE_ACCOUNT_ROLES = ['roles/tpu.admin']
+
+# If there are TPU nodes in config, this field will be set
+# to True in config['provider'].
+HAS_TPU_PROVIDER_FIELD = '_has_tpus'
+
+# NOTE: iam.serviceAccountUser allows the Head Node to create worker nodes
+# with ServiceAccounts.
+
 SKYPILOT_VPC_NAME = 'skypilot-vpc'
 
 # Below parameters are from the default VPC on GCP.
