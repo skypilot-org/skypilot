@@ -35,9 +35,9 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.provision import instance_setup
@@ -46,6 +46,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -97,13 +98,6 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
-
-# Mapping from reserved cluster names to the corresponding group name (logging
-# purpose).
-# NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
-}
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -1018,9 +1012,10 @@ def write_cluster_config(
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
-                'user': get_cleaned_username(os.environ.get(
-                    'SKYPILOT_USER', '')),
+                # SKYPILOT_USER env var (see
+                # execution.py::_shared_controller_env_vars).
+                'user': get_cleaned_username(
+                    os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # AWS only:
                 'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
@@ -2541,6 +2536,79 @@ def check_cluster_available(
     return handle
 
 
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
+def is_controller_up(
+    controller_type: controller_utils.Controllers,
+    stopped_message: str,
+    non_existent_message: Optional[str] = None,
+) -> Tuple[Optional[status_lib.ClusterStatus],
+           Optional['backends.CloudVmRayResourceHandle']]:
+    """Check if the spot/serve controller is up.
+
+    It can be used to check the actual controller status (since the autostop is
+    set for the controller) before the spot/serve commands interact with the
+    controller.
+
+    Args:
+        type: Type of the controller.
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
+
+    Returns:
+        controller_status: The status of the controller. If it fails during
+          refreshing the status, it will be the cached status. None if the
+          controller does not exist.
+        handle: The ResourceHandle of the controller. None if the
+          controller is not UP or does not exist.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
+          the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+    """
+    if non_existent_message is None:
+        non_existent_message = (
+            controller_type.value.default_hint_if_non_existent)
+    cluster_name = controller_type.value.cluster_name
+    controller_name = controller_type.value.name.replace(' controller', '')
+    try:
+        # Set force_refresh_statuses=None to make sure the refresh only happens
+        # when the controller is INIT/UP (triggered in these statuses as the
+        # autostop is always set for the controller). This optimization avoids
+        # unnecessary costly refresh when the controller is already stopped.
+        # This optimization is based on the assumption that the user will not
+        # start the controller manually from the cloud console.
+        controller_status, handle = refresh_cluster_status_handle(
+            cluster_name, force_refresh_statuses=None)
+    except exceptions.ClusterStatusFetchingError as e:
+        # We do not catch the exceptions related to the cluster owner identity
+        # mismatch, please refer to the comment in
+        # `backend_utils.check_cluster_available`.
+        logger.warning(
+            'Failed to get the status of the controller. It is not '
+            f'fatal, but {controller_name} commands/calls may hang or return '
+            'stale information, when the controller is not up.\n'
+            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        controller_status, handle = None, None
+        if record is not None:
+            controller_status, handle = record['status'], record['handle']
+
+    if controller_status is None:
+        sky_logging.print(non_existent_message)
+    elif controller_status != status_lib.ClusterStatus.UP:
+        msg = (f'{controller_name.capitalize()} controller {cluster_name} '
+               f'is {controller_status.value}.')
+        if controller_status == status_lib.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        sky_logging.print(msg)
+        handle = None
+    return controller_status, handle
+
+
 class CloudFilter(enum.Enum):
     # Filter for all types of clouds.
     ALL = 'all'
@@ -2551,7 +2619,7 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-    include_reserved: bool,
+    include_controller: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -2564,8 +2632,8 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_reserved: Whether to include reserved clusters, e.g. spot
-            controller.
+        include_controller: Whether to include controllers, e.g. spot controller
+            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
@@ -2580,10 +2648,10 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
 
-    if not include_reserved:
+    if not include_controller:
         records = [
             record for record in records
-            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+            if controller_utils.Controllers.from_name(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2730,10 +2798,22 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
-    """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
+def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+    """Returns the resources dict of the task.
+
+    Returns:
+        A dict of the resources of the task. The keys are the resource names
+        and the values are the number of the resources. It always contains
+        the CPU resource (to control the maximum number of tasks), and
+        optionally accelerator demands.
+    """
+    # TODO: Custom CPU and other memory resources are not supported yet.
+    # For sky serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of services.
+    resources_dict = {
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
+                if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
+    }
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2741,23 +2821,30 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+    if resources is not None and resources.accelerators is not None:
+        resources_dict.update(resources.accelerators)
+    return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
+    """Returns the resources string of the task.
+
+    The resources string is only used as a display purpose, so we only show
+    the accelerator demands (if any). Otherwise, the CPU demand is shown.
+    """
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
+                       is not None else DEFAULT_TASK_CPU_DEMAND)
     if task.best_resources is not None:
         accelerator_dict = task.best_resources.accelerators
         if accelerator_dict is None:
-            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+            resources_str = f'CPU:{task_cpu_demand}'
         else:
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in accelerator_dict.items())
     elif len(task.resources) == 1:
         resources_dict = list(task.resources)[0].accelerators
         if resources_dict is None:
-            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+            resources_str = f'CPU:{task_cpu_demand}'
         else:
             resources_str = ', '.join(
                 f'{k}:{v}' for k, v in resources_dict.items())
@@ -2772,30 +2859,9 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
         if resource_accelerators:
             resources_str = ', '.join(set(resource_accelerators))
         else:
-            resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+            resources_str = f'CPU:{task_cpu_demand}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_not_reserved(
-        cluster_name: Optional[str],
-        operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster is a reserved cluster (spot controller).
-
-    Raises:
-      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
-        with an error message explaining 'operation_str' is not allowed.
-
-    Returns:
-      None, if the cluster name is not reserved.
-    """
-    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c

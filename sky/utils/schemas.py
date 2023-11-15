@@ -285,6 +285,67 @@ def get_storage_schema():
     }
 
 
+def get_service_schema():
+    """Schema for top-level `service:` field (for SkyServe)."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': ['readiness_probe'],
+        'additionalProperties': False,
+        'properties': {
+            'readiness_probe': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': ['path'],
+                    'additionalProperties': False,
+                    'properties': {
+                        'path': {
+                            'type': 'string',
+                        },
+                        'initial_delay_seconds': {
+                            'type': 'number',
+                        },
+                        'post_data': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'object',
+                            }]
+                        }
+                    }
+                }]
+            },
+            'replica_policy': {
+                'type': 'object',
+                'required': ['min_replicas'],
+                'additionalProperties': False,
+                'properties': {
+                    'min_replicas': {
+                        'type': 'integer',
+                    },
+                    'max_replicas': {
+                        'type': 'integer',
+                    },
+                    'qps_upper_threshold': {
+                        'type': 'number',
+                    },
+                    'qps_lower_threshold': {
+                        'type': 'number',
+                    },
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
+                }
+            },
+            'replicas': {
+                'type': 'integer',
+            },
+        }
+    }
+
+
 def get_task_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -310,6 +371,10 @@ def get_task_schema():
             },
             # storage config is validated separately using STORAGE_SCHEMA
             'file_mounts': {
+                'type': 'object',
+            },
+            # service config is validated separately using SERVICE_SCHEMA
+            'service': {
                 'type': 'object',
             },
             'setup': {
@@ -396,32 +461,38 @@ def get_cluster_schema():
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
+
+    resources_schema = {
+        k: v
+        for k, v in get_resources_schema().items()
+        # Validation may fail if $schema is included.
+        if k != '$schema'
+    }
+    resources_schema['properties'].pop('ports')
+    controller_resources_schema = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'controller': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'resources': resources_schema,
+                }
+            },
+        }
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'spot': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'controller': {
-                        'type': 'object',
-                        'required': [],
-                        'additionalProperties': False,
-                        'properties': {
-                            'resources': {
-                                k: v
-                                for k, v in get_resources_schema().items()
-                                # Validation may fail if $schema is included.
-                                if k != '$schema'
-                            },
-                        }
-                    },
-                }
-            },
+            'spot': controller_resources_schema,
+            'serve': controller_resources_schema,
             'aws': {
                 'type': 'object',
                 'required': [],

@@ -234,6 +234,7 @@ extras_require: Dict[str, List[str]] = {
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
     'remote': remote,
+    'serve': ['uvicorn', 'fastapi'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

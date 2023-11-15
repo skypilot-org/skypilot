@@ -31,6 +31,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot as spot_lib
@@ -51,6 +52,7 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
@@ -292,7 +294,7 @@ class RayCodeGen:
     def add_gang_scheduling_placement_group_and_setup(
         self,
         num_nodes: int,
-        accelerator_dict: Optional[Dict[str, float]],
+        resources_dict: Dict[str, float],
         stable_cluster_internal_ips: List[str],
         setup_cmd: Optional[str] = None,
         setup_log_path: Optional[str] = None,
@@ -310,16 +312,17 @@ class RayCodeGen:
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
 
+        bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
         # for remote functions, since the task will request 1 CPU
         # by default.
-        bundles = [{
-            'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND
-        } for _ in range(num_nodes)]
+        task_cpu_demand = resources_dict.pop('CPU')
 
-        if accelerator_dict is not None:
-            acc_name = list(accelerator_dict.keys())[0]
-            acc_count = list(accelerator_dict.values())[0]
+        if resources_dict:
+            assert len(resources_dict) == 1, (
+                'There can only be one type of accelerator per instance. '
+                f'Found: {resources_dict}.')
+            acc_name, acc_count = list(resources_dict.items())[0]
             gpu_dict = {'GPU': acc_count}
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve
@@ -328,7 +331,6 @@ class RayCodeGen:
                 gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
-                    **accelerator_dict,
                     # Set the GPU to avoid ray hanging the resources allocation
                     **gpu_dict,
                 })
@@ -421,7 +423,7 @@ class RayCodeGen:
                     return ray.util.get_node_ip_address()
                 gang_scheduling_id_to_ip = ray.get([
                     check_ip.options(
-                            num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
+                            num_cpus={task_cpu_demand},
                             scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
                                 placement_group=pg,
                                 placement_group_bundle_index=i
@@ -459,7 +461,7 @@ class RayCodeGen:
                      bash_script: Optional[str],
                      task_name: Optional[str],
                      job_run_id: Optional[str],
-                     ray_resources_dict: Optional[Dict[str, float]],
+                     ray_resources_dict: Dict[str, float],
                      log_dir: str,
                      env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0,
@@ -471,17 +473,18 @@ class RayCodeGen:
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
+        task_cpu_demand = ray_resources_dict.pop('CPU')
         # Build remote_task.options(...)
         #   resources=...
         #   num_gpus=...
         options = []
-        options.append(f'num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}')
+        options.append(f'num_cpus={task_cpu_demand}')
 
         num_gpus = 0.0
-        if ray_resources_dict is not None:
-            assert len(ray_resources_dict) == 1, \
-                ('There can only be one type of accelerator per instance.'
-                 f' Found: {ray_resources_dict}.')
+        if ray_resources_dict:
+            assert len(ray_resources_dict) == 1, (
+                'There can only be one type of accelerator per instance. '
+                f'Found: {ray_resources_dict}.')
             num_gpus = list(ray_resources_dict.values())[0]
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
@@ -3398,7 +3401,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            if name == spot_lib.SPOT_CONTROLLER_NAME:
+            controller = controller_utils.Controllers.from_name(name)
+            if controller == controller_utils.Controllers.SPOT_CONTROLLER:
                 logger.info(
                     f'{fore.CYAN}Spot Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
@@ -3417,7 +3421,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo view the spot job dashboard:\t'
                     f'{backend_utils.BOLD}sky spot dashboard'
                     f'{backend_utils.RESET_BOLD}')
-            else:
+            elif controller is None:
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
                             '\nTo cancel the job:\t'
@@ -3549,7 +3553,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
+        controller = controller_utils.Controllers.from_name(name)
+        if controller is not None or down:
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
@@ -3845,6 +3850,43 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
+        self.run_on_head(
+            handle,
+            code,
+            stream_logs=True,
+            process_stream=False,
+            ssh_mode=command_runner.SshMode.INTERACTIVE,
+            stdin=subprocess.DEVNULL,
+        )
+
+    def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
+                        service_name: str, target: serve_lib.ServiceComponent,
+                        replica_id: Optional[int], follow: bool) -> None:
+        """Tail the logs of a service.
+
+        Args:
+            handle: The handle to the sky serve controller.
+            service_name: The name of the service.
+            target: The component to tail the logs of. Could be controller,
+                load balancer, or replica.
+            replica_id: The replica ID to tail the logs of. Only used when
+                target is replica.
+            follow: Whether to follow the logs.
+        """
+        if target != serve_lib.ServiceComponent.REPLICA:
+            code = serve_lib.ServeCodeGen.stream_serve_process_logs(
+                service_name,
+                stream_controller=(
+                    target == serve_lib.ServiceComponent.CONTROLLER),
+                follow=follow)
+        else:
+            assert replica_id is not None, service_name
+            code = serve_lib.ServeCodeGen.stream_replica_logs(
+                service_name, replica_id, follow)
+
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
         self.run_on_head(
             handle,
             code,
@@ -4767,7 +4809,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
 
-        accelerator_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -4776,7 +4818,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             1,
-            accelerator_dict,
+            resources_dict,
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
@@ -4825,7 +4867,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         #     submit _run_cmd(cmd) with resource {node_i: 1}
         log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
-        accelerator_dict = backend_utils.get_task_demands_dict(task)
+        resources_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
@@ -4843,7 +4885,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
             num_actual_nodes,
-            accelerator_dict,
+            resources_dict,
             stable_cluster_internal_ips=internal_ips,
             setup_cmd=self._setup_cmd,
             setup_log_path=os.path.join(log_dir, 'setup.log'),
@@ -4875,7 +4917,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 env_vars=task.envs,
                 task_name=task.name,
                 job_run_id=job_run_id,
-                ray_resources_dict=accelerator_dict,
+                ray_resources_dict=backend_utils.get_task_demands_dict(task),
                 log_dir=log_dir,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,

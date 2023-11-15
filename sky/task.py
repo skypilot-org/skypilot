@@ -20,6 +20,7 @@ import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
+from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -256,6 +257,7 @@ class Task:
         # Default to CPUNode
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
+        self._service: Optional[service_spec.SkyServiceSpec] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -266,6 +268,9 @@ class Task:
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
         # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
+
+        # Only set when 'self' is a sky serve controller task.
+        self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -488,6 +493,12 @@ class Task:
         else:
             task.set_resources(
                 {sky.Resources.from_yaml_config(resources_config)})
+
+        service = config.pop('service', None)
+        if service is not None:
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
+        task.set_service(service)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -662,6 +673,23 @@ class Task:
             new_resources_list.append(new_resources)
 
         self.set_resources(type(self.resources)(new_resources_list))
+        return self
+
+    @property
+    def service(self) -> Optional[service_spec.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self,
+                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
@@ -1044,6 +1072,10 @@ class Task:
             tmp_resource_config = list(self.resources)[0].to_yaml_config()
 
         add_if_not_none('resources', tmp_resource_config)
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:

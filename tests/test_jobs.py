@@ -8,7 +8,7 @@ from sky.utils import db_utils
 
 
 class TestExecutionOnExistingClusters:
-    """Test operations on reserved clusters."""
+    """Test operations on existing clusters."""
 
     @pytest.fixture
     def _mock_db_conn(self, monkeypatch, tmp_path):
