@@ -104,3 +104,8 @@ FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
 FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
+
+# The default idle timeout for SkyPilot controllers. This include spot
+# controller and sky serve controller.
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10

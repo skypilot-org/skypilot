@@ -195,7 +195,7 @@ def _start(
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
         idle_minutes_to_autostop = (
-            controller_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+            constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.

@@ -21,6 +21,7 @@ from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
+from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -720,7 +721,7 @@ def spot_launch(
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
-            idle_minutes_to_autostop=controller_utils.
+            idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )

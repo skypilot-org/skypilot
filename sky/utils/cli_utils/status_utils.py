@@ -10,8 +10,8 @@ from sky import backends
 from sky import global_user_state
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
@@ -278,8 +278,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 
     if cluster_records:
         if controller_name is not None:
-            autostop_minutes = (
-                controller_utils.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+            autostop_minutes = (constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '

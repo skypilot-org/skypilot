@@ -8,9 +8,11 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
 from sky import sky_logging
 from sky import status_lib
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.serve import constants as serve_constants
@@ -37,10 +39,6 @@ def up(
         task: sky.Task to serve up.
         service_name: Name of the service.
     """
-    # Import here to avoid circular import.
-    # pylint: disable=import-outside-toplevel
-    from sky import execution
-    from sky import task as task_lib
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -152,7 +150,7 @@ def up(
             stream_logs=False,
             cluster_name=controller_name,
             detach_run=True,
-            idle_minutes_to_autostop=controller_utils.
+            idle_minutes_to_autostop=constants.
             CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
