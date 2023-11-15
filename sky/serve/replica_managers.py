@@ -319,14 +319,20 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str,
-                 replica_port: str) -> None:
+    def __init__(self,
+                 replica_id: int,
+                 cluster_name: str,
+                 replica_port: str,
+                 is_on_demand_backup: bool = False) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
+        self.is_on_demand_backup: bool = is_on_demand_backup
+        logger.info(f'Created replica info for replica {replica_id}.'
+                    f' is_on_demand_backup: {is_on_demand_backup}')
 
     def handle(
         self,
@@ -372,6 +378,7 @@ class ReplicaInfo:
             'status': self.status,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
+            'is_on_demand_backup': self.is_on_demand_backup,
         }
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
@@ -481,9 +488,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self.spot_policy: Optional[
             spot_policy.SpotPolicy] = spot_policy.SpotPolicy(
-                spec.spot_zones, spec.spot_placement,
-                spec.mix_policy) if (spec.spot_zones and spec.spot_placement and
-                                     spec.mix_policy) else None
+                spec.spot_zones, spec.spot_placement, spec.mix_policy,
+                spec) if (spec.spot_zones and spec.spot_placement and
+                          spec.mix_policy) else None
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
@@ -501,14 +508,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
 
-    def _generate_launch_overwrite_dict(self) -> Dict[str, str]:
+    def _generate_launch_overwrite_dict(self) -> Dict[str, Any]:
         overwrite_dict = {}
         if self.spot_policy is not None:
             zone = self.spot_policy.get_next_zone()
             overwrite_dict['zone'] = zone
         return overwrite_dict
 
-    def _launch_replica(self, replica_id: int) -> None:
+    def _launch_replica(self,
+                        replica_id: int,
+                        is_on_demand_backup: bool = False) -> None:
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -519,6 +528,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
         overwrite_dict = self._generate_launch_overwrite_dict()
+        if is_on_demand_backup:
+            logger.info(f'Replica {replica_id} is an on-demand backup.')
+            overwrite_dict['use_spot'] = False
+            overwrite_dict['spot_recovery'] = None
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
@@ -527,7 +540,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             args=(self._task_yaml_path, cluster_name, overwrite_dict),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port,
+                           is_on_demand_backup)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -619,10 +633,23 @@ class SkyPilotReplicaManager(ReplicaManager):
             self.spot_policy.handle_preemption(handle.launched_resources.zone)
         self._terminate_replica(replica_id, sync_down_logs=False)
 
+        infos = serve_state.get_replica_infos(self._service_name)
+        num_active_spot_replicas = 0
+        for info in infos:
+            # Assume info all uses spot instances
+            if (not info.is_on_demand_backup and
+                    info.status == serve_state.ReplicaStatus.READY):
+                num_active_spot_replicas += 1
+
+        if self.spot_policy is not None:
+            self.spot_policy.update_num_alive_spot_replicas(
+                num_active_spot_replicas)
+
         if (self.spot_policy is not None and
                 self.spot_policy.is_fallback_on_demand()):
-            raise NotImplementedError(
-                'Fallback on demand is not supported yet.')
+            self._launch_replica(replica_id=self._next_replica_id,
+                                 is_on_demand_backup=True)
+            self._next_replica_id += 1
         else:
             pass
 
@@ -670,6 +697,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
                     else:
+                        if info.is_on_demand_backup:
+                            if self.spot_policy is not None:
+                                self.spot_policy.handle_backup()
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
                 serve_state.add_or_update_replica(self._service_name,
@@ -917,12 +947,32 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                replica_statuses = [
-                    info.status for info in serve_state.get_replica_infos(
-                        self._service_name)
-                ]
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                replica_statuses = [info.status for info in replica_infos]
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)
+
+                # Update the number of active spot replicas
+                if self.spot_policy is not None:
+                    num_active_spot_replicas = 0
+                    for info in replica_infos:
+                        # Assume info all uses spot instances
+                        if (not info.is_on_demand_backup and
+                                info.status == serve_state.ReplicaStatus.READY):
+                            num_active_spot_replicas += 1
+                    self.spot_policy.update_num_alive_spot_replicas(
+                        num_active_spot_replicas)
+
+                    # Downscale the on_demand replica.
+                    for info in replica_infos:
+                        if info.is_on_demand_backup:
+                            if self.spot_policy.is_scale_down_on_demand_backup(
+                            ):
+                                self._terminate_replica(info.replica_id,
+                                                        sync_down_logs=False)
+                                self.spot_policy.handle_backup_terminate()
+
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # replica prober running.

@@ -190,7 +190,8 @@ class SkyServiceSpec:
     def policy_str(self):
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
-            return f'Fixed {self.min_replicas} replica{min_plural}'
+            return (f'Fixed {self.min_replicas} replica{min_plural}'
+                    f' ({self.spot_policy_str()})')
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to '
