@@ -1,33 +1,24 @@
 """Utilities for sky status."""
-import re
-import typing
 from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
-
-if typing.TYPE_CHECKING:
-    from sky import serve
+from sky.utils import resources_utils
 
 COMMAND_TRUNC_LENGTH = 25
-REPLICA_TRUNC_NUM = 10
 NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
 # A record returned by core.cost_report(); see its docstr for all fields.
 _ClusterCostReportRecord = Dict[str, Any]
-# A record in serve_state's 'services' table.
-_ServiceRecord = Dict[str, Any]
-_ReplicaRecord = Dict[str, Any]
 
 
 def truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -115,87 +106,6 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     else:
         click.echo('No existing clusters.')
     return num_pending_autostop
-
-
-# TODO(tian): Refactor to sky/serve.
-def format_service_table(service_records: List[_ServiceRecord],
-                         show_all: bool) -> str:
-    if not service_records:
-        return 'No existing services.'
-
-    status_columns = [
-        StatusColumn('NAME', _get_name),
-        StatusColumn('UPTIME', _get_uptime),
-        StatusColumn('STATUS', _get_service_status_colored),
-        StatusColumn('REPLICAS', _get_replicas),
-        StatusColumn('ENDPOINT', get_endpoint),
-        StatusColumn('POLICY', _get_policy, show_by_default=False),
-        StatusColumn('REQUESTED_RESOURCES',
-                     _get_requested_resources,
-                     show_by_default=False),
-    ]
-
-    columns = []
-    for status_column in status_columns:
-        if status_column.show_by_default or show_all:
-            columns.append(status_column.name)
-    service_table = log_utils.create_table(columns)
-    replica_infos = []
-    for record in service_records:
-        row = []
-        for status_column in status_columns:
-            if status_column.show_by_default or show_all:
-                row.append(status_column.calc(record))
-        service_table.add_row(row)
-        for replica in record['replica_info']:
-            replica['service_name'] = record['name']
-            replica_infos.append(replica)
-
-    replica_table = format_replica_table(replica_infos, show_all)
-    return (f'{service_table}\n'
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
-            f'{replica_table}')
-
-
-def format_replica_table(replica_records: List[_ReplicaRecord],
-                         show_all: bool) -> str:
-    if not replica_records:
-        return 'No existing replicas.'
-
-    status_columns = [
-        StatusColumn('SERVICE_NAME', _get_service_name),
-        StatusColumn('ID', _get_replica_id),
-        StatusColumn('IP', _get_head_ip),
-        StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn(
-            'RESOURCES',
-            _get_full_replica_resources if show_all else _get_replica_resources,
-            trunc_length=70 if not show_all else 0),
-        StatusColumn('REGION', _get_replica_region),
-        StatusColumn('ZONE', _get_replica_zone, show_by_default=False),
-        StatusColumn('STATUS', _get_status_colored),
-    ]
-
-    truncate_hint = ''
-    if not show_all:
-        if len(replica_records) > REPLICA_TRUNC_NUM:
-            truncate_hint = '\n... (use --all to show all replicas)'
-        replica_records = replica_records[:REPLICA_TRUNC_NUM]
-
-    columns = []
-    for status_column in status_columns:
-        if status_column.show_by_default or show_all:
-            columns.append(status_column.name)
-    replica_table = log_utils.create_table(columns)
-    for record in replica_records:
-        row = []
-        for status_column in status_columns:
-            if status_column.show_by_default or show_all:
-                row.append(status_column.calc(record))
-        replica_table.add_row(row)
-
-    return f'{replica_table}{truncate_hint}'
 
 
 def get_total_cost_of_displayed_records(
@@ -398,58 +308,6 @@ _get_region = (
 _get_command = (lambda cluster_record: cluster_record['last_use'])
 _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
-_get_replica_id = lambda replica_record: replica_record['replica_id']
-_get_service_name = lambda replica_record: replica_record['service_name']
-_get_policy = lambda replica_record: replica_record['policy']
-_get_requested_resources = lambda replica_record: replica_record[
-    'requested_resources']
-
-
-def _get_uptime(service_record: _ServiceRecord) -> str:
-    uptime = service_record['uptime']
-    if uptime is None:
-        return '-'
-    return log_utils.readable_time_duration(uptime, absolute=True)
-
-
-def _get_replicas(service_record: _ServiceRecord) -> str:
-    # Import here to avoid circular import
-    from sky import serve  # pylint: disable=import-outside-toplevel
-
-    ready_replica_num, total_replica_num = 0, 0
-    for info in service_record['replica_info']:
-        if _get_status(info) == serve.ReplicaStatus.READY:
-            ready_replica_num += 1
-        # If auto restart enabled, not count FAILED replicas here.
-        if (not service_record['auto_restart'] or
-                _get_status(info) != serve.ReplicaStatus.FAILED):
-            total_replica_num += 1
-    return f'{ready_replica_num}/{total_replica_num}'
-
-
-def get_endpoint(service_record: _ServiceRecord) -> str:
-    # Import here to avoid circular import
-    from sky import serve  # pylint: disable=import-outside-toplevel
-
-    # Don't use backend_utils.is_controller_up since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        serve.SKY_SERVE_CONTROLLER_NAME)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None or handle.head_ip is None:
-        return '-'
-    load_balancer_port = service_record['load_balancer_port']
-    if load_balancer_port is None:
-        return '-'
-    return f'{handle.head_ip}:{load_balancer_port}'
-
-
-def _get_service_status(
-        service_record: _ServiceRecord) -> 'serve.ServiceStatus':
-    return service_record['status']
-
-
-def _get_service_status_colored(service_record: _ServiceRecord) -> str:
-    return _get_service_status(service_record).colored_str()
 
 
 def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
@@ -462,23 +320,10 @@ def _get_status_colored(cluster_record: _ClusterRecord) -> str:
 
 def _get_resources(cluster_record: _ClusterRecord) -> str:
     handle = cluster_record['handle']
-    resources_str = '<initializing>'
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
     elif isinstance(handle, backends.CloudVmRayResourceHandle):
-        if (handle.launched_nodes is not None and
-                handle.launched_resources is not None):
-            launched_resource_str = str(handle.launched_resources)
-            # accelerator_args is way too long.
-            # Convert from:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-            # to:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-            pattern = ', accelerator_args={.*}'
-            launched_resource_str = re.sub(pattern, '...',
-                                           launched_resource_str)
-            resources_str = (f'{handle.launched_nodes}x '
-                             f'{launched_resource_str}')
+        resources_str = resources_utils.get_cloud_resources_str(handle)
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
@@ -489,44 +334,6 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
     if zone_str is None:
         zone_str = '-'
     return zone_str
-
-
-def _get_full_replica_resources(replica_record: _ReplicaRecord) -> str:
-    handle = replica_record['handle']
-    if handle is None:
-        return '-'
-    return _get_resources(replica_record)
-
-
-def _get_replica_resources(replica_record: _ReplicaRecord) -> str:
-    handle = replica_record['handle']
-    if handle is None:
-        return '-'
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    cloud = handle.launched_resources.cloud
-    if handle.launched_resources.accelerators is None:
-        vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-            handle.launched_resources.instance_type)
-        hardware = f'vCPU={int(vcpu)}'
-    else:
-        hardware = f'{handle.launched_resources.accelerators})'
-    spot = '[Spot]' if handle.launched_resources.use_spot else ''
-    resources_str = f'{handle.launched_nodes}x {cloud}({spot}{hardware})'
-    return resources_str
-
-
-def _get_replica_region(replica_record: _ReplicaRecord) -> str:
-    handle = replica_record['handle']
-    if handle is None:
-        return '-'
-    return _get_region(replica_record)
-
-
-def _get_replica_zone(replica_record: _ReplicaRecord) -> str:
-    handle = replica_record['handle']
-    if handle is None:
-        return '-'
-    return _get_zone(replica_record)
 
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:

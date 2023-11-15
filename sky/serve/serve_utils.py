@@ -26,6 +26,8 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -43,6 +45,9 @@ _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
     '{replica_id}. Please use `sky serve status [SERVICE_NAME]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+# Max number of replicas to show in `sky serve status` by default.
+# If user wants to see all replicas, use `sky serve status --all`.
+_REPLICA_TRUNC_NUM = 10
 
 
 class ServiceComponent(enum.Enum):
@@ -621,6 +626,137 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
                                  exit_if_stream_end=not follow):
             print(line, end='', flush=True)
     return ''
+
+
+# ================== Table Formatter for `sky serve status` ==================
+
+
+def _get_replicas(service_record: Dict[str, Any]) -> str:
+    ready_replica_num, total_replica_num = 0, 0
+    for info in service_record['replica_info']:
+        if info['status'] == serve_state.ReplicaStatus.READY:
+            ready_replica_num += 1
+        # If auto restart enabled, not count FAILED replicas here.
+        if (not service_record['auto_restart'] or
+                info['status'] != serve_state.ReplicaStatus.FAILED):
+            total_replica_num += 1
+    return f'{ready_replica_num}/{total_replica_num}'
+
+
+def get_endpoint(service_record: Dict[str, Any]) -> str:
+    # Don't use backend_utils.is_controller_up since it is too slow.
+    handle = global_user_state.get_handle_from_cluster_name(
+        SKY_SERVE_CONTROLLER_NAME)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    if handle is None or handle.head_ip is None:
+        return '-'
+    load_balancer_port = service_record['load_balancer_port']
+    if load_balancer_port is None:
+        return '-'
+    return f'{handle.head_ip}:{load_balancer_port}'
+
+
+def format_service_table(service_records: List[Dict[str, Any]],
+                         show_all: bool) -> str:
+    if not service_records:
+        return 'No existing services.'
+
+    service_columns = ['NAME', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT']
+    if show_all:
+        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+    service_table = log_utils.create_table(service_columns)
+
+    replica_infos = []
+    for record in service_records:
+        for replica in record['replica_info']:
+            replica['service_name'] = record['name']
+            replica_infos.append(replica)
+
+        service_name = record['name']
+        uptime = log_utils.readable_time_duration(record['uptime'],
+                                                  absolute=True)
+        service_status = record['status']
+        status_str = service_status.colored_str()
+        replicas = _get_replicas(record)
+        endpoint = get_endpoint(record)
+        policy = record['policy']
+        requested_resources = record['requested_resources']
+
+        service_values = [
+            service_name,
+            uptime,
+            status_str,
+            replicas,
+            endpoint,
+        ]
+        if show_all:
+            service_values.extend([policy, requested_resources])
+        service_table.add_row(service_values)
+
+    replica_table = _format_replica_table(replica_infos, show_all)
+    return (f'{service_table}\n'
+            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+            f'Service Replicas{colorama.Style.RESET_ALL}\n'
+            f'{replica_table}')
+
+
+def _format_replica_table(replica_records: List[Dict[str, Any]],
+                          show_all: bool) -> str:
+    if not replica_records:
+        return 'No existing replicas.'
+
+    replica_columns = [
+        'SERVICE_NAME', 'ID', 'IP', 'LAUNCHED', 'RESOURCES', 'STATUS', 'REGION'
+    ]
+    if show_all:
+        replica_columns.append('ZONE')
+    replica_table = log_utils.create_table(replica_columns)
+
+    truncate_hint = ''
+    if not show_all:
+        if len(replica_records) > _REPLICA_TRUNC_NUM:
+            truncate_hint = '\n... (use --all to show all replicas)'
+        replica_records = replica_records[:_REPLICA_TRUNC_NUM]
+
+    for record in replica_records:
+        service_name = record['service_name']
+        replica_id = record['replica_id']
+        replica_ip = '-'
+        launched_at = log_utils.readable_time_duration(record['launched_at'])
+        resources_str = '-'
+        replica_status = record['status']
+        status_str = replica_status.colored_str()
+        region = '-'
+        zone = '-'
+
+        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
+        if replica_handle is not None:
+            if replica_handle.head_ip is not None:
+                replica_ip = replica_handle.head_ip
+            resources_str = resources_utils.get_cloud_resources_str(
+                replica_handle, simplify=not show_all)
+            if replica_handle.launched_resources.region is not None:
+                region = replica_handle.launched_resources.region
+            if replica_handle.launched_resources.zone is not None:
+                zone = replica_handle.launched_resources.zone
+
+        replica_values = [
+            service_name,
+            replica_id,
+            replica_ip,
+            launched_at,
+            resources_str,
+            status_str,
+            region,
+        ]
+        if show_all:
+            replica_values.append(zone)
+        replica_table.add_row(replica_values)
+
+    return f'{replica_table}{truncate_hint}'
+
+
+# =========================== CodeGen for Sky Serve ===========================
 
 
 # TODO(tian): Use REST API instead of SSH in the future. This codegen pattern

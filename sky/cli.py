@@ -1721,9 +1721,9 @@ def _get_services(service_names: Optional[List[str]],
                     f'{service_num} service{plural} found. Please specify '
                     'an existing service to show its endpoint. Usage: '
                     'sky serve status --endpoint <service-name>')
-            msg = status_utils.get_endpoint(service_records[0])
+            msg = serve_lib.get_endpoint(service_records[0])
         else:
-            msg = status_utils.format_service_table(service_records, show_all)
+            msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
             if service_names is not None:
                 for service_name in service_names:
