@@ -4497,6 +4497,8 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
+# TODO(tian): Add default argument for this CLI if none of the flags are
+# specified.
 def serve_logs(
     service_name: str,
     follow: bool,
