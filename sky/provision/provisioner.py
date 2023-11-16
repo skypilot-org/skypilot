@@ -245,10 +245,14 @@ def _wait_ssh_connection_direct(
     try:
         with socket.create_connection((ip, 22), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
-                # Wait for SSH actually ready, otherwise we may get "System
-                # is booting up. Unprivileged users are not permitted to log in
-                # yet".
-                return _wait_ssh_connection_indirect(ip, ssh_user, ssh_private_key, ssh_control_name, ssh_proxy_command)
+                # Wait for SSH being actually ready, otherwise we may get the
+                # following error:
+                # "System is booting up. Unprivileged users are not permitted to
+                # log in yet".
+                return _wait_ssh_connection_indirect(ip, ssh_user,
+                                                     ssh_private_key,
+                                                     ssh_control_name,
+                                                     ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
         pass
     except Exception:  # pylint: disable=broad-except
