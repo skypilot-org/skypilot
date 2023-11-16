@@ -49,7 +49,8 @@ SSHCommandRunner.set_port = set_port
 
 def run_override_timeout(*args, **kwargs):
     # If command is `uptime`, change timeout to 10s
-    if args[1] == 'uptime':
+    command = args[1]
+    if command == 'uptime':
         kwargs['timeout'] = UPTIME_SSH_TIMEOUT
     return SSHCommandRunner._run(*args, **kwargs)
 
