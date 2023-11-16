@@ -48,9 +48,7 @@ def _retry_on_http_exception(
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            from googleapiclient.errors import HttpError
-
-            exception_type = HttpError
+            exception_type = gcp.http_error_exception()
 
             def try_catch_exc():
                 try:
@@ -243,6 +241,10 @@ class GCPInstance:
         else:
             results = operations
 
+        if "sourceMachineImage" in node_config:
+            for _, instance_id in results:
+                cls.resize_disk(project_id, zone, node_config, instance_id)
+
         return results
 
     @classmethod
@@ -280,6 +282,18 @@ class GCPInstance:
             availability_zone: str,
             instance_id: str,
             wait_for_operation: bool = True) -> common.InstanceInfo:
+        raise NotImplementedError
+
+    @classmethod
+    def resize_disk(cls,
+                    project_id: str,
+                    availability_zone: str,
+                    node_config: dict,
+                    instance_name: str,
+                    wait_for_operation: bool = True) -> dict:
+        """Resize a Google Cloud disk based on the provided configuration.
+        Returns the response of resize operation.
+        """
         raise NotImplementedError
 
 
@@ -802,6 +816,50 @@ class GCPComputeInstance(GCPInstance):
             tags=result.get('labels', {}),
         )
 
+    @classmethod
+    def resize_disk(cls,
+                    project_id: str,
+                    availability_zone: str,
+                    node_config: dict,
+                    instance_name: str,
+                    wait_for_operation: bool = True) -> bool:
+        """Resize a Google Cloud disk based on the provided configuration."""
+
+        # Extract the specified disk size from the configuration
+        new_size_gb = node_config["disks"][0]["initializeParams"]["diskSizeGb"]
+
+        # Fetch the instance details to get the disk name and current disk size
+        response = (cls.load_resource().instances().get(
+            project=project_id,
+            zone=availability_zone,
+            instance=instance_name,
+        ).execute())
+        disk_name = response["disks"][0]["source"].split("/")[-1]
+
+        try:
+            # Execute the resize request and return the response
+            operation = (cls.load_resource().disks().resize(
+                project=project_id,
+                zone=availability_zone,
+                disk=disk_name,
+                body={
+                    "sizeGb": str(new_size_gb),
+                },
+            ).execute())
+        except gcp.http_error_exception() as e:
+            # Catch HttpError when provided with invalid value for new disk size.
+            # Allowing users to create instances with the same size as the image
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            return False
+
+        if wait_for_operation:
+            result = cls.wait_for_operation(operation, project_id,
+                                            availability_zone)
+        else:
+            result = operation
+
+        return result
+
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU node."""
@@ -985,8 +1043,8 @@ class GCPTPUVMInstance(GCPInstance):
         ).execute())
 
         if wait_for_operation:
-            result = cls.wait_for_operation(project_id, availability_zone,
-                                            operation)
+            result = cls.wait_for_operation(operation, project_id,
+                                            availability_zone)
         else:
             result = operation
 
@@ -1019,6 +1077,20 @@ class GCPTPUVMInstance(GCPInstance):
             result = operation
 
         return result
+
+    @classmethod
+    def resize_disk(cls,
+                    project_id: str,
+                    availability_zone: str,
+                    node_config: dict,
+                    instance_name: str,
+                    wait_for_operation: bool = True) -> dict:
+        """
+        TODO: Implement the feature to attach persistent disks for TPU VMs.
+        The boot disk of TPU VMs is not resizable, and users need to add a
+        persistent disk to expand disk capacity. Related issue: #2387
+        """
+        return False
 
 
 class GCPNodeType(enum.Enum):
