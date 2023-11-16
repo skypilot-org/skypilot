@@ -203,7 +203,7 @@ class SkyServiceSpec:
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
             Replica auto restart:             {self.auto_restart}
-             Spot Policy:                      {self.spot_policy_str()}\
+            Spot Policy:                      {self.spot_policy_str()}\
         """)
 
     @property
