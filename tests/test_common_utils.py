@@ -3,6 +3,7 @@ from sky.utils.common_utils import _adjust_cluster_name
 
 
 class TestAdjustClusterName:
+
     def test_adjust_cluster_name_with_uppercase_letters(self):
         assert _adjust_cluster_name("LoRA") == "lora"
 
