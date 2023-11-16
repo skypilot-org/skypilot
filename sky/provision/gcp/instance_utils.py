@@ -12,6 +12,7 @@ from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision.gcp.constants import MAX_POLLS
 from sky.provision.gcp.constants import POLL_INTERVAL
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 # Tag uniquely identifying all nodes of a cluster
@@ -85,13 +86,15 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     The suffix is expected to be one of 'compute' or 'tpu'
     (as in ``GCPNodeType``).
     """
-    suffix = f'-{uuid.uuid4().hex[:INSTANCE_NAME_UUID_LEN]}-{node_suffix}'
+    suffix_id = common_utils.base36_encode(uuid.uuid4().hex)
+    suffix = f'-{suffix_id[:INSTANCE_NAME_UUID_LEN]}-{node_suffix}'
     if is_head:
         suffix = f'-head{suffix}'
     else:
         suffix = f'-worker{suffix}'
-    prefix = cluster_name[:INSTANCE_NAME_MAX_LEN - len(suffix)]
-    return prefix + suffix
+    node_name = cluster_name + suffix
+    assert len(node_name) <= INSTANCE_NAME_MAX_LEN, cluster_name
+    return node_name
 
 
 def instance_to_handler(instance: str):

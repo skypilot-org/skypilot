@@ -104,6 +104,9 @@ def construct_clients_from_provider_config(provider_config):
         # credentials in the local environment.
         return _create_crm(), _create_iam(), _create_compute(), tpu_resource
 
+    # Note: The following code has not been used yet, as we will never set
+    # `gcp_credentials` in provider_config.
+    # It will only be used when we allow users to specify their own credeitals.
     assert ('type' in gcp_credentials
            ), 'gcp_credentials cluster yaml field missing "type" field.'
     assert ('credentials' in gcp_credentials
