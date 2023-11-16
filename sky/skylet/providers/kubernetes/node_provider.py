@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TAG_RETRIES = 3
 DELAY_BEFORE_TAG_RETRY = 0.5
+UPTIME_SSH_TIMEOUT = 10
 
 RAY_COMPONENT_LABEL = 'cluster.ray.io/component'
 
@@ -29,6 +30,33 @@ def set_port(self, port):
 
 
 SSHCommandRunner.set_port = set_port
+
+# Monkey patch SSHCommandRunner to use a larger timeout when running uptime to
+# check cluster liveness. This is needed because the default timeout of 5s is
+# too short when the cluster is accessed from different geographical
+# locations over VPN.
+#
+# Ray autoscaler sets the timeout on a per-call basis (as an arg to
+# SSHCommandRunner.run). The 5s timeout is hardcoded in
+# NodeUpdater.wait_ready() in updater.py is hard to modify without
+# duplicating a large chunk of ray autoscaler code. Instead, we
+# monkey patch the run method to check if the command being run is 'uptime',
+# and if so change the timeout to 10s.
+#
+# Fortunately, Ray uses a timeout of 120s for running commands after the
+# cluster is ready, so we do not need to modify that.
+
+
+def run_override_timeout(*args, **kwargs):
+    # If command is `uptime`, change timeout to 10s
+    command = args[1]
+    if command == 'uptime':
+        kwargs['timeout'] = UPTIME_SSH_TIMEOUT
+    return SSHCommandRunner._run(*args, **kwargs)
+
+
+SSHCommandRunner._run = SSHCommandRunner.run
+SSHCommandRunner.run = run_override_timeout
 
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
