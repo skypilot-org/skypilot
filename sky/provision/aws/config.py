@@ -215,6 +215,14 @@ def _usable_subnets(
         str: VPC ID of the first subnet.
     """
 
+    # For existing cluster, it is ok to return a VPC and subnet not used by
+    # the cluster, as AWS will ignore them.
+    # There is a corner case where the multi-node cluster was partially
+    # launched, launching the cluster again can cause the nodes located on
+    # different VPCs, if VPCs in the project have changed. It should be fine to
+    # not handle this special case as we don't want to sacrifice the performance
+    # for every launch just for this rare case.
+
     def _are_user_subnets_pruned(current_subnets: List[Any]) -> bool:
         return user_specified_subnets is not None and len(
             current_subnets) != len(user_specified_subnets)

@@ -134,9 +134,18 @@ User
     compute.firewalls.list
     compute.firewalls.update
 
-8. Click **Create** to create the role.
-9. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-10. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
+
+.. code-block:: text
+    
+    compute.disks.get
+    compute.disks.resize
+    compute.images.get
+    compute.images.useReadOnly
+
+9. Click **Create** to create the role.
+10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -144,7 +153,7 @@ User
     :align: center
     :alt: GCP Grant Access
 
-11. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
@@ -193,8 +202,8 @@ using SkyPilot. If the default VPC does not satisfy the minimal required rules,
 a new VPC ``skypilot-vpc`` with sufficient rules will be automatically created
 and used.
 
-However, if you manually set up and instruct SkyPilot to use a VPC (see
-:ref:`here <config-yaml>`), ensure it has the following required firewall rules:
+However, if you manually set up and instruct SkyPilot to use a custom VPC (see
+:ref:`below <gcp-bring-your-vpc>`), ensure it has the following required firewall rules:
 
 .. code-block:: python
 
@@ -230,3 +239,29 @@ However, if you manually set up and instruct SkyPilot to use a VPC (see
 You can inspect and manage firewall rules at
 ``https://console.cloud.google.com/net-security/firewall-manager/firewall-policies/list?project=<your-project-id>``
 or using any of GCP's SDKs.
+
+.. _gcp-bring-your-vpc:
+
+Using a specific VPC
+-----------------------
+By default, SkyPilot uses the following behavior to get a VPC to use for all GCP instances:
+
+- First, all existing VPCs in the project are checked against the minimal
+  recommended firewall rules for SkyPilot to function. If any VPC satisfies these
+  rules, it is used.
+- Otherwise, a new VPC named ``skypilot-vpc`` is automatically created with the
+  minimal recommended firewall rules and will be used. It is an auto mode VPC that
+  automatically starts with one subnet per region.
+
+To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
+
+.. code-block:: yaml
+
+    gcp:
+      vpc_name: my-vpc-name
+
+See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+VPC with fine-grained constraints, typically created via Terraform or manually.
+
+The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-firewall-rules>`.
