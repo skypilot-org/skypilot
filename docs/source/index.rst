@@ -112,6 +112,13 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: Spin up Services
+
+   examples/sky-serve
+   examples/service-yaml-spec
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cutting Cloud Costs
 
    examples/spot-jobs
