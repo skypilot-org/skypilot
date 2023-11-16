@@ -3,15 +3,39 @@
 Sky Serve
 =========
 
-GPU availability has become a critical bottleneck for many AI services. With Sky Serve, we offer a lightweight control plane that simplifies deployment across many cloud providers. By consolidating availability and pricing data across clouds, we ensure **timely execution at optimal costs**, addressing the complexities of managing resources in a multi-cloud environment.
+Sky Serve is SkyPilot's serving library. Sky Serve takes an existing serving
+framework and deploys it across one or more regions or clouds.
+
+.. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
 Why Sky Serve?
 
-* Allocate scarce resources (e.g., A100) **across regions and clouds**
-* Autoscale your endpoint deployment with load balancing
-* Manage your multi-cloud resources with a single control plane
+* **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
+* **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware
+* **Out-of-the-box load-balancing and autoscaling** of service replicas
+* Manage multi-cloud, multi-region deployments with a single control plane
+* Everything is launched inside your cloud accounts and VPCs
 
-Sky Serve provides a simple CLI interface to deploy and manage your services. It features a simple YAML spec to describe your service (We'll refer to such YAML as a **Service YAML** in the following), and a centralized controller to manage the deployment.
+.. * Allocate scarce resources (e.g., A100) **across regions and clouds**
+.. * Autoscale your endpoint deployment with load balancing
+.. * Manage your multi-cloud resources with a single control plane
+
+How it works
+
+- Each service gets an endpoint that automatically redirects requests to its underlying replicas.
+- The replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
+- Sky Serve transparently handles the load balancing, failover, and autoscaling of the serving replicas.
+
+.. GPU availability has become a critical bottleneck for many AI services. With Sky
+.. Serve, we offer a lightweight control plane that simplifies deployment across
+.. many cloud providers. By consolidating availability and pricing data across
+.. clouds, we ensure **timely execution at optimal costs**, addressing the
+.. complexities of managing resources in a multi-cloud environment.
+
+
+Sky Serve provides a simple CLI interface to deploy and manage your services. It
+features a simple YAML spec to describe your services (referred to as a *service
+YAML* in the following) and a centralized controller to manage the deployments.
 
 Service YAML
 ------------
@@ -147,7 +171,7 @@ Below we show an end-to-end example of deploying a LLM model with Sky Serve. We'
 
     run: |
       conda activate chatbot
-  
+
       echo 'Starting controller...'
       python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
       sleep 10
@@ -244,7 +268,7 @@ See all running services:
 .. code-block:: console
 
     Services
-    NAME         UPTIME      STATUS  REPLICAS  ENDPOINT           
+    NAME         UPTIME      STATUS  REPLICAS  ENDPOINT
     llama2-spot  2h 29m 36s  READY   1/2       34.238.42.4:30001
     vicuna       3h 5m 56s   READY   2/2       34.238.42.4:30003
     http-server  3h 20m 50s  READY   2/2       34.238.42.4:30002

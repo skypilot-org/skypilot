@@ -112,7 +112,7 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
-   :caption: Spin up Services
+   :caption: Multi-Cloud Serving
 
    examples/sky-serve
    examples/service-yaml-spec
