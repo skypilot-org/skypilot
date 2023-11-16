@@ -543,6 +543,9 @@ class Resources:
         assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption(self)
 
+    def set_zone(self, zone: str) -> None:
+        self._validate_and_set_region_zone(region=None, zone=zone)
+
     def _validate_and_set_region_zone(self, region: Optional[str],
                                       zone: Optional[str]) -> None:
         if region is None and zone is None:

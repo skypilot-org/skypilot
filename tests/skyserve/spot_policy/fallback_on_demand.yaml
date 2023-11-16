@@ -1,0 +1,21 @@
+resources:
+  cloud: gcp
+  cpus: 2+
+  use_spot: true
+  ports: 8080
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: python3 server.py --port 8080
+
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy: 
+    min_replicas: 2
+    max_replicas: 2
+    spot_placement: DynamicFailover
+    mix_policy: FallbackOnDemand
+    spot_zones: [us-central1-a, us-central1-b, us-central1-c]

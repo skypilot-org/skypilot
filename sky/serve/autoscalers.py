@@ -128,7 +128,14 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> AutoscalerDecision:
         current_time = time.time()
-        num_replicas = len(replica_infos)
+        num_replicas = 0
+        for replica in replica_infos:
+            logger.info(f'Replica {replica.replica_id} '
+                        f'is_on_demand_backup: '
+                        f'{replica.is_on_demand_backup}')
+            if replica.is_on_demand_backup:
+                continue
+            num_replicas += 1
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -189,6 +196,9 @@ class RequestRateAutoscaler(Autoscaler):
             for info in replica_infos:
                 if len(replica_ids_to_remove) >= num_replicas_to_remove:
                     break
+                # Skip On-demand backup replicas.
+                if info.is_on_demand_backup:
+                    continue
                 replica_ids_to_remove.append(info.replica_id)
             logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
                         f'(id: {replica_ids_to_remove}).')
