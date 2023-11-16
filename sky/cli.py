@@ -1692,7 +1692,7 @@ def _get_services(service_names: Optional[List[str]],
             if not service_names:
                 # Change empty list to None
                 service_names = None
-            service_records = core.serve_status(service_names)
+            service_records = serve_lib.status(service_names)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1721,9 +1721,9 @@ def _get_services(service_names: Optional[List[str]],
                     f'{service_num} service{plural} found. Please specify '
                     'an existing service to show its endpoint. Usage: '
                     'sky serve status --endpoint <service-name>')
-            msg = status_utils.get_endpoint(service_records[0])
+            msg = serve_lib.get_endpoint(service_records[0])
         else:
-            msg = status_utils.format_service_table(service_records, show_all)
+            msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
             if service_names is not None:
                 for service_name in service_names:
@@ -2863,7 +2863,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
         with rich_utils.safe_status(
                 '[bold cyan]Checking for running services[/]'):
             try:
-                services = core.serve_status()
+                services = serve_lib.status()
             except exceptions.ClusterNotUpError:
                 cluster_status = backend_utils.refresh_cluster_status_handle(
                     controller_name)
@@ -4282,7 +4282,7 @@ def serve_up(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.serve_up(task, service_name)
+    serve_lib.up(task, service_name)
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
@@ -4409,6 +4409,11 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               is_flag=True,
               help='Tear down all services.')
+@click.option('--purge',
+              '-p',
+              default=False,
+              is_flag=True,
+              help='Tear down services in failed status.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4416,7 +4421,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               required=False,
               help='Skip confirmation prompt.')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, yes: bool):
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
     """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
@@ -4440,6 +4445,9 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
         \b
         # Tear down all existing services.
         sky serve down -a
+        \b
+        # Forcefully tear down a service in failed status.
+        sky serve down failed-service --purge
     """
     if sum([len(service_names) > 0, all]) != 1:
         argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
@@ -4466,7 +4474,7 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    sky.serve_down(service_names=service_names, all=all)
+    serve_lib.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4489,6 +4497,8 @@ def serve_down(service_names: List[str], all: bool, yes: bool):
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
+# TODO(tian): Add default argument for this CLI if none of the flags are
+# specified.
 def serve_logs(
     service_name: str,
     follow: bool,
@@ -4503,13 +4513,13 @@ def serve_logs(
     .. code-block:: bash
 
         # Tail the controller logs of a service
-        sky serve logs --controller [SERVICE_ID]
+        sky serve logs --controller [SERVICE_NAME]
         \b
         # Print the load balancer logs so far and exit
-        sky serve logs --load-balancer --no-follow [SERVICE_ID]
+        sky serve logs --load-balancer --no-follow [SERVICE_NAME]
         \b
         # Tail the logs of replica 1
-        sky serve logs [SERVICE_ID] 1
+        sky serve logs [SERVICE_NAME] 1
     """
     have_replica_id = replica_id is not None
     num_flags = (controller + load_balancer + have_replica_id)
@@ -4528,10 +4538,10 @@ def serve_logs(
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:
-        core.serve_tail_logs(service_name,
-                             target=target_component,
-                             replica_id=replica_id,
-                             follow=follow)
+        serve_lib.tail_logs(service_name,
+                            target=target_component,
+                            replica_id=replica_id,
+                            follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
         sys.exit(1)

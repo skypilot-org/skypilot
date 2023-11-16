@@ -14,13 +14,13 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
+from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -257,7 +257,7 @@ class Task:
         # Default to CPUNode
         self.resources: Union[List[sky.Resources],
                               Set[sky.Resources]] = {sky.Resources()}
-        self._service: Optional[serve_lib.SkyServiceSpec] = None
+        self._service: Optional[service_spec.SkyServiceSpec] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -496,7 +496,7 @@ class Task:
 
         service = config.pop('service', None)
         if service is not None:
-            service = serve_lib.SkyServiceSpec.from_yaml_config(service)
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
@@ -676,11 +676,11 @@ class Task:
         return self
 
     @property
-    def service(self) -> Optional[serve_lib.SkyServiceSpec]:
+    def service(self) -> Optional[service_spec.SkyServiceSpec]:
         return self._service
 
     def set_service(self,
-                    service: Optional[serve_lib.SkyServiceSpec]) -> 'Task':
+                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
         """Sets the service spec for this task.
 
         Args:

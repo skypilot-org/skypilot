@@ -49,7 +49,6 @@ from sky.core import down
 from sky.core import download_logs
 from sky.core import job_status
 from sky.core import queue
-from sky.core import serve_down
 from sky.core import spot_cancel
 from sky.core import spot_queue
 from sky.core import spot_status
@@ -65,7 +64,6 @@ from sky.data import StorageMode
 from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
-from sky.execution import serve_up
 from sky.execution import spot_launch
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
@@ -116,7 +114,6 @@ __all__ = [
     'launch',
     'exec',
     'spot_launch',
-    'serve_up',
     # core APIs
     'status',
     'start',
@@ -137,6 +134,4 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
-    # core APIs Serve Management
-    'serve_down',
 ]

@@ -6,6 +6,7 @@ import pathlib
 import pickle
 import re
 import shlex
+import shutil
 import threading
 import time
 import typing
@@ -25,6 +26,8 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
+from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -37,10 +40,14 @@ NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
+# TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
-    '{replica_id}. Please use `sky serve status [SERVICE_ID]`'
+    '{replica_id}. Please use `sky serve status [SERVICE_NAME]`'
     f' to check all valid replica id.{colorama.Style.RESET_ALL}')
+# Max number of replicas to show in `sky serve status` by default.
+# If user wants to see all replicas, use `sky serve status --all`.
+_REPLICA_TRUNC_NUM = 10
 
 
 class ServiceComponent(enum.Enum):
@@ -58,7 +65,7 @@ class UserSignal(enum.Enum):
     # Stop the controller, load balancer and all replicas.
     TERMINATE = 'terminate'
 
-    # TODO(tian): Add more signals, such as update or pause.
+    # TODO(tian): Add more signals, such as pause.
 
     def error_type(self) -> Type[Exception]:
         """Get the error corresponding to the signal."""
@@ -280,73 +287,129 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    serve_statuses = []
+    service_statuses = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
-        serve_status = _get_service_status(service_name)
-        if serve_status is None:
+        service_status = _get_service_status(service_name)
+        if service_status is None:
             continue
-        serve_statuses.append({
+        service_statuses.append({
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
-            for k, v in serve_status.items()
+            for k, v in service_status.items()
         })
-    return common_utils.encode_payload(serve_statuses)
+    return common_utils.encode_payload(service_statuses)
 
 
-def load_serve_status(payload: str) -> List[Dict[str, Any]]:
-    serve_statuses_encoded = common_utils.decode_payload(payload)
-    serve_statuses = []
-    for serve_status in serve_statuses_encoded:
-        serve_statuses.append({
+def load_service_status(payload: str) -> List[Dict[str, Any]]:
+    service_statuses_encoded = common_utils.decode_payload(payload)
+    service_statuses = []
+    for service_status in service_statuses_encoded:
+        service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
-            for k, v in serve_status.items()
+            for k, v in service_status.items()
         })
-    return serve_statuses
+    return service_statuses
 
 
-def terminate_services(service_names: Optional[List[str]]) -> str:
+def _terminate_failed_services(
+        service_name: str,
+        service_status: serve_state.ServiceStatus) -> Optional[str]:
+    """Terminate service in failed status.
+
+    Services included in ServiceStatus.failed_statuses() do not have an
+    active controller process, so we can't send a file terminate signal
+    to the controller. Instead, we manually cleanup database record for
+    the service and alert the user about a potential resource leak.
+
+    Returns:
+        A message indicating potential resource leak (if any). If no
+        resource leak is detected, return None.
+    """
+    remaining_replica_clusters = []
+    # The controller should have already attempted to terminate those
+    # replicas, so we don't need to try again here.
+    for replica_info in serve_state.get_replica_infos(service_name):
+        # TODO(tian): Refresh latest status of the cluster.
+        if global_user_state.get_cluster_from_name(
+                replica_info.cluster_name) is not None:
+            remaining_replica_clusters.append(f'{replica_info.cluster_name!r}')
+        serve_state.remove_replica(service_name, replica_info.replica_id)
+
+    service_dir = os.path.expanduser(
+        generate_remote_service_dir_name(service_name))
+    shutil.rmtree(service_dir)
+    serve_state.remove_service(service_name)
+
+    if not remaining_replica_clusters:
+        return None
+    remaining_identity = ', '.join(remaining_replica_clusters)
+    return (f'{colorama.Fore.YELLOW}terminate service {service_name!r} with '
+            f'failed status ({service_status}). This may indicate a resource '
+            'leak. Please check the following SkyPilot clusters on the '
+            f'controller: {remaining_identity}{colorama.Style.RESET_ALL}')
+
+
+def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
     terminated_service_names = []
+    messages = []
     for service_name in service_names:
-        serve_status = _get_service_status(service_name,
-                                           with_replica_info=False)
-        assert serve_status is not None
-        if (serve_status['status']
-                in serve_state.ServiceStatus.refuse_to_terminate_statuses()):
-            # TODO(tian): Cleanup replicas for CONTROLLER_FAILED status. Seems
-            # like spot doesn't implement this yet?
+        service_status = _get_service_status(service_name,
+                                             with_replica_info=False)
+        assert service_status is not None
+        if service_status['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
+            # Already scheduled to be terminated.
             continue
-        # Send the terminate signal to controller.
-        signal_file = pathlib.Path(
-            constants.SIGNAL_FILE_PATH.format(service_name))
-        # Filelock is needed to prevent race condition between signal
-        # check/removal and signal writing.
-        with filelock.FileLock(str(signal_file) + '.lock'):
-            with signal_file.open(mode='w') as f:
-                # TODO(tian): Probably write a dict instead of bare string
-                # to the file? It will be helpful for update cases.
-                f.write(UserSignal.TERMINATE.value)
-                f.flush()
+        if (service_status['status']
+                in serve_state.ServiceStatus.failed_statuses()):
+            if purge:
+                message = _terminate_failed_services(service_name,
+                                                     service_status['status'])
+                if message is not None:
+                    messages.append(message)
+            else:
+                messages.append(
+                    f'{colorama.Fore.YELLOW}Service {service_name!r} is in '
+                    f'failed status ({service_status["status"]}). Skipping '
+                    'its termination as it could lead to a resource leak. '
+                    f'(Use `sky serve down {service_name} --purge` to '
+                    'forcefully terminate the service.)'
+                    f'{colorama.Style.RESET_ALL}')
+                # Don't add to terminated_service_names since it's not
+                # actually terminated.
+                continue
+        else:
+            # Send the terminate signal to controller.
+            signal_file = pathlib.Path(
+                constants.SIGNAL_FILE_PATH.format(service_name))
+            # Filelock is needed to prevent race condition between signal
+            # check/removal and signal writing.
+            with filelock.FileLock(str(signal_file) + '.lock'):
+                with signal_file.open(mode='w') as f:
+                    f.write(UserSignal.TERMINATE.value)
+                    f.flush()
         terminated_service_names.append(f'{service_name!r}')
     if len(terminated_service_names) == 0:
-        return 'No service to terminate.'
-    identity_str = f'Service {terminated_service_names[0]} is'
-    if len(terminated_service_names) > 1:
-        terminated_service_names_str = ', '.join(terminated_service_names)
-        identity_str = f'Services {terminated_service_names_str} are'
-    return f'{identity_str} scheduled to be terminated.'
+        messages.append('No service to terminate.')
+    else:
+        identity_str = f'Service {terminated_service_names[0]} is'
+        if len(terminated_service_names) > 1:
+            terminated_service_names_str = ', '.join(terminated_service_names)
+            identity_str = f'Services {terminated_service_names_str} are'
+        messages.append(f'{identity_str} scheduled to be terminated.')
+    return '\n'.join(messages)
 
 
 def wait_service_initialization(service_name: str, job_id: int) -> str:
-    """Util function to call at the end of `sky.serve_up()`.
+    """Util function to call at the end of `sky.serve.up()`.
 
     This function will:
         (1) Check the name duplication by job id of the controller. If
             the job id is not the same as the database record, this
             means another service is already taken that name. See
-            sky/execution.py::serve_up for more details.
+            sky/serve/api.py::up for more details.
         (2) Wait for the load balancer port to be assigned and return.
 
     Returns:
@@ -565,6 +628,137 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+# ================== Table Formatter for `sky serve status` ==================
+
+
+def _get_replicas(service_record: Dict[str, Any]) -> str:
+    ready_replica_num, total_replica_num = 0, 0
+    for info in service_record['replica_info']:
+        if info['status'] == serve_state.ReplicaStatus.READY:
+            ready_replica_num += 1
+        # If auto restart enabled, not count FAILED replicas here.
+        if (not service_record['auto_restart'] or
+                info['status'] != serve_state.ReplicaStatus.FAILED):
+            total_replica_num += 1
+    return f'{ready_replica_num}/{total_replica_num}'
+
+
+def get_endpoint(service_record: Dict[str, Any]) -> str:
+    # Don't use backend_utils.is_controller_up since it is too slow.
+    handle = global_user_state.get_handle_from_cluster_name(
+        SKY_SERVE_CONTROLLER_NAME)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
+    if handle is None or handle.head_ip is None:
+        return '-'
+    load_balancer_port = service_record['load_balancer_port']
+    if load_balancer_port is None:
+        return '-'
+    return f'{handle.head_ip}:{load_balancer_port}'
+
+
+def format_service_table(service_records: List[Dict[str, Any]],
+                         show_all: bool) -> str:
+    if not service_records:
+        return 'No existing services.'
+
+    service_columns = ['NAME', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT']
+    if show_all:
+        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+    service_table = log_utils.create_table(service_columns)
+
+    replica_infos = []
+    for record in service_records:
+        for replica in record['replica_info']:
+            replica['service_name'] = record['name']
+            replica_infos.append(replica)
+
+        service_name = record['name']
+        uptime = log_utils.readable_time_duration(record['uptime'],
+                                                  absolute=True)
+        service_status = record['status']
+        status_str = service_status.colored_str()
+        replicas = _get_replicas(record)
+        endpoint = get_endpoint(record)
+        policy = record['policy']
+        requested_resources = record['requested_resources']
+
+        service_values = [
+            service_name,
+            uptime,
+            status_str,
+            replicas,
+            endpoint,
+        ]
+        if show_all:
+            service_values.extend([policy, requested_resources])
+        service_table.add_row(service_values)
+
+    replica_table = _format_replica_table(replica_infos, show_all)
+    return (f'{service_table}\n'
+            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+            f'Service Replicas{colorama.Style.RESET_ALL}\n'
+            f'{replica_table}')
+
+
+def _format_replica_table(replica_records: List[Dict[str, Any]],
+                          show_all: bool) -> str:
+    if not replica_records:
+        return 'No existing replicas.'
+
+    replica_columns = [
+        'SERVICE_NAME', 'ID', 'IP', 'LAUNCHED', 'RESOURCES', 'STATUS', 'REGION'
+    ]
+    if show_all:
+        replica_columns.append('ZONE')
+    replica_table = log_utils.create_table(replica_columns)
+
+    truncate_hint = ''
+    if not show_all:
+        if len(replica_records) > _REPLICA_TRUNC_NUM:
+            truncate_hint = '\n... (use --all to show all replicas)'
+        replica_records = replica_records[:_REPLICA_TRUNC_NUM]
+
+    for record in replica_records:
+        service_name = record['service_name']
+        replica_id = record['replica_id']
+        replica_ip = '-'
+        launched_at = log_utils.readable_time_duration(record['launched_at'])
+        resources_str = '-'
+        replica_status = record['status']
+        status_str = replica_status.colored_str()
+        region = '-'
+        zone = '-'
+
+        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
+        if replica_handle is not None:
+            if replica_handle.head_ip is not None:
+                replica_ip = replica_handle.head_ip
+            resources_str = resources_utils.get_readable_resources_repr(
+                replica_handle, simplify=not show_all)
+            if replica_handle.launched_resources.region is not None:
+                region = replica_handle.launched_resources.region
+            if replica_handle.launched_resources.zone is not None:
+                zone = replica_handle.launched_resources.zone
+
+        replica_values = [
+            service_name,
+            replica_id,
+            replica_ip,
+            launched_at,
+            resources_str,
+            status_str,
+            region,
+        ]
+        if show_all:
+            replica_values.append(zone)
+        replica_table.add_row(replica_values)
+
+    return f'{replica_table}{truncate_hint}'
+
+
+# =========================== CodeGen for Sky Serve ===========================
+
+
 # TODO(tian): Use REST API instead of SSH in the future. This codegen pattern
 # is to reuse the authentication of ssh. If we want to use REST API, we need
 # to implement some authentication mechanism.
@@ -588,10 +782,11 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def terminate_services(cls, service_names: Optional[List[str]]) -> str:
+    def terminate_services(cls, service_names: Optional[List[str]],
+                           purge: bool) -> str:
         code = [
-            f'msg = serve_utils.terminate_services({service_names!r})',
-            'print(msg, end="", flush=True)'
+            f'msg = serve_utils.terminate_services({service_names!r}, '
+            f'purge={purge})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 
