@@ -305,7 +305,7 @@ class KubernetesNodeProvider(NodeProvider):
                         waiting = container_status.state.waiting
                         if waiting is not None and waiting.reason != 'ContainerCreating':
                             raise config.KubernetesError(
-                                'Failed to create container while launcing '
+                                'Failed to create container while launching '
                                 'the node. Error details: '
                                 f'{container_status.state.waiting.message}.')
                 # Reaching this point means that one of the pods had an issue,
