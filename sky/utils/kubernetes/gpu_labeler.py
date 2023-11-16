@@ -109,7 +109,7 @@ def label():
             node_name = node.metadata.name
 
             # Modify the job manifest for the current node
-            job_manifest['metadata']['name'] = ('sky-gpu-labeler-' 
+            job_manifest['metadata']['name'] = ('sky-gpu-labeler-'
                                                 f'{get_node_hash(node_name)}')
             job_manifest['spec']['template']['spec']['nodeSelector'] = {
                 'kubernetes.io/hostname': node_name
