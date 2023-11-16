@@ -72,9 +72,12 @@ FIREWALL_RULES_REQUIRED = [
             'IPProtocol': 'tcp',
             'ports': ['22'],
         }],
+        # TODO(skypilot): some users reported that this should be relaxed (e.g.,
+        # allowlisting only certain IPs to have ssh access).
         'sourceRanges': ['0.0.0.0/0'],
     },
 ]
+
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [
     {
@@ -110,6 +113,8 @@ FIREWALL_RULES_TEMPLATE = [
             'IPProtocol': 'tcp',
             'ports': ['22'],
         }],
+        # TODO(skypilot): some users reported that this should be relaxed (e.g.,
+        # allowlisting only certain IPs to have ssh access).
         'sourceRanges': ['0.0.0.0/0'],
     },
     {
@@ -127,10 +132,15 @@ FIREWALL_RULES_TEMPLATE = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp # pylint: disable=line-too-long
+# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
     'compute.disks.create',
     'compute.disks.list',
+    # TODO(skypilot): some users reported that firewalls changes
+    # (create/delete/update) should be removed if VPC/firewalls are separately
+    # set up. It is undesirable for a normal account to have these permissions.
+    # Note that if these permissions are removed, opening ports (e.g., via
+    # `resources.ports`) would fail.
     'compute.firewalls.create',
     'compute.firewalls.delete',
     'compute.firewalls.get',
