@@ -12,7 +12,7 @@ To get a machine with a GPU attached, use:
    # Launch a VM with 1 NVIDIA GPU and forward port 8888 to localhost
    sky launch -c jupyter-vm --gpus K80:1
    ssh -L 8888:localhost:8888 jupyter-vm
-
+Access the jupyter notebook on the browser with the url: ``http://localhost:8888``
 .. note::
 
   View the supported GPUs with the :code:`sky show-gpus` command.
