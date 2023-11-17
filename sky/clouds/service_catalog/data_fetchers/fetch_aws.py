@@ -7,6 +7,7 @@ import datetime
 import itertools
 from multiprocessing import pool as mp_pool
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -287,6 +288,14 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             if row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
+            if row['InstanceType'].startswith('trn1'):
+                # Trainium instances does not have a field for information of
+                # the accelerators. We need to infer the accelerator info from
+                # the instance type name.
+                # https://aws.amazon.com/ec2/instance-types/trn1/
+                acc_name = 'Trainium'
+                num_in_name = re.search(r'(\d+)xlarge', row['InstanceType']).group(1)
+                acc_count = int(num_in_name) // 2
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
