@@ -290,7 +290,7 @@ class GCPInstance:
                     availability_zone: str,
                     node_config: dict,
                     instance_name: str,
-                    wait_for_operation: bool = True) -> dict:
+                    wait_for_operation: bool = True) -> bool:
         """Resize a Google Cloud disk based on the provided configuration.
         Returns the response of resize operation.
         """
@@ -1084,7 +1084,7 @@ class GCPTPUVMInstance(GCPInstance):
                     availability_zone: str,
                     node_config: dict,
                     instance_name: str,
-                    wait_for_operation: bool = True) -> dict:
+                    wait_for_operation: bool = True) -> bool:
         """
         TODO: Implement the feature to attach persistent disks for TPU VMs.
         The boot disk of TPU VMs is not resizable, and users need to add a
