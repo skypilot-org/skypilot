@@ -830,22 +830,25 @@ class Storage(object):
             if data_utils.is_cloud_store_url(source):
                 name = None
 
+        # For backwards compatibility
+        # TODO(Doyoung): Implement __setstate__ to resolve backwards
+        # compatibility issue
+        # StorageMode is set to MOUNT mode default
         mode = StorageMode.MOUNT
         if hasattr(metadata, 'mode'):
             if metadata.mode:
                 mode = override_args.get('mode', metadata.mode)
 
+        interval_seconds = None
+        if hasattr(metadata, 'interval_seconds'):
+            interval_seconds = metadata.interval_seconds
+
         storage_obj = cls(name=name,
                           source=source,
                           sync_on_reconstruction=override_args.get(
                               'sync_on_reconstruction', True),
+                          interval_seconds=interval_seconds,
                           mode=mode)
-
-        # For backward compatibility
-        # TODO(Doyoung): Implement __setstate__ to resolve backwards
-        # compatibility issue
-        if hasattr(metadata, 'interval_seconds'):
-            storage_obj.interval_seconds = metadata.interval_seconds
 
         return storage_obj
 
