@@ -1205,6 +1205,18 @@ def _add_command_alias_to_group(group, command, name, hidden):
     group.add_command(new_command, name=name)
 
 
+def _deprecate_and_hide_command(group, command_to_deprecate,
+                                alternative_command):
+    """Hide a command and show a deprecation note, hinting the alternative."""
+    command_to_deprecate.hidden = True
+    if group is not None:
+        orig = f'sky {group.name} {command_to_deprecate.name}'
+    else:
+        orig = f'sky {command_to_deprecate.name}'
+    command_to_deprecate.invoke = _with_deprecation_warning(
+        command_to_deprecate.invoke, alternative_command, orig)
+
+
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
@@ -1386,7 +1398,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    """Launch a task from a YAML or a command (rerun setup if cluster exists).
+    """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
@@ -1505,7 +1517,7 @@ def exec(
     env: List[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Execute a task or a command on a cluster (skip setup).
+    """Execute a task or command on an existing cluster.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
@@ -3669,7 +3681,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
 def admin():
     """SkyPilot On-prem administrator CLI."""
     pass
@@ -3746,8 +3758,14 @@ def admin_deploy(clusterspec_yaml: str):
 
 
 @cli.group(cls=_NaturalOrderGroup)
+def bench():
+    """SkyPilot Benchmark CLI."""
+    pass
+
+
+@cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Managed Spot commands (spot instances with auto-recovery)."""
+    """Managed Spot CLI (spot instances with auto-recovery)."""
     pass
 
 
@@ -4022,9 +4040,6 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
                f'{in_progress_only_hint}\n{msg}')
 
 
-_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
-
-
 @spot.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
@@ -4187,7 +4202,7 @@ def spot_dashboard(port: Optional[int]):
 
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
-    """SkyServe commands CLI."""
+    """SkyServe CLI (multi-region, multi-cloud serving)."""
     pass
 
 
@@ -4588,12 +4603,6 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         if not isinstance(candidate, dict):
             raise ValueError('Each resource candidate must be a dictionary.')
     return candidates
-
-
-@cli.group(cls=_NaturalOrderGroup)
-def bench():
-    """SkyPilot Benchmark CLI."""
-    pass
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
@@ -5259,6 +5268,19 @@ def local_down():
         with rich_utils.safe_status('Running sky check...'):
             sky_check.check(quiet=True)
         click.echo('Local cluster removed.')
+
+
+# TODO(skypilot): remove the below in v0.5.
+_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=cpunode,
+                            alternative_command='sky launch')
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=gpunode,
+                            alternative_command='sky launch --gpus <gpus>')
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=tpunode,
+                            alternative_command='sky launch --gpus <tpus>')
 
 
 def main():
