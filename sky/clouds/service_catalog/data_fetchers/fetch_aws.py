@@ -294,7 +294,10 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
                 # the instance type name.
                 # https://aws.amazon.com/ec2/instance-types/trn1/
                 acc_name = 'Trainium'
-                num_in_name = re.search(r'(\d+)xlarge', row['InstanceType']).group(1)
+                find_num_in_name = re.search(r'(\d+)xlarge',
+                                             row['InstanceType'])
+                assert find_num_in_name is not None, row['InstanceType']
+                num_in_name = find_num_in_name.group(1)
                 acc_count = int(num_in_name) // 2
             return pd.Series({
                 'AcceleratorName': acc_name,
