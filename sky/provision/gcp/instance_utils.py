@@ -2,6 +2,7 @@
 import copy
 import enum
 import functools
+from multiprocessing import pool
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -224,15 +225,12 @@ class GCPInstance:
 
         Returns a list of tuples of (result, node_name).
         """
-        operations = [
-            cls.create_instance(cluster_name,
-                                project_id,
-                                zone,
-                                node_config,
-                                labels,
-                                is_head_node=include_head_node and i == 0,
-                                wait_for_operation=False) for i in range(count)
-        ]
+        with pool.ThreadPool() as p:
+            operations = p.starmap(
+                cls.create_instance,
+                [(cluster_name, project_id, zone, node_config, labels,
+                  include_head_node and i == 0, False) for i in range(count)],
+            )
 
         if wait_for_operation:
             results = [(cls.wait_for_operation(operation, project_id,

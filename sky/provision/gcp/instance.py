@@ -1,6 +1,7 @@
 """GCP instance provisioning."""
 import collections
 import copy
+from multiprocessing import pool
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
@@ -312,10 +313,12 @@ def get_cluster_info(
         label_filters,
         lambda _: ['RUNNING'],
     )
-    instances = {}
+    instances: Dict[str, common.InstanceInfo] = {}
     for res, insts in handler_to_instances.items():
-        for inst in insts:
-            instances[inst] = res.get_instance_info(project_id, zone, inst)
+        with pool.ThreadPool() as p:
+            inst_info = p.starmap(res.get_instance_info,
+                                  [(project_id, zone, inst) for inst in insts])
+        instances.update(zip(insts, inst_info))
 
     head_instances = _filter_instances(
         handlers,
