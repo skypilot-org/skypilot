@@ -8,7 +8,7 @@ with resource specific information, these functions are called with the filled
 in ray yaml config as input,
 1. Replace the placeholders in the ray yaml file `skypilot:ssh_user` and
    `skypilot:ssh_public_key_content` with the actual username and public key
-   content, i.e., `_replace_ssh_info_in_config`.
+   content, i.e., `configure_ssh_info`.
 2. Setup the `authorized_keys` on the remote VM with the public key content,
    by cloud-init or directly using cloud provider's API.
 
