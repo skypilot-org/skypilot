@@ -1043,7 +1043,9 @@ def write_cluster_config(
                     constants.CONDA_INSTALLATION_COMMANDS,
                 # Ray and SkyPilot setup
                 'ray_and_skypilot_setup_commands':
-                    constants.RAY_AND_SKYPILOT_SETUP_COMMANDS.format(sky_wheel_hash=wheel_hash, sky_version=str(version.parse(sky.__version__))),
+                    constants.RAY_AND_SKYPILOT_SETUP_COMMANDS.format(
+                        sky_wheel_hash=wheel_hash,
+                        sky_version=str(version.parse(sky.__version__))),
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.

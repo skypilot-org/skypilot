@@ -22,9 +22,9 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import status_lib
-from sky.skylet import constants as skylet_constants
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
@@ -826,4 +826,5 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return f'{skylet_constants.CONDA_RUN} python -u -c {shlex.quote(generated_code)}'
+        return (f'{skylet_constants.CONDA_RUN} '
+                f'python -u -c {shlex.quote(generated_code)}')

@@ -2984,7 +2984,6 @@ def test_user_ray_cluster(generic_cloud: str):
 
 _CODE_PREFIX = ['import sky']
 
-
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.

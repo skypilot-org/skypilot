@@ -18,7 +18,8 @@ def restart_skylet():
         shell=True,
         check=False)
     subprocess.run(
-        f'{constants.SET_CONDA_ENV_CMD} nohup {constants.CONDA_RUN} python -m sky.skylet.skylet'
+        f'{constants.SET_CONDA_ENV_CMD} '
+        f'nohup {constants.CONDA_RUN} python -m sky.skylet.skylet'
         ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)

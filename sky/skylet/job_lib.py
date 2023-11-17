@@ -920,4 +920,5 @@ class JobLibCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'{constants.CONDA_CHECK_AND_RUN} python -u -c {shlex.quote(code)}'
+        return (f'{constants.CONDA_CHECK_AND_RUN} '
+                f'python -u -c {shlex.quote(code)}')

@@ -36,7 +36,8 @@ _DUMP_RAY_PORTS = (
     f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w"))\'')
 
 _RAY_PORT_COMMAND = (
-    f'RAY_PORT=$({constants.CONDA_CHECK_AND_RUN} python -c "from sky.skylet import job_lib; '
+    f'RAY_PORT=$({constants.CONDA_CHECK_AND_RUN} '
+    'python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379)')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
@@ -46,7 +47,8 @@ RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{constants.CONDA_CHECK_AND_RUN} ray status')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = f'{constants.CONDA_CHECK_AND_RUN} python -m sky.skylet.attempt_skylet'
+_MAYBE_SKYLET_RESTART_CMD = (f'{constants.CONDA_CHECK_AND_RUN} '
+                             'python -m sky.skylet.attempt_skylet')
 
 
 def _auto_retry(func):
@@ -224,8 +226,8 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
     cmd = (f'{constants.CONDA_CHECK_AND_RUN} ray stop; '
            'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'export RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0; '
-           f'{constants.CONDA_CHECK_AND_RUN} ray start --head {ray_options} || exit 1;' + _RAY_PRLIMIT +
-           _DUMP_RAY_PORTS)
+           f'{constants.CONDA_CHECK_AND_RUN} ray start --head {ray_options} || '
+           'exit 1;' + _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     logger.info(f'Running command on head node: {cmd}')
     # TODO(zhwu): add the output to log files.
     returncode, stdout, stderr = ssh_runner.run(cmd,

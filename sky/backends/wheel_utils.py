@@ -24,7 +24,6 @@ from packaging import version
 
 import sky
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
