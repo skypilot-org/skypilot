@@ -2973,6 +2973,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Update launched resources.
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
+
+                if 'tpu_name' in config_dict:
+                    self._set_tpu_name(handle, config_dict['tpu_name'])
+
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, handle.external_ips(),
@@ -2990,9 +2994,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             config = common_utils.read_yaml(cluster_config_file)
             if 'docker' in config:
                 handle.setup_docker_user(cluster_config_file)
-
-            if 'tpu_name' in config_dict:
-                self._set_tpu_name(handle, config_dict['tpu_name'])
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
