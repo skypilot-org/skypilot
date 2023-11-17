@@ -1,0 +1,12 @@
+name: multi-accelerators
+
+resources:
+
+  # Ordered list of accelerators: Try the accelerators in the specified order.
+  # accelerators: ['A100-40GB:1', 'V100:1', 'K80:1', 'T4:1']
+
+  # Unordered set of accelerators: Optimize all specified accelerators together, and try accelerator with lowest cost first.
+  accelerators: {'A100-40GB:1', 'K80:1', 'V100:1', 'T4:1', 'T4:4'}
+
+run: |
+  nvidia-smi
