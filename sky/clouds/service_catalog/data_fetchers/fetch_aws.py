@@ -292,6 +292,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
                 # Trainium instances does not have a field for information of
                 # the accelerators. We need to infer the accelerator info from
                 # the instance type name.
+                # aws ec2 describe-instance-types --region us-east-1
                 # https://aws.amazon.com/ec2/instance-types/trn1/
                 acc_name = 'Trainium'
                 find_num_in_name = re.search(r'(\d+)xlarge',
