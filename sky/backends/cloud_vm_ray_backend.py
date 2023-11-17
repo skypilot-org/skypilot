@@ -1641,7 +1641,20 @@ class RetryingVmProvisioner(object):
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
-                    return config_dict
+                    tpu_name = config_dict.get('tpu_name')
+                    if tpu_name is None:
+                        return config_dict
+
+                    # tpu_name will only be set when TPU node (not TPU VM)
+                    # is required.
+                    logger.info(
+                        f'{colorama.Style.BRIGHT}Provisioning TPU node on '
+                        f'{to_provision.cloud} '
+                        f'{region.name}{colorama.Style.RESET_ALL}{zone_str}')
+
+                    success = self._try_provision_tpu(to_provision, config_dict)
+                    if success:
+                        return config_dict
 
                 # NOTE: We try to cleanup the cluster even if the previous
                 # cluster does not exist. Also we are fast at
@@ -1660,17 +1673,6 @@ class RetryingVmProvisioner(object):
                 continue
                 # NOTE: The code below in the loop should not be reachable
                 # with the new provisioner.
-
-            tpu_name = config_dict.get('tpu_name')
-            if tpu_name is not None:
-                logger.info(
-                    f'{colorama.Style.BRIGHT}Provisioning TPU on '
-                    f'{to_provision.cloud} '
-                    f'{region.name}{colorama.Style.RESET_ALL}{zone_str}')
-
-                success = self._try_provision_tpu(to_provision, config_dict)
-                if not success:
-                    continue
 
             logging_info = {
                 'cluster_name': cluster_name,
@@ -1795,8 +1797,8 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=is_prev_cluster_healthy)
 
-    def _tpu_pod_setup(self, cluster_yaml: str,
-                       cluster_handle: 'backends.CloudVmRayResourceHandle'):
+    def _tpu_vm_pod_setup(self, cluster_yaml: str,
+                          cluster_handle: 'backends.CloudVmRayResourceHandle'):
         """Completes setup and start Ray cluster on TPU VM Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
@@ -2040,7 +2042,7 @@ class RetryingVmProvisioner(object):
         if tpu_utils.is_tpu_vm_pod(resources):
             logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
                         f'{style.RESET_ALL}')
-            self._tpu_pod_setup(cluster_config_file, cluster_handle)
+            self._tpu_vm_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
