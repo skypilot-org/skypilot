@@ -7,6 +7,7 @@ import datetime
 import itertools
 from multiprocessing import pool as mp_pool
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -287,12 +288,18 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             if row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
-            if row['InstanceType'] == 'trn1.2xlarge':
+            if row['InstanceType'].startswith('trn1'):
+                # Trainium instances does not have a field for information of
+                # the accelerators. We need to infer the accelerator info from
+                # the instance type name.
+                # aws ec2 describe-instance-types --region us-east-1
+                # https://aws.amazon.com/ec2/instance-types/trn1/
                 acc_name = 'Trainium'
-                acc_count = 1
-            if row['InstanceType'] in ['trn1.32xlarge', 'trn1n.32xlarge']:
-                acc_name = 'Trainium'
-                acc_count = 16
+                find_num_in_name = re.search(r'(\d+)xlarge',
+                                             row['InstanceType'])
+                assert find_num_in_name is not None, row['InstanceType']
+                num_in_name = find_num_in_name.group(1)
+                acc_count = int(num_in_name) // 2
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
@@ -354,8 +361,8 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 # Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
 # does not have the latest PyTorch version):
 # GPU:
-# Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
-#   Nvidia driver: 515.65.01, CUDA Version: 11.7
+# Deep Learning AMI GPU PyTorch 2.1.0 (Ubuntu 20.04) 20231103
+#   Nvidia driver: 535.104.12, CUDA Version: 12.2
 #
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
 #   Nvidia driver: 510.47.03, CUDA Version: 11.6
@@ -367,7 +374,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
 #   Nvidia driver: 470.57.02, CUDA Version: 11.4
 _GPU_UBUNTU_DATE_PYTORCH = [
-    ('gpu', '20.04', '20230103', '1.13.1'),
+    ('gpu', '20.04', '20231103', '2.1.0'),
     ('gpu', '18.04', '20221114', '1.10.0'),
     ('k80', '20.04', '20211208', '1.10.0'),
     ('k80', '18.04', '20211208', '1.10.0'),
