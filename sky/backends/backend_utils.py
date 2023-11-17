@@ -67,7 +67,6 @@ SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
-SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
@@ -1042,6 +1041,9 @@ def write_cluster_config(
                 # Conda setup
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS,
+                # Ray and SkyPilot setup
+                'ray_and_skypilot_setup_commands':
+                    constants.RAY_AND_SKYPILOT_SETUP_COMMANDS.format(sky_wheel_hash=wheel_hash, sky_version=str(version.parse(sky.__version__))),
 
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
@@ -1054,7 +1056,7 @@ def write_cluster_config(
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
-                'sky_remote_path': SKY_REMOTE_PATH,
+                'sky_remote_path': constants.SKY_REMOTE_WHEEL_PATH,
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
                 'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,

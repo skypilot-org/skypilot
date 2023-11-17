@@ -135,7 +135,7 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = 'python3 -m sky.skylet.attempt_skylet'
+_MAYBE_SKYLET_RESTART_CMD = f'{constants.CONDA_RUN} python -m sky.skylet.attempt_skylet'
 
 
 def _get_cluster_config_template(cloud):
@@ -1814,7 +1814,7 @@ class RetryingVmProvisioner(object):
         # Get the private IP of head node for connecting Ray cluster.
         head_runner = command_runner.SSHCommandRunner(
             all_ips[0], port=cluster_handle.head_ssh_port, **ssh_credentials)
-        cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
+        cmd_str = f'{constants.CONDA_RUN} python -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
         rc, stdout, stderr = head_runner.run(cmd_str,
                                              require_outputs=True,
                                              stream_logs=False)
@@ -3354,8 +3354,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
-                'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-                f'{cd} && ray job submit '
+                f'RAY_DASHBOARD_PORT=$({constants.CONDA_RUN} python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+                f'{cd} && {constants.CONDA_RUN} ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
                 f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
@@ -3476,7 +3476,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ssh_user, remote_run_file)
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
-            'ray job submit '
+            '{constants.CONDA_RUN} ray job submit '
             '--address='
             f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
             f'--submission-id {ray_job_id} '

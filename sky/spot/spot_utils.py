@@ -744,7 +744,7 @@ class SpotCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(generated_code)}'
+        return f'{constants.CONDA_RUN} python -u -c {shlex.quote(generated_code)}'
 
 
 def dump_job_table_cache(job_table: str):
