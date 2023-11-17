@@ -1,0 +1,36 @@
+# SkyServe YAML to run stable diffusion web tool.
+#
+# Usage:
+#   sky serve up -n sd examples/serve/stable_diffusion_service.yaml
+# Then visit the endpoint printed in the console. You could also
+# check the endpoint by running:
+#   sky serve status --endpoint sd
+
+service:
+  readiness_probe: /
+  replicas: 2
+
+resources:
+  ports: 7860
+  accelerators: V100:1
+
+file_mounts:
+  /stable_diffusion: examples/stable_diffusion
+
+setup: |
+  sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  cd stable-diffusion-webui-docker  
+  sudo rm -r stable-diffusion-webui-docker
+  git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
+  cd stable-diffusion-webui-docker
+  git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
+  wget https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt -P models
+  mv models/sd-v1-4.ckpt models/model.ckpt
+  docker pull berkeleyskypilot/stable-diffusion
+  rm docker-compose.yml
+  cp /stable_diffusion/docker-compose.yml .
+
+run: |
+  cd stable-diffusion-webui-docker
+  docker-compose up

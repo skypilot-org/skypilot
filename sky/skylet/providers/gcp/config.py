@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import partial
+import typing
 from typing import Dict, List, Set, Tuple
 
 from cryptography.hazmat.backends import default_backend
@@ -12,6 +13,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
+
+if typing.TYPE_CHECKING:
+    import google
 
 from sky.skylet.providers.gcp.node import (
     MAX_POLLS,
@@ -381,11 +385,15 @@ def _is_permission_satisfied(
         for binding in policy["bindings"]:
             if binding["role"] == role:
                 if member_id not in binding["members"]:
+                    logger.info(
+                        f"_configure_iam_role: role {role} is not attached to {member_id}..."
+                    )
                     binding["members"].append(member_id)
                     already_configured = False
                 role_exists = True
 
         if not role_exists:
+            logger.info(f"_configure_iam_role: role {role} does not exist.")
             already_configured = False
             policy["bindings"].append(
                 {
@@ -763,8 +771,15 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
         wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
 
 
-def get_usable_vpc(config) -> str:
-    """Return a usable VPC.
+def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
+    """Returns the VPC name of a network interface."""
+    return network_interface["network"].split("/")[-1]
+
+
+def get_usable_vpc_and_subnet(
+    config,
+) -> Tuple[str, "google.cloud.compute_v1.types.compute.Subnetwork"]:
+    """Return a usable VPC and the subnet in it.
 
     If config['provider']['vpc_name'] is set, return the VPC with the name
     (errors out if not found). When this field is set, no firewall rules
@@ -773,28 +788,26 @@ def get_usable_vpc(config) -> str:
 
     If not found, create a new one with sufficient firewall rules.
 
+    Returns:
+        vpc_name: The name of the VPC network.
+        subnet_name: The name of the subnet in the VPC network for the specific
+            region.
+
     Raises:
       RuntimeError: if the user has specified a VPC name but the VPC is not found.
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
-    specific_vpc_to_use = config["provider"].get("vpc_name", None)
-    if specific_vpc_to_use is None:
-        # For backward compatibility, reuse the VPC if the VM is launched.
-        resource = GCPCompute(
-            compute,
-            config["provider"]["project_id"],
-            config["provider"]["availability_zone"],
-            config["cluster_name"],
-        )
-        node = resource._list_instances(label_filters=None, status_filter=None)
-        if len(node) > 0:
-            netInterfaces = node[0].get("networkInterfaces", [])
-            if len(netInterfaces) > 0:
-                vpc_name = netInterfaces[0]["network"].split("/")[-1]
-                return vpc_name
 
-        vpcnets_all = _list_vpcnets(config, compute)
-    else:
+    # For existing cluster, it is ok to return a VPC and subnet not used by
+    # the cluster, as AWS will ignore them.
+    # There is a corner case where the multi-node cluster was partially
+    # launched, launching the cluster again can cause the nodes located on
+    # different VPCs, if VPCs in the project have changed. It should be fine to
+    # not handle this special case as we don't want to sacrifice the performance
+    # for every launch just for this rare case.
+
+    specific_vpc_to_use = config["provider"].get("vpc_name", None)
+    if specific_vpc_to_use is not None:
         vpcnets_all = _list_vpcnets(
             config, compute, filter=f"name={specific_vpc_to_use}"
         )
@@ -805,7 +818,15 @@ def get_usable_vpc(config) -> str:
         if len(vpcnets_all) == 1:
             # Skip checking any firewall rules if the user has specified a VPC.
             logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
-            return specific_vpc_to_use
+            subnets = _list_subnets(
+                config, compute, filter=f'(name="{specific_vpc_to_use}")'
+            )
+            if not subnets:
+                _skypilot_log_error_and_exit_for_failover(
+                    f"No subnet for region {config['provider']['region']} found for specified VPC {specific_vpc_to_use!r}. "
+                    f"Check the subnets of VPC {specific_vpc_to_use!r} at https://console.cloud.google.com/networking/networks"
+                )
+            return specific_vpc_to_use, subnets[0]
         else:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
@@ -814,34 +835,47 @@ def get_usable_vpc(config) -> str:
             )
             # Should not reach here.
 
-    usable_vpc_name = None
-    for vpc in vpcnets_all:
-        if _check_firewall_rules(vpc["name"], config, compute):
-            usable_vpc_name = vpc["name"]
-            break
+    subnets_all = _list_subnets(config, compute)
 
+    # Check if VPC for subnet has sufficient firewall rules.
+    insufficient_vpcs = set()
+    for subnet in subnets_all:
+        vpc_name = _network_interface_to_vpc_name(subnet)
+        if vpc_name in insufficient_vpcs:
+            continue
+        if _check_firewall_rules(vpc_name, config, compute):
+            logger.info(f"get_usable_vpc: Found a usable VPC network {vpc_name!r}.")
+            return vpc_name, subnet
+        else:
+            insufficient_vpcs.add(vpc_name)
+
+    # No usable VPC found. Try to create one.
     proj_id = config["provider"]["project_id"]
-    if usable_vpc_name is None:
-        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+    logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
-        # Create a SkyPilot VPC network if it doesn't exist
-        vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
-        if len(vpc_list) == 0:
-            body = VPC_TEMPLATE.copy()
-            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            body["selfLink"] = body["selfLink"].format(
-                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
-            )
-            _create_vpcnet(config, compute, body)
-
-        _create_rules(
-            config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id
+    # Create a SkyPilot VPC network if it doesn't exist
+    vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+    if len(vpc_list) == 0:
+        body = VPC_TEMPLATE.copy()
+        body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+        body["selfLink"] = body["selfLink"].format(
+            PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
         )
+        _create_vpcnet(config, compute, body)
 
-        usable_vpc_name = SKYPILOT_VPC_NAME
-        logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+    _create_rules(config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id)
 
-    return usable_vpc_name
+    usable_vpc_name = SKYPILOT_VPC_NAME
+    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
+    if not subnets:
+        _skypilot_log_error_and_exit_for_failover(
+            f"No subnet for region {config['provider']['region']} found for generated VPC {usable_vpc_name!r}. "
+            "This is probably due to the region being disabled in the account/project_id."
+        )
+    usable_subnet = subnets[0]
+    logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+
+    return usable_vpc_name, usable_subnet
 
 
 def _configure_subnet(config, compute):
@@ -863,17 +897,7 @@ def _configure_subnet(config, compute):
         return config
 
     # SkyPilot: make sure there's a usable VPC
-    usable_vpc_name = get_usable_vpc(config)
-    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
-    if not subnets:
-        # This can happen when e.g., region A is specified but the VPC has no
-        # subnet in region A.
-        _skypilot_log_error_and_exit_for_failover(
-            f"No subnet for region {config['provider']['region']} found (VPC {usable_vpc_name!r}). "
-            f"Check the subnets of VPC {usable_vpc_name!r} at https://console.cloud.google.com/networking/networks"
-        )
-
-    default_subnet = subnets[0]
+    _, default_subnet = get_usable_vpc_and_subnet(config)
 
     default_interfaces = [
         {
@@ -956,10 +980,16 @@ def _list_vpcnets(config, compute, filter=None):
         .execute()
     )
 
-    return response["items"] if "items" in response else []
+    return (
+        list(sorted(response["items"], key=lambda x: x["name"]))
+        if "items" in response
+        else []
+    )
 
 
-def _list_subnets(config, compute, filter=None):
+def _list_subnets(
+    config, compute, filter=None
+) -> List["google.cloud.compute_v1.types.compute.Subnetwork"]:
     response = (
         compute.subnetworks()
         .list(

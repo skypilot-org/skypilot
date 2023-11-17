@@ -256,3 +256,8 @@ class AWSAzFetchingError(Exception):
         self.reason = reason
 
         super().__init__(reason.message)
+
+
+class ServeUserTerminatedError(Exception):
+    """Raised by serve controller when a user tear down the service."""
+    pass

@@ -294,6 +294,7 @@ class Cloud:
         if num_nodes > 1:
             resources_required_features.add(
                 CloudImplementationFeatures.MULTI_NODE)
+
         try:
             self.check_features_are_supported(resources_required_features)
         except exceptions.NotSupportedError:
