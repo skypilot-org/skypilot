@@ -3681,6 +3681,8 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
+# TODO(skypilot): remove all code related to the deprecated `sky admin` code
+# path.
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
 def admin():
     """SkyPilot On-prem administrator CLI."""
