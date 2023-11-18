@@ -67,7 +67,7 @@ DOCKER_LOGIN_ENV_VARS = {
 }
 
 SET_CONDA_ENV_CMD = (
-    f'conda env list | grep -q {SKY_REMOTE_CONDA_ENV_NAME} && '
+    f'[ -f ~/.sky/separate_conda_env ] && '
     f'env_name={SKY_REMOTE_CONDA_ENV_NAME} || skypilot_runtime_env_name=base;')
 _CONDA_RUN = f'conda run -n {SKY_REMOTE_CONDA_ENV_NAME}'
 CONDA_RUN = ('conda run -n '
@@ -92,10 +92,11 @@ CONDA_INSTALLATION_COMMANDS = (
     'which conda | grep /opt/conda || conda init > /dev/null;'
     # Create a separate conda environment for SkyPilot dependencies.
     f'conda env list | grep "{SKY_REMOTE_CONDA_ENV_NAME}" || '
-    f'conda create -y -n {SKY_REMOTE_CONDA_ENV_NAME} --clone base;'
-    f'echo "alias skypy=\'{_CONDA_RUN} python\'" >> ~/.bashrc;'
-    f'echo "alias skypip=\'{_CONDA_RUN} pip\'" >> ~/.bashrc;'
-    f'echo "alias skyray=\'{_CONDA_RUN} ray\'" >> ~/.bashrc;')
+    f'conda create -y -n {SKY_REMOTE_CONDA_ENV_NAME} python=3.10 && '
+    'touch ~/.sky/separate_conda_env;'
+    f'echo "alias skypy=\'{CONDA_CHECK_AND_RUN} python\'" >> ~/.bashrc;'
+    f'echo "alias skypip=\'{CONDA_CHECK_AND_RUN} pip\'" >> ~/.bashrc;'
+    f'echo "alias skyray=\'{CONDA_CHECK_AND_RUN} ray\'" >> ~/.bashrc;')
 
 RAY_AND_SKYPILOT_SETUP_COMMANDS = (
     '(type -a python | grep -q python3) || '
