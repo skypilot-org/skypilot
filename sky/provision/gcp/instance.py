@@ -235,16 +235,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             )
 
     if to_start_count > 0:
-        results = resource.create_instances(cluster_name_on_cloud, project_id,
-                                            availability_zone,
-                                            config.node_config, labels,
-                                            to_start_count,
-                                            head_instance_id is None)
+        success, created_instance_ids = resource.create_instances(
+            cluster_name_on_cloud, project_id, availability_zone,
+            config.node_config, labels, to_start_count,
+            head_instance_id is None)
+        if not success:
+            raise RuntimeError('Failed to launch instances.')
         if head_instance_id is None:
-            head_instance_id = results[0][1]
-        # FIXME: it seems that success could be False sometimes, but the instances
-        #   are started correctly.
-        created_instance_ids = [instance_id for success, instance_id in results]
+            head_instance_id = created_instance_ids[0]
 
     while True:
         # wait until all instances are running

@@ -195,21 +195,6 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def create_instance(cls,
-                        cluster_name: str,
-                        project_id: str,
-                        availability_zone: str,
-                        node_config: dict,
-                        labels: dict,
-                        is_head_node: bool,
-                        wait_for_operation: bool = True) -> Tuple[dict, str]:
-        """Creates a single instance and returns result.
-
-        Returns a tuple of (result, node_name).
-        """
-        raise NotImplementedError
-
-    @classmethod
     def create_instances(
         cls,
         cluster_name: str,
@@ -220,30 +205,12 @@ class GCPInstance:
         count: int,
         include_head_node: bool,
         wait_for_operation: bool = True,
-    ) -> List[Tuple[dict, str]]:
+    ) -> Tuple[bool, List[str]]:
         """Creates multiple instances and returns result.
 
-        Returns a list of tuples of (result, node_name).
+        Returns a tuple of (result, list[instance_names]).
         """
-        with pool.ThreadPool() as p:
-            operations = p.starmap(
-                cls.create_instance,
-                [(cluster_name, project_id, zone, node_config, labels,
-                  include_head_node and i == 0, False) for i in range(count)],
-            )
-
-        if wait_for_operation:
-            results = [(cls.wait_for_operation(operation, project_id,
-                                               zone), node_name)
-                       for operation, node_name in operations]
-        else:
-            results = operations
-
-        if "sourceMachineImage" in node_config:
-            for _, instance_id in results:
-                cls.resize_disk(project_id, zone, node_config, instance_id)
-
-        return results
+        raise NotImplementedError
 
     @classmethod
     def start_instance(cls,
@@ -589,7 +556,7 @@ class GCPComputeInstance(GCPInstance):
             }
         else:
             node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '1',
+                TAG_SKYPILOT_HEAD_NODE: '0',
                 TAG_RAY_NODE_KIND: 'worker',
             }
         cls.set_labels(project_id=project_id,
@@ -637,109 +604,66 @@ class GCPComputeInstance(GCPInstance):
 
         return configuration_dict
 
-    # @classmethod
-    # def create_instances(
-    #     cls,
-    #     cluster_name: str,
-    #     project_id: str,
-    #     zone: str,
-    #     node_config: dict,
-    #     labels: dict,
-    #     count: int,
-    #     include_head_node: bool,
-    #     wait_for_operation: bool = True,
-    # ) -> List[Tuple[dict, str]]:
-    #     config = cls._convert_resources_to_urls(project_id, zone,
-    #                                             node_config)
-    #     # removing TPU-specific default key set in config.py
-    #     config.pop("networkConfig", None)
-    #     names = []
-    #     if include_head_node:
-    #         names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=True))
-    #         for _ in range(count - 1):
-    #             names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=False))
-    #     else:
-    #         for _ in range(count):
-    #             names.append(_generate_node_name(cluster_name, GCPNodeType.COMPUTE.value, is_head=False))
-
-    #     labels = dict(config.get("labels", {}), **labels)
-
-    #     config.update({
-    #         "labels": dict(
-    #             labels, **{
-    #                 TAG_RAY_CLUSTER_NAME: cluster_name,
-    #                 TAG_SKYPILOT_CLUSTER_NAME: cluster_name
-    #             }),
-    #     })
-    #     source_instance_template = config.pop("sourceInstanceTemplate", None)
-    #     body = {
-    #         'count': count,
-    #         'instanceProperties': config,
-    #         'sourceInstanceTemplate': source_instance_template,
-    #         'perInstanceProperties': {n: {} for n in names}
-    #     }
-
-    #     # Allow Google Compute Engine instance templates.
-    #     #
-    #     # Config example:
-    #     #
-    #     #     ...
-    #     #     node_config:
-    #     #         sourceInstanceTemplate: global/instanceTemplates/worker-16
-    #     #         machineType: e2-standard-16
-    #     #     ...
-    #     #
-    #     # node_config parameters override matching template parameters, if any.
-    #     #
-    #     # https://cloud.google.com/compute/docs/instance-templates
-    #     # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
-    #     operation = (cls.load_resource().instances().bulkInsert(
-    #         project=project_id,
-    #         zone=zone,
-    #         body=body,
-    #     ).execute())
-
-    #     if wait_for_operation:
-    #         result = cls.wait_for_operation(operation, project_id,
-    #                                         zone)
-    #     else:
-    #         result = operation
-
-    #     return result, name
-
     @classmethod
-    def create_instance(cls,
-                        cluster_name: str,
-                        project_id: str,
-                        availability_zone: str,
-                        node_config: dict,
-                        labels: dict,
-                        is_head_node: bool,
-                        wait_for_operation: bool = True) -> Tuple[dict, str]:
-        config = cls._convert_resources_to_urls(project_id, availability_zone,
-                                                node_config)
+    def create_instances(
+        cls,
+        cluster_name: str,
+        project_id: str,
+        zone: str,
+        node_config: dict,
+        labels: dict,
+        count: int,
+        include_head_node: bool,
+        wait_for_operation: bool = True,
+    ) -> Tuple[bool, List[str]]:
+        # NOTE: The syntax for bulkInsert() is different from insert().
+        # bulkInsert expects resource names without prefix. Otherwise
+        # it causes a 503 error.
+
+        # TODO: We could remove "_convert_resources_to_urls". It is here
+        # just for possible backward compat.
+        config = cls._convert_resources_to_urls(project_id, zone, node_config)
+
+        for disk in config.get('disks', []):
+            disk_type = disk.get('initializeParams', {}).get('diskType')
+            if disk_type:
+                disk['initializeParams']['diskType'] = disk_type.rsplit('/',
+                                                                        1)[-1]
+        config['machineType'] = config['machineType'].rsplit('/', 1)[-1]
+        for accelerator in config.get("guestAccelerators", []):
+            accelerator["acceleratorType"] = accelerator[
+                "acceleratorType"].rsplit('/', 1)[-1]
+
         # removing TPU-specific default key set in config.py
         config.pop("networkConfig", None)
-        name = _generate_node_name(cluster_name, GCPNodeType.COMPUTE.value,
-                                   is_head_node)
+
+        head_tag_needed = [False] * count
+        if include_head_node:
+            head_tag_needed[0] = True
+
+        names = []
+        for i in range(count):
+            names.append(
+                _generate_node_name(cluster_name,
+                                    GCPNodeType.COMPUTE.value,
+                                    is_head=head_tag_needed[i]))
 
         labels = dict(config.get("labels", {}), **labels)
-        labels.update({
-            TAG_RAY_CLUSTER_NAME: cluster_name,
-            TAG_SKYPILOT_CLUSTER_NAME: cluster_name
-        })
-        if is_head_node:
-            labels.update({
-                TAG_SKYPILOT_HEAD_NODE: '1',
-                TAG_RAY_NODE_KIND: 'head',
-            })
-        else:
-            labels.update({
-                TAG_SKYPILOT_HEAD_NODE: '0',
-                TAG_RAY_NODE_KIND: 'worker',
-            })
 
-        config.update({"labels": labels, "name": name})
+        config.update({
+            "labels": dict(
+                labels, **{
+                    TAG_RAY_CLUSTER_NAME: cluster_name,
+                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                }),
+        })
+        source_instance_template = config.pop("sourceInstanceTemplate", None)
+        body = {
+            'count': count,
+            'instanceProperties': config,
+            'sourceInstanceTemplate': source_instance_template,
+            'perInstanceProperties': {n: {} for n in names}
+        }
 
         # Allow Google Compute Engine instance templates.
         #
@@ -755,21 +679,29 @@ class GCPComputeInstance(GCPInstance):
         #
         # https://cloud.google.com/compute/docs/instance-templates
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
-        source_instance_template = config.pop("sourceInstanceTemplate", None)
-        operation = (cls.load_resource().instances().insert(
+        operation = (cls.load_resource().instances().bulkInsert(
             project=project_id,
-            zone=availability_zone,
-            sourceInstanceTemplate=source_instance_template,
-            body=config,
+            zone=zone,
+            body=body,
         ).execute())
 
         if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
+            result = cls.load_resource().zoneOperations().wait(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            ).execute()
+            success = result['status'] == 'DONE'
+            if success:
+                # assign labels for head node
+                with pool.ThreadPool() as p:
+                    p.starmap(cls.create_node_tag,
+                              [(cluster_name, project_id, zone, names[i],
+                                head_tag_needed[i]) for i in range(count)])
 
-        return result, name
+            return success, names
+
+        return operation
 
     @classmethod
     def start_instance(cls,
