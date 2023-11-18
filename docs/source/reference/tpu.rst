@@ -16,15 +16,17 @@ ML researchers and students are encouraged to apply for free TPU access through 
 Getting TPUs in one command
 ===========================
 
-Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quickly get TPUs for development:
+Use one command to quickly get TPU nodes for development:
 
 .. code-block:: bash
 
-   sky tpunode                                # By default TPU v2-8 is used
-   sky tpunode --use-spot                     # Preemptible TPUs
-   sky tpunode --tpus tpu-v3-8                # Change TPU type to tpu-v3-8
-   sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
-   sky tpunode --tpu-vm                       # Use TPU VM (instead of TPU Node)
+   sky launch --gpus tpu-v2-8
+   # Preemptible TPUs:
+   sky launch --gpus tpu-v2-8 --use-spot
+   # Change TPU type to tpu-v3-8:
+   sky launch --gpus tpu-v3-8
+   # Change the host VM type to n1-highmem-16:
+   sky launch --gpus tpu-v3-8 -t n1-highmem-16
 
 After the command finishes, you will be dropped into a TPU host VM and can start developing code right away.
 
@@ -48,7 +50,7 @@ More details can be found on GCP `documentation <https://cloud.google.com/tpu/do
 TPU VMs
 -------
 
-To use TPU VMs, set the following in a task YAML's ``resources`` field: 
+To use TPU VMs, set the following in a task YAML's ``resources`` field:
 
 .. code-block:: yaml
 
@@ -223,7 +225,7 @@ To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.
    :emphasize-lines: 2-2
 
    resources:
-      accelerators: tpu-v2-32  # Pods have > 8 cores (the last number) 
+      accelerators: tpu-v2-32  # Pods have > 8 cores (the last number)
       accelerator_args:
          runtime_version: tpu-vm-base
          tpu_vm: True

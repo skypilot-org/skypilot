@@ -16,11 +16,9 @@ searching for regions (or clouds) that can provide the requested resources.
 
 .. tip::
 
-  No action is required to use this feature.
-
-  Auto-failover is automatically enabled whenever a new cluster is to be
-  provisioned, such as during :code:`sky launch` or the :ref:`interactive node
-  commands <interactive-nodes>` :code:`sky {gpunode,cpunode,tpunode}`.
+  No action is required to use this feature.  Auto-failover is automatically
+  enabled whenever a new cluster is to be provisioned, such as during :code:`sky
+  launch`.
 
   If specific :code:`cloud`, ``region``, or ``zone`` are requested for a
   task, auto-failover retries only within the specified location.
@@ -36,16 +34,8 @@ provisioner handles such a request:
 
 .. code-block::
 
-  $ sky gpunode -c gpu --gpus V100
-  I 02-11 21:17:43 optimizer.py:211] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
-  I 02-11 21:17:43 optimizer.py:317] Optimizer - plan minimizing cost (~$3.0):
-  I 02-11 21:17:43 optimizer.py:332]
-  I 02-11 21:17:43 optimizer.py:332] TASK     BEST_RESOURCE
-  I 02-11 21:17:43 optimizer.py:332] gpunode  GCP(n1-highmem-8, {'V100': 1.0})
-  I 02-11 21:17:43 optimizer.py:332]
-  I 02-11 21:17:43 optimizer.py:285] Considered resources -> cost
-  I 02-11 21:17:43 optimizer.py:286] {AWS(p3.2xlarge): 3.06, GCP(n1-highmem-8, {'V100': 1.0}): 2.953212}
-  I 02-11 21:17:43 optimizer.py:286]
+  $ sky launch -c gpu --gpus V100
+  ...  # optimizer output
   I 02-11 21:17:43 cloud_vm_ray_backend.py:1034] Creating a new cluster: "gpu" [1x GCP(n1-highmem-8, {'V100': 1.0})].
   I 02-11 21:17:43 cloud_vm_ray_backend.py:1034] Tip: to reuse an existing cluster, specify --cluster-name (-c) in the CLI or use sky.launch(.., cluster_name=..) in the Python API. Run `sky status` to see existing clusters.
   I 02-11 21:17:43 cloud_vm_ray_backend.py:614] To view detailed progress: tail -n100 -f sky_logs/sky-2022-02-11-21-17-43-171661/provision.log
@@ -78,17 +68,9 @@ AWS, where it succeeded after two regions:
 
 .. code-block::
 
-  $ sky gpunode --gpus V100:8
-  I 02-23 16:39:59 optimizer.py:213] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
-  I 02-23 16:39:59 optimizer.py:323] Optimizer - plan minimizing cost (~$20.3):
-  I 02-23 16:39:59 optimizer.py:337]
-  I 02-23 16:39:59 optimizer.py:337] TASK     BEST_RESOURCE
-  I 02-23 16:39:59 optimizer.py:337] gpunode  GCP(n1-highmem-8, {'V100': 8.0})
-  I 02-23 16:39:59 optimizer.py:337]
-  I 02-23 16:39:59 optimizer.py:290] Considered resources -> cost
-  I 02-23 16:39:59 optimizer.py:292] {GCP(n1-highmem-8, {'V100': 8.0}): 20.313212, AWS(p3.16xlarge): 24.48}
-  I 02-23 16:39:59 optimizer.py:292]
-  I 02-23 16:39:59 cloud_vm_ray_backend.py:1010] Creating a new cluster: "sky-gpunode-zongheng" [1x GCP(n1-highmem-8, {'V100': 8.0})].
+  $ sky launch -c v100-8 --gpus V100:8
+  ...  # optimizer output
+  I 02-23 16:39:59 cloud_vm_ray_backend.py:1010] Creating a new cluster: "v100-8" [1x GCP(n1-highmem-8, {'V100': 8.0})].
   I 02-23 16:39:59 cloud_vm_ray_backend.py:1010] Tip: to reuse an existing cluster, specify --cluster-name (-c) in the CLI or use sky.launch(.., cluster_name=..) in the Python API. Run `sky status` to see existing clusters.
   I 02-23 16:39:59 cloud_vm_ray_backend.py:658] To view detailed progress: tail -n100 -f sky_logs/sky-2022-02-23-16-39-58-577551/provision.log
   I 02-23 16:39:59 cloud_vm_ray_backend.py:668]
@@ -112,14 +94,7 @@ AWS, where it succeeded after two regions:
   E 02-23 16:41:50 cloud_vm_ray_backend.py:746] Failed to acquire resources in all regions/zones (requested GCP(n1-highmem-8, {'V100': 8.0})). Try changing resource requirements or use another cloud.
   W 02-23 16:41:50 cloud_vm_ray_backend.py:891]
   W 02-23 16:41:50 cloud_vm_ray_backend.py:891] Provision failed for GCP(n1-highmem-8, {'V100': 8.0}). Trying other launchable resources (if any)...
-  I 02-23 16:41:50 optimizer.py:213] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
-  I 02-23 16:41:50 optimizer.py:323] Optimizer - plan minimizing cost (~$24.5):
-  I 02-23 16:41:50 optimizer.py:337]
-  I 02-23 16:41:50 optimizer.py:337] TASK     BEST_RESOURCE
-  I 02-23 16:41:50 optimizer.py:337] gpunode  AWS(p3.16xlarge)
-  I 02-23 16:41:50 optimizer.py:337]
-  I 02-23 16:41:50 cloud_vm_ray_backend.py:658] To view detailed progress: tail -n100 -f sky_logs/sky-2022-02-23-16-39-58-577551/provision.log
-  I 02-23 16:41:50 cloud_vm_ray_backend.py:668]
+  ...
   I 02-23 16:41:50 cloud_vm_ray_backend.py:668] Launching on AWS us-east-1 (us-east-1a,us-east-1b,us-east-1c,us-east-1d,us-east-1e,us-east-1f)
   W 02-23 16:42:15 cloud_vm_ray_backend.py:477] Got error(s) in all zones of us-east-1:
   W 02-23 16:42:15 cloud_vm_ray_backend.py:479]   create_instances: Attempt failed with An error occurred (InsufficientInstanceCapacity) when calling the RunInstances operation (reached max retries: 0): We currently do not have sufficient p3.16xlarge capacity in the Availability Zone you requested (us-east-1a). Our system will be working on provisioning additional capacity. You can currently get p3.16xlarge capacity by not specifying an Availability Zone in your request or choosing us-east-1b, us-east-1d, us-east-1f., retrying.

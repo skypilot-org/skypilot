@@ -410,7 +410,7 @@ def launch(
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a task.
+    """Launch a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
     (when specified, it is synced to remote cluster).  The task undergoes job
