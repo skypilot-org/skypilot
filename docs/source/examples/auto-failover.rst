@@ -34,7 +34,7 @@ A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
 are often in high demand and hard to get.  Let's see how SkyPilot's auto-failover
 provisioner handles such a request:
 
-.. code-block::
+.. code-block:: console
 
   $ sky gpunode -c gpu --gpus V100
   I 02-11 21:17:43 optimizer.py:211] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
@@ -76,7 +76,7 @@ Here is an example of cross-cloud failover when requesting 8x V100 GPUs.  All
 regions in GCP failed to provide the resource, so the provisioner switched to
 AWS, where it succeeded after two regions:
 
-.. code-block::
+.. code-block:: console
 
   $ sky gpunode --gpus V100:8
   I 02-23 16:39:59 optimizer.py:213] Defaulting estimated time to 1 hr. Call Task.set_time_estimator() to override.
@@ -139,3 +139,68 @@ AWS, where it succeeded after two regions:
   I 02-23 16:42:26 cloud_vm_ray_backend.py:668]
   I 02-23 16:42:26 cloud_vm_ray_backend.py:668] Launching on AWS us-west-2 (us-west-2a,us-west-2b,us-west-2c,us-west-2d)
   I 02-23 16:47:04 cloud_vm_ray_backend.py:740] Successfully provisioned or found existing VM. Setup completed.
+
+
+Multiple Candidate GPUs
+-------------------------
+
+If a task can be run on different GPUs, the user can specific multiple candidate GPUs,
+and SkyPilot will automatically find the best available GPU.
+
+To allow SkyPilot to choose any of the candidate GPUs, specify a set of candidate GPUs in the task yaml:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: {A10:1, L4:1, A10g:1}
+
+In the above example, SkyPilot will try to provision the any cheapest available GPU within the set of
+A10, L4, and A10g GPUs, using :code:`sky launch task.yaml`.
+
+
+
+To specify a preference order, use a list of candidate GPUs in the task yaml:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: [A10:1, A10g:1, L4:1]
+
+In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU:
+:code:`sky launch task.yaml`
+
+
+**Advanced** Multiple Candidate Resources
+--------------------------------------------
+
+If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:
+
+.. code-block:: yaml
+
+  resources:
+    ordered: # Candidate resources in a preference order
+      - cloud: gcp
+        accelerators: A100-80GB
+      - instance_type: g5.xlarge
+      - cloud: azure
+        region: eastus
+        accelerator: A100
+
+
+
+.. code-block:: yaml
+
+    resources:
+      any_of: # Candidate resources that can be chosen in any order
+        - cloud: gcp
+          accelerators: A100-80GB
+        - instance_type: g5.xlarge
+        - cloud: azure
+          region: eastus
+          accelerator: A100
+          
+This will be useful when only a set of regions/clouds are desired for launching the resources:
+
+
+.. code-block:: yaml
+  
