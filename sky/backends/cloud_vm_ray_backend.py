@@ -3355,7 +3355,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
-                f'RAY_DASHBOARD_PORT=$({constants.CONDA_RUN} python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+                f'RAY_DASHBOARD_PORT=$({constants.CONDA_CHECK_AND_RUN} python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
                 f'{cd} && {constants.CONDA_CHECK_AND_RUN} ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
                 f'--submission-id {ray_job_id} --no-wait '

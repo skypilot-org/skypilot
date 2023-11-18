@@ -826,5 +826,5 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return (f'{skylet_constants.CONDA_RUN} '
+        return (f'{skylet_constants.CONDA_CHECK_AND_RUN} '
                 f'python -u -c {shlex.quote(generated_code)}')
