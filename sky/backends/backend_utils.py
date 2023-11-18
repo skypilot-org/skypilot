@@ -1044,6 +1044,7 @@ def write_cluster_config(
                 # Ray and SkyPilot setup
                 'ray_and_skypilot_setup_commands':
                     constants.RAY_AND_SKYPILOT_SETUP_COMMANDS.format(
+                        cloud=str(cloud).lower(),
                         sky_wheel_hash=wheel_hash,
                         sky_version=str(version.parse(sky.__version__))),
 
