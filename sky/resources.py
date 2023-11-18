@@ -883,6 +883,18 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_accelerators_str(self) -> str:
+        accelerators = self.accelerators
+        if accelerators is None:
+            accelerators = '-'
+        elif isinstance(accelerators, dict) and len(accelerators) == 1:
+            accelerators, count = list(accelerators.items())[0]
+            accelerators = f'{accelerators}:{count}'
+        return accelerators
+
+    def get_spot_str(self) -> str:
+        return '[Spot]' if self.use_spot else ''
+
     def make_deploy_variables(
             self, cluster_name_on_cloud: str, region: clouds.Region,
             zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
@@ -1164,8 +1176,8 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-        config['spot_recovery'] = self.spot_recovery
-        config['disk_size'] = self.disk_size
+            add_if_not_none('spot_recovery', self.spot_recovery)
+        add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)

@@ -41,6 +41,11 @@ sky launch -c vicuna-serve-v100 -s serve.yaml --gpus V100
 sky launch -c vicuna-serve -s serve.yaml --env MODEL_SIZE=13
 ```
 
+5. [Optional] Serve the OpenAI API Compatible Endpoint:
+```bash
+sky launch -c vicuna-openai-api -s serve-openai-api-endpoint.yaml
+```
+
 
 ## Training Vicuna with SkyPilot
 Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.

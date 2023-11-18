@@ -1,0 +1,32 @@
+# The template for the sky serve controller
+
+name: {{service_name}}
+
+setup: |
+  # Install all cloud dependencies.
+  # This is for multicloud support. To allow controller launch on all clouds,
+  # we need to install all cloud dependencies.
+  # This also includes all serve dependencies.
+  pip install skypilot[all] > /dev/null 2>&1
+
+  # Install gcloud CLI.
+  {{google_sdk_installation_commands}}
+
+file_mounts:
+  {{remote_task_yaml_path}}: {{local_task_yaml_path}}
+{% if user_config_path is not none %}
+  {{remote_user_config_path}}: {{user_config_path}}
+{% endif %}
+
+run: |
+  # Start sky serve service.
+  python -u -m sky.serve.service \
+    --service-name {{service_name}} \
+    --task-yaml {{remote_task_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    >> {{controller_log_file}} 2>&1
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}
