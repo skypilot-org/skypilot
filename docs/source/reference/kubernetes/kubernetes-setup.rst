@@ -169,7 +169,7 @@ Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
 If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
-1. The Nvidia device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
+1. The Nvidia device plugin is installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
 2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
