@@ -1262,8 +1262,8 @@ class S3Store(AbstractStore):
                 # This handle links to sky managed storage if it exists.
                 handle = global_user_state.get_handle_from_storage_name(
                     self.name)
-                # If no handle is found, it implies the bucket is created
-                # externally and not managed by sky. For mounting such
+                # If handle is None, it implies the bucket is created
+                # externally and not managed by Skypilot. For mounting such
                 # externally created buckets, users must provide the
                 # bucket's URL as 'source'.
                 if handle is None:
@@ -1722,8 +1722,8 @@ class GcsStore(AbstractStore):
                 # This handle links to sky managed storage if it exists.
                 handle = global_user_state.get_handle_from_storage_name(
                     self.name)
-                # If no handle is found, it implies the bucket is created
-                # externally and not managed by sky. For mounting such
+                # If handle is None, it implies the bucket is created
+                # externally and not managed by Skypilot. For mounting such
                 # externally created buckets, users must provide the
                 # bucket's URL as 'source'.
                 if handle is None:
@@ -2104,8 +2104,8 @@ class R2Store(AbstractStore):
                 # This handle links to sky managed storage if it exists.
                 handle = global_user_state.get_handle_from_storage_name(
                     self.name)
-                # If no handle is found, it implies the bucket is created
-                # externally and not managed by sky. For mounting such
+                # If handle is None, it implies the bucket is created
+                # externally and not managed by Skypilot. For mounting such
                 # externally created buckets, users must provide the
                 # bucket's URL as 'source'.
                 if handle is None:
@@ -2586,8 +2586,8 @@ class IBMCosStore(AbstractStore):
                 # This handle links to sky managed storage if it exists.
                 handle = global_user_state.get_handle_from_storage_name(
                     self.name)
-                # If no handle is found, it implies the bucket is created
-                # externally and not managed by sky. For mounting such
+                # If handle is None, it implies the bucket is created
+                # externally and not managed by Skypilot. For mounting such
                 # externally created buckets, users must provide the
                 # bucket's URL as 'source'.
                 if handle is None:
