@@ -272,7 +272,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY, see the comment in
     # `start_ray_on_head_node`.
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
-           'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+           'export RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0; '
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +
            _RAY_PRLIMIT + _DUMP_RAY_PORTS)
     if no_restart:
@@ -286,6 +286,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                f'{{ {cmd}; }}')
     else:
         cmd = 'ray stop; ' + cmd
+    cmd = constants.ACTIVATE_PYTHON_ENV + cmd
 
     logger.info(f'Running command on worker nodes: {cmd}')
 

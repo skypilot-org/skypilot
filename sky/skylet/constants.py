@@ -67,7 +67,7 @@ DOCKER_LOGIN_ENV_VARS = {
 }
 
 ACTIVATE_PYTHON_ENV = (f'[ -d {SKY_REMOTE_PYTHON_ENV} ] && '
-                       f'source {SKY_REMOTE_PYTHON_ENV}/bin/active;')
+                       f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate;')
 
 
 def run_in_python_env(command):
