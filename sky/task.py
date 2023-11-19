@@ -188,7 +188,7 @@ class Task:
 
         Optionally, call ``Task.set_resources()`` to set the resource
         requirements for this task.  If not set, a default CPU-only requirement
-        is assumed (the same as ``sky cpunode``).
+        is assumed (the same as ``sky launch``).
 
         All setters of this class, ``Task.set_*()``, return ``self``, i.e.,
         they are fluent APIs and can be chained together.
