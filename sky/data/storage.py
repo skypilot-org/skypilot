@@ -819,6 +819,10 @@ class Storage(object):
             logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
+        except exceptions.StorageSpecError:
+            logger.error(f'Could not mount externally created {store_type}'
+                         f'store with name {self.name!r}.')
+            raise
 
         # Add store to storage
         self._add_store(store)
@@ -1233,6 +1237,8 @@ class S3Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1248,6 +1254,26 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            # Check if 'source' is None, indicating Storage is in MOUNT mode.
+            # Note: In COPY mode, a 'source' being None is already handled
+            # as an error in _validate_storage_spec.
+            if self.source is None:
+                # Retrieve a handle associated with the storage name.
+                # This handle links to sky managed storage if it exists.
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                # If no handle is found, it implies the bucket is created
+                # externally and not managed by sky. For mounting such
+                # externally created buckets, users must provide the
+                # bucket's URL as 'source'.
+                if handle is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Attempted to mount a non-sky managed bucket '
+                            f'{self.name!r} from S3 without specifying a '
+                            'storage source. To mount an externally created '
+                            'bucket, please specify the bucket URL as '
+                            'the storage source.')
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1678,6 +1704,8 @@ class GcsStore(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -1686,6 +1714,26 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
+            # Check if 'source' is None, indicating Storage is in MOUNT mode.
+            # Note: In COPY mode, a 'source' being None is already handled
+            # as an error in _validate_storage_spec.
+            if self.source is None:
+                # Retrieve a handle associated with the storage name.
+                # This handle links to sky managed storage if it exists.
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                # If no handle is found, it implies the bucket is created
+                # externally and not managed by sky. For mounting such
+                # externally created buckets, users must provide the
+                # bucket's URL as 'source'.
+                if handle is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Attempted to mount a non-sky managed bucket '
+                            f'{self.name!r} from GCS without specifying a '
+                            'storage source. To mount an externally created '
+                            'bucket, please specify the bucket URL as '
+                            'the storage source.')
             return bucket, False
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
@@ -2031,6 +2079,8 @@ class R2Store(AbstractStore):
           3) Create and return a new bucket otherwise
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2046,6 +2096,26 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
+            # Check if 'source' is None, indicating Storage is in MOUNT mode.
+            # Note: In COPY mode, a 'source' being None is already handled
+            # as an error in _validate_storage_spec.
+            if self.source is None:
+                # Retrieve a handle associated with the storage name.
+                # This handle links to sky managed storage if it exists.
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                # If no handle is found, it implies the bucket is created
+                # externally and not managed by sky. For mounting such
+                # externally created buckets, users must provide the
+                # bucket's URL as 'source'.
+                if handle is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Attempted to mount a non-sky managed bucket '
+                            f'{self.name!r} from R2 without specifying a '
+                            'storage source. To mount an externally created '
+                            'bucket, please specify the bucket URL as '
+                            'the storage source.')
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -2446,6 +2516,8 @@ class IBMCosStore(AbstractStore):
           bool: indicates whether a new bucket was created.
 
         Raises:
+            StorageSpecError: If externally created bucket is attempted to be
+                mounted without specifying storage source.
             StorageBucketCreateError: If bucket creation fails.
             StorageBucketGetError: If fetching a bucket fails
             StorageExternalDeletionError: If externally deleted storage is
@@ -2505,7 +2577,28 @@ class IBMCosStore(AbstractStore):
                 f'{self.name}')
         else:
             # bucket exists
-            return self.s3_resource.Bucket(self.name), False
+            bucket = self.s3_resource.Bucket(self.name)
+            # Check if 'source' is None, indicating Storage is in MOUNT mode.
+            # Note: In COPY mode, a 'source' being None is already handled
+            # as an error in _validate_storage_spec.
+            if self.source is None:
+                # Retrieve a handle associated with the storage name.
+                # This handle links to sky managed storage if it exists.
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                # If no handle is found, it implies the bucket is created
+                # externally and not managed by sky. For mounting such
+                # externally created buckets, users must provide the
+                # bucket's URL as 'source'.
+                if handle is None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Attempted to mount a non-sky managed bucket '
+                            f'{self.name!r} from IBM COS without specifying a '
+                            'storage source. To mount an externally created '
+                            'bucket, please specify the bucket URL as '
+                            'the storage source.')
+            return bucket, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
