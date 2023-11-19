@@ -1,0 +1,57 @@
+# SkyServe YAML to run Llama2 LLM.
+#
+# Usage: replace the <your-huggingface-token> with
+# your huggingface token, and run:
+#   sky serve up -n llama2 examples/serve/llama2/llama2.yaml
+# Then run the following command to interact with
+# the model:
+#   python3 examples/serve/llama2/chat.py
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint llama2
+
+# TODO(tian): Change usage to `HF_TOKEN=<your-token> sky serve up -n llama2 examples/serve/llama2/llama2.yaml --env HF_TOKEN` once we have `--env` enabled.
+
+service:
+  readiness_probe: /v1/models
+  replicas: 2
+
+resources:
+  ports: 8087
+  memory: 32+
+  accelerators: T4:1
+  disk_size: 1024
+  disk_tier: high
+
+envs:
+  MODEL_SIZE: 7
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+
+setup: |
+  conda activate chatbot
+  if [ $? -ne 0 ]; then
+    conda create -n chatbot python=3.9 -y
+    conda activate chatbot
+  fi
+
+  # Install dependencies
+  pip install "fschat[model_worker,webui]==0.2.24"
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+run: |
+  conda activate chatbot
+  
+  echo 'Starting controller...'
+  python -u -m fastchat.serve.controller --host 0.0.0.0 > ~/controller.log 2>&1 &
+  sleep 10
+  echo 'Starting model worker...'
+  python -u -m fastchat.serve.model_worker --host 0.0.0.0 \
+            --model-path meta-llama/Llama-2-${MODEL_SIZE}b-chat-hf \
+            --num-gpus $SKYPILOT_NUM_GPUS_PER_NODE 2>&1 \
+            | tee model_worker.log &
+
+  echo 'Waiting for model worker to start...'
+  while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
+
+  echo 'Starting openai api server...'
+  python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log

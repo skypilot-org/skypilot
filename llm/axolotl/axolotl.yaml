@@ -1,0 +1,35 @@
+# Usage:
+#   HF_TOKEN=abc sky launch -c axolotl axolotl.yaml --env HF_TOKEN -y -i30 --down
+
+name: axolotl
+
+resources:
+  accelerators: L4:1
+  cloud: gcp # optional
+
+workdir: mistral
+
+setup: |
+  docker pull winglian/axolotl:main-py3.10-cu118-2.0.1
+
+run: |
+  docker run --gpus all \
+    -v ~/sky_workdir:/sky_workdir \
+    -v /root/.cache:/root/.cache \
+    winglian/axolotl:main-py3.10-cu118-2.0.1 \
+    huggingface-cli login --token ${HF_TOKEN} 
+
+  docker run --gpus all \
+    -v ~/sky_workdir:/sky_workdir \
+    -v /root/.cache:/root/.cache \
+    winglian/axolotl:main-py3.10-cu118-2.0.1 \
+    accelerate launch -m axolotl.cli.train /sky_workdir/qlora.yaml
+
+envs:
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+  
+  
+
+
+  
+

@@ -1,0 +1,51 @@
+# SkyServe YAML to run vLLM with Vicuna LLM.
+#
+# Usage:
+#   sky serve up -n vllm examples/serve/vllm.yaml
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint vllm
+
+service:
+  readiness_probe:
+    path: /v1/models
+    # vllm takes 5-10 minutes to install
+    initial_delay_seconds: 1200
+  replicas: 2
+
+resources:
+  ports: 8081
+  accelerators: A100:1
+
+setup: |
+  conda activate chatbot
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    # Setup the environment
+    conda create -n chatbot python=3.10 -y
+    conda activate chatbot
+    pip install "fschat[model_worker,webui]==0.2.24"
+    pip install vllm accelerate protobuf
+  fi
+
+run: |
+  conda activate chatbot
+
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  python3 -m fastchat.serve.controller --host 0.0.0.0 --port ${CONTROLLER_PORT} > ~/controller.log 2>&1 &
+
+  cd FastChat
+  python3 -m fastchat.serve.vllm_worker \
+    --model-path lmsys/vicuna-7b-v1.5 \
+    --controller-address http://${WORKER_IP}:${CONTROLLER_PORT} \
+    --worker-address http://${WORKER_IP}:${WORKER_PORT} \
+    --host 0.0.0.0 \
+    --port ${WORKER_PORT} \
+    --tokenizer hf-internal-testing/llama-tokenizer > ~/worker.log 2>&1 &
+
+  HOST_IP=$(hostname -I | cut -d' ' -f1)
+  python3 -m fastchat.serve.openai_api_server --host ${HOST_IP} --port 8081

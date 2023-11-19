@@ -37,6 +37,10 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
                 vpc_name: {VPC_NAME}
                 use_internal_ips: true
                 ssh_proxy_command: {PROXY_COMMAND}
+
+            gcp:
+                vpc_name: {VPC_NAME}
+
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
             """))
@@ -167,6 +171,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
+    assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('kubernetes', 'networking'),
                                       None) == NODEPORT_MODE_NAME
     # Check set_nested() will copy the config dict and return a new dict
@@ -189,6 +194,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
+    assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
 
     # Check config with only partial keys still works
     new_config3 = copy.copy(new_config2)
@@ -223,3 +229,4 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
+    assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
