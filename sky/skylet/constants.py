@@ -72,7 +72,7 @@ ACTIVATE_PYTHON_ENV = (f'[ -d {SKY_REMOTE_PYTHON_ENV} ] && '
 
 def run_in_python_env(command):
     """Returns a command that runs in the SkyPilot's python environment."""
-    return (f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )')
+    return f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )'
 
 
 # Install conda on the remote cluster if it is not already installed.
@@ -81,9 +81,9 @@ def run_in_python_env(command):
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
-_RUN_PYTHON = run_in_python_env('python \$@')
-_RUN_PIP = run_in_python_env('pip \$@')
-_RUN_RAY = run_in_python_env('ray \$@')
+_RUN_PYTHON = run_in_python_env('python \\$@')
+_RUN_PIP = run_in_python_env('pip \\$@')
+_RUN_RAY = run_in_python_env('ray \\$@')
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
@@ -106,7 +106,8 @@ RAY_AND_SKYPILOT_SETUP_COMMANDS = (
     'echo "alias python=python3" >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo "alias pip=pip3" >> ~/.bashrc;'
     'source ~/.bashrc;'
-    'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;'
+    'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && '
+    'touch ~/.sudo_as_admin_successful;'
     f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate; '
     f'(pip list | grep "ray " | grep "{SKY_REMOTE_RAY_VERSION}" '
     '2>&1 > /dev/null || '
