@@ -1815,7 +1815,7 @@ class RetryingVmProvisioner(object):
         # Get the private IP of head node for connecting Ray cluster.
         head_runner = command_runner.SSHCommandRunner(
             all_ips[0], port=cluster_handle.head_ssh_port, **ssh_credentials)
-        cmd_str = f'{constants.CONDA_CHECK_AND_RUN} python -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
+        cmd_str = f'{constants.ACTIVATE_PYTHON_ENV} python -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
         rc, stdout, stderr = head_runner.run(cmd_str,
                                              require_outputs=True,
                                              stream_logs=False)

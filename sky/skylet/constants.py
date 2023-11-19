@@ -67,10 +67,13 @@ DOCKER_LOGIN_ENV_VARS = {
 }
 
 ACTIVATE_PYTHON_ENV = (f'[ -d {SKY_REMOTE_PYTHON_ENV} ] && '
-    f'source {SKY_REMOTE_PYTHON_ENV}/bin/active;')
+                       f'source {SKY_REMOTE_PYTHON_ENV}/bin/active;')
+
+
 def run_in_python_env(command):
-  """Returns a command that runs in the SkyPilot's python environment."""
-  return ( f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )')
+    """Returns a command that runs in the SkyPilot's python environment."""
+    return (f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )')
+
 
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not
