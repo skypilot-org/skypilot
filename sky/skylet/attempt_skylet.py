@@ -20,7 +20,7 @@ def restart_skylet():
     subprocess.run(
         f'{constants.ACTIVATE_PYTHON_ENV} '
         f'nohup python -m sky.skylet.skylet'
-        ' >> ~/.sky/skylet.log 2>&1 &; deactivate',
+        ' >> ~/.sky/skylet.log 2>&1 &',
         shell=True,
         check=True)
     with open(VERSION_FILE, 'w') as v_f:

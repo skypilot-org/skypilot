@@ -921,4 +921,4 @@ class JobLibCodeGen:
         code = cls._PREFIX + code
         code = ';'.join(code)
         return (f'{constants.ACTIVATE_PYTHON_ENV} '
-                f'python -u -c {shlex.quote(code)}; deactivate')
+                f'python -u -c {shlex.quote(code)}')

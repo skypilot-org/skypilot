@@ -745,7 +745,7 @@ class SpotCodeGen:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
         return (f'{constants.ACTIVATE_PYTHON_ENV} '
-                f'python -u -c {shlex.quote(generated_code)}; deactivate')
+                f'python -u -c {shlex.quote(generated_code)}')
 
 
 def dump_job_table_cache(job_table: str):

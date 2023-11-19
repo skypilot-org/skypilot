@@ -45,11 +45,11 @@ _RAY_PORT_COMMAND = (
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
     f'{_RAY_PORT_COMMAND}; '
     'export RAY_ADDRESS=127.0.0.1:$RAY_PORT;'
-    f'{constants.ACTIVATE_PYTHON_ENV} ray status; deactivate')
+    f'{constants.ACTIVATE_PYTHON_ENV} ray status')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
-                             'python -m sky.skylet.attempt_skylet; deactivate')
+                             'python -m sky.skylet.attempt_skylet')
 
 
 def _auto_retry(func):
