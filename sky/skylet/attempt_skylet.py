@@ -18,9 +18,9 @@ def restart_skylet():
         shell=True,
         check=False)
     subprocess.run(
-        f'{constants.SET_CONDA_ENV_CMD} '
-        f'nohup {constants.CONDA_RUN} python -m sky.skylet.skylet'
-        ' >> ~/.sky/skylet.log 2>&1 &',
+        f'{constants.ACTIVATE_PYTHON_ENV} '
+        f'nohup python -m sky.skylet.skylet'
+        ' >> ~/.sky/skylet.log 2>&1 &; deactivate',
         shell=True,
         check=True)
     with open(VERSION_FILE, 'w') as v_f:

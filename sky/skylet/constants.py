@@ -20,7 +20,7 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.4.0'
 SKY_REMOTE_WHEEL_PATH = '~/.sky/wheels'
-SKY_REMOTE_CONDA_ENV_NAME = 'skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV = '~/skypilot-runtime'
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
 UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
@@ -66,13 +66,11 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_SERVER_ENV_VAR,
 }
 
-SET_CONDA_ENV_CMD = (
-    f'[ -f ~/.sky/separate_conda_env ] && '
-    f'env_name={SKY_REMOTE_CONDA_ENV_NAME} || skypilot_runtime_env_name=base;')
-_CONDA_RUN = f'conda run -n {SKY_REMOTE_CONDA_ENV_NAME}'
-CONDA_RUN = ('conda run -n '
-             f'${{skypilot_runtime_env_name:-{SKY_REMOTE_CONDA_ENV_NAME}}}')
-CONDA_CHECK_AND_RUN = f'{SET_CONDA_ENV_CMD} {CONDA_RUN}'
+ACTIVATE_PYTHON_ENV = (f'[ -d {SKY_REMOTE_PYTHON_ENV} ] && '
+    f'source {SKY_REMOTE_PYTHON_ENV}/bin/active;')
+def run_in_python_env(command):
+  """Returns a command that runs in the SkyPilot's python environment."""
+  return ( f'( {ACTIVATE_PYTHON_ENV}{command}; deactivate )')
 
 # Install conda on the remote cluster if it is not already installed.
 # We do not install the latest conda with python 3.11 because ray has not
@@ -80,6 +78,9 @@ CONDA_CHECK_AND_RUN = f'{SET_CONDA_ENV_CMD} {CONDA_RUN}'
 # https://github.com/ray-project/ray/issues/31606
 # We use python 3.10 to be consistent with the python version of the
 # AWS's Deep Learning AMI's default conda environment.
+_RUN_PYTHON = run_in_python_env('python \$@')
+_RUN_PIP = run_in_python_env('pip \$@')
+_RUN_RAY = run_in_python_env('ray \$@')
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ wget -nc https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh -O Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
@@ -91,12 +92,11 @@ CONDA_INSTALLATION_COMMANDS = (
     # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;'
     # Create a separate conda environment for SkyPilot dependencies.
-    f'conda env list | grep "{SKY_REMOTE_CONDA_ENV_NAME}" || '
-    f'conda create -y -n {SKY_REMOTE_CONDA_ENV_NAME} python=3.10 && '
-    'touch ~/.sky/separate_conda_env;'
-    f'echo "alias skypy=\'{CONDA_CHECK_AND_RUN} python\'" >> ~/.bashrc;'
-    f'echo "alias skypip=\'{CONDA_CHECK_AND_RUN} pip\'" >> ~/.bashrc;'
-    f'echo "alias skyray=\'{CONDA_CHECK_AND_RUN} ray\'" >> ~/.bashrc;')
+    f'[ -d ~/{SKY_REMOTE_PYTHON_ENV} ] || '
+    f'python -m venv ~/{SKY_REMOTE_PYTHON_ENV}; '
+    f'echo "function skypy () {{ {_RUN_PYTHON} }}" >> ~/.bashrc;'
+    f'echo "function skypip () {{ {_RUN_PIP} }}" >> ~/.bashrc;'
+    f'echo "function skyray () {{ {_RUN_RAY} }}" >> ~/.bashrc;')
 
 RAY_AND_SKYPILOT_SETUP_COMMANDS = (
     '(type -a python | grep -q python3) || '
@@ -104,18 +104,19 @@ RAY_AND_SKYPILOT_SETUP_COMMANDS = (
     '(type -a pip | grep -q pip3) || echo "alias pip=pip3" >> ~/.bashrc;'
     'source ~/.bashrc;'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;'
-    f'({_CONDA_RUN} pip list | grep "ray " | grep "{SKY_REMOTE_RAY_VERSION}" '
+    f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate; '
+    f'(pip list | grep "ray " | grep "{SKY_REMOTE_RAY_VERSION}" '
     '2>&1 > /dev/null || '
-    f'{_CONDA_RUN} pip install --exists-action w -U '
+    f'pip install --exists-action w -U '
     f'ray[default]=={SKY_REMOTE_RAY_VERSION});'
-    f'({_CONDA_RUN} pip list | grep "skypilot " && '
+    f'(pip list | grep "skypilot " && '
     f'[ "$(cat {SKY_REMOTE_WHEEL_PATH}/current_sky_wheel_hash)" == '
-    f'"{{sky_wheel_hash}}" ]) || ({_CONDA_RUN} pip uninstall skypilot -y; '
-    f'{_CONDA_RUN} pip install "$(echo {SKY_REMOTE_WHEEL_PATH}/'
+    f'"{{sky_wheel_hash}}" ]) || (pip uninstall skypilot -y; '
+    f'pip install "$(echo {SKY_REMOTE_WHEEL_PATH}/'
     f'{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[{{cloud}}, remote]" && '
     f'echo "{{sky_wheel_hash}}" '
     f'> {SKY_REMOTE_WHEEL_PATH}/current_sky_wheel_hash || exit 1);'
-    f'{_CONDA_RUN} python -c '
+    f'python -c '
     '"from sky.skylet.ray_patches import patch; patch()" || exit 1;')
 
 # The name for the environment variable that stores SkyPilot user hash, which

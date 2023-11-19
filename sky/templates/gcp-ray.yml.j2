@@ -304,7 +304,7 @@ setup_commands:
     {{ conda_installation_commands }}
     {{ ray_and_skypilot_setup_commands }}
   {%- if tpu_vm %}
-    conda run -n skypilot-runtime pip install --upgrade google-api-python-client;
+    source ~/skypilot-runtime/bin/activate; pip install --upgrade google-api-python-client; deactivate
   {%- endif %}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}

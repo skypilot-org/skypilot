@@ -135,7 +135,7 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
     'monkey_patches' / 'monkey_patch_ray_up.py')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
-_MAYBE_SKYLET_RESTART_CMD = (f'{constants.CONDA_CHECK_AND_RUN} '
+_MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
                              'python -m sky.skylet.attempt_skylet')
 
 
@@ -3355,8 +3355,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
-                f'RAY_DASHBOARD_PORT=$({constants.CONDA_CHECK_AND_RUN} python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
-                f'{cd} && {constants.CONDA_CHECK_AND_RUN} ray job submit '
+                f'{constants.ACTIVATE_PYTHON_ENV}'
+                f'RAY_DASHBOARD_PORT=$(python -c "from sky.skylet import job_lib; print(job_lib.get_job_submission_port())" 2> /dev/null || echo 8265);'  # pylint: disable=line-too-long
+                f'{cd} && ray job submit '
                 '--address=http://127.0.0.1:$RAY_DASHBOARD_PORT '
                 f'--submission-id {ray_job_id} --no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
@@ -3477,7 +3478,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ssh_user, remote_run_file)
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
-            f'{constants.CONDA_CHECK_AND_RUN} ray job submit '
+            f'{constants.ACTIVATE_PYTHON_ENV} '
+            'ray job submit '
             '--address='
             f'http://127.0.0.1:{constants.SKY_REMOTE_RAY_DASHBOARD_PORT} '
             f'--submission-id {ray_job_id} '
