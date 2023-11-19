@@ -95,8 +95,9 @@ CONDA_INSTALLATION_COMMANDS = (
     # cause error and waiting for the error to be reported: #2273.
     'which conda | grep /opt/conda || conda init > /dev/null;'
     # Create a separate conda environment for SkyPilot dependencies.
-    f'[ -d ~/{SKY_REMOTE_PYTHON_ENV} ] || '
-    f'python -m venv ~/{SKY_REMOTE_PYTHON_ENV}; '
+    f'[ -d {SKY_REMOTE_PYTHON_ENV} ] || '
+    f'python -m venv {SKY_REMOTE_PYTHON_ENV}; '
+    f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate; '
     f'echo "function skypy () {{ {_RUN_PYTHON} }}" >> ~/.bashrc;'
     f'echo "function skypip () {{ {_RUN_PIP} }}" >> ~/.bashrc;'
     f'echo "function skyray () {{ {_RUN_RAY} }}" >> ~/.bashrc;')
@@ -105,10 +106,8 @@ RAY_AND_SKYPILOT_SETUP_COMMANDS = (
     '(type -a python | grep -q python3) || '
     'echo "alias python=python3" >> ~/.bashrc;'
     '(type -a pip | grep -q pip3) || echo "alias pip=pip3" >> ~/.bashrc;'
-    'source ~/.bashrc;'
     'mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && '
     'touch ~/.sudo_as_admin_successful;'
-    f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate; '
     f'(pip list | grep "ray " | grep "{SKY_REMOTE_RAY_VERSION}" '
     '2>&1 > /dev/null || '
     f'pip install --exists-action w -U '
