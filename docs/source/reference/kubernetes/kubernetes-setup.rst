@@ -167,10 +167,10 @@ Please follow their respective guides to deploy your Kubernetes cluster.
 
 Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
-If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia
-device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
-Additionally, you will need to label each node in your cluster with the GPU type.
-For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+If your Kubernetes cluster has Nvidia GPUs, ensure that:
+
+1. The Nvidia device plugin is installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
+2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
@@ -184,6 +184,9 @@ We provide a convenience script that automatically detects GPU types and labels 
  To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
  You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerators: <gpu_name>`.
 
+
+.. note::
+ GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
 
 .. note::
  GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.
