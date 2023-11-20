@@ -83,8 +83,8 @@ AWS, where it succeeded after two regions:
 Multiple Candidate GPUs
 -------------------------
 
-If a task can be run on different GPUs, the user can specific multiple candidate GPUs,
-and SkyPilot will automatically find the best available GPU.
+If a task can be run on different GPUs, the user can specify multiple candidate GPUs,
+and SkyPilot will automatically find the cheapest available GPU.
 
 To allow SkyPilot to choose any of the candidate GPUs, specify a set of candidate GPUs in the task yaml:
 
@@ -117,8 +117,7 @@ To specify a preference order, use a list of candidate GPUs in the task yaml:
   resources:
     accelerators: [A10:1, A10g:1, L4:1]
 
-In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU:
-:code:`sky launch task.yaml`
+In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU.
 
 
 (**Advanced**) Multiple Candidate Resources
