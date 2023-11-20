@@ -100,7 +100,7 @@ A10, L4, and A10g GPUs, using :code:`sky launch task.yaml`.
 
   $ sky launch task.yaml
   ...
-  -----------------------------------------------------------------------------------------------------
+  I 11-19 08:07:45 optimizer.py:910] -----------------------------------------------------------------------------------------------------
   I 11-19 08:07:45 optimizer.py:910]  CLOUD   INSTANCE                 vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
   I 11-19 08:07:45 optimizer.py:910] -----------------------------------------------------------------------------------------------------
   I 11-19 08:07:45 optimizer.py:910]  Azure   Standard_NV6ads_A10_v5   6       55        A10:1          eastus        0.45          ✔     
@@ -125,6 +125,11 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 --------------------------------------------
 
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:
+
+.. tip::
+
+  The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
+  includes the field for a candidate resource.
 
 .. code-block:: yaml
 
@@ -156,13 +161,11 @@ This will be useful when only a set of regions/clouds are desired for launching 
 
   resources:
     any_of:
-      - region: us-east-1
+      - cloud: aws
+        region: us-east-2
         accelerators: A100:8
-      - region: us-east-2
-        accelerators: A100:8
-      - region: us-west-2
-        accelerators: A100:8
-      - region: us-central1
+      - cloud: gcp
+        region: us-central1
         accelerators: A100:8
 
 This will genereate the following output:
@@ -171,11 +174,11 @@ This will genereate the following output:
 
   $ sky launch -c mycluster task.yaml
   ...
-  ----------------------------------------------------------------------------------------------
-  I 11-19 08:00:03 optimizer.py:910]  CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
-  I 11-19 08:00:03 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-19 08:00:03 optimizer.py:910]  GCP     a2-highgpu-8g   96      680       A100:8         us-central1-a   29.39         ✔     
-  I 11-19 08:00:03 optimizer.py:910]  AWS     p4d.24xlarge    96      1152      A100:8         us-east-1       32.77               
-  I 11-19 08:00:03 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-19 08:00:03 optimizer.py:910] 
+  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
+  I 11-20 14:06:24 optimizer.py:910]  CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
+  I 11-20 14:06:24 optimizer.py:910]  GCP     a2-highgpu-8g   96      680       A100:8         us-central1-a   29.39         ✔     
+  I 11-20 14:06:24 optimizer.py:910]  AWS     p4d.24xlarge    96      1152      A100:8         us-east-2       32.77               
+  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
+  I 11-20 14:06:24 optimizer.py:910]
   Launching a new cluster 'mycluster'. Proceed? [Y/n]: 
