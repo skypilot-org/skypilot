@@ -37,7 +37,7 @@ _DUMP_RAY_PORTS = (
 )
 
 _RAY_PORT_COMMAND = (
-    f'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
+    'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379)')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
