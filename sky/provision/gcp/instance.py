@@ -94,7 +94,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """See sky/provision/__init__.py"""
     # NOTE: although google cloud instances have IDs, but they are
     #  not used for indexing. Instead, we use the instance name.
-    labels = config.tags  # gcp uses "labels" instead of aws "tags"
+    labels = config.tags  # gcp uses 'labels' instead of aws 'tags'
     labels = dict(sorted(copy.deepcopy(labels).items()))
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
@@ -103,19 +103,20 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
 
-    # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
-    # "STOPPING" means the VM is being stopped, which needs
+    # SKY: 'TERMINATED' for compute VM, 'STOPPED' for TPU VM
+    # 'STOPPING' means the VM is being stopped, which needs
     # to be included to avoid creating a new VM.
+    resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
-        STOPPED_STATUS = 'TERMINATED'
+        stopped_status = 'TERMINATED'
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
-        STOPPED_STATUS = 'STOPPED'
+        stopped_status = 'STOPPED'
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    PENDING_STATUS = ['PROVISIONING', 'STAGING']
+    pending_status = ['PROVISIONING', 'STAGING']
     filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     # wait until all stopping instances are stopped/terminated
@@ -147,36 +148,36 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     stopping_instances = []
     stopped_instances = []
 
-    # SkyPilot: We try to use the instances with the same matching launch_config first. If
-    # there is not enough instances with matching launch_config, we then use all the
-    # instances with the same matching launch_config plus some instances with wrong
-    # launch_config.
+    # SkyPilot: We try to use the instances with the same matching launch_config
+    # first. If there is not enough instances with matching launch_config, we
+    # then use all the instances with the same matching launch_config plus some
+    # instances with wrong launch_config.
     def get_order_key(node):
-        import datetime
+        import datetime  # pylint: disable=import-outside-toplevel
 
-        timestamp = node.get("lastStartTimestamp")
+        timestamp = node.get('lastStartTimestamp')
         if timestamp is not None:
             return datetime.datetime.strptime(timestamp,
-                                              "%Y-%m-%dT%H:%M:%S.%f%z")
+                                              '%Y-%m-%dT%H:%M:%S.%f%z')
         return node['id']
 
     for inst in exist_instances:
         state = inst['status']
-        if state in PENDING_STATUS:
+        if state in pending_status:
             pending_instances.append(inst)
         elif state == 'RUNNING':
             running_instances.append(inst)
         elif state == 'STOPPING':
             stopping_instances.append(inst)
-        elif state == STOPPED_STATUS:
+        elif state == stopped_status:
             stopped_instances.append(inst)
         else:
             raise RuntimeError(f'Unsupported state "{state}".')
 
-    pending_instances.sort(key=lambda n: get_order_key(n), reverse=True)
-    running_instances.sort(key=lambda n: get_order_key(n), reverse=True)
-    stopping_instances.sort(key=lambda n: get_order_key(n), reverse=True)
-    stopped_instances.sort(key=lambda n: get_order_key(n), reverse=True)
+    pending_instances.sort(key=get_order_key, reverse=True)
+    running_instances.sort(key=get_order_key, reverse=True)
+    stopping_instances.sort(key=get_order_key, reverse=True)
+    stopped_instances.sort(key=get_order_key, reverse=True)
 
     if stopping_instances:
         raise RuntimeError(
@@ -250,7 +251,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=PENDING_STATUS,
+            status_filters=pending_status,
         )
         if not instances:
             break
@@ -270,6 +271,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                        'This could be some instances failed to start '
                        'or some resource leak.')
 
+    assert head_instance_id is not None, 'head_instance_id is None'
     return common.ProvisionRecord(provider_name='gcp',
                                   region=region,
                                   zone=availability_zone,
@@ -282,9 +284,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
+    del region, cluster_name_on_cloud, state
     # We already wait for the instances to be running in run_instances.
     # So we don't need to wait here.
-    return
 
 
 def get_cluster_info(
@@ -292,6 +294,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
+    del region
     assert provider_config is not None, cluster_name_on_cloud
     zone = provider_config['availability_zone']
     project_id = provider_config['project_id']

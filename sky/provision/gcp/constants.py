@@ -1,9 +1,12 @@
+"""Constants used by the GCP provisioner."""
+
 VERSION = 'v1'
 TPU_VERSION = 'v2'  # change once v2 is stable
 
 RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
-SERVICE_ACCOUNT_EMAIL_TEMPLATE = '{account_id}@{project_id}.iam.gserviceaccount.com'
+SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
+    '{account_id}@{project_id}.iam.gserviceaccount.com')
 DEFAULT_SERVICE_ACCOUNT_CONFIG = {
     'displayName': f'Ray Autoscaler Service Account ({VERSION})',
 }
@@ -39,7 +42,7 @@ SKYPILOT_VPC_NAME = 'skypilot-vpc'
 
 # Below parameters are from the default VPC on GCP.
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc
-VPC_TEMPLATE = {
+VPC_TEMPLATE: dict = {
     'name': '{VPC_NAME}',
     'selfLink': 'projects/{PROJ_ID}/global/networks/{VPC_NAME}',
     'autoCreateSubnetworks': True,
@@ -82,9 +85,11 @@ FIREWALL_RULES_REQUIRED = [
 FIREWALL_RULES_TEMPLATE = [
     {
         'name': '{VPC_NAME}-allow-custom',
-        'description': 'Allows connection from any source to any instance on the network using custom protocols.',
+        'description': ('Allows connection from any source to any instance on '
+                        'the network using custom protocols.'),
         'network': 'projects/{PROJ_ID}/global/networks/{VPC_NAME}',
-        'selfLink': 'projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-custom',
+        'selfLink':
+            ('projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-custom'),
         'direction': 'INGRESS',
         'priority': 65534,
         'allowed': [
@@ -104,7 +109,9 @@ FIREWALL_RULES_TEMPLATE = [
     },
     {
         'name': '{VPC_NAME}-allow-ssh',
-        'description': 'Allows TCP connections from any source to any instance on the network using port 22.',
+        'description':
+            ('Allows TCP connections from any source to any instance on the '
+             'network using port 22.'),
         'network': 'projects/{PROJ_ID}/global/networks/{VPC_NAME}',
         'selfLink': 'projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-ssh',
         'direction': 'INGRESS',
@@ -119,7 +126,8 @@ FIREWALL_RULES_TEMPLATE = [
     },
     {
         'name': '{VPC_NAME}-allow-icmp',
-        'description': 'Allows ICMP connections from any source to any instance on the network.',
+        'description': ('Allows ICMP connections from any source to any '
+                        'instance on the network.'),
         'network': 'projects/{PROJ_ID}/global/networks/{VPC_NAME}',
         'selfLink': 'projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-icmp',
         'direction': 'INGRESS',

@@ -96,9 +96,9 @@ def get_credentials(cred_type: str, credentials_field: str):
         # mistake in copying the credentials into the config yaml.
         try:
             service_account_info = json.loads(credentials_field)
-        except json.decoder.JSONDecodeError:
+        except json.decoder.JSONDecodeError as e:
             raise RuntimeError('gcp_credentials found in cluster yaml file but '
-                               'formatted improperly.')
+                               'formatted improperly.') from e
         credentials = service_account.Credentials.from_service_account_info(
             service_account_info)
     elif cred_type == 'credentials_token':

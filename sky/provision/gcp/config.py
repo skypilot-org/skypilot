@@ -3,7 +3,7 @@ import copy
 import logging
 import time
 import typing
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from sky.adaptors import gcp
 from sky.provision import common
@@ -21,7 +21,7 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
-    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
     raise RuntimeError(prefix + error)
 
 
@@ -99,9 +99,7 @@ def _create_tpu(gcp_credentials=None):
 
 
 def construct_clients_from_provider_config(provider_config):
-    """
-    Attempt to fetch and parse the JSON GCP credentials from the provider
-    config yaml file.
+    """Attempt to fetch and parse the JSON GCP credentials.
 
     tpu resource (the last element of the tuple) will be None if
     `_has_tpus` in provider config is not set or False.
@@ -149,7 +147,7 @@ def bootstrap_instances(
             config.node_config) == instance_utils.GCPNodeType.TPU:
         config.provider_config[constants.HAS_TPU_PROVIDER_FIELD] = True
 
-    crm, iam, compute, tpu = construct_clients_from_provider_config(
+    crm, iam, compute, _ = construct_clients_from_provider_config(
         config.provider_config)
 
     # Setup a Google Cloud Platform Project.
@@ -217,15 +215,14 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
         for binding in policy['bindings']:
             if binding['role'] == role:
                 if member_id not in binding['members']:
-                    logger.info(
-                        f"_configure_iam_role: role {role} is not attached to {member_id}..."
-                    )
+                    logger.info(f'_configure_iam_role: role {role} is not '
+                                f'attached to {member_id}...')
                     binding['members'].append(member_id)
                     already_configured = False
                 role_exists = True
 
         if not role_exists:
-            logger.info(f"_configure_iam_role: role {role} does not exist.")
+            logger.info(f'_configure_iam_role: role {role} does not exist.')
             already_configured = False
             policy['bindings'].append({
                 'members': [member_id],
@@ -264,7 +261,7 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
     return False, policy
 
 
-def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
+def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     """Setup a gcp service account with IAM roles.
 
     Creates a gcp service acconut and binds IAM roles which allow it to control
@@ -284,8 +281,10 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
     permissions = constants.VM_MINIMAL_PERMISSIONS
     roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
-        roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES + constants.TPU_SERVICE_ACCOUNT_ROLES
-        permissions = constants.VM_MINIMAL_PERMISSIONS + constants.TPU_MINIMAL_PERMISSIONS
+        roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +
+                 constants.TPU_SERVICE_ACCOUNT_ROLES)
+        permissions = (constants.VM_MINIMAL_PERMISSIONS +
+                       constants.TPU_MINIMAL_PERMISSIONS)
 
     satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
                                                  permissions, roles)
@@ -343,10 +342,12 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam):
         # account is limited by the IAM rights specified below.
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
+    iam_role: Dict[str, Any]
     if instance_utils.get_node_type(
             config.node_config) == instance_utils.GCPNodeType.TPU:
-        # SKY: The API for TPU VM is slightly different from normal compute instances.
-        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
+        # SKY: The API for TPU VM is slightly different from normal compute
+        # instances.
+        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # pylint: disable=line-too-long
         account_dict['scope'] = account_dict['scopes']
         account_dict.pop('scopes')
         iam_role = {'serviceAccount': account_dict}
@@ -368,7 +369,8 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
         return False
     effective_rules = response['firewalls']
 
-    def _merge_and_refine_rule(rules):
+    def _merge_and_refine_rule(
+            rules) -> Dict[Tuple[str, str], Dict[str, Set[int]]]:
         """Returns the reformatted rules from the firewall rules
 
         The function translates firewall rules fetched from the cloud provider
@@ -378,30 +380,32 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
         [
             {
                 ...
-                "direction": "INGRESS",
-                "allowed": [
-                    {"IPProtocol": "tcp", "ports": ['80', '443']},
-                    {"IPProtocol": "udp", "ports": ['53']},
+                'direction': 'INGRESS',
+                'allowed': [
+                    {'IPProtocol': 'tcp', 'ports': ['80', '443']},
+                    {'IPProtocol': 'udp', 'ports': ['53']},
                 ],
-                "sourceRanges": ["10.128.0.0/9"],
+                'sourceRanges': ['10.128.0.0/9'],
             },
             {
                 ...
-                "direction": "INGRESS",
-                "allowed": [{
-                    "IPProtocol": "tcp",
-                    "ports": ["22"],
+                'direction': 'INGRESS',
+                'allowed': [{
+                    'IPProtocol': 'tcp',
+                    'ports': ['22'],
                 }],
-                "sourceRanges": ["0.0.0.0/0"],
+                'sourceRanges': ['0.0.0.0/0'],
             },
         ]
 
         Returns:
-            source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
-                Example {
-                    ("INGRESS", "10.128.0.0/9"): {"tcp": {80, 443}, "udp": {53}},
-                    ("INGRESS", "0.0.0.0/0"): {"tcp": {22}},
-                }
+            source2rules: Dict[(direction, sourceRanges) ->
+                Dict(protocol -> Set[ports])]
+
+            Example {
+                ('INGRESS', '10.128.0.0/9'): {'tcp': {80, 443}, 'udp': {53}},
+                ('INGRESS', '0.0.0.0/0'): {'tcp': {22}},
+            }
         """
         source2rules: Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
@@ -452,13 +456,13 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
                     port_set)
         return source2rules
 
-    effective_rules = _merge_and_refine_rule(effective_rules)
-    required_rules = _merge_and_refine_rule(required_rules)
+    effective_rules_map = _merge_and_refine_rule(effective_rules)
+    required_rules_map = _merge_and_refine_rule(required_rules)
 
-    for direction_source, allowed_req in required_rules.items():
-        if direction_source not in effective_rules:
+    for direction_source, allowed_req in required_rules_map.items():
+        if direction_source not in effective_rules_map:
             return False
-        allowed_eff = effective_rules[direction_source]
+        allowed_eff = effective_rules_map[direction_source]
         # Special case: 'all' means allowing all traffic
         if 'all' in allowed_eff:
             continue
@@ -470,12 +474,12 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
     return True
 
 
-def _create_rules(project_id: str, compute, rules, VPC_NAME):
+def _create_rules(project_id: str, compute, rules, vpc_name):
     opertaions = []
     for rule in rules:
         # Query firewall rule by its name (unique in a project).
         # If the rule already exists, delete it first.
-        rule_name = rule['name'].format(VPC_NAME=VPC_NAME)
+        rule_name = rule['name'].format(VPC_NAME=vpc_name)
         rule_list = _list_firewall_rules(project_id,
                                          compute,
                                          filter=f'(name={rule_name})')
@@ -483,11 +487,11 @@ def _create_rules(project_id: str, compute, rules, VPC_NAME):
             _delete_firewall_rule(project_id, compute, rule_name)
 
         body = rule.copy()
-        body['name'] = body['name'].format(VPC_NAME=VPC_NAME)
+        body['name'] = body['name'].format(VPC_NAME=vpc_name)
         body['network'] = body['network'].format(PROJ_ID=project_id,
-                                                 VPC_NAME=VPC_NAME)
+                                                 VPC_NAME=vpc_name)
         body['selfLink'] = body['selfLink'].format(PROJ_ID=project_id,
-                                                   VPC_NAME=VPC_NAME)
+                                                   VPC_NAME=vpc_name)
         op = compute.firewalls().insert(project=project_id, body=body).execute()
         opertaions.append(op)
     for op in opertaions:
@@ -496,7 +500,7 @@ def _create_rules(project_id: str, compute, rules, VPC_NAME):
 
 def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
     """Returns the VPC name of a network interface."""
-    return network_interface["network"].split("/")[-1]
+    return network_interface['network'].split('/')[-1]
 
 
 def get_usable_vpc_and_subnet(
@@ -504,7 +508,7 @@ def get_usable_vpc_and_subnet(
     region: str,
     config: common.ProvisionConfig,
     compute,
-) -> Tuple[str, "google.cloud.compute_v1.types.compute.Subnetwork"]:
+) -> Tuple[str, 'google.cloud.compute_v1.types.compute.Subnetwork']:
     """Return a usable VPC and the subnet in it.
 
     If config.provider_config['vpc_name'] is set, return the VPC with the name
@@ -520,7 +524,8 @@ def get_usable_vpc_and_subnet(
             region.
 
     Raises:
-        RuntimeError: if the user has specified a VPC name but the VPC is not found.
+        RuntimeError: if the user has specified a VPC name but the VPC is not
+        found.
     """
     project_id = config.provider_config['project_id']
 
@@ -532,33 +537,34 @@ def get_usable_vpc_and_subnet(
     # not handle this special case as we don't want to sacrifice the performance
     # for every launch just for this rare case.
 
-    specific_vpc_to_use = config.provider_config.get("vpc_name", None)
+    specific_vpc_to_use = config.provider_config.get('vpc_name', None)
     if specific_vpc_to_use is not None:
         vpcnets_all = _list_vpcnets(project_id,
                                     compute,
-                                    filter=f"name={specific_vpc_to_use}")
+                                    filter=f'name={specific_vpc_to_use}')
         # On GCP, VPC names are unique, so it'd be 0 or 1 VPC found.
-        assert (
-            len(vpcnets_all) <= 1
-        ), f"{len(vpcnets_all)} VPCs found with the same name {specific_vpc_to_use}"
+        assert (len(vpcnets_all) <=
+                1), (f'{len(vpcnets_all)} VPCs found with the same name '
+                     f'{specific_vpc_to_use}')
         if len(vpcnets_all) == 1:
             # Skip checking any firewall rules if the user has specified a VPC.
-            logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
+            logger.info(f'Using user-specified VPC {specific_vpc_to_use!r}.')
             subnets = _list_subnets(project_id,
                                     region,
                                     compute,
                                     filter=f'(name="{specific_vpc_to_use}")')
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
-                    f"No subnet for region {region} found for specified VPC {specific_vpc_to_use!r}. "
-                    f"Check the subnets of VPC {specific_vpc_to_use!r} at https://console.cloud.google.com/networking/networks"
-                )
+                    f'No subnet for region {region} found for specified VPC '
+                    f'{specific_vpc_to_use!r}. '
+                    f'Check the subnets of VPC {specific_vpc_to_use!r} at '
+                    'https://console.cloud.google.com/networking/networks')
             return specific_vpc_to_use, subnets[0]
         else:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
-                f"No VPC with name {specific_vpc_to_use!r} is found. "
-                "To fix: specify a correct VPC name.")
+                f'No VPC with name {specific_vpc_to_use!r} is found. '
+                'To fix: specify a correct VPC name.')
             # Should not reach here.
 
     subnets_all = _list_subnets(project_id, region, compute)
@@ -571,23 +577,23 @@ def get_usable_vpc_and_subnet(
             continue
         if _check_firewall_rules(cluster_name, vpc_name, project_id, compute):
             logger.info(
-                f"get_usable_vpc: Found a usable VPC network {vpc_name!r}.")
+                f'get_usable_vpc: Found a usable VPC network {vpc_name!r}.')
             return vpc_name, subnet
         else:
             insufficient_vpcs.add(vpc_name)
 
     # No usable VPC found. Try to create one.
     logger.info(
-        f"Creating a default VPC network, {constants.SKYPILOT_VPC_NAME}...")
+        f'Creating a default VPC network, {constants.SKYPILOT_VPC_NAME}...')
 
     # Create a SkyPilot VPC network if it doesn't exist
     vpc_list = _list_vpcnets(project_id,
                              compute,
-                             filter=f"name={constants.SKYPILOT_VPC_NAME}")
+                             filter=f'name={constants.SKYPILOT_VPC_NAME}')
     if len(vpc_list) == 0:
         body = constants.VPC_TEMPLATE.copy()
-        body["name"] = body["name"].format(VPC_NAME=constants.SKYPILOT_VPC_NAME)
-        body["selfLink"] = body["selfLink"].format(
+        body['name'] = body['name'].format(VPC_NAME=constants.SKYPILOT_VPC_NAME)
+        body['selfLink'] = body['selfLink'].format(
             PROJ_ID=project_id, VPC_NAME=constants.SKYPILOT_VPC_NAME)
         _create_vpcnet(project_id, compute, body)
 
@@ -601,11 +607,11 @@ def get_usable_vpc_and_subnet(
                             filter=f'(name="{usable_vpc_name}")')
     if not subnets:
         _skypilot_log_error_and_exit_for_failover(
-            f"No subnet for region {region} found for generated VPC {usable_vpc_name!r}. "
-            "This is probably due to the region being disabled in the account/project_id."
-        )
+            f'No subnet for region {region} found for generated VPC '
+            f'{usable_vpc_name!r}. This is probably due to the region being '
+            'disabled in the account/project_id.')
     usable_subnet = subnets[0]
-    logger.info(f"A VPC network {constants.SKYPILOT_VPC_NAME} created.")
+    logger.info(f'A VPC network {constants.SKYPILOT_VPC_NAME} created.')
     return usable_vpc_name, usable_subnet
 
 
@@ -652,6 +658,7 @@ def _delete_firewall_rule(project_id: str, compute, name):
     return response
 
 
+# pylint: disable=redefined-builtin
 def _list_firewall_rules(project_id, compute, filter=None):
     response = (compute.firewalls().list(
         project=project_id,
@@ -667,22 +674,23 @@ def _create_vpcnet(project_id: str, compute, body):
     return response
 
 
-def _list_vpcnets(project_id: str, compute, filter=None):
+def _list_vpcnets(project_id: str, compute, filter=None):  # pylint: disable=redefined-builtin
     response = (compute.networks().list(
         project=project_id,
         filter=filter,
     ).execute())
 
-    return (list(sorted(response["items"], key=lambda x: x["name"]))
-            if "items" in response else [])
+    return (list(sorted(response['items'], key=lambda x: x['name']))
+            if 'items' in response else [])
 
 
 def _list_subnets(
-        project_id: str,
-        region: str,
-        compute,
-        filter=None
-) -> List["google.cloud.compute_v1.types.compute.Subnetwork"]:
+    project_id: str,
+    region: str,
+    compute,
+    # pylint: disable=redefined-builtin
+    filter=None
+) -> List['google.cloud.compute_v1.types.compute.Subnetwork']:
     response = (compute.subnetworks().list(
         project=project_id,
         region=region,
@@ -722,9 +730,9 @@ def _get_service_account(account: str, project_id: str, iam):
             name=full_name).execute()
     except gcp.http_error_exception() as e:
         if e.resp.status not in [403, 404]:
-            # SkyPilot: added 403, which means the service account doesn't exist,
-            # or not accessible by the current account, which is fine, as we do the
-            # fallback in the caller.
+            # SkyPilot: added 403, which means the service account doesn't
+            # exist, or not accessible by the current account, which is fine, as
+            # we do the fallback in the caller.
             raise
         service_account = None
 
@@ -746,6 +754,7 @@ def _create_service_account(account_id: str, account_config, project_id: str,
 
 def _add_iam_policy_binding(service_account, policy, crm, iam):
     """Add new IAM roles for the service account."""
+    del iam
     project_id = service_account['projectId']
 
     result = (crm.projects().setIamPolicy(

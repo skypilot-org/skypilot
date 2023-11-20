@@ -18,9 +18,9 @@ from sky.utils import ux_utils
 
 # Tag uniquely identifying all nodes of a cluster
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
-TAG_RAY_CLUSTER_NAME = "ray-cluster-name"
+TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 # Tag for the name of the node
-TAG_RAY_NODE_NAME = "ray-node-name"
+TAG_RAY_NODE_NAME = 'ray-node-name'
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
@@ -55,7 +55,7 @@ def _retry_on_http_exception(
                 try:
                     value = func(*args, **kwargs)
                     return value
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     if not isinstance(e, exception_type) or (
                             regex and not re.search(regex, str(e))):
                         raise
@@ -229,7 +229,7 @@ class GCPInstance:
                        node_id: str,
                        project_id: str,
                        zone: str,
-                       wait_for_operation: bool = True) -> dict:
+                       wait_for_operation: bool = True) -> Union[bool, dict]:
         """Start a stopped instance."""
         raise NotImplementedError
 
@@ -267,7 +267,7 @@ class GCPInstance:
                     availability_zone: str,
                     node_config: dict,
                     instance_name: str,
-                    wait_for_operation: bool = True) -> bool:
+                    wait_for_operation: bool = True) -> Union[bool, dict]:
         """Resize a Google Cloud disk based on the provided configuration.
         Returns the response of resize operation.
         """
@@ -535,8 +535,8 @@ class GCPComputeInstance(GCPInstance):
             zone=availability_zone,
         ).execute()
         body = {
-            "labels": dict(node["labels"], **labels),
-            "labelFingerprint": node["labelFingerprint"],
+            'labels': dict(node['labels'], **labels),
+            'labelFingerprint': node['labelFingerprint'],
         }
         operation = (cls.load_resource().instances().setLabels(
             project=project_id,
@@ -596,19 +596,19 @@ class GCPComputeInstance(GCPInstance):
                 `acceleratorType`.
         """
         configuration_dict = copy.deepcopy(configuration_dict)
-        existing_machine_type = configuration_dict["machineType"]
-        if not re.search(".*/machineTypes/.*", existing_machine_type):
+        existing_machine_type = configuration_dict['machineType']
+        if not re.search('.*/machineTypes/.*', existing_machine_type):
             configuration_dict[
-                "machineType"] = "zones/{zone}/machineTypes/{machine_type}".format(
+                'machineType'] = 'zones/{zone}/machineTypes/{machine_type}'.format(
                     zone=availability_zone,
-                    machine_type=configuration_dict["machineType"],
+                    machine_type=configuration_dict['machineType'],
                 )
 
-        for accelerator in configuration_dict.get("guestAccelerators", []):
-            gpu_type = accelerator["acceleratorType"]
-            if not re.search(".*/acceleratorTypes/.*", gpu_type):
+        for accelerator in configuration_dict.get('guestAccelerators', []):
+            gpu_type = accelerator['acceleratorType']
+            if not re.search('.*/acceleratorTypes/.*', gpu_type):
                 accelerator[
-                    "acceleratorType"] = "projects/{project}/zones/{zone}/acceleratorTypes/{accelerator}".format(  # noqa: E501
+                    'acceleratorType'] = 'projects/{project}/zones/{zone}/acceleratorTypes/{accelerator}'.format(  # noqa: E501
                         project=project_id,
                         zone=availability_zone,
                         accelerator=gpu_type,
@@ -632,7 +632,7 @@ class GCPComputeInstance(GCPInstance):
         # bulkInsert expects resource names without prefix. Otherwise
         # it causes a 503 error.
 
-        # TODO: We could remove "_convert_resources_to_urls". It is here
+        # TODO: We could remove '_convert_resources_to_urls'. It is here
         # just for possible backward compat.
         config = cls._convert_resources_to_urls(project_id, zone, node_config)
 
@@ -642,12 +642,12 @@ class GCPComputeInstance(GCPInstance):
                 disk['initializeParams']['diskType'] = selflink_to_name(
                     disk_type)
         config['machineType'] = selflink_to_name(config['machineType'])
-        for accelerator in config.get("guestAccelerators", []):
+        for accelerator in config.get('guestAccelerators', []):
             accelerator['acceleratorType'] = selflink_to_name(
                 accelerator['acceleratorType'])
 
         # removing TPU-specific default key set in config.py
-        config.pop("networkConfig", None)
+        config.pop('networkConfig', None)
 
         head_tag_needed = [False] * count
         if include_head_node:
@@ -660,16 +660,16 @@ class GCPComputeInstance(GCPInstance):
                                     GCPNodeType.COMPUTE.value,
                                     is_head=head_tag_needed[i]))
 
-        labels = dict(config.get("labels", {}), **labels)
+        labels = dict(config.get('labels', {}), **labels)
 
         config.update({
-            "labels": dict(
+            'labels': dict(
                 labels, **{
                     TAG_RAY_CLUSTER_NAME: cluster_name,
                     TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
-        source_instance_template = config.pop("sourceInstanceTemplate", None)
+        source_instance_template = config.pop('sourceInstanceTemplate', None)
         body = {
             'count': count,
             'instanceProperties': config,
@@ -746,10 +746,10 @@ class GCPComputeInstance(GCPInstance):
             zone=availability_zone,
             instance=instance_id,
         ).execute()
-        external_ip = (result.get("networkInterfaces",
-                                  [{}])[0].get("accessConfigs",
-                                               [{}])[0].get("natIP", None))
-        internal_ip = result.get("networkInterfaces", [{}])[0].get("networkIP")
+        external_ip = (result.get('networkInterfaces',
+                                  [{}])[0].get('accessConfigs',
+                                               [{}])[0].get('natIP', None))
+        internal_ip = result.get('networkInterfaces', [{}])[0].get('networkIP')
 
         return common.InstanceInfo(
             instance_id=instance_id,
@@ -768,7 +768,7 @@ class GCPComputeInstance(GCPInstance):
         """Resize a Google Cloud disk based on the provided configuration."""
 
         # Extract the specified disk size from the configuration
-        new_size_gb = node_config["disks"][0]["initializeParams"]["diskSizeGb"]
+        new_size_gb = node_config['disks'][0]['initializeParams']['diskSizeGb']
 
         # Fetch the instance details to get the disk name and current disk size
         response = (cls.load_resource().instances().get(
@@ -776,7 +776,7 @@ class GCPComputeInstance(GCPInstance):
             zone=availability_zone,
             instance=instance_name,
         ).execute())
-        disk_name = selflink_to_name(response["disks"][0]["source"])
+        disk_name = selflink_to_name(response['disks'][0]['source'])
 
         try:
             # Execute the resize request and return the response
@@ -785,13 +785,13 @@ class GCPComputeInstance(GCPInstance):
                 zone=availability_zone,
                 disk=disk_name,
                 body={
-                    "sizeGb": str(new_size_gb),
+                    'sizeGb': str(new_size_gb),
                 },
             ).execute())
         except gcp.http_error_exception() as e:
             # Catch HttpError when provided with invalid value for new disk size.
             # Allowing users to create instances with the same size as the image
-            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return False
 
         if wait_for_operation:
@@ -964,7 +964,7 @@ class GCPTPUVMInstance(GCPInstance):
                     f'Failed to get VPC name for instance {instance}') from e
 
     @classmethod
-    @_retry_on_http_exception("unable to queue the operation")
+    @_retry_on_http_exception('unable to queue the operation')
     def set_labels(cls,
                    project_id: str,
                    availability_zone: str,
@@ -974,9 +974,9 @@ class GCPTPUVMInstance(GCPInstance):
         node = cls.load_resource().projects().locations().nodes().get(
             name=node_id)
         body = {
-            "labels": dict(node["labels"], **labels),
+            'labels': dict(node['labels'], **labels),
         }
-        update_mask = "labels"
+        update_mask = 'labels'
 
         operation = (cls.load_resource().projects().locations().nodes().patch(
             name=node_id,
@@ -1012,7 +1012,7 @@ class GCPTPUVMInstance(GCPInstance):
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
-        # FIXME: original implementation has the "max_polls=MAX_POLLS" option.
+        # FIXME: original implementation has the 'max_polls=MAX_POLLS' option.
         if wait_for_operation:
             result = cls.wait_for_operation(operation, project_id, zone)
         else:
@@ -1027,7 +1027,8 @@ class GCPTPUVMInstance(GCPInstance):
                     node_config: dict,
                     instance_name: str,
                     wait_for_operation: bool = True) -> Union[bool, dict]:
-        """
+        """Resize the disk a machine image with a different size is used.
+
         TODO: Implement the feature to attach persistent disks for TPU VMs.
         The boot disk of TPU VMs is not resizable, and users need to add a
         persistent disk to expand disk capacity. Related issue: #2387
@@ -1038,8 +1039,8 @@ class GCPTPUVMInstance(GCPInstance):
 class GCPNodeType(enum.Enum):
     """Enum for GCP node types (compute & tpu)"""
 
-    COMPUTE = "compute"
-    TPU = "tpu"
+    COMPUTE = 'compute'
+    TPU = 'tpu'
 
 
 def get_node_type(node: dict) -> GCPNodeType:
