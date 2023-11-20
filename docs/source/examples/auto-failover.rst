@@ -117,8 +117,7 @@ To specify a preference order, use a list of candidate GPUs in the task yaml:
   resources:
     accelerators: [A10:1, A10g:1, L4:1]
 
-In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU:
-:code:`sky launch task.yaml`
+In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU.
 
 
 (**Advanced**) Multiple Candidate Resources
