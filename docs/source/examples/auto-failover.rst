@@ -84,7 +84,7 @@ Multiple Candidate GPUs
 -------------------------
 
 If a task can be run on different GPUs, the user can specific multiple candidate GPUs,
-and SkyPilot will automatically find the best available GPU.
+and SkyPilot will automatically find the cheapest available GPU.
 
 To allow SkyPilot to choose any of the candidate GPUs, specify a set of candidate GPUs in the task yaml:
 
