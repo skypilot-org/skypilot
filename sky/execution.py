@@ -691,6 +691,7 @@ def spot_launch(
             'google_sdk_installation_commands':
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
+            'skypilot_runtime_env': constants.SKY_REMOTE_PYTHON_ENV,
             **extra_vars,
         }
 

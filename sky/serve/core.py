@@ -107,6 +107,7 @@ def up(
                 gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
+            'skypilot_runtime_env': constants.SKY_REMOTE_PYTHON_ENV,
             **extra_vars,
         }
         backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,

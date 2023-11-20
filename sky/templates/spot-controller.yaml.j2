@@ -12,6 +12,7 @@ setup: |
   # Install cli dependencies
   # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
   # TODO(zhwu): Keep the dependencies align with the ones in setup.py
+  source {{skypilot_runtime_env}}/bin/activate
   (pip list | grep boto3 > /dev/null 2>&1 && \
    pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
    pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
@@ -33,6 +34,7 @@ setup: |
   ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
 
 run: |
+  source {{skypilot_runtime_env}}/bin/activate
   python -u -m sky.spot.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
