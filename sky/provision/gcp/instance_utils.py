@@ -5,7 +5,7 @@ import functools
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 from sky import sky_logging
@@ -94,6 +94,18 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     node_name = cluster_name + suffix
     assert len(node_name) <= INSTANCE_NAME_MAX_LEN, cluster_name
     return node_name
+
+
+def selflink_to_name(selflink: str) -> str:
+    """Converts a selflink to a name.
+
+    Args:
+        selflink: The selflink to convert.
+
+    Returns:
+        The name of the resource.
+    """
+    return selflink.rsplit('/', 1)[-1]
 
 
 def instance_to_handler(instance: str):
@@ -227,7 +239,7 @@ class GCPInstance:
                    availability_zone: str,
                    node_id: str,
                    labels: dict,
-                   wait_for_operation: bool = True) -> dict:
+                   wait_for_operation: bool = True) -> Union[bool, dict]:
         raise NotImplementedError
 
     @classmethod
@@ -406,7 +418,7 @@ class GCPComputeInstance(GCPInstance):
             ).execute()
             # Format: projects/PROJECT_ID/global/networks/VPC_NAME
             vpc_link = response['networkInterfaces'][0]['network']
-            return vpc_link.split('/')[-1]
+            return selflink_to_name(vpc_link)
         except gcp.http_error_exception() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -516,7 +528,7 @@ class GCPComputeInstance(GCPInstance):
                    availability_zone: str,
                    node_id: str,
                    labels: dict,
-                   wait_for_operation: bool = True) -> dict:
+                   wait_for_operation: bool = True) -> Union[bool, dict]:
         node = cls.load_resource().instances().get(
             project=project_id,
             instance=node_id,
@@ -627,12 +639,12 @@ class GCPComputeInstance(GCPInstance):
         for disk in config.get('disks', []):
             disk_type = disk.get('initializeParams', {}).get('diskType')
             if disk_type:
-                disk['initializeParams']['diskType'] = disk_type.rsplit('/',
-                                                                        1)[-1]
-        config['machineType'] = config['machineType'].rsplit('/', 1)[-1]
+                disk['initializeParams']['diskType'] = selflink_to_name(
+                    disk_type)
+        config['machineType'] = selflink_to_name(config['machineType'])
         for accelerator in config.get("guestAccelerators", []):
-            accelerator["acceleratorType"] = accelerator[
-                "acceleratorType"].rsplit('/', 1)[-1]
+            accelerator['acceleratorType'] = selflink_to_name(
+                accelerator['acceleratorType'])
 
         # removing TPU-specific default key set in config.py
         config.pop("networkConfig", None)
@@ -708,7 +720,7 @@ class GCPComputeInstance(GCPInstance):
                        node_id: str,
                        project_id: str,
                        zone: str,
-                       wait_for_operation: bool = True) -> dict:
+                       wait_for_operation: bool = True) -> Union[bool, dict]:
         operation = (cls.load_resource().instances().start(
             project=project_id,
             zone=zone,
@@ -752,7 +764,7 @@ class GCPComputeInstance(GCPInstance):
                     availability_zone: str,
                     node_config: dict,
                     instance_name: str,
-                    wait_for_operation: bool = True) -> bool:
+                    wait_for_operation: bool = True) -> Union[bool, dict]:
         """Resize a Google Cloud disk based on the provided configuration."""
 
         # Extract the specified disk size from the configuration
@@ -764,7 +776,7 @@ class GCPComputeInstance(GCPInstance):
             zone=availability_zone,
             instance=instance_name,
         ).execute())
-        disk_name = response["disks"][0]["source"].split("/")[-1]
+        disk_name = selflink_to_name(response["disks"][0]["source"])
 
         try:
             # Execute the resize request and return the response
@@ -945,7 +957,7 @@ class GCPTPUVMInstance(GCPInstance):
             response = cls.load_resource().projects().locations().nodes().get(
                 name=instance).execute()
             vpc_link = response['networkConfig']['network']
-            return vpc_link.split('/')[-1]
+            return selflink_to_name(vpc_link)
         except gcp.http_error_exception() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -958,7 +970,7 @@ class GCPTPUVMInstance(GCPInstance):
                    availability_zone: str,
                    node_id: str,
                    labels: dict,
-                   wait_for_operation: bool = True) -> dict:
+                   wait_for_operation: bool = True) -> Union[bool, dict]:
         node = cls.load_resource().projects().locations().nodes().get(
             name=node_id)
         body = {
@@ -996,7 +1008,7 @@ class GCPTPUVMInstance(GCPInstance):
                        node_id: str,
                        project_id: str,
                        zone: str,
-                       wait_for_operation: bool = True) -> dict:
+                       wait_for_operation: bool = True) -> Union[bool, dict]:
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
@@ -1014,7 +1026,7 @@ class GCPTPUVMInstance(GCPInstance):
                     availability_zone: str,
                     node_config: dict,
                     instance_name: str,
-                    wait_for_operation: bool = True) -> bool:
+                    wait_for_operation: bool = True) -> Union[bool, dict]:
         """
         TODO: Implement the feature to attach persistent disks for TPU VMs.
         The boot disk of TPU VMs is not resizable, and users need to add a
