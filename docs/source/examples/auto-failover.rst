@@ -154,7 +154,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
           region: eastus
           accelerator: A100
           
-This will be useful when only a set of regions/clouds are desired for launching the resources:
+The following is an example for only allowing a set of regions/clouds for launching the required resource:
 
 .. code-block:: yaml
 
