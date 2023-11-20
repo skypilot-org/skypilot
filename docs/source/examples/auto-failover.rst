@@ -125,10 +125,6 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:
 
-.. tip::
-
-  The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
-  includes the field for a candidate resource.
 
 .. code-block:: yaml
 
@@ -154,6 +150,11 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
           region: eastus
           accelerator: A100
           
+.. tip::
+
+  The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
+  includes the field for a candidate resource. :code:`ordered` and :code:`any_of` indicate the preference for the candidate resources.
+
 The following is an example for only allowing a set of regions/clouds for launching the required resource:
 
 .. code-block:: yaml
