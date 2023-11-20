@@ -326,8 +326,8 @@ def run_bash_command_with_log(bash_command: str,
         fp.flush()
         script_path = fp.name
 
-        # deactivate is needed to avoid running the user program in the skypilot
-        # runtime environment.
+        # 'deactivate' is needed to avoid running the user program in the
+        # skypilot-runtime environment.
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'deactivate || true; /bin/bash -i {script_path}'
 
