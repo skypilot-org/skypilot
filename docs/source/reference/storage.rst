@@ -1,7 +1,10 @@
 .. _sky-storage:
 
-SkyPilot Storage
-=================
+Accessing Object Stores
+=======================
+
+SkyPilot tasks can access objects in cloud object stores (e.g., S3, GCS, R2, IBM). SkyPilot can "mount" these object stores a
+
 
 A SkyPilot Storage object represents an abstract data store containing large data
 files required by the task. Think of it as a bucket of files that can be attached
