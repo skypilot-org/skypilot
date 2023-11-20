@@ -37,15 +37,15 @@ _DUMP_RAY_PORTS = (
 )
 
 _RAY_PORT_COMMAND = (
-    f'RAY_PORT=$({constants.ACTIVATE_PYTHON_ENV} '
-    'python -c "from sky.skylet import job_lib; '
+    f'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
     'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379)')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
+    f'{constants.ACTIVATE_PYTHON_ENV} '
     f'{_RAY_PORT_COMMAND}; '
-    'export RAY_ADDRESS=127.0.0.1:$RAY_PORT;'
-    f'{constants.ACTIVATE_PYTHON_ENV} ray status')
+    'export RAY_ADDRESS=127.0.0.1:$RAY_PORT; '
+    f'ray status')
 
 # Restart skylet when the version does not match to keep the skylet up-to-date.
 _MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_PYTHON_ENV} '
@@ -283,7 +283,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # that is connected to the head with the correct port.
         cmd = (f'{_RAY_PORT_COMMAND}; ps aux | grep "ray/raylet/raylet" | '
                f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
-               f'{{ {cmd}; }}')
+               f'{{ {cmd} }}')
     else:
         cmd = 'ray stop; ' + cmd
     cmd = constants.ACTIVATE_PYTHON_ENV + cmd
