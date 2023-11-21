@@ -2,19 +2,14 @@
 import enum
 import random
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Dict, List, Optional, Type
 
 from sky import sky_logging
-from sky.serve import serve_state
 
 if typing.TYPE_CHECKING:
-    from sky.serve import replica_managers
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
-
-# TODO(tian): Move this to user config.
-DEFAULT_OVER_PROVISION_NUM = 1
 
 
 class SpotPlacer:
@@ -132,158 +127,3 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
             # TODO(tian): Why move to active?
             self.move_zone_to_active(zone)
         return zone
-
-
-class SpotMixer:
-    """Spot OnDemand mixture specification."""
-    NAME: Optional[str] = None
-    REGISTRY: Dict[str, Type['SpotMixer']] = dict()
-
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        pass
-
-    def __init_subclass__(cls) -> None:
-        if cls.NAME is None:
-            # This is an abstract class, don't put it in the registry.
-            return
-        assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
-        cls.REGISTRY[cls.NAME] = cls
-
-    def generate_mix_plan(
-            self, num_target: int,
-            replica_infos: List['replica_managers.ReplicaInfo']
-    ) -> Tuple[int, int]:
-        """Generate mix plan for spot and on-demand instances.
-
-        Args:
-            num_target (int): target number of replicas.
-
-        Returns:
-            Tuple[int, int]: (num_on_demand_delta, num_spot_delta).
-        """
-        raise NotImplementedError
-
-    def __repr__(self) -> str:
-        return f'{self.NAME}SpotMixer()'
-
-    @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotMixer':
-        assert spec.spot_mixer is not None
-        return cls.REGISTRY[spec.spot_mixer](spec)
-
-
-# TODO(tian): Add pure spot / pure on demand
-class OnDemandFallbackSpotMixer(SpotMixer):
-    """Fallback to on-demand when spot cannot reach target."""
-    NAME: Optional[str] = 'OnDemandFallback'
-
-    def generate_mix_plan(
-            self, num_target: int,
-            replica_infos: List['replica_managers.ReplicaInfo']
-    ) -> Tuple[int, int]:
-        # TODO(tian): Considering not alive replicas.
-        alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        current_num_on_demand = 0
-        current_num_alive_spot = 0
-        current_num_ready_spot = 0
-        for info in alive_replica_infos:
-            if info.is_spot:
-                if info.status == serve_state.ReplicaStatus.READY:
-                    current_num_ready_spot += 1
-                current_num_alive_spot += 1
-            else:
-                current_num_on_demand += 1
-        num_to_provision = num_target + DEFAULT_OVER_PROVISION_NUM
-        spot_gap = num_to_provision - current_num_alive_spot
-        if spot_gap > 0:
-            # Launch spot_gap spot and on-demand simultaneously.
-            num_spot_delta = spot_gap
-            num_on_demand_delta = spot_gap - current_num_on_demand
-        else:
-            num_on_demand_delta = 0
-            if current_num_ready_spot >= num_to_provision:
-                # Clean all on-demand instances if enough spot instances
-                # are ready.
-                num_on_demand_delta = -current_num_on_demand
-            # Cleanup redundant spot instances.
-            num_spot_delta = spot_gap
-        return num_on_demand_delta, num_spot_delta
-
-
-class SpotPolicy:
-    """Spot Policy specification."""
-
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        self.spot_placer = SpotPlacer.from_spec(spec)
-        self.spot_mixer = SpotMixer.from_spec(spec)
-
-    def _get_next_zone(self) -> str:
-        zone = self.spot_placer.select()
-        logger.info(f'Chosen zone {zone} with {self.spot_placer}')
-        return zone
-
-    def _generate_mix_plan(
-            self, num_target: int,
-            replica_infos: List['replica_managers.ReplicaInfo']
-    ) -> Tuple[int, int]:
-        num_on_demand_delta, num_spot_delta = self.spot_mixer.generate_mix_plan(
-            num_target, replica_infos)
-        logger.info(f'Generated mix plan: {num_on_demand_delta} '
-                    f'on-demand delta, {num_spot_delta} spot delta '
-                    f'with {self.spot_mixer}')
-        return num_on_demand_delta, num_spot_delta
-
-    def get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': True, 'spot_recovery': None}
-
-    def get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': False, 'spot_recovery': None}
-
-    def generate_autoscaling_plan(
-        self, num_target: int,
-        replica_infos: List['replica_managers.ReplicaInfo']
-    ) -> Tuple[int, List[str], List[int]]:
-        """Generate autoscaling plan.
-
-        Returns:
-            int: Number of OnDemand instances to launch.
-            List[str]: Zones of spot instances to launch. Each zone represent
-                one spot instance to launch.
-            List[int]: Replica IDs to scale down.
-        """
-        num_on_demand_delta, num_spot_delta = self._generate_mix_plan(
-            num_target, replica_infos)
-        replica_ids_to_scale_down = []
-        alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        if num_on_demand_delta < 0:
-            for info in alive_replica_infos:
-                if not info.is_spot:
-                    replica_ids_to_scale_down.append(info.replica_id)
-                    num_on_demand_delta += 1
-                    if num_on_demand_delta == 0:
-                        break
-        spot_zones_to_launch = []
-        if num_spot_delta < 0:
-            for info in alive_replica_infos:
-                if info.is_spot:
-                    replica_ids_to_scale_down.append(info.replica_id)
-                    num_spot_delta += 1
-                    if num_spot_delta == 0:
-                        break
-        else:
-            if isinstance(self.spot_placer, HistoricalSpotPlacer):
-                logger.info('Active/Preempted zones list: '
-                            f'{self.spot_placer.zone2type}')
-            for _ in range(num_spot_delta):
-                spot_zones_to_launch.append(self._get_next_zone())
-        logger.info(f'Autoscaling plan: Add {num_on_demand_delta} '
-                    f'on-demand instances, add {len(spot_zones_to_launch)} '
-                    f'spot instances in {spot_zones_to_launch}, scale down '
-                    f'{len(replica_ids_to_scale_down)} replicas with id '
-                    f'{replica_ids_to_scale_down}')
-        return (num_on_demand_delta, spot_zones_to_launch,
-                replica_ids_to_scale_down)
-
-    def handle_preemption(self, zone):
-        self.spot_placer.handle_preemption(zone)
-        logger.info(f'Handle preemption in {zone}')
