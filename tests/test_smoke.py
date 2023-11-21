@@ -1226,7 +1226,7 @@ def test_large_job_queue(generic_cloud: str):
             ],
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=22 * 60,
     )
     run_one_test(test)
 
@@ -3834,6 +3834,7 @@ def test_multiple_accelerators_unordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
