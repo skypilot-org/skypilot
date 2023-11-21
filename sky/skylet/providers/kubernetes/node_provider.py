@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 MAX_TAG_RETRIES = 3
 DELAY_BEFORE_TAG_RETRY = 0.5
+UPTIME_SSH_TIMEOUT = 10
 
 RAY_COMPONENT_LABEL = 'cluster.ray.io/component'
 
@@ -34,6 +35,33 @@ def set_port(self, port):
 
 
 SSHCommandRunner.set_port = set_port
+
+# Monkey patch SSHCommandRunner to use a larger timeout when running uptime to
+# check cluster liveness. This is needed because the default timeout of 5s is
+# too short when the cluster is accessed from different geographical
+# locations over VPN.
+#
+# Ray autoscaler sets the timeout on a per-call basis (as an arg to
+# SSHCommandRunner.run). The 5s timeout is hardcoded in
+# NodeUpdater.wait_ready() in updater.py is hard to modify without
+# duplicating a large chunk of ray autoscaler code. Instead, we
+# monkey patch the run method to check if the command being run is 'uptime',
+# and if so change the timeout to 10s.
+#
+# Fortunately, Ray uses a timeout of 120s for running commands after the
+# cluster is ready, so we do not need to modify that.
+
+
+def run_override_timeout(*args, **kwargs):
+    # If command is `uptime`, change timeout to 10s
+    command = args[1]
+    if command == 'uptime':
+        kwargs['timeout'] = UPTIME_SSH_TIMEOUT
+    return SSHCommandRunner._run(*args, **kwargs)
+
+
+SSHCommandRunner._run = SSHCommandRunner.run
+SSHCommandRunner.run = run_override_timeout
 
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
@@ -179,9 +207,23 @@ class KubernetesNodeProvider(NodeProvider):
         kubernetes.core_api().patch_namespaced_pod(node_id, self.namespace, pod)
 
     def _raise_pod_scheduling_errors(self, new_nodes):
+        """Raise pod scheduling failure reason.
+        
+        When a pod fails to schedule in Kubernetes, the reasons for the failure
+        are recorded as events. This function retrieves those events and raises
+        descriptive errors for better debugging and user feedback.
+        """
         for new_node in new_nodes:
-            pod_status = new_node.status.phase
-            pod_name = new_node._metadata._name
+            pod = kubernetes.core_api().read_namespaced_pod(
+                new_node.metadata.name, self.namespace)
+            pod_status = pod.status.phase
+            # When there are multiple pods involved while launching instance,
+            # there may be a single pod causing issue while others are
+            # successfully scheduled. In this case, we make sure to not surface
+            # the error message from the pod that is already scheduled.
+            if pod_status != 'Pending':
+                continue
+            pod_name = pod._metadata._name
             events = kubernetes.core_api().list_namespaced_event(
                 self.namespace,
                 field_selector=(f'involvedObject.name={pod_name},'
@@ -189,10 +231,12 @@ class KubernetesNodeProvider(NodeProvider):
             # Events created in the past hours are kept by
             # Kubernetes python client and we want to surface
             # the latest event message
-            events_desc_by_time = \
-                sorted(events.items,
+            events_desc_by_time = sorted(
+                events.items,
                 key=lambda e: e.metadata.creation_timestamp,
                 reverse=True)
+
+            event_message = None
             for event in events_desc_by_time:
                 if event.reason == 'FailedScheduling':
                     event_message = event.message
@@ -216,22 +260,232 @@ class KubernetesNodeProvider(NodeProvider):
                         lf.get_label_key()
                         for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     ]
-                    if new_node.spec.node_selector:
-                        for label_key in new_node.spec.node_selector.keys():
+                    if pod.spec.node_selector:
+                        for label_key in pod.spec.node_selector.keys():
                             if label_key in gpu_lf_keys:
                                 # TODO(romilb): We may have additional node
                                 #  affinity selectors in the future - in that
                                 #  case we will need to update this logic.
-                                if 'Insufficient nvidia.com/gpu' in event_message or \
-                                    'didn\'t match Pod\'s node affinity/selector' in event_message:
+                                if ('Insufficient nvidia.com/gpu'
+                                        in event_message or
+                                        'didn\'t match Pod\'s node affinity/selector'
+                                        in event_message):
                                     raise config.KubernetesError(
                                         f'{lack_resource_msg.format(resource="GPU")} '
-                                        f'Verify if {new_node.spec.node_selector[label_key]}'
+                                        f'Verify if {pod.spec.node_selector[label_key]}'
                                         ' is available in the cluster.')
                 raise config.KubernetesError(f'{timeout_err_msg} '
                                              f'Pod status: {pod_status}'
                                              f'Details: \'{event_message}\' ')
         raise config.KubernetesError(f'{timeout_err_msg}')
+
+    def _wait_for_pods_to_schedule(self, new_nodes):
+        """Wait for all pods to be scheduled.
+        
+        Wait for all pods including jump pod to be scheduled, and if it
+        exceeds the timeout, raise an exception. If pod's container
+        is ContainerCreating, then we can assume that resources have been
+        allocated and we can exit.
+        """
+        start_time = time.time()
+        while time.time() - start_time < self.timeout:
+            all_pods_scheduled = True
+            for node in new_nodes:
+                # Iterate over each pod to check their status
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+                if pod.status.phase == 'Pending':
+                    # If container_statuses is None, then the pod hasn't
+                    # been scheduled yet.
+                    if pod.status.container_statuses is None:
+                        all_pods_scheduled = False
+                        break
+
+            if all_pods_scheduled:
+                return
+            time.sleep(1)
+
+        # Handle pod scheduling errors
+        try:
+            self._raise_pod_scheduling_errors(new_nodes)
+        except config.KubernetesError:
+            raise
+        except Exception as e:
+            raise config.KubernetesError(
+                'An error occurred while trying to fetch the reason '
+                'for pod scheduling failure. '
+                f'Error: {common_utils.format_exception(e)}') from None
+
+    def _wait_for_pods_to_run(self, new_nodes):
+        """Wait for pods and their containers to be ready.
+        
+        Pods may be pulling images or may be in the process of container
+        creation.
+        """
+        while True:
+            all_pods_running = True
+            # Iterate over each pod to check their status
+            for node in new_nodes:
+                pod = kubernetes.core_api().read_namespaced_pod(
+                    node.metadata.name, self.namespace)
+
+                # Continue if pod and all the containers within the
+                # pod are succesfully created and running.
+                if pod.status.phase == 'Running' and all([
+                        container.state.running
+                        for container in pod.status.container_statuses
+                ]):
+                    continue
+
+                all_pods_running = False
+                if pod.status.phase == 'Pending':
+                    # Iterate over each container in pod to check their status
+                    for container_status in pod.status.container_statuses:
+                        # If the container wasn't in 'ContainerCreating'
+                        # state, then we know pod wasn't scheduled or
+                        # had some other error, such as image pull error.
+                        # See list of possible reasons for waiting here:
+                        # https://stackoverflow.com/a/57886025
+                        waiting = container_status.state.waiting
+                        if waiting is not None and waiting.reason != 'ContainerCreating':
+                            raise config.KubernetesError(
+                                'Failed to create container while launching '
+                                'the node. Error details: '
+                                f'{container_status.state.waiting.message}.')
+                # Reaching this point means that one of the pods had an issue,
+                # so break out of the loop
+                break
+
+            if all_pods_running:
+                break
+            time.sleep(1)
+
+    def _check_user_privilege(self, new_nodes):
+        # Checks if the default user has sufficient privilege to set up
+        # the kubernetes instance pod.
+        check_k8s_user_sudo_cmd = [
+            '/bin/sh', '-c',
+            ('if [ $(id -u) -eq 0 ]; then'
+             '  echo \'alias sudo=""\' >> ~/.bashrc; '
+             'else '
+             '  if command -v sudo >/dev/null 2>&1; then '
+             '    timeout 2 sudo -l >/dev/null 2>&1 || '
+             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+             '  else '
+             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
+             '  fi; '
+             'fi')
+        ]
+
+        for new_node in new_nodes:
+            privilege_check = kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=check_k8s_user_sudo_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
+                raise config.KubernetesError(
+                    'Insufficient system privileges detected. '
+                    'Ensure the default user has root access or '
+                    '"sudo" is installed and the user is added to the sudoers '
+                    'from the image.')
+
+
+    def _setup_ssh_in_pods(self, new_nodes):
+        # Setting up ssh for the pod instance. This is already setup for
+        # the jump pod so it does not need to be run for it.
+        set_k8s_ssh_cmd = [
+            '/bin/sh', '-c',
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
+             '$(prefix_cmd) apt install openssh-server rsync -y; '
+             '$(prefix_cmd) mkdir -p /var/run/sshd; '
+             '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
+             '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
+             '$(prefix_cmd) mkdir -p ~/.ssh; '
+             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
+             '$(prefix_cmd) service ssh restart')
+        ]
+
+        for new_node in new_nodes:
+            kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_ssh_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+    def _set_env_vars_in_pods(self, new_nodes):
+        """Setting environment variables in pods.
+        
+        Once all containers are ready, we can exec into them and set env vars.
+        Kubernetes automatically populates containers with critical
+        environment variables, such as those for discovering services running
+        in the cluster and CUDA/nvidia environment variables. We need to
+        make sure these env vars are available in every task and ssh session.
+        This is needed for GPU support and service discovery.
+        See https://github.com/skypilot-org/skypilot/issues/2287 for
+        more details.
+
+        To do so, we capture env vars from the pod's runtime and write them to
+        /etc/profile.d/, making them available for all users in future
+        shell sessions.
+        """
+        set_k8s_env_var_cmd = [
+            '/bin/sh', '-c',
+            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
+             'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
+             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
+             '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
+        ]
+
+        for new_node in new_nodes:
+            kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=set_k8s_env_var_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+    def _update_ssh_user_config(self, new_nodes, cluster_name_with_hash):
+        get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
+        for new_node in new_nodes:
+            # TODO(doyoung): skip this for jump pod when #2589 is merged
+            ssh_user = kubernetes.stream()(
+                kubernetes.core_api().connect_get_namespaced_pod_exec,
+                new_node.metadata.name,
+                self.namespace,
+                command=get_k8s_ssh_user_cmd,
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _request_timeout=kubernetes.API_TIMEOUT)
+
+        cluster_yaml_path = self._recover_cluster_yaml_path(
+            cluster_name_with_hash)
+        with open(cluster_yaml_path, 'r') as f:
+            content = f.read()
+
+        # Replacing the default ssh user name with the actual user name.
+        # This updates user name specified in user's custom image if it's used.
+        content = re.sub(r'ssh_user: \w+', f'ssh_user: {ssh_user}', content)
+
+        with open(cluster_yaml_path, 'w') as f:
+            f.write(content)
 
     def create_node(self, node_config, tags, count):
         conf = copy.deepcopy(node_config)
@@ -273,181 +527,24 @@ class KubernetesNodeProvider(NodeProvider):
                     self.namespace, service_spec)
                 new_svcs.append(svc)
 
-        # Wait for all pods to be ready, and if it exceeds the timeout, raise an
-        # exception. If pod's container is ContainerCreating, then we can assume
-        # that resources have been allocated and we can exit.
-        start = time.time()
-        while True:
-            if time.time() - start > self.timeout:
-                try:
-                    self._raise_pod_scheduling_errors(new_nodes)
-                except config.KubernetesError:
-                    raise
-                except Exception as e:
-                    raise config.KubernetesError(
-                        'An error occurred while trying to fetch the reason '
-                        'for pod scheduling failure. '
-                        f'Error: {common_utils.format_exception(e)}') from None
+        # Adding the jump pod to the new_nodes list as well so it can be
+        # checked if it's scheduled and running along with other pod instances.
+        ssh_jump_pod_name = conf['metadata']['labels']['skypilot-ssh-jump']
+        jump_pod = kubernetes.core_api().read_namespaced_pod(
+            ssh_jump_pod_name, self.namespace)
+        new_nodes.append(jump_pod)
 
-            all_ready = True
-            for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
-                    node.metadata.name, self.namespace)
-                if pod.status.phase == 'Pending':
-                    # Iterate over each pod to check their status
-                    if pod.status.container_statuses is not None:
-                        for container_status in pod.status.container_statuses:
-                            # Continue if container status is ContainerCreating
-                            # This indicates this pod has been scheduled.
-                            if container_status.state.waiting is not None and container_status.state.waiting.reason == 'ContainerCreating':
-                                continue
-                            else:
-                                # If the container wasn't in creating state,
-                                # then we know pod wasn't scheduled or had some
-                                # other error, such as image pull error.
-                                # See list of possible reasons for waiting here:
-                                # https://stackoverflow.com/a/57886025
-                                all_ready = False
-                    else:
-                        # If container_statuses is None, then the pod hasn't
-                        # been scheduled yet.
-                        all_ready = False
-            if all_ready:
-                break
-            time.sleep(1)
-
-        # Wait for pod containers to be ready - they may be pulling images or
-        # may be in the process of container creation.
-        while True:
-            pods = []
-            for node in new_nodes:
-                pod = kubernetes.core_api().read_namespaced_pod(
-                    node.metadata.name, self.namespace)
-                pods.append(pod)
-            if all([pod.status.phase == "Running" for pod in pods]) \
-                    and all(
-                [container.state.running for pod in pods for container in
-                 pod.status.container_statuses]):
-                break
-            time.sleep(1)
-
-        # Checks if the default user has sufficient privilege to set up
-        # the kubernetes instance pod.
-        check_k8s_user_sudo_cmd = [
-            '/bin/sh', '-c',
-            ('if [ $(id -u) -eq 0 ]; then'
-             '  echo \'alias sudo=""\' >> ~/.bashrc; '
-             'else '
-             '  if command -v sudo >/dev/null 2>&1; then '
-             '    timeout 2 sudo -l >/dev/null 2>&1 || '
-             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-             '  else '
-             f'    ( echo {exceptions.INSUFFICIENT_PRIVILEGES_CODE!r}; ); '
-             '  fi; '
-             'fi')
-        ]
-
-        for new_node in new_nodes:
-            privilege_check = kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=check_k8s_user_sudo_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-            if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
-                raise config.KubernetesError(
-                    'Insufficient system privileges detected. '
-                    'Ensure the default user has root access or '
-                    '"sudo" is installed and the user is added to the sudoers '
-                    'from the image.')
-
-        # Setting up ssh for the pod instance. This is already setup for
-        # the jump pod so it does not need to be run for it.
-        set_k8s_ssh_cmd = [
-            '/bin/sh', '-c',
-            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
-             '$(prefix_cmd) apt install openssh-server rsync -y; '
-             '$(prefix_cmd) mkdir -p /var/run/sshd; '
-             '$(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config; '
-             '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
-             'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
-             '$(prefix_cmd) mkdir -p ~/.ssh; '
-             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
-             '$(prefix_cmd) service ssh restart')
-        ]
-
-        for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_ssh_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-
-        # Once all containers are ready, we can exec into them and set env vars.
-        # Kubernetes automatically populates containers with critical
-        # environment variables, such as those for discovering services running
-        # in the cluster and CUDA/nvidia environment variables. We need to
-        # make sure these env vars are available in every task and ssh session.
-        # This is needed for GPU support and service discovery.
-        # See https://github.com/skypilot-org/skypilot/issues/2287 for
-        # more details.
-        # To do so, we capture env vars from the pod's runtime and write them to
-        # /etc/profile.d/, making them available for all users in future
-        # shell sessions.
-        set_k8s_env_var_cmd = [
-            '/bin/sh', '-c',
-            ('prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
-             'printenv | awk -F "=" \'{print "export " $1 "=\\047" $2 "\\047"}\' > ~/k8s_env_var.sh && '
-             'mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh || '
-             '$(prefix_cmd) mv ~/k8s_env_var.sh /etc/profile.d/k8s_env_var.sh')
-        ]
-        for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_env_var_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-
-        get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
-        for new_node in new_nodes:
-            # TODO(doyoung): skip this for jump pod when #2589 is merged
-            ssh_user = kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=get_k8s_ssh_user_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
-
+        # Wait until the pods are scheduled and surface cause for error
+        # if there is one
+        self._wait_for_pods_to_schedule(new_nodes)
+        # Wait until the pods and their containers are up and running, and
+        # fail early if there is an error
+        self._wait_for_pods_to_run(new_nodes)
+        self._check_user_privilege(new_nodes)
+        self._setup_ssh_in_pods(new_nodes)
+        self._set_env_vars_in_pods(new_nodes)
         cluster_name_with_hash = conf['metadata']['labels']['skypilot-cluster']
-        cluster_yaml_path = self._recover_cluster_yaml_path(
-            cluster_name_with_hash)
-        with open(cluster_yaml_path, 'r') as f:
-            content = f.read()
-
-        # Replacing the default ssh user name with the actual user name.
-        # This updates user name specified in user's custom image.
-        content = re.sub(r'ssh_user: \w+', f'ssh_user: {ssh_user}', content)
-
-        with open(cluster_yaml_path, 'w') as f:
-            f.write(content)
+        self._update_ssh_user_config(new_nodes, cluster_name_with_hash)
 
     def terminate_node(self, node_id):
         logger.info(config.log_prefix + 'calling delete_namespaced_pod')
@@ -494,7 +591,7 @@ class KubernetesNodeProvider(NodeProvider):
                            log_prefix,
                            node_id,
                            auth_config,
-                           cluster_name,
+                           cluster_name_with_hash,
                            process_runner,
                            use_internal_ip,
                            docker_config=None):
@@ -506,7 +603,8 @@ class KubernetesNodeProvider(NodeProvider):
         node_id(str): the node ID.
         auth_config(dict): the authentication configs from the autoscaler
             yaml file.
-        cluster_name(str): the name of the cluster.
+        cluster_name_with_hash(str): the name of the cluster and hash value,
+            separated by a hyphen.
         process_runner(module): the module to use to run the commands
             in the CommandRunner. E.g., subprocess.
         use_internal_ip(bool): whether the node_id belongs to an internal ip
@@ -517,7 +615,7 @@ class KubernetesNodeProvider(NodeProvider):
         # For custom images, the username might differ. Ensure that the 'ssh_user'
         # reflects the username from the custom image. The cluster configuration
         # from the yaml is updated during the 'create_node()' process.
-        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name)
+        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name_with_hash)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml_path)
         credentials_to_keep = [
@@ -530,7 +628,7 @@ class KubernetesNodeProvider(NodeProvider):
             'node_id': node_id,
             'provider': self,
             'auth_config': auth_config,
-            'cluster_name': cluster_name,
+            'cluster_name': cluster_name_with_hash,
             'process_runner': process_runner,
             'use_internal_ip': use_internal_ip,
         }

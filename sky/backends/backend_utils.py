@@ -1,6 +1,5 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
-import difflib
 import enum
 import getpass
 import json
@@ -8,6 +7,7 @@ import os
 import pathlib
 import pprint
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -19,7 +19,6 @@ import uuid
 import colorama
 import filelock
 import jinja2
-import jsonschema
 from packaging import version
 import requests
 from requests import adapters
@@ -36,9 +35,9 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import provision as provision_lib
+from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky import spot as spot_lib
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.provision import instance_setup
@@ -47,13 +46,13 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -99,16 +98,14 @@ _TEST_IP_LIST = ['https://1.1.1.1', 'https://8.8.8.8']
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Mapping from reserved cluster names to the corresponding group name (logging
-# purpose).
-# NOTE: each group can only have one reserved cluster name for now.
-SKY_RESERVED_CLUSTER_NAMES: Dict[str, str] = {
-    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
-}
-
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Filelocks for updating cluster's file_mounts.
+CLUSTER_FILE_MOUNTS_LOCK_PATH = os.path.expanduser(
+    '~/.sky/.{}_file_mounts.lock')
+CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
@@ -295,8 +292,12 @@ def path_size_megabytes(path: str) -> int:
     git_exclude_filter = ''
     if (resolved_path / command_runner.GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
+        #
+        # We shlex.quote() because the path may contain spaces:
+        #   'my dir/.git/info/exclude'
+        # Without quoting rsync fails.
         git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / command_runner.GIT_EXCLUDE))
+            shlex.quote(str(resolved_path / command_runner.GIT_EXCLUDE)))
     rsync_command = (f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
                      f'{command_runner.RSYNC_FILTER_OPTION} '
                      f'{git_exclude_filter} --dry-run {path!r}')
@@ -1011,13 +1012,14 @@ def write_cluster_config(
                 'disk_size': to_provision.disk_size,
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
-                'user': get_cleaned_username(os.environ.get(
-                    'SKYPILOT_USER', '')),
+                # SKYPILOT_USER env var (see
+                # execution.py::_shared_controller_env_vars).
+                'user': get_cleaned_username(
+                    os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # AWS only:
-                'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                       None),
+                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
+                                                           None),
                 'use_internal_ips': skypilot_config.get_nested(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
@@ -1031,6 +1033,8 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
+                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
+                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1119,10 +1123,21 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{constants.SKY_USER_FILE_PATH}/')
 
+        # We do not import the module under sky.skylet.providers globally as we
+        # need to avoid importing ray module (extras like skypilot[aws] has
+        # removed the Ray dependency).
         # pylint: disable=import-outside-toplevel
         from sky.skylet.providers.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
-        vpc_name = gcp_config.get_usable_vpc(config)
+        vpc_name = None
+        try:
+            vpc_name, _ = gcp_config.get_usable_vpc_and_subnet(config)
+        except RuntimeError as e:
+            # Launching a TPU and encountering a bootstrap-phase error, no point
+            # in failover unless:
+            # TODO(zongheng): handle failover when multi-resource is added.
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
         scripts = []
         for template_name in ('gcp-tpu-create.sh.j2', 'gcp-tpu-delete.sh.j2'):
@@ -1156,10 +1171,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.Azure, clouds.OCI, clouds.SCP)):
+    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
+    elif isinstance(cloud, clouds.Azure):
+        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):
@@ -1947,43 +1964,66 @@ def check_can_clone_disk_and_override_task(
                     'disk is only supported when creating a new cluster. To fix: specify '
                     'a new target cluster name.')
 
-    assert len(task.resources) == 1, task.resources
-    task_resources = list(task.resources)[0]
-    if handle.launched_resources.disk_size > task_resources.disk_size:
-        # The target cluster's disk should be at least as large as the source.
-        with ux_utils.print_exception_no_traceback():
-            target_cluster_name_str = f' {target_cluster_name!r}'
-            if target_cluster_name is None:
-                target_cluster_name_str = ''
-            raise exceptions.NotSupportedError(
-                f'The target cluster{target_cluster_name_str} should have a disk size '
-                f'of at least {handle.launched_resources.disk_size} GB to clone the '
-                f'disk from {cluster_name!r}.')
-    override_param = {}
+    new_task_resources = []
     original_cloud = handle.launched_resources.cloud
-    assert original_cloud is not None, handle.launched_resources
-    if task_resources.cloud is None:
-        override_param['cloud'] = original_cloud
-    else:
-        if not original_cloud.is_same_cloud(task_resources.cloud):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cannot clone disk across cloud from {original_cloud} to '
-                    f'{task_resources.cloud}.')
     original_cloud.check_features_are_supported(
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
-    if task_resources.region is None:
-        override_param['region'] = handle.launched_resources.region
+    assert original_cloud is not None, handle.launched_resources
+    has_override = False
+    has_disk_size_met = False
+    has_cloud_met = False
+    for task_resources in task.resources:
+        if handle.launched_resources.disk_size > task_resources.disk_size:
+            # The target cluster's disk should be at least as large as the source.
+            continue
+        has_disk_size_met = True
+        if task_resources.cloud is not None and not original_cloud.is_same_cloud(
+                task_resources.cloud):
+            continue
+        has_cloud_met = True
 
-    if override_param:
-        logger.info(
-            f'No cloud/region specified for the task. Using the same region '
-            f'as source cluster {cluster_name!r}: '
-            f'{handle.launched_resources.cloud}'
-            f'({handle.launched_resources.region}).')
+        override_param = {}
+        if task_resources.cloud is None:
+            override_param['cloud'] = original_cloud
+        if task_resources.region is None:
+            override_param['region'] = handle.launched_resources.region
+
+        if override_param:
+            logger.info(
+                f'No cloud/region specified for the task {task_resources}. Using the same region '
+                f'as source cluster {cluster_name!r}: '
+                f'{handle.launched_resources.cloud}'
+                f'({handle.launched_resources.region}).')
+            has_override = True
         task_resources = task_resources.copy(**override_param)
-        task.set_resources({task_resources})
+        new_task_resources.append(task_resources)
+
+    if not new_task_resources:
+        if not has_disk_size_met:
+            with ux_utils.print_exception_no_traceback():
+                target_cluster_name_str = f' {target_cluster_name!r}'
+                if target_cluster_name is None:
+                    target_cluster_name_str = ''
+                raise exceptions.NotSupportedError(
+                    f'The target cluster{target_cluster_name_str} should have a disk size '
+                    f'of at least {handle.launched_resources.disk_size} GB to clone the '
+                    f'disk from {cluster_name!r}.')
+        if not has_cloud_met:
+            task_resources_cloud_str = '[' + ','.join(
+                [f'{res.cloud}' for res in task.resources]) + ']'
+            task_resources_str = '[' + ','.join(
+                [f'{res}' for res in task.resources]) + ']'
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot clone disk across cloud from {original_cloud} to '
+                    f'{task_resources_cloud_str} for resources {task_resources_str}.'
+                )
+        assert False, 'Should not reach here.'
+    # set the new_task_resources to be the same type (list or set) as the
+    # original task.resources
+    if has_override:
+        task.set_resources(type(task.resources)(new_task_resources))
         # Reset the best_resources to triger re-optimization
         # later, so that the new task_resources will be used.
         task.best_resources = None
@@ -2498,6 +2538,79 @@ def check_cluster_available(
     return handle
 
 
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
+def is_controller_up(
+    controller_type: controller_utils.Controllers,
+    stopped_message: str,
+    non_existent_message: Optional[str] = None,
+) -> Tuple[Optional[status_lib.ClusterStatus],
+           Optional['backends.CloudVmRayResourceHandle']]:
+    """Check if the spot/serve controller is up.
+
+    It can be used to check the actual controller status (since the autostop is
+    set for the controller) before the spot/serve commands interact with the
+    controller.
+
+    Args:
+        type: Type of the controller.
+        stopped_message: Message to print if the controller is STOPPED.
+        non_existent_message: Message to show if the controller does not exist.
+
+    Returns:
+        controller_status: The status of the controller. If it fails during
+          refreshing the status, it will be the cached status. None if the
+          controller does not exist.
+        handle: The ResourceHandle of the controller. None if the
+          controller is not UP or does not exist.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
+          the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+    """
+    if non_existent_message is None:
+        non_existent_message = (
+            controller_type.value.default_hint_if_non_existent)
+    cluster_name = controller_type.value.cluster_name
+    controller_name = controller_type.value.name.replace(' controller', '')
+    try:
+        # Set force_refresh_statuses=None to make sure the refresh only happens
+        # when the controller is INIT/UP (triggered in these statuses as the
+        # autostop is always set for the controller). This optimization avoids
+        # unnecessary costly refresh when the controller is already stopped.
+        # This optimization is based on the assumption that the user will not
+        # start the controller manually from the cloud console.
+        controller_status, handle = refresh_cluster_status_handle(
+            cluster_name, force_refresh_statuses=None)
+    except exceptions.ClusterStatusFetchingError as e:
+        # We do not catch the exceptions related to the cluster owner identity
+        # mismatch, please refer to the comment in
+        # `backend_utils.check_cluster_available`.
+        logger.warning(
+            'Failed to get the status of the controller. It is not '
+            f'fatal, but {controller_name} commands/calls may hang or return '
+            'stale information, when the controller is not up.\n'
+            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        controller_status, handle = None, None
+        if record is not None:
+            controller_status, handle = record['status'], record['handle']
+
+    if controller_status is None:
+        sky_logging.print(non_existent_message)
+    elif controller_status != status_lib.ClusterStatus.UP:
+        msg = (f'{controller_name.capitalize()} controller {cluster_name} '
+               f'is {controller_status.value}.')
+        if controller_status == status_lib.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == status_lib.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        sky_logging.print(msg)
+        handle = None
+    return controller_status, handle
+
+
 class CloudFilter(enum.Enum):
     # Filter for all types of clouds.
     ALL = 'all'
@@ -2508,7 +2621,7 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-    include_reserved: bool,
+    include_controller: bool,
     refresh: bool,
     cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
     cluster_names: Optional[Union[str, List[str]]] = None,
@@ -2521,8 +2634,8 @@ def get_clusters(
     of the clusters.
 
     Args:
-        include_reserved: Whether to include reserved clusters, e.g. spot
-            controller.
+        include_controller: Whether to include controllers, e.g. spot controller
+            or sky serve controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
@@ -2537,10 +2650,10 @@ def get_clusters(
     """
     records = global_user_state.get_clusters()
 
-    if not include_reserved:
+    if not include_controller:
         records = [
             record for record in records
-            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+            if controller_utils.Controllers.from_name(record['name']) is None
         ]
 
     yellow = colorama.Fore.YELLOW
@@ -2687,10 +2800,22 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
-    """Returns the accelerator dict of the task"""
-    # TODO: CPU and other memory resources are not supported yet.
-    accelerator_dict = None
+def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+    """Returns the resources dict of the task.
+
+    Returns:
+        A dict of the resources of the task. The keys are the resource names
+        and the values are the number of the resources. It always contains
+        the CPU resource (to control the maximum number of tasks), and
+        optionally accelerator demands.
+    """
+    # TODO: Custom CPU and other memory resources are not supported yet.
+    # For sky serve controller task, we set the CPU resource to a smaller
+    # value to support a larger number of services.
+    resources_dict = {
+        'CPU': (serve_lib.SERVICES_TASK_CPU_DEMAND
+                if task.service_name is not None else DEFAULT_TASK_CPU_DEMAND)
+    }
     if task.best_resources is not None:
         resources = task.best_resources
     else:
@@ -2698,40 +2823,47 @@ def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
         # sky.optimize(), so best_resources may be None.
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
-    if resources is not None:
-        accelerator_dict = resources.accelerators
-    return accelerator_dict
+    if resources is not None and resources.accelerators is not None:
+        resources_dict.update(resources.accelerators)
+    return resources_dict
 
 
 def get_task_resources_str(task: 'task_lib.Task') -> str:
-    resources_dict = get_task_demands_dict(task)
-    if resources_dict is None:
-        resources_str = f'CPU:{DEFAULT_TASK_CPU_DEMAND}'
+    """Returns the resources string of the task.
+
+    The resources string is only used as a display purpose, so we only show
+    the accelerator demands (if any). Otherwise, the CPU demand is shown.
+    """
+    task_cpu_demand = (serve_lib.SERVICES_TASK_CPU_DEMAND if task.service_name
+                       is not None else DEFAULT_TASK_CPU_DEMAND)
+    if task.best_resources is not None:
+        accelerator_dict = task.best_resources.accelerators
+        if accelerator_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in accelerator_dict.items())
+    elif len(task.resources) == 1:
+        resources_dict = list(task.resources)[0].accelerators
+        if resources_dict is None:
+            resources_str = f'CPU:{task_cpu_demand}'
+        else:
+            resources_str = ', '.join(
+                f'{k}:{v}' for k, v in resources_dict.items())
     else:
-        resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
+        resource_accelerators = []
+        for resource in task.resources:
+            if resource.accelerators is None:
+                continue
+            for k, v in resource.accelerators.items():
+                resource_accelerators.append(f'{k}:{v}')
+
+        if resource_accelerators:
+            resources_str = ', '.join(set(resource_accelerators))
+        else:
+            resources_str = f'CPU:{task_cpu_demand}'
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_not_reserved(
-        cluster_name: Optional[str],
-        operation_str: Optional[str] = None) -> None:
-    """Errors out if the cluster is a reserved cluster (spot controller).
-
-    Raises:
-      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
-        with an error message explaining 'operation_str' is not allowed.
-
-    Returns:
-      None, if the cluster name is not reserved.
-    """
-    if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for the '
-               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
-        if operation_str is not None:
-            msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c
@@ -2756,60 +2888,6 @@ def stop_handler(signum, frame):
           f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
-    """Validates an object against a given JSON schema.
-
-    Args:
-        obj: The object to validate.
-        schema: The JSON schema against which to validate the object.
-        err_msg_prefix: The string to prepend to the error message if
-          validation fails.
-        skip_none: If True, removes fields with value None from the object
-          before validation. This is useful for objects that will never contain
-          None because yaml.safe_load() loads empty fields as None.
-
-    Raises:
-        ValueError: if the object does not match the schema.
-    """
-    if skip_none:
-        obj = {k: v for k, v in obj.items() if v is not None}
-    err_msg = None
-    try:
-        validator.SchemaValidator(schema).validate(obj)
-    except jsonschema.ValidationError as e:
-        if e.validator == 'additionalProperties':
-            if tuple(e.schema_path) == ('properties', 'envs',
-                                        'additionalProperties'):
-                # Hack. Here the error is Task.envs having some invalid keys. So
-                # we should not print "unsupported field".
-                #
-                # This will print something like:
-                # 'hello world' does not match any of the regexes: <regex>
-                err_msg = (err_msg_prefix +
-                           'The `envs` field contains invalid keys:\n' +
-                           e.message)
-            else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
-                known_fields = set(e.schema.get('properties', {}).keys())
-                for field in e.instance:
-                    if field not in known_fields:
-                        most_similar_field = difflib.get_close_matches(
-                            field, known_fields, 1)
-                        if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
-                                        f'{most_similar_field[0]!r}?')
-                        else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
-        else:
-            # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
-                       f'. Check problematic field(s): {e.json_path}')
-
-    if err_msg:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(err_msg)
 
 
 def check_public_cloud_enabled():

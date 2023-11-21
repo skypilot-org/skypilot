@@ -40,7 +40,12 @@ TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
 # lifetime of the job.
 TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 
-SKYLET_VERSION = '2'
+# The version of skylet. MUST bump this version whenever we need the skylet to
+# be restarted on existing clusters updated with the new version of SkyPilot,
+# e.g., when we add new events to skylet, or we fix a bug in skylet.
+#
+# TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
+SKYLET_VERSION = '4'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
@@ -79,9 +84,29 @@ CONDA_INSTALLATION_COMMANDS = (
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
-# will be recognized as the same user (e.g., spot controller).
+# will be recognized as the same user (e.g., spot controller or sky serve
+# controller).
 USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+
+# The name for the environment variable that stores SkyPilot user name.
+# Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
+# runs on a VM launched by SkyPilot will be recognized as the same user.
+USER_ENV_VAR = 'SKYPILOT_USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-z]([-a-z0-9]*[a-z0-9])?'
+
+# Used for translate local file mounts to cloud storage. Please refer to
+# sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
+# more details.
+WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
+FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
+FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
+
+# The default idle timeout for SkyPilot controllers. This include spot
+# controller and sky serve controller.
+# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
+CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10

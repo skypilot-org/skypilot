@@ -28,7 +28,7 @@ The easiest way to grant permissions to a user access your GCP project without t
   roles/iam.securityAdmin
 
 .. note::
-    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, remove the role from the list above.
+    If the ``roles/iam.securityAdmin`` role is undesirable, you can do the following. First, include the role and have any user (e.g., the admin) run ``sky launch --cloud gcp`` successfully once. This is to create the necessary service account. Then, replace the role ``roles/iam.securityAdmin`` with ``roles/iam.roleViewer`` in the list above.
 
 
 Optionally, to use TPUs, add the following role:
@@ -66,7 +66,7 @@ User
     compute.firewalls.create
     compute.firewalls.delete
     compute.firewalls.get
-    compute.instances.create 
+    compute.instances.create
     compute.instances.delete
     compute.instances.get
     compute.instances.list
@@ -134,9 +134,18 @@ User
     compute.firewalls.list
     compute.firewalls.update
 
-8. Click **Create** to create the role.
-9. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-10. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
+
+.. code-block:: text
+    
+    compute.disks.get
+    compute.disks.resize
+    compute.images.get
+    compute.images.useReadOnly
+
+9. Click **Create** to create the role.
+10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -144,12 +153,12 @@ User
     :align: center
     :alt: GCP Grant Access
 
-11. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
-    The user created with the above minimal permissions will not be able to create service accounts to be assigned to SkyPilot instances. 
-    
+    The user created with the above minimal permissions will not be able to create service accounts to be assigned to SkyPilot instances.
+
     The admin needs to follow the :ref:`instruction below <gcp-service-account-creation>` to create a service account to be shared by all users in the project.
 
 
@@ -161,7 +170,7 @@ Service Account
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Service Accounts" tab in the "IAM & Admin" console, and click on the **CREATE SERVICE ACCOUNT**.
+1. Click the "Service Accounts" tab in the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__, and click on **CREATE SERVICE ACCOUNT**.
 
 .. image:: ../../images/screenshots/gcp/create-service-account.png
     :width: 80%
@@ -175,10 +184,86 @@ Service Account
     :align: center
     :alt: Set Service Account Name
 
-3. Select the ``minimal-skypilot-role`` (or the name you set) created in the last section and click on **DONE**.
+3. Select the ``minimal-skypilot-role`` (or the name you set) created in the
+last section and click on **DONE**. You can also choose to use the Default or
+Medium Permissions roles as described in the previous sections.
 
 .. image:: ../../images/screenshots/gcp/service-account-grant-role.png
     :width: 60%
     :align: center
     :alt: Set Service Account Role
 
+
+.. _gcp-minimum-firewall-rules:
+
+Firewall Rules
+~~~~~~~~~~~~~~~~~~~
+
+By default, users do not need to set up any special firewall rules to start
+using SkyPilot. If the default VPC does not satisfy the minimal required rules,
+a new VPC ``skypilot-vpc`` with sufficient rules will be automatically created
+and used.
+
+However, if you manually set up and instruct SkyPilot to use a custom VPC (see
+:ref:`below <gcp-bring-your-vpc>`), ensure it has the following required firewall rules:
+
+.. code-block:: python
+
+    # Allow internal connections between SkyPilot VMs:
+    #
+    #   controller -> head node of a cluster
+    #   head node of a cluster <-> worker node(s) of a cluster
+    #
+    # NOTE: these ports are more relaxed than absolute minimum, but the
+    # sourceRanges restrict the traffic to internal IPs.
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {"IPProtocol": "tcp", "ports": ["0-65535"]},
+            {"IPProtocol": "udp", "ports": ["0-65535"]},
+        ],
+        "sourceRanges": ["10.128.0.0/9"],
+    },
+
+    # Allow SSH connections from user machine(s)
+    #
+    # NOTE: This can be satisfied using the following relaxed sourceRanges
+    # (0.0.0.0/0), but you can customize it if you want to restrict to certain
+    # known public IPs (useful when using internal VPN or proxy solutions).
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {"IPProtocol": "tcp", "ports": ["22"]},
+        ],
+        "sourceRanges": ["0.0.0.0/0"],
+    },
+
+You can inspect and manage firewall rules at
+``https://console.cloud.google.com/net-security/firewall-manager/firewall-policies/list?project=<your-project-id>``
+or using any of GCP's SDKs.
+
+.. _gcp-bring-your-vpc:
+
+Using a specific VPC
+-----------------------
+By default, SkyPilot uses the following behavior to get a VPC to use for all GCP instances:
+
+- First, all existing VPCs in the project are checked against the minimal
+  recommended firewall rules for SkyPilot to function. If any VPC satisfies these
+  rules, it is used.
+- Otherwise, a new VPC named ``skypilot-vpc`` is automatically created with the
+  minimal recommended firewall rules and will be used. It is an auto mode VPC that
+  automatically starts with one subnet per region.
+
+To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
+
+.. code-block:: yaml
+
+    gcp:
+      vpc_name: my-vpc-name
+
+See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
+VPC with fine-grained constraints, typically created via Terraform or manually.
+
+The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-firewall-rules>`.
