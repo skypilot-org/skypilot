@@ -678,6 +678,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
         self._terminate_replica(info.replica_id, sync_down_logs=False)
+        return True
 
     #################################
     # ReplicaManager Daemon Threads #
