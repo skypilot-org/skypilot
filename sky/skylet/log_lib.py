@@ -268,8 +268,9 @@ def run_with_log(
 
 def make_task_bash_script(codegen: str,
                           env_vars: Optional[Dict[str, str]] = None) -> str:
-    # 'deactivate' is needed to avoid running the user program in the
-    # skypilot-runtime environment.
+    # 'export PATH=...' is needed to avoid running the user program in the
+    # skypilot-runtime environment. We cannot use `deactivate` as it cannot
+    # be found after conda is installed.
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -277,7 +278,7 @@ def make_task_bash_script(codegen: str,
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
-            deactivate || true; 
+            export PATH=$(echo $PATH | tr ':' '\n' | grep -v "/skypilot-runtime/bin" | tr '\n' ':')
             source ~/.bashrc
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
