@@ -1,6 +1,5 @@
 """ Sky Spot Policy for SkyServe."""
 import enum
-import logging
 import random
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type
