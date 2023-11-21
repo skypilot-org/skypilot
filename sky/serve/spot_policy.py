@@ -5,13 +5,14 @@ import random
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Type
 
+from sky import sky_logging
 from sky.serve import serve_state
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
     from sky.serve import service_spec
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 # TODO(tian): Move this to user config.
 _DEFAULT_OVER_PROVISION_NUM = 1
@@ -172,6 +173,7 @@ class SpotMixer:
         return cls.REGISTRY[spec.spot_mixer](spec)
 
 
+# TODO(tian): Add pure spot / pure on demand
 class OnDemandFallbackSpotMixer(SpotMixer):
     """Fallback to on-demand when spot cannot reach target."""
     NAME: Optional[str] = 'OnDemandFallback'
@@ -195,10 +197,6 @@ class OnDemandFallbackSpotMixer(SpotMixer):
         num_to_provision = num_target + _DEFAULT_OVER_PROVISION_NUM
         spot_gap = num_to_provision - current_num_alive_spot
         if spot_gap > 0:
-            # If there are not enough spot instances, this is the
-            # first time we launch on-demand and spot simultaneously.
-            # There shouldn't be any on-demand instances.
-            assert current_num_on_demand == 0
             # Launch spot_gap spot and on-demand simultaneously.
             num_spot_delta = spot_gap
             num_on_demand_delta = spot_gap - current_num_on_demand

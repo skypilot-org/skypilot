@@ -267,6 +267,9 @@ class ReplicaStatusProperty:
             # Pending to launch
             return serve_state.ReplicaStatus.PENDING
         if self.sky_launch_status == ProcessStatus.RUNNING:
+            if self.sky_down_status is not None:
+                # sky.down is running since a scale down interrupted sky.launch
+                return serve_state.ReplicaStatus.SHUTTING_DOWN
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
@@ -427,10 +430,12 @@ class ReplicaInfo:
                 msg += '.'
             else:
                 msg += f' and response {response.text}.'
-            logger.info(msg)
             if response.status_code == 200:
-                logger.debug(f'{replica_identity.capitalize()} is ready.')
+                logger.debug(msg)
+                logger.info(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
+            else:
+                logger.info(msg)
         except requests.exceptions.RequestException as e:
             logger.info(f'Error when probing {replica_identity}: '
                         f'{common_utils.format_exception(e)}.')
@@ -595,7 +600,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                     replica_id)
         assert info is not None
 
-        if sync_down_logs:
+        is_launching = False
+        if replica_id in self._launch_process_pool:
+            is_launching = True
+            self._launch_process_pool[replica_id].terminate()
+            del self._launch_process_pool[replica_id]
+
+        if sync_down_logs and not is_launching:
             _download_and_stream_logs(info)
 
         logger.info(f'preempted: {info.status_property.preempted}, '

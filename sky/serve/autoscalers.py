@@ -285,9 +285,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                      self.policy.get_spot_resources_override_dict()))
             ]
 
+        logger.info('Current target number of replicas: '
+                    f'{self.target_num_replicas}')
         desired_num_replicas = self.get_desired_num_replicas(num_replicas)
         if desired_num_replicas == self.target_num_replicas:
             return []
+        logger.info('Scale to new desired number of replicas: '
+                    f'{desired_num_replicas}')
         self.target_num_replicas = desired_num_replicas
 
         (num_on_demand_to_launch, spot_zones_to_launch,
