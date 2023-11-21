@@ -334,18 +334,25 @@ def get_service_schema():
                     'qps_lower_threshold': {
                         'type': 'number',
                     },
+                    'target_qps_per_replica': {
+                        'type': 'number',
+                    },
                     'auto_restart': {
                         'type': 'boolean',
                     },
-                    'spot_placement': {
-                        'type': 'string'
+                    'spot_placer': {
+                        'type': 'string',
                     },
-                    'mix_policy': {
-                        'type': 'string'
+                    'spot_mixer': {
+                        'type': 'string',
                     },
                     'spot_zones': {
-                        'type': 'array'
-                    }
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
                 }
             },
             'replicas': {

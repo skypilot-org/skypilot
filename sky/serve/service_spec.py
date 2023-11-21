@@ -23,10 +23,11 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
+        target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
-        spot_placement: Optional[str] = None,
-        mix_policy: Optional[str] = None,
+        spot_placer: Optional[str] = None,
+        spot_mixer: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
@@ -48,10 +49,24 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
+        self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
         self._auto_restart = auto_restart
-        self._spot_placement = spot_placement
-        self._mix_policy = mix_policy
+        spot_args = [
+            spot_placer, spot_mixer, spot_zones, target_qps_per_replica
+        ]
+        spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
+        if spot_args_num != 0 and spot_args_num != len(spot_args):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'spot_placer, spot_mixer, and spot_zones must be all '
+                    'specified or all not specified in the service YAML.')
+        # TODO(tian): Check vanilla autoscaler argument not exist if spot
+        # TODO(tian): Warning user that the use_spot in resources is ignored
+        # if spot policy is specified.
+        self._spot_placer = spot_placer
+        self._spot_mixer = spot_mixer
+        # TODO(tian): If no zone specified, default to all enabled zones
         self._spot_zones = spot_zones
 
     @staticmethod
@@ -110,14 +125,17 @@ class SkyServiceSpec:
                 'qps_upper_threshold', None)
             service_config['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
+            service_config['target_qps_per_replica'] = policy_section.get(
+                'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
-            service_config['spot_placement'] = policy_section.get(
-                'spot_placement', None)
-            service_config['mix_policy'] = policy_section.get(
-                'mix_policy', None)
+            service_config['spot_placer'] = policy_section.get(
+                'spot_placer', None)
+            service_config['spot_mixer'] = policy_section.get(
+                'spot_mixer', None)
             service_config['spot_zones'] = policy_section.get(
                 'spot_zones', None)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -164,11 +182,13 @@ class SkyServiceSpec:
                         self.qps_upper_threshold)
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
+        add_if_not_none('replica_policy', 'target_qps_per_replica',
+                        self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
-        add_if_not_none('replica_policy', 'spot_placement',
-                        self._spot_placement)
-        add_if_not_none('replica_policy', 'mix_policy', self._mix_policy)
+        add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
+        add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
+
         return config
 
     def probe_str(self):
@@ -177,25 +197,22 @@ class SkyServiceSpec:
         return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
 
     def spot_policy_str(self):
-        string = ''
-        if self.spot_placement:
-            string += self.spot_placement
-        if self.mix_policy:
-            string += f' with {self.mix_policy}'
-        if string == '':
-            return 'No spot policy'
-        return string
+        policy = ''
+        if self.spot_placer:
+            policy += self.spot_placer
+        if self.spot_mixer:
+            policy += f' with {self.spot_mixer}'
+        return policy if policy else 'No spot policy'
 
     def policy_str(self):
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return (f'Fixed {self.min_replicas} replica{min_plural}'
                     f' ({self.spot_policy_str()})')
-            # TODO(tian): Refactor to contain more information
+        # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to '
-                f'{self.max_replicas} replica{max_plural}'
-                f'({self.spot_policy_str()})')
+                f'{self.max_replicas} replica{max_plural}')
 
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
@@ -232,6 +249,10 @@ class SkyServiceSpec:
         return self._qps_lower_threshold
 
     @property
+    def target_qps_per_replica(self) -> Optional[float]:
+        return self._target_qps_per_replica
+
+    @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
 
@@ -240,12 +261,12 @@ class SkyServiceSpec:
         return self._auto_restart
 
     @property
-    def spot_placement(self) -> Optional[str]:
-        return self._spot_placement
+    def spot_placer(self) -> Optional[str]:
+        return self._spot_placer
 
     @property
-    def mix_policy(self) -> Optional[str]:
-        return self._mix_policy
+    def spot_mixer(self) -> Optional[str]:
+        return self._spot_mixer
 
     @property
     def spot_zones(self) -> Optional[List[str]]:
