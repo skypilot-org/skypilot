@@ -65,17 +65,19 @@ class SkyServeController:
                     for info in replica_info
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
-                scaling_option = self._autoscaler.evaluate_scaling(replica_info)
-                if (scaling_option.operator ==
-                        autoscalers.AutoscalerDecisionOperator.SCALE_UP):
-                    assert isinstance(scaling_option.target,
-                                      int), scaling_option
-                    self._replica_manager.scale_up(scaling_option.target)
-                elif (scaling_option.operator ==
-                      autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
-                    assert isinstance(scaling_option.target,
-                                      list), scaling_option
-                    self._replica_manager.scale_down(scaling_option.target)
+                scaling_options = self._autoscaler.evaluate_scaling(
+                    replica_info)
+                for scaling_option in scaling_options:
+                    if (scaling_option.operator ==
+                            autoscalers.AutoscalerDecisionOperator.SCALE_UP):
+                        assert isinstance(scaling_option.target,
+                                          tuple), scaling_option
+                        self._replica_manager.scale_up(*scaling_option.target)
+                    elif (scaling_option.operator ==
+                          autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                        assert isinstance(scaling_option.target,
+                                          list), scaling_option
+                        self._replica_manager.scale_down(scaling_option.target)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.

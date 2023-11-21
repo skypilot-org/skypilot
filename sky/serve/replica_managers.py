@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 import requests
+import yaml
 
 import sky
 from sky import backends
@@ -51,6 +52,7 @@ _MAX_NUM_LAUNCH = psutil.cpu_count()
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
+                   resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -63,7 +65,14 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
-        task = sky.Task.from_yaml(task_yaml_path)
+        with open(os.path.expanduser(task_yaml_path), 'r',
+                  encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        if resources_override is not None:
+            resource_config = config.get('resources', {})
+            resource_config.update(resources_override)
+            config['resources'] = resource_config
+        task = sky.Task.from_yaml_config(config)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -342,6 +351,18 @@ class ReplicaInfo:
         return handle
 
     @property
+    def is_spot(self) -> bool:
+        """Whether the replica is a spot instance."""
+        handle = self.handle()
+        if handle is None:
+            return False
+        return handle.launched_resources.use_spot
+
+    @property
+    def is_alive(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.alive_statuses()
+
+    @property
     def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:
@@ -437,7 +458,11 @@ class ReplicaManager:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
 
-    def scale_up(self, n: int) -> None:
+    def scale_up(
+        self,
+        n: int,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Scale up the service by n replicas."""
         raise NotImplementedError
 
@@ -490,7 +515,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
 
-    def _launch_replica(self, replica_id: int) -> None:
+    def _launch_replica(
+        self,
+        replica_id: int,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -505,7 +534,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name),
+            args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         info = ReplicaInfo(replica_id, cluster_name, replica_port)
@@ -514,9 +543,13 @@ class SkyPilotReplicaManager(ReplicaManager):
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
-    def scale_up(self, n: int) -> None:
+    def scale_up(
+        self,
+        n: int,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> None:
         for _ in range(n):
-            self._launch_replica(self._next_replica_id)
+            self._launch_replica(self._next_replica_id, resources_override)
             self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
@@ -806,14 +839,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     if info.status_property.first_ready_time is None:
                         info.status_property.first_ready_time = probe_time
                 else:
-                    handle = info.handle()
-                    if handle is None:
-                        logger.error('Cannot find handle for '
-                                     f'replica {info.replica_id}.')
-                    elif handle.launched_resources is None:
-                        logger.error('Cannot find launched_resources in '
-                                     f'handle for replica {info.replica_id}.')
-                    elif handle.launched_resources.use_spot:
+                    if info.is_spot:
                         # Pull the actual cluster status
                         # from the cloud provider to
                         # determine whether the cluster is preempted.

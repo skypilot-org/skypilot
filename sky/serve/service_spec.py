@@ -2,7 +2,7 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -25,6 +25,9 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
+        spot_placer: Optional[str] = None,
+        spot_mixer: Optional[str] = None,
+        spot_zones: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -47,6 +50,17 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._auto_restart = auto_restart
+        spot_args = [spot_placer, spot_mixer, spot_zones]
+        spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
+        if spot_args_num != 0 and spot_args_num != len(spot_args):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'spot_placer, spot_mixer, and spot_zones must be all '
+                    'specified or all not specified in the service YAML.')
+        self._spot_placer = spot_placer
+        self._spot_mixer = spot_mixer
+        # TODO(tian): If no zone specified, default to all enabled zones
+        self._spot_zones = spot_zones
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -106,6 +120,12 @@ class SkyServiceSpec:
                 'qps_lower_threshold', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
+            service_config['spot_placer'] = policy_section.get(
+                'spot_placer', None)
+            service_config['spot_mixer'] = policy_section.get(
+                'spot_mixer', None)
+            service_config['spot_zones'] = policy_section.get(
+                'spot_zones', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -154,6 +174,9 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
+        add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
+        add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
+        add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
 
         return config
 
@@ -162,10 +185,19 @@ class SkyServiceSpec:
             return f'GET {self.readiness_path}'
         return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
 
+    def spot_policy_str(self):
+        policy = ''
+        if self.spot_placer:
+            policy += self.spot_placer
+        if self.spot_mixer:
+            policy += f' with {self.spot_mixer}'
+        return policy if policy else 'No spot policy'
+
     def policy_str(self):
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
-            return f'Fixed {self.min_replicas} replica{min_plural}'
+            return (f'Fixed {self.min_replicas} replica{min_plural}'
+                    f' ({self.spot_policy_str()})')
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to '
@@ -176,7 +208,8 @@ class SkyServiceSpec:
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}\
+            Replica auto restart:             {self.auto_restart}
+            Spot Policy:                      {self.spot_policy_str()}\
         """)
 
     @property
@@ -211,3 +244,15 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def spot_placer(self) -> Optional[str]:
+        return self._spot_placer
+
+    @property
+    def spot_mixer(self) -> Optional[str]:
+        return self._spot_mixer
+
+    @property
+    def spot_zones(self) -> Optional[List[str]]:
+        return self._spot_zones

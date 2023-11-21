@@ -337,6 +337,19 @@ def get_service_schema():
                     'auto_restart': {
                         'type': 'boolean',
                     },
+                    'spot_placer': {
+                        'type': 'string',
+                    },
+                    'spot_mixer': {
+                        'type': 'string',
+                    },
+                    'spot_zones': {
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
                 }
             },
             'replicas': {
