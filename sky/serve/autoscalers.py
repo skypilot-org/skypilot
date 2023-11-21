@@ -281,17 +281,21 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             return [
                 AutoscalerDecision(
                     AutoscalerDecisionOperator.SCALE_UP,
-                    (self.target_num_replicas,
+                    (self.target_num_replicas +
+                     spot_policy.DEFAULT_OVER_PROVISION_NUM,
                      self.policy.get_spot_resources_override_dict()))
             ]
 
-        logger.info('Current target number of replicas: '
-                    f'{self.target_num_replicas}')
         desired_num_replicas = self.get_desired_num_replicas(num_replicas)
+        logger.info(
+            f'Current target number of replicas: {self.target_num_replicas}, '
+            f'Upscale counter: {self.upscale_counter}, '
+            f'Downscale counter: {self.downscale_counter}, '
+            f'Current decision: {desired_num_replicas}')
+
+        # TODO(tian): Remove OnDemand fallback.
         if desired_num_replicas == self.target_num_replicas:
             return []
-        logger.info('Scale to new desired number of replicas: '
-                    f'{desired_num_replicas}')
         self.target_num_replicas = desired_num_replicas
 
         (num_on_demand_to_launch, spot_zones_to_launch,

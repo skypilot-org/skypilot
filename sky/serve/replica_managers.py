@@ -432,7 +432,6 @@ class ReplicaInfo:
                 msg += f' and response {response.text}.'
             if response.status_code == 200:
                 logger.debug(msg)
-                logger.info(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
             else:
                 logger.info(msg)

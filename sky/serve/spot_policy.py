@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 # TODO(tian): Move this to user config.
-_DEFAULT_OVER_PROVISION_NUM = 1
+DEFAULT_OVER_PROVISION_NUM = 1
 
 
 class SpotPlacer:
@@ -193,7 +193,7 @@ class OnDemandFallbackSpotMixer(SpotMixer):
                 current_num_alive_spot += 1
             else:
                 current_num_on_demand += 1
-        num_to_provision = num_target + _DEFAULT_OVER_PROVISION_NUM
+        num_to_provision = num_target + DEFAULT_OVER_PROVISION_NUM
         spot_gap = num_to_provision - current_num_alive_spot
         if spot_gap > 0:
             # Launch spot_gap spot and on-demand simultaneously.
