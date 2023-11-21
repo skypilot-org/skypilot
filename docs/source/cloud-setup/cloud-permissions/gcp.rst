@@ -170,7 +170,7 @@ Service Account
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Service Accounts" tab in the "IAM & Admin" console, and click on the **CREATE SERVICE ACCOUNT**.
+1. Click the "Service Accounts" tab in the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__, and click on **CREATE SERVICE ACCOUNT**.
 
 .. image:: ../../images/screenshots/gcp/create-service-account.png
     :width: 80%
@@ -184,7 +184,9 @@ Service Account
     :align: center
     :alt: Set Service Account Name
 
-3. Select the ``minimal-skypilot-role`` (or the name you set) created in the last section and click on **DONE**.
+3. Select the ``minimal-skypilot-role`` (or the name you set) created in the
+last section and click on **DONE**. You can also choose to use the Default or
+Medium Permissions roles as described in the previous sections.
 
 .. image:: ../../images/screenshots/gcp/service-account-grant-role.png
     :width: 60%
