@@ -1,7 +1,7 @@
 .. _installation:
 
-Installation
-============
+Local Installation
+==================
 
 .. note::
 
@@ -54,6 +54,9 @@ or install from source:
   $ pip install ".[all]"
 
 
+Docker Installation
+===================
+
 .. note::
 
     As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
@@ -61,7 +64,7 @@ or install from source:
 .. _cloud-account-setup:
 
 Cloud account setup
--------------------
+===================
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
