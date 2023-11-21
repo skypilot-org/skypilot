@@ -78,6 +78,20 @@ def to_label_selector(tags):
     return label_selector
 
 
+def run_command_on_pods(node_name, node_namespace, command):
+    cmd_output = kubernetes.stream()(
+        kubernetes.core_api().connect_get_namespaced_pod_exec,
+        node_name,
+        node_namespace,
+        command=command,
+        stderr=True,
+        stdin=False,
+        stdout=True,
+        tty=False,
+        _request_timeout=kubernetes.API_TIMEOUT)
+    return cmd_output
+
+
 class KubernetesNodeProvider(NodeProvider):
 
     def __init__(self, provider_config, cluster_name):
@@ -378,23 +392,15 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-            privilege_check = kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=check_k8s_user_sudo_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            privilege_check = run_command_on_pods(new_node.metadata.name,
+                                                  self.namespace,
+                                                  check_k8s_user_sudo_cmd)
             if privilege_check == str(exceptions.INSUFFICIENT_PRIVILEGES_CODE):
                 raise config.KubernetesError(
                     'Insufficient system privileges detected. '
                     'Ensure the default user has root access or '
                     '"sudo" is installed and the user is added to the sudoers '
                     'from the image.')
-
 
     def _setup_ssh_in_pods(self, new_nodes):
         # Setting up ssh for the pod instance. This is already setup for
@@ -413,16 +419,8 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_ssh_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            run_command_on_pods(new_node.metadata.name, self.namespace,
+                                set_k8s_ssh_cmd)
 
     def _set_env_vars_in_pods(self, new_nodes):
         """Setting environment variables in pods.
@@ -449,31 +447,15 @@ class KubernetesNodeProvider(NodeProvider):
         ]
 
         for new_node in new_nodes:
-            kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=set_k8s_env_var_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            run_command_on_pods(new_node.metadata.name, self.namespace,
+                                set_k8s_env_var_cmd)
 
     def _update_ssh_user_config(self, new_nodes, cluster_name_with_hash):
         get_k8s_ssh_user_cmd = ['/bin/sh', '-c', ('echo $(whoami)')]
         for new_node in new_nodes:
             # TODO(doyoung): skip this for jump pod when #2589 is merged
-            ssh_user = kubernetes.stream()(
-                kubernetes.core_api().connect_get_namespaced_pod_exec,
-                new_node.metadata.name,
-                self.namespace,
-                command=get_k8s_ssh_user_cmd,
-                stderr=True,
-                stdin=False,
-                stdout=True,
-                tty=False,
-                _request_timeout=kubernetes.API_TIMEOUT)
+            ssh_user = run_command_on_pods(new_node.metadata.name,
+                                           self.namespace, get_k8s_ssh_user_cmd)
 
         cluster_yaml_path = self._recover_cluster_yaml_path(
             cluster_name_with_hash)
@@ -615,7 +597,8 @@ class KubernetesNodeProvider(NodeProvider):
         # For custom images, the username might differ. Ensure that the 'ssh_user'
         # reflects the username from the custom image. The cluster configuration
         # from the yaml is updated during the 'create_node()' process.
-        cluster_yaml_path = self._recover_cluster_yaml_path(cluster_name_with_hash)
+        cluster_yaml_path = self._recover_cluster_yaml_path(
+            cluster_name_with_hash)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_yaml_path)
         credentials_to_keep = [
