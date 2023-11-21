@@ -3,6 +3,11 @@
 Installation
 ============
 
+.. note::
+
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
+
+
 Install SkyPilot using pip:
 
 .. code-block:: console
@@ -28,6 +33,12 @@ If you only have access to certain clouds, use any combination of
 the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
+.. note::
+
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
+
+
+
 To get the latest features/updates, either install the nightly build:
 
 .. code-block:: console
@@ -42,10 +53,6 @@ or install from source:
   $ cd skypilot
   $ pip install ".[all]"
 
-
-.. note::
-
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 
