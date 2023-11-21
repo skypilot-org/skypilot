@@ -8,9 +8,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import cachetools
+import colorama
 
 from sky import clouds
 from sky import exceptions
@@ -83,7 +84,21 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
+# Firewall rule name for user opened ports.
 USER_PORTS_FIREWALL_RULE_NAME = 'sky-ports-{}'
+
+# UX message when image not found in GCP.
+# pylint: disable=line-too-long
+_IMAGE_NOT_FOUND_UX_MESSAGE = (
+    'Image {image_id!r} not found in GCP.\n'
+    '\nTo find GCP images: https://cloud.google.com/compute/docs/images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/images/<image-name>{colorama.Style.RESET_ALL}\n'
+    'Example: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310\n'
+    '\nTo find machine images: https://cloud.google.com/compute/docs/machine-images\n'
+    f'Format: {colorama.Style.BRIGHT}projects/<project-id>/global/machineImages/<machine-image-name>{colorama.Style.RESET_ALL}\n'
+    f'\nYou can query image id using: {colorama.Style.BRIGHT}gcloud compute images list --project <project-id> --no-standard-images{colorama.Style.RESET_ALL}'
+    f'\nTo query common AI images: {colorama.Style.BRIGHT}gcloud compute images list --project deeplearning-platform-release | less{colorama.Style.RESET_ALL}'
+)
 
 
 def _run_output(cmd):
@@ -364,7 +379,9 @@ class GCP(clouds.Cloud):
         try:
             image_attrs = image_id.split('/')
             if len(image_attrs) == 1:
-                raise ValueError(f'Image {image_id!r} not found in GCP.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(image_id=image_id))
             project = image_attrs[1]
             image_name = image_attrs[-1]
             # We support both GCP's Machine Images and Custom Images, both
@@ -392,8 +409,9 @@ class GCP(clouds.Cloud):
                                      f'{image_id!r}') from None
             if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id!r} not found in '
-                                     'GCP.') from None
+                    raise ValueError(
+                        _IMAGE_NOT_FOUND_UX_MESSAGE.format(
+                            image_id=image_id)) from None
             raise
 
     @classmethod
@@ -472,7 +490,7 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = 'skypilot:k80-debian-10'
                 else:
-                    # CUDA driver version 525.105.17, CUDA Library 11.8
+                    # CUDA driver version 535.86.10, CUDA Library 12.2
                     image_id = 'skypilot:gpu-debian-11'
 
         if resources.image_id is not None and resources.extract_docker_image(
@@ -676,7 +694,10 @@ class GCP(clouds.Cloud):
         )
         returncode, stdout, stderr = subprocess_utils.run_with_retries(
             list_reservations_cmd,
-            retry_returncode=[255],
+            # 1: means connection aborted (although it shows 22 in the error,
+            # but the actual error code is 1)
+            # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument')) # pylint: disable=line-too-long
+            retry_returncode=[255, 1],
         )
         subprocess_utils.handle_returncode(
             returncode,
@@ -839,7 +860,7 @@ class GCP(clouds.Cloud):
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions.html#gcp')  # pylint: disable=line-too-long
+                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -1206,3 +1227,10 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        state = self.__dict__.copy()
+        # We should avoid saving third-party object to the state, as it may
+        # cause unpickling error when the third-party API is updated.
+        state.pop('_list_reservations_cache', None)
+        return state

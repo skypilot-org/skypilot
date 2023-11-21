@@ -1,16 +1,16 @@
 """Utilities for sky status."""
-import re
 from typing import Any, Callable, Dict, List, Optional
 
 import click
 import colorama
 
 from sky import backends
-from sky import spot
 from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import resources_utils
 
 COMMAND_TRUNC_LENGTH = 25
 NUM_COST_REPORT_LINES = 5
@@ -124,7 +124,7 @@ def get_total_cost_of_displayed_records(
 
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           reserved_group_name: Optional[str] = None):
+                           controller_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
     For each cluster, this shows: cluster name, resources, launched time,
@@ -187,10 +187,10 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
-        if reserved_group_name is not None:
-            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        if controller_name is not None:
+            autostop_minutes = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
@@ -212,7 +212,7 @@ def show_local_status_table(local_clusters: List[str]):
     has ran at least one job on the cluster.
     """
     clusters_status = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [
@@ -320,23 +320,10 @@ def _get_status_colored(cluster_record: _ClusterRecord) -> str:
 
 def _get_resources(cluster_record: _ClusterRecord) -> str:
     handle = cluster_record['handle']
-    resources_str = '<initializing>'
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
     elif isinstance(handle, backends.CloudVmRayResourceHandle):
-        if (handle.launched_nodes is not None and
-                handle.launched_resources is not None):
-            launched_resource_str = str(handle.launched_resources)
-            # accelerator_args is way too long.
-            # Convert from:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.5.0'}  # pylint: disable=line-too-long
-            # to:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-            pattern = ', accelerator_args={.*}'
-            launched_resource_str = re.sub(pattern, '...',
-                                           launched_resource_str)
-            resources_str = (f'{handle.launched_nodes}x '
-                             f'{launched_resource_str}')
+        resources_str = resources_utils.get_readable_resources_repr(handle)
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str

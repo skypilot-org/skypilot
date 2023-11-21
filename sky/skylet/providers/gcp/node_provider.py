@@ -13,7 +13,7 @@ from sky.skylet.providers.gcp.config import (
     get_node_type,
 )
 from sky.skylet.providers.command_runner import SkyDockerCommandRunner
-from sky.skylet.providers.command_runner import DockerLoginConfig
+from sky.provision import docker_utils
 
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.tags import (
@@ -286,6 +286,9 @@ class GCPNodeProvider(NodeProvider):
                     count -= len(reuse_node_ids)
             if count:
                 results = resource.create_instances(base_config, labels, count)
+                if "sourceMachineImage" in base_config:
+                    for _, instance_id in results:
+                        resource.resize_disk(base_config, instance_id)
                 result_dict.update(
                     {instance_id: result for result, instance_id in results}
                 )
@@ -389,7 +392,7 @@ class GCPNodeProvider(NodeProvider):
         }
         if docker_config and docker_config["container_name"] != "":
             if "docker_login_config" in self.provider_config:
-                docker_config["docker_login_config"] = DockerLoginConfig(
+                docker_config["docker_login_config"] = docker_utils.DockerLoginConfig(
                     **self.provider_config["docker_login_config"]
                 )
             return SkyDockerCommandRunner(docker_config, **common_args)

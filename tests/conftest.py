@@ -1,8 +1,6 @@
-import tempfile
 from typing import List
-from unittest.mock import patch
 
-import pandas as pd
+import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
 
 # Usage: use
@@ -20,7 +18,8 @@ import pytest
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, --azure, or --lambda.
 #
-# To only run tests for managed spot (without generic tests), use --managed-spot.
+# To only run tests for managed spot (without generic tests), use
+# --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
     'kubernetes'
@@ -58,6 +57,10 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='Only run tests for managed spot.')
+    parser.addoption('--sky-serve',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for sky serve.')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -106,6 +109,8 @@ def pytest_collection_modifyitems(config, items):
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks['managed_spot'] = pytest.mark.skip(
         reason='skipped, because --managed-spot option is set')
+    skip_marks['sky_serve'] = pytest.mark.skip(
+        reason='skipped, because --sky-serve option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -132,6 +137,9 @@ def pytest_collection_modifyitems(config, items):
         if (not 'managed_spot'
                 in item.keywords) and config.getoption('--managed-spot'):
             item.add_marker(skip_marks['managed_spot'])
+        if (not 'sky_serve'
+                in item.keywords) and config.getoption('--sky-serve'):
+            item.add_marker(skip_marks['sky_serve'])
 
     # Check if tests need to be run serially for Kubernetes and Lambda Cloud
     # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
@@ -180,61 +188,12 @@ def generic_cloud(request) -> str:
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch):
-    from sky import clouds
-    from sky.utils import kubernetes_utils
-
-    # Monkey-patching is required because in the test environment, no cloud is
-    # enabled. The optimizer checks the environment to find enabled clouds, and
-    # only generates plans within these clouds. The tests assume that all three
-    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
-    # to return all three clouds. We also monkeypatch `sky.check.check` so that
-    # when the optimizer tries calling it to update enabled_clouds, it does not
-    # raise exceptions.
-    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
-    monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
-    )
-    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
-    monkeypatch.setattr(
-        'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
-        config_file_backup.name)
-    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
-
-    az_mappings = pd.read_csv('tests/default_aws_az_mappings.csv')
-
-    def _get_az_mappings(_):
-        return az_mappings
-
-    monkeypatch.setattr(
-        'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
-        _get_az_mappings)
-
-    monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
-                        lambda _: None)
-
-    monkeypatch.setattr(
-        'sky.clouds.gcp.GCP._list_reservations_for_instance_type',
-        lambda *_args, **_kwargs: [])
-
-    # Monkey patch Kubernetes resource detection since it queries
-    # the cluster to detect available cluster resources.
-    monkeypatch.setattr(
-        'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
-        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
-                        lambda *_args, **_kwargs: [True, []])
-    monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',
-                        lambda *_args, **_kwargs: [True, ''])
+def enable_all_clouds(monkeypatch: pytest.MonkeyPatch):
+    common.enable_all_clouds_in_monkeypatch(monkeypatch)
 
 
 @pytest.fixture
-def aws_config_region(monkeypatch) -> str:
+def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
     from sky import skypilot_config
     region = 'us-west-2'
     if skypilot_config.loaded():

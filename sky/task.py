@@ -19,8 +19,9 @@ from sky.backends import backend_utils
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.provision import docker_utils
+from sky.serve import service_spec
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -127,12 +128,13 @@ def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
 
 
 def _with_docker_login_config(
-    resources_set: Set['resources_lib.Resources'],
+    resources: Union[Set['resources_lib.Resources'],
+                     List['resources_lib.Resources']],
     task_envs: Dict[str, str],
-) -> Set['resources_lib.Resources']:
+) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
     if not _check_docker_login_config(task_envs):
-        return resources_set
-    docker_login_config = command_runner.DockerLoginConfig.from_env_vars(
+        return resources
+    docker_login_config = docker_utils.DockerLoginConfig.from_env_vars(
         task_envs)
 
     def _add_docker_login_config(resources: 'resources_lib.Resources'):
@@ -155,7 +157,10 @@ def _with_docker_login_config(
         return resources.copy(image_id={region: 'docker:' + docker_image},
                               _docker_login_config=docker_login_config)
 
-    return {_add_docker_login_config(resources) for resources in resources_set}
+    new_resources = []
+    for r in resources:
+        new_resources.append(_add_docker_login_config(r))
+    return type(resources)(new_resources)
 
 
 class Task:
@@ -183,7 +188,7 @@ class Task:
 
         Optionally, call ``Task.set_resources()`` to set the resource
         requirements for this task.  If not set, a default CPU-only requirement
-        is assumed (the same as ``sky cpunode``).
+        is assumed (the same as ``sky launch``).
 
         All setters of this class, ``Task.set_*()``, return ``self``, i.e.,
         they are fluent APIs and can be chained together.
@@ -250,7 +255,9 @@ class Task:
         self.estimated_inputs_size_gigabytes: Optional[float] = None
         self.estimated_outputs_size_gigabytes: Optional[float] = None
         # Default to CPUNode
-        self.resources = {sky.Resources()}
+        self.resources: Union[List[sky.Resources],
+                              Set[sky.Resources]] = {sky.Resources()}
+        self._service: Optional[service_spec.SkyServiceSpec] = None
         # Resources that this task cannot run on.
         self.blocked_resources = blocked_resources
 
@@ -261,6 +268,9 @@ class Task:
         # Only set when 'self' is a spot controller task: 'self.spot_dag' is
         # the underlying managed spot dag (sky.Dag object).
         self.spot_dag: Optional['sky.Dag'] = None
+
+        # Only set when 'self' is a sky serve controller task.
+        self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -350,8 +360,8 @@ class Task:
         if envs is not None and isinstance(envs, dict):
             config['envs'] = {str(k): str(v) for k, v in envs.items()}
 
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        common_utils.validate_schema(config, schemas.get_task_schema(),
+                                     'Invalid task YAML: ')
 
         # Fill in any Task.envs into file_mounts (src/dst paths, storage
         # name/source).
@@ -422,10 +432,73 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.pop('resources', None)
-        resources = sky.Resources.from_yaml_config(resources)
+        resources_config = config.pop('resources', None)
+        if resources_config and resources_config.get(
+                'any_of') is not None and resources_config.get(
+                    'ordered') is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both "any_of" and "ordered" in resources.')
+        if resources_config and resources_config.get('any_of') is not None:
+            # TODO(Ziming) In the future we can consider to allow
+            # additional field when any_of is specified,
+            # which means we override the fields in all the
+            # resources under any_of with the fields specified outsied any_of.
+            if len(resources_config) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify "any_of" with other resource fields.')
+            resources_set = set()
+            for resource in resources_config['any_of']:
+                resources_set.add(sky.Resources.from_yaml_config(resource))
+            task.set_resources(resources_set)
+        elif resources_config and resources_config.get('ordered') is not None:
+            if len(resources_config) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify "ordered" with other resource fields.')
+            resources_list = []
+            for resource in resources_config['ordered']:
+                resources_list.append(sky.Resources.from_yaml_config(resource))
+            task.set_resources(resources_list)
+        # Translate accelerators field to potential multiple resources.
+        elif resources_config and resources_config.get(
+                'accelerators') is not None:
+            accelerators = resources_config.get('accelerators')
+            if isinstance(accelerators, str):
+                accelerators = {accelerators}
+            elif isinstance(accelerators, dict):
+                accelerators = [
+                    f'{k}:{v}' if v is not None else f'{k}'
+                    for k, v in accelerators.items()
+                ]
+                accelerators = set(accelerators)
 
-        task.set_resources({resources})
+            # In yaml file, we store accelerators as a list.
+            # In Task, we store a list of resources, each with 1 accelerator.
+            # This for loop is for format conversion.
+            tmp_resources_list = []
+            for acc in accelerators:
+                tmp_resource = resources_config.copy()
+                tmp_resource['accelerators'] = acc
+                tmp_resources_list.append(
+                    sky.Resources.from_yaml_config(tmp_resource))
+
+            if isinstance(accelerators, list):
+                task.set_resources(tmp_resources_list)
+            elif isinstance(accelerators, set):
+                task.set_resources(set(tmp_resources_list))
+            else:
+                raise RuntimeError('Accelerators must be a list or a set.')
+        else:
+            task.set_resources(
+                {sky.Resources.from_yaml_config(resources_config)})
+
+        service = config.pop('service', None)
+        if service is not None:
+            service = service_spec.SkyServiceSpec.from_yaml_config(service)
+        task.set_service(service)
+
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -571,6 +644,7 @@ class Task:
 
     def set_resources(
         self, resources: Union['resources_lib.Resources',
+                               List['resources_lib.Resources'],
                                Set['resources_lib.Resources']]
     ) -> 'Task':
         """Sets the required resources to execute this task.
@@ -579,10 +653,9 @@ class Task:
         requirements will be used (8 vCPUs).
 
         Args:
-          resources: either a sky.Resources, or a set of them.  The latter case
-            is EXPERIMENTAL and indicates asking the optimizer to "pick the
+          resources: either a sky.Resources, a set of them, or a list of them.
+            A set or a list of resources asks the optimizer to "pick the
             best of these resources" to run this task.
-
         Returns:
           self: The current task, with resources set.
         """
@@ -592,8 +665,32 @@ class Task:
         self.resources = _with_docker_login_config(resources, self.envs)
         return self
 
-    def get_resources(self):
-        return self.resources
+    def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
+        """Sets the override parameters for the resources."""
+        new_resources_list = []
+        for res in list(self.resources):
+            new_resources = res.copy(**override_params)
+            new_resources_list.append(new_resources)
+
+        self.set_resources(type(self.resources)(new_resources_list))
+        return self
+
+    @property
+    def service(self) -> Optional[service_spec.SkyServiceSpec]:
+        return self._service
+
+    def set_service(self,
+                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
+        """Sets the service spec for this task.
+
+        Args:
+          service: a SkyServiceSpec object.
+
+        Returns:
+          self: The current task, with service set.
+        """
+        self._service = service
+        return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':
@@ -814,7 +911,10 @@ class Task:
         #  3. if not specified or the task's cloud does not support storage,
         #     use the first enabled storage cloud.
         # This should be refactored and moved to the optimizer.
-        assert len(self.resources) == 1, self.resources
+
+        # This check is not needed to support multiple accelerators;
+        # We just need to get the storage_cloud.
+        # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
         backend_utils.check_public_cloud_enabled()
@@ -961,10 +1061,21 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
-            add_if_not_none('resources', resources.to_yaml_config())
+        tmp_resource_config = {}
+        if len(self.resources) > 1:
+            resource_list = []
+            for r in self.resources:
+                resource_list.append(r.to_yaml_config())
+            key = 'ordered' if isinstance(self.resources, list) else 'any_of'
+            tmp_resource_config[key] = resource_list
+        else:
+            tmp_resource_config = list(self.resources)[0].to_yaml_config()
+
+        add_if_not_none('resources', tmp_resource_config)
+
+        if self.service is not None:
+            add_if_not_none('service', self.service.to_yaml_config())
+
         add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
@@ -997,8 +1108,6 @@ class Task:
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
-        if self.name and self.name != 'sky-cmd':  # CLI launch with a command
-            return self.name
         if isinstance(self.run, str):
             run_msg = self.run.replace('\n', '\\n')
             if len(run_msg) > 20:
@@ -1010,7 +1119,10 @@ class Task:
         else:
             run_msg = 'run=<fn>'
 
-        s = f'Task({run_msg})'
+        name_str = ''
+        if self.name is not None:
+            name_str = f'<name={self.name}>'
+        s = f'Task{name_str}({run_msg})'
         if self.inputs is not None:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
@@ -1018,10 +1130,13 @@ class Task:
         if self.num_nodes > 1:
             s += f'\n  nodes: {self.num_nodes}'
         if len(self.resources) > 1:
-            s += f'\n  resources: {self.resources}'
-        elif len(
-                self.resources) == 1 and not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {list(self.resources)[0]}'
+            resources_str = ('{' + ', '.join(
+                r.repr_with_region_zone for r in self.resources) + '}')
+            s += f'\n  resources: {resources_str}'
+        elif (len(self.resources) == 1 and
+              not list(self.resources)[0].is_empty()):
+            s += (f'\n  resources: '
+                  f'{list(self.resources)[0].repr_with_region_zone}')
         else:
             s += '\n  resources: default instances'
         return s
