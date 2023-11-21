@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import traceback
+from typing import Type
 
 import fastapi
 import uvicorn
@@ -45,12 +46,16 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
-        self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(
-                service_spec,
-                frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
-                cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
-                rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS))
+        autoscaler_class: Type[autoscalers.Autoscaler]
+        if service_spec.spot_zones is not None:
+            autoscaler_class = autoscalers.SpotRequestRateAutoscaler
+        else:
+            autoscaler_class = autoscalers.RequestRateAutoscaler
+        self._autoscaler: autoscalers.Autoscaler = autoscaler_class(
+            service_spec,
+            frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
+            cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
+            rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS)
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -68,6 +73,7 @@ class SkyServeController:
                 scaling_options = self._autoscaler.evaluate_scaling(
                     replica_info)
                 for scaling_option in scaling_options:
+                    logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
                             autoscalers.AutoscalerDecisionOperator.SCALE_UP):
                         assert isinstance(scaling_option.target,

@@ -3,7 +3,7 @@ import enum
 import logging
 import random
 import typing
-from typing import Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from sky.serve import serve_state
 
@@ -200,8 +200,10 @@ class OnDemandFallbackSpotMixer(SpotMixer):
             # There shouldn't be any on-demand instances.
             assert current_num_on_demand == 0
             # Launch spot_gap spot and on-demand simultaneously.
-            num_on_demand_delta = num_spot_delta = spot_gap
+            num_spot_delta = spot_gap
+            num_on_demand_delta = spot_gap - current_num_on_demand
         else:
+            num_on_demand_delta = 0
             if current_num_ready_spot >= num_to_provision:
                 # Clean all on-demand instances if enough spot instances
                 # are ready.
@@ -218,12 +220,12 @@ class SpotPolicy:
         self.spot_placer = SpotPlacer.from_spec(spec)
         self.spot_mixer = SpotMixer.from_spec(spec)
 
-    def get_next_zone(self) -> str:
+    def _get_next_zone(self) -> str:
         zone = self.spot_placer.select()
         logger.info(f'Chosen zone {zone} with {self.spot_placer}')
         return zone
 
-    def generate_mix_plan(
+    def _generate_mix_plan(
             self, num_target: int,
             replica_infos: List['replica_managers.ReplicaInfo']
     ) -> Tuple[int, int]:
@@ -233,6 +235,12 @@ class SpotPolicy:
                     f'on-demand delta, {num_spot_delta} spot delta '
                     f'with {self.spot_mixer}')
         return num_on_demand_delta, num_spot_delta
+
+    def get_spot_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': True, 'spot_recovery': None}
+
+    def get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': False, 'spot_recovery': None}
 
     def generate_autoscaling_plan(
         self, num_target: int,
@@ -246,7 +254,7 @@ class SpotPolicy:
                 one spot instance to launch.
             List[int]: Replica IDs to scale down.
         """
-        num_on_demand_delta, num_spot_delta = self.generate_mix_plan(
+        num_on_demand_delta, num_spot_delta = self._generate_mix_plan(
             num_target, replica_infos)
         replica_ids_to_scale_down = []
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
@@ -266,8 +274,16 @@ class SpotPolicy:
                     if num_spot_delta == 0:
                         break
         else:
+            if isinstance(self.spot_placer, HistoricalSpotPlacer):
+                logger.info('Active/Preempted zones list: '
+                            f'{self.spot_placer.zone2type}')
             for _ in range(num_spot_delta):
-                spot_zones_to_launch.append(self.get_next_zone())
+                spot_zones_to_launch.append(self._get_next_zone())
+        logger.info(f'Autoscaling plan: Add {num_on_demand_delta} '
+                    f'on-demand instances, add {len(spot_zones_to_launch)} '
+                    f'spot instances in {spot_zones_to_launch}, scale down '
+                    f'{len(replica_ids_to_scale_down)} replicas with id '
+                    f'{replica_ids_to_scale_down}')
         return (num_on_demand_delta, spot_zones_to_launch,
                 replica_ids_to_scale_down)
 

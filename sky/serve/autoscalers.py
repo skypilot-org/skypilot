@@ -2,6 +2,7 @@
 import bisect
 import dataclasses
 import enum
+import math
 import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -17,11 +18,14 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# TODO(tian): Expose this to config.
+_UPSCALE_DELAY_S = 300
+_DOWNSCALE_DELAY_S = 6000
+
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
     SCALE_DOWN = 'scale_down'
-    NO_OP = 'no_op'
 
 
 @dataclasses.dataclass
@@ -34,13 +38,10 @@ class AutoscalerDecision:
     | SCALE_UP   | Tuple[int, Dict[str, Any]] | Num and override to add       |
     |------------|----------------------------|-------------------------------|
     | SCALE_DOWN | List[int]                  | List of replica ids to remove |
-    |------------|----------------------------|-------------------------------|
-    | NO_OP      | None                       | No scaling needed             |
     |-------------------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    # TODO(tian): Remove NO_OP since now we can use empty list to represent it.
-    target: Optional[Union[Tuple[int, Dict[str, Any]], List[int]]]
+    target: Union[Tuple[int, Dict[str, Any]], List[int]]
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -142,8 +143,7 @@ class RequestRateAutoscaler(Autoscaler):
                     f'cooldown: {self.cooldown}')
                 logger.info('Cooldown period has not passed since last scaling '
                             'operation. Skipping scaling.')
-                return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                          target=None)
+                return []
 
         # Convert to requests per second.
         num_requests_per_second = len(
@@ -172,12 +172,13 @@ class RequestRateAutoscaler(Autoscaler):
         num_replicas_delta = target_num_replicas - num_replicas
         if num_replicas_delta == 0:
             logger.info('No scaling needed.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                      target=None)
+            return []
         elif num_replicas_delta > 0:
             logger.info(f'Scaling up by {num_replicas_delta} replicas.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=num_replicas_delta)
+            return [
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                   target=(num_replicas_delta, {}))
+            ]
         else:
             num_replicas_to_remove = -num_replicas_delta
             # Remove FAILED replicas first.
@@ -194,8 +195,10 @@ class RequestRateAutoscaler(Autoscaler):
                 replica_ids_to_remove.append(info.replica_id)
             logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
                         f'(id: {replica_ids_to_remove}).')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                      target=replica_ids_to_remove)
+            return [
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_ids_to_remove)
+            ]
 
 
 class SpotRequestRateAutoscaler(RequestRateAutoscaler):
@@ -209,16 +212,58 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                  cooldown: int, rps_window_size: int) -> None:
         super().__init__(spec, frequency, cooldown, rps_window_size)
         assert (spec.spot_placer is not None and spec.spot_mixer is not None and
-                spec.spot_zones is not None)
+                spec.spot_zones is not None and
+                spec.target_qps_per_replica is not None)
         self.policy = spot_policy.SpotPolicy(spec)
+        self.target_qps_per_replica = spec.target_qps_per_replica
+        # TODO(tian): Maybe add init_replicas?
+        self.target_num_replicas = spec.min_replicas
+
+        self.upscale_counter: int = 0
+        self.downscale_counter: int = 0
+
+        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+                                                     self.frequency)
+        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+                                                       self.frequency)
+
+    def get_desired_num_replicas(self, current_num_replicas: int) -> int:
+        # Convert to requests per second.
+        num_requests_per_second = len(
+            self.request_timestamps) / self.rps_window_size
+        # Edge case: num_replicas is zero.
+        requests_per_replica = (num_requests_per_second /
+                                current_num_replicas if current_num_replicas
+                                else num_requests_per_second)
+        logger.info(f'Requests per replica: {requests_per_replica}')
+        target_num_replicas = math.ceil(requests_per_replica /
+                                        self.target_qps_per_replica)
+        target_num_replicas = max(self.min_replicas,
+                                  min(self.max_replicas, target_num_replicas))
+
+        if target_num_replicas > self.target_num_replicas:
+            self.upscale_counter += 1
+            self.downscale_counter = 0
+            if self.upscale_counter >= self.scale_up_consecutive_periods:
+                return target_num_replicas
+        elif target_num_replicas < self.target_num_replicas:
+            self.downscale_counter += 1
+            self.upscale_counter = 0
+            if self.downscale_counter >= self.scale_down_consecutive_periods:
+                return target_num_replicas
+        return self.target_num_replicas
 
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
-        # TODO(tian): Fix this.
         current_time = time.time()
-        num_replicas = len(replica_infos)
+        # TODO(tian): Consider non-alive replicas.
+        alive_replica_infos = [
+            info for info in replica_infos if info.is_alive or
+            info.status == serve_state.ReplicaStatus.NOT_READY
+        ]
+        num_replicas = len(alive_replica_infos)
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -230,57 +275,42 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     f'cooldown: {self.cooldown}')
                 logger.info('Cooldown period has not passed since last scaling '
                             'operation. Skipping scaling.')
-                return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                          target=None)
-
-        # Convert to requests per second.
-        num_requests_per_second = len(
-            self.request_timestamps) / self.rps_window_size
-        # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second / num_replicas
-                                if num_replicas else num_requests_per_second)
-
-        logger.info(f'Requests per replica: {requests_per_replica}')
-
-        logger.info(f'Number of replicas: {num_replicas}')
-        target_num_replicas = num_replicas
-        if num_replicas < self.min_replicas:
-            target_num_replicas = self.min_replicas
-        elif (self.upper_threshold is not None and
-              requests_per_replica > self.upper_threshold):
-            scale_target = requests_per_replica / self.upper_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-        elif (self.lower_threshold is not None and
-              requests_per_replica < self.lower_threshold):
-            scale_target = requests_per_replica / self.lower_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-
-        target_num_replicas = max(self.min_replicas,
-                                  min(self.max_replicas, target_num_replicas))
-        num_replicas_delta = target_num_replicas - num_replicas
-        if num_replicas_delta == 0:
-            logger.info('No scaling needed.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                      target=None)
-        elif num_replicas_delta > 0:
-            logger.info(f'Scaling up by {num_replicas_delta} replicas.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=num_replicas_delta)
+                return []
         else:
-            num_replicas_to_remove = -num_replicas_delta
-            # Remove FAILED replicas first.
-            replica_ids_to_remove: List[int] = []
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                if info.status == serve_state.ReplicaStatus.FAILED:
-                    replica_ids_to_remove.append(info.replica_id)
-            # Then rest of them.
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                replica_ids_to_remove.append(info.replica_id)
-            logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
-                        f'(id: {replica_ids_to_remove}).')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                      target=replica_ids_to_remove)
+            # Bootstrap.
+            return [
+                AutoscalerDecision(
+                    AutoscalerDecisionOperator.SCALE_UP,
+                    (self.target_num_replicas,
+                     self.policy.get_spot_resources_override_dict()))
+            ]
+
+        desired_num_replicas = self.get_desired_num_replicas(num_replicas)
+        if desired_num_replicas == self.target_num_replicas:
+            return []
+        self.target_num_replicas = desired_num_replicas
+
+        (num_on_demand_to_launch, spot_zones_to_launch,
+         replica_ids_to_scale_down) = self.policy.generate_autoscaling_plan(
+             self.target_num_replicas, replica_infos)
+
+        scaling_options = []
+        if num_on_demand_to_launch > 0:
+            scaling_options.append(
+                AutoscalerDecision(
+                    AutoscalerDecisionOperator.SCALE_UP,
+                    target=(
+                        num_on_demand_to_launch,
+                        self.policy.get_on_demand_resources_override_dict())))
+        if spot_zones_to_launch:
+            for zone in spot_zones_to_launch:
+                spot_override = self.policy.get_spot_resources_override_dict()
+                spot_override.update({'zone': zone})
+                scaling_options.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                       target=(1, spot_override)))
+        if replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_ids_to_scale_down))
+        return scaling_options

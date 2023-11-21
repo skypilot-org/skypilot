@@ -23,6 +23,7 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
+        target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
         spot_placer: Optional[str] = None,
@@ -48,15 +49,21 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._qps_upper_threshold = qps_upper_threshold
         self._qps_lower_threshold = qps_lower_threshold
+        self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
         self._auto_restart = auto_restart
-        spot_args = [spot_placer, spot_mixer, spot_zones]
+        spot_args = [
+            spot_placer, spot_mixer, spot_zones, target_qps_per_replica
+        ]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         if spot_args_num != 0 and spot_args_num != len(spot_args):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'spot_placer, spot_mixer, and spot_zones must be all '
                     'specified or all not specified in the service YAML.')
+        # TODO(tian): Check vanilla autoscaler argument not exist if spot
+        # TODO(tian): Warning user that the use_spot in resources is ignored
+        # if spot policy is specified.
         self._spot_placer = spot_placer
         self._spot_mixer = spot_mixer
         # TODO(tian): If no zone specified, default to all enabled zones
@@ -118,6 +125,8 @@ class SkyServiceSpec:
                 'qps_upper_threshold', None)
             service_config['qps_lower_threshold'] = policy_section.get(
                 'qps_lower_threshold', None)
+            service_config['target_qps_per_replica'] = policy_section.get(
+                'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
             service_config['spot_placer'] = policy_section.get(
@@ -173,6 +182,8 @@ class SkyServiceSpec:
                         self.qps_upper_threshold)
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
+        add_if_not_none('replica_policy', 'target_qps_per_replica',
+                        self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
         add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
         add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
@@ -236,6 +247,10 @@ class SkyServiceSpec:
     @property
     def qps_lower_threshold(self) -> Optional[float]:
         return self._qps_lower_threshold
+
+    @property
+    def target_qps_per_replica(self) -> Optional[float]:
+        return self._target_qps_per_replica
 
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:

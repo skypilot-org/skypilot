@@ -281,7 +281,8 @@ def execute(
 
     if not cluster_exists:
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller):
+                not _is_launched_by_spot_controller and
+                not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
