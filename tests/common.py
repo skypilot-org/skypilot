@@ -55,7 +55,7 @@ def enable_all_clouds_in_monkeypatch(
     # the cluster to detect available cluster resources.
     monkeypatch.setattr(
         'sky.utils.kubernetes_utils.detect_gpu_label_formatter',
-        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, []])
+        lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, {}])
     monkeypatch.setattr('sky.utils.kubernetes_utils.detect_gpu_resource',
                         lambda *_args, **_kwargs: [True, []])
     monkeypatch.setattr('sky.utils.kubernetes_utils.check_instance_fits',

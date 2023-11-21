@@ -132,7 +132,6 @@ Documentation
    examples/docker-containers
    examples/ports
    reference/tpu
-   reference/interactive-nodes
    reference/logging
    reference/faq
 
