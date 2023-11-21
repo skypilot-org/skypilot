@@ -1983,6 +1983,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         if show_services:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Services{colorama.Style.RESET_ALL}')
+            num_services = None
             if spot_jobs_query_interrupted:
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
