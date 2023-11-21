@@ -59,9 +59,10 @@ GCP Service Account
 <https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
 
 .. tip::
-    A long-lived service account on your local machine can avoid the periodic
+    A service account on your local machine can avoid the periodic
     ``google.auth.exceptions.RefreshError: Reauthentication is needed. Please
-    run `gcloud auth application-default login` to reauthenticate.`` error.
+    run `gcloud auth application-default login` to reauthenticate.`` error. A
+    service account is long-lived as it does not have an expiry time.
 
 Set up a service account as follows:
 
