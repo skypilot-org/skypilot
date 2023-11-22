@@ -903,3 +903,64 @@ class GCPTPU(GCPResource):
         The boot disk of TPU VMs is not resizable, and users need to add a
         persistent disk to expand disk capacity. Related issue: #2387
         """
+        from sky.skylet import log_lib
+        import os
+        from googleapiclient import discovery
+
+        resource = discovery.build("compute", "v1")
+
+        # TODO: Update the CLI to prompt the for disk mode and size
+        disk_size_gb = 200
+        disk_mode = "read-write"
+        tpu_name = instance_name.split("/")[-1]
+
+        # Create a new disk
+        disk_body = {
+            "name": f"{tpu_name}-extra-disk",
+            "sizeGb": str(disk_size_gb),
+            "type": f"zones/{self.availability_zone}/diskTypes/pd-standard",  # or pd-ssd
+        }
+
+        try:
+            create_operation = (
+                resource.disks()
+                .insert(
+                    project=self.project_id, zone=self.availability_zone, body=disk_body
+                )
+                .execute()
+            )
+            if wait_for_operation:
+                result = self.wait_for_operation(create_operation, max_polls=MAX_POLLS)
+            else:
+                result = create_operation
+
+        except HttpError as e:
+            # Catch HttpError for issues during disk creation or attachment
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+
+        # Attach the disk to TPUVMs with gcloud alpha
+        attach_to_tpus = (
+            f"gcloud alpha compute tpus tpu-vm attach-disk {tpu_name} "
+            f"--zone {self.availability_zone} --disk {disk_body['name']} "
+            f"--mode {disk_mode}"
+        )
+
+        rcode, stdout, stderr = log_lib.run_with_log(
+            attach_to_tpus,
+            os.devnull,
+            shell=True,
+            stream_logs=False,
+            require_outputs=True,
+        )
+
+        if rcode != 0:
+            failure_massage = (
+                "Failed to attach disk to TPU VMs.\n"
+                "**** STDOUT ****\n"
+                "{stdout}\n"
+                "**** STDERR ****\n"
+                "{stderr}"
+            )
+            logger.warning(failure_massage)
+
+        return {}
