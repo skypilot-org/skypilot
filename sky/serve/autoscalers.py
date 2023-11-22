@@ -365,11 +365,10 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         elif num_alive_spot > num_to_provision:
             # Too many spot instances, scale down.
             num_spot_to_scale_down = num_alive_spot - num_to_provision
-            # Here we use alive_statuses() to indicate order, which is the
-            # desired order: PENDING -> PROVISIONING -> STARTING -> READY
             _add_to_scale_down(
                 info_filter=lambda info: info.is_spot,
-                status_order=serve_state.ReplicaStatus.alive_statuses(),
+                status_order=serve_state.ReplicaStatus.
+                scale_down_decision_order(),
                 num_limit=num_spot_to_scale_down,
             )
         elif num_ready_spot + num_on_demand >= num_to_provision:
@@ -378,7 +377,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                                            num_to_provision)
             _add_to_scale_down(
                 info_filter=lambda info: not info.is_spot,
-                status_order=serve_state.ReplicaStatus.alive_statuses(),
+                status_order=serve_state.ReplicaStatus.
+                scale_down_decision_order(),
                 num_limit=num_on_demand_to_scale_down,
             )
         if replica_ids_to_scale_down:

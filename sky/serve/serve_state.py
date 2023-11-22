@@ -101,6 +101,14 @@ class ReplicaStatus(enum.Enum):
     def alive_statuses(cls) -> List['ReplicaStatus']:
         return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
 
+    @classmethod
+    def scale_down_decision_order(cls) -> List['ReplicaStatus']:
+        # TODO(tian): Add non-alive and non-not_ready statuses.
+        return [
+            cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.NOT_READY,
+            cls.READY
+        ]
+
     def colored_str(self) -> str:
         color = _REPLICA_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
