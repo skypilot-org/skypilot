@@ -359,11 +359,14 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         num_to_provision = (self.target_num_replicas +
                             _DEFAULT_OVER_PROVISION_NUM)
         if num_alive_spot < num_to_provision:
-            scaling_options.append(
-                AutoscalerDecision(
-                    AutoscalerDecisionOperator.SCALE_UP,
-                    target=(num_to_provision - num_alive_spot,
-                            self._get_on_demand_resources_override_dict())))
+            num_on_demand_to_scale_up = (num_to_provision - num_alive_spot -
+                                         num_on_demand)
+            if num_on_demand_to_scale_up > 0:
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=(num_on_demand_to_scale_up,
+                                self._get_on_demand_resources_override_dict())))
             for _ in range(num_to_provision - num_alive_spot):
                 spot_override = self._get_spot_resources_override_dict()
                 zone = self.spot_placer.select()

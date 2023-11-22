@@ -217,7 +217,8 @@ class ReplicaStatusProperty:
     sky_launch_status: Optional[ProcessStatus] = None
     user_app_failed: bool = False
     service_ready_now: bool = False
-    # None means readiness probe is not passed yet.
+    # None means readiness probe is not executed yet;
+    # -1 means the initial delay seconds is exceeded.
     first_ready_time: Optional[float] = None
     # None means sky.down is not called yet.
     sky_down_status: Optional[ProcessStatus] = None
@@ -256,7 +257,7 @@ class ReplicaStatusProperty:
             return True
         if not self.service_ready_now:
             return False
-        return self.first_ready_time is not None
+        return self.first_ready_time != -1
 
     def should_track_service_status(self) -> bool:
         """Should we track the status of the replica.
@@ -300,6 +301,10 @@ class ReplicaStatusProperty:
                 # Failed on user setup/run
                 return serve_state.ReplicaStatus.FAILED
             if self.first_ready_time is None:
+                # readiness probe is not executed yet, but a scale down is
+                # triggered.
+                return serve_state.ReplicaStatus.SHUTTING_DOWN
+            if self.first_ready_time == -1:
                 # initial delay seconds exceeded
                 return serve_state.ReplicaStatus.FAILED
             if not self.service_ready_now:
@@ -327,7 +332,7 @@ class ReplicaStatusProperty:
         if self.service_ready_now:
             # Service is ready
             return serve_state.ReplicaStatus.READY
-        if self.first_ready_time is not None:
+        if self.first_ready_time is not None and self.first_ready_time != -1:
             # Service was ready before but not now
             return serve_state.ReplicaStatus.NOT_READY
         else:
@@ -935,6 +940,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 'exceeding initial delay seconds. Terminating '
                                 'the replica...')
                             should_teardown = True
+                            info.status_property.first_ready_time = -1
                         else:
                             current_delay_seconds = int(current_delay_seconds)
                             logger.info(f'Replica {info.replica_id} is not '
