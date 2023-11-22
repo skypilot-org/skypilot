@@ -120,10 +120,6 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
     NAME: Optional[str] = 'DynamicFailover'
 
     def select(self) -> str:
-        if len(self.active_zones()) > 0:
-            zone = random.choice(self.active_zones())
-        else:
-            zone = random.choice(self.preempted_zones())
-            # TODO(tian): Why move to active?
-            self.move_zone_to_active(zone)
-        return zone
+        if len(self.active_zones()) == 0:
+            self.clear_preempted_zones()
+        return random.choice(self.active_zones())

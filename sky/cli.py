@@ -4292,6 +4292,7 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    # TODO(tian): Limit zones to optimize if spot-zone is specified.
     sky.optimize(dag)
 
     if not yes:

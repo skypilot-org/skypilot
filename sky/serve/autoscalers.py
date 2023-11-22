@@ -239,14 +239,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
-    def _get_desired_num_replicas(self, current_num_replicas: int) -> int:
+    def _get_desired_num_replicas(self, num_ready_replicas: int) -> int:
         # Convert to requests per second.
         num_requests_per_second = len(
             self.request_timestamps) / self.rps_window_size
         # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second /
-                                current_num_replicas if current_num_replicas
-                                else num_requests_per_second)
+        requests_per_replica = (num_requests_per_second / num_ready_replicas if
+                                num_ready_replicas else num_requests_per_second)
         logger.info(f'Requests per replica: {requests_per_replica}')
         target_num_replicas = math.ceil(requests_per_replica /
                                         self.target_qps_per_replica)
@@ -265,6 +264,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             if self.downscale_counter >= self.scale_down_consecutive_periods:
                 self.downscale_counter = 0
                 return target_num_replicas
+        else:
+            self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
 
     def handle_preemption_history(self, history: List[str]) -> None:
@@ -282,6 +283,10 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             info.status == serve_state.ReplicaStatus.NOT_READY
         ]
         num_replicas = len(alive_replica_infos)
+        num_ready_replicas = len([
+            info for info in replica_infos
+            if info.status == serve_state.ReplicaStatus.READY
+        ])
 
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
@@ -308,11 +313,14 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                                        target=(1, spot_override)))
             return scaling_options
 
-        self.target_num_replicas = self._get_desired_num_replicas(num_replicas)
+        self.target_num_replicas = self._get_desired_num_replicas(
+            num_ready_replicas)
         logger.info(
             f'Current target number of replicas: {self.target_num_replicas}, '
-            f'Upscale counter: {self.upscale_counter}, '
-            f'Downscale counter: {self.downscale_counter}')
+            f'Upscale counter: {self.upscale_counter}/'
+            f'{self.scale_up_consecutive_periods}, '
+            f'Downscale counter: {self.downscale_counter}/'
+            f'{self.scale_down_consecutive_periods}')
 
         num_alive_spot, num_ready_spot, num_on_demand = 0, 0, 0
         for info in alive_replica_infos:

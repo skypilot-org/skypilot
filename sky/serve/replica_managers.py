@@ -653,6 +653,12 @@ class SkyPilotReplicaManager(ReplicaManager):
         if not info.is_spot:
             return False
 
+        # Get cluster handle first for zone information. The following
+        # backend_utils.refresh_cluster_status_handle might delete the
+        # cluster record from the cluster table.
+        handle = global_user_state.get_handle_from_cluster_name(
+            info.cluster_name)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
         # Pull the actual cluster status from the cloud provider to
         # determine whether the cluster is preempted.
         cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -668,11 +674,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         # TODO(MaoZiming): Support spot recovery policies
-        info = serve_state.get_replica_info_from_id(self._service_name,
-                                                    info.replica_id)
-        assert info is not None
-        handle = info.handle()
-        assert handle is not None
         self.preemption_history.append(handle.launched_resources.zone)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
@@ -816,9 +817,18 @@ class SkyPilotReplicaManager(ReplicaManager):
             handle = info.handle()
             assert handle is not None, info
             # Use None to fetch latest job, which stands for user task job
-            job_statuses = backend.get_job_status(handle,
-                                                  None,
-                                                  stream_logs=False)
+            try:
+                job_statuses = backend.get_job_status(handle,
+                                                      None,
+                                                      stream_logs=False)
+            except exceptions.CommandError:
+                # If the job status fetch failed, it is likely that the
+                # cluster is preempted.
+                is_preempted = self._handle_preemption(info)
+                if is_preempted:
+                    continue
+                # Re-raise the exception if it is not preempted.
+                raise
             job_status = list(job_statuses.values())[0]
             if job_status in [
                     job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
