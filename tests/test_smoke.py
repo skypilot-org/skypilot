@@ -3390,28 +3390,30 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
-        subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
-        yield tmp_bucket_name
-        subprocess.check_call(
-            ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
+        bucket_uri = f's3://{tmp_bucket_name}'
+        subprocess.check_call(['aws', 's3', 'mb', bucket_uri])
+        yield tmp_bucket_name, bucket_uri
+        subprocess.check_call(['aws', 's3', 'rb', bucket_uri, '--force'])
 
     @pytest.fixture
     def tmp_gsutil_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-        subprocess.check_call(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
-        yield tmp_bucket_name
-        subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
+        bucket_uri = f'gs://{tmp_bucket_name}'
+        subprocess.check_call(['gsutil', 'mb', bucket_uri])
+        yield tmp_bucket_name, bucket_uri
+        subprocess.check_call(['gsutil', 'rm', '-r', bucket_uri])
 
     @pytest.fixture
     def tmp_awscli_bucket_r2(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         endpoint_url = cloudflare.create_endpoint()
+        bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb s3://{tmp_bucket_name} --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile=r2',
             shell=True)
-        yield tmp_bucket_name
+        yield tmp_bucket_name, bucket_uri
         subprocess.check_call(
-            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb s3://{tmp_bucket_name} --force --endpoint {endpoint_url} --profile=r2',
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile=r2',
             shell=True)
 
     @pytest.fixture
@@ -3644,7 +3646,7 @@ class TestStorageWithCredentials:
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
-        bucket_name = request.getfixturevalue(ext_bucket_fixture)
+        bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
         storage_obj.add_store(store_type)
 
@@ -3759,6 +3761,43 @@ class TestStorageWithCredentials:
         # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
         assert '4' in cnt_output.decode('utf-8'), \
                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+
+    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
+                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
+                              pytest.param('tmp_awscli_bucket_r2',
+                                           storage_lib.StoreType.R2,
+                                           marks=pytest.mark.cloudflare)])
+    def test_externally_created_bucket_mount_without_source(
+            self, ext_bucket_fixture, request, store_type):
+        # Non-sky managed buckets(buckets created outside of Skypilot CLI)
+        # are allowed to be MOUNTed by specifying the URI of the bucket to
+        # source field only. When it is attempted by specifying the name of
+        # the bucket only, it should error out.
+        # TODO(doyoung): Add test for IBM COS. Currently, this is blocked
+        # as rclone used to interact with IBM COS does not support feature to
+        # create a bucket, and the ibmcloud CLI is not supported in Skypilot.
+        # Either of the feature is necessary to simulate an external bucket
+        # createion for IBM COS.
+        # https://github.com/skypilot-org/skypilot/pull/1966/files#r1253439837
+
+        ext_bucket_name, ext_bucket_uri = request.getfixturevalue(
+            ext_bucket_fixture)
+        # invalid spec
+        with pytest.raises(sky.exceptions.StorageSpecError) as e:
+            storage_obj = storage_lib.Storage(
+                name=ext_bucket_name, mode=storage_lib.StorageMode.MOUNT)
+            storage_obj.add_store(store_type)
+
+        assert 'Attempted to mount a non-sky managed bucket' in str(e)
+
+        # valid spec
+        storage_obj = storage_lib.Storage(source=ext_bucket_uri,
+                                          mode=storage_lib.StorageMode.MOUNT)
+        handle = global_user_state.get_handle_from_storage_name(
+            storage_obj.name)
+        if handle:
+            storage_obj.delete()
 
 
 # ---------- Testing YAML Specs ----------
