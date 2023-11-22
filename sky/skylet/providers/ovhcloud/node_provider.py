@@ -7,8 +7,9 @@ from urllib.parse import urlparse
 from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-from sky.exceptions import ResourcesUnavailableError
+
 from sky import authentication as auth
+from sky.exceptions import ResourcesUnavailableError
 
 from .ovhai_client import OVHCloudClient
 
@@ -55,8 +56,8 @@ class OVHCloudNodeProvider(NodeProvider):
             self.client.create_key_pair(self.ssh_key_name, key_content)
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters):
-        nodes = self.client._get_filtered_nodes(tag_filters)
+    def get_filtered_nodes(self, tag_filters):
+        nodes = self.client.get_filtered_nodes(tag_filters)
         possible_names = [
             f'{self.cluster_name}-head', f'{self.cluster_name}-worker'
         ]
@@ -76,7 +77,7 @@ class OVHCloudNodeProvider(NodeProvider):
         (e.g. is_running(node_id)). This means that non_terminated_nodes()
         must be called again to refresh results.
         """
-        nodes = self._get_filtered_nodes(tag_filters=tag_filters)
+        nodes = self.get_filtered_nodes(tag_filters=tag_filters)
         return [node_id for node_id in nodes.keys()]
 
     def is_running(self, node_id):
@@ -131,7 +132,8 @@ class OVHCloudNodeProvider(NodeProvider):
                 node = self.client.get_node_details(node.id)
                 time.sleep(2)
             if node.state == 'error':
-                if 'not enough hosts available' in node.extra['fault']['message']:
+                if 'not enough hosts available' in node.extra['fault'][
+                        'message']:
                     raise ResourcesUnavailableError
                 raise RuntimeError("Unable to launch instance")
             config_tags = node_config.get('tags', {}).copy()

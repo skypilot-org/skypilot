@@ -1,7 +1,9 @@
+"""OVHCloud
+"""
 import json
-from os import environ, path
+from os import path
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional
 
 from sky import clouds
 from sky import status_lib
@@ -15,8 +17,10 @@ if typing.TYPE_CHECKING:
 
 @clouds.CLOUD_REGISTRY.register
 class OVHCloud(clouds.Cloud):
+    """OVHCloud GPU instances"""
 
     _REPR = 'OVHCloud'
+    # pylint: disable=line-too-long
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'OVHCloud does not support spot VMs.',
         clouds.CloudImplementationFeatures.MULTI_NODE: 'OVHCloud does not support multi nodes.',
@@ -80,7 +84,7 @@ class OVHCloud(clouds.Cloud):
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
-    ) -> Iterator[None]:
+    ) -> Iterator[Optional[List['clouds.Zone']]]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -180,17 +184,21 @@ class OVHCloud(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+        if zones:
+            zones_formatted = ','.join([zone.name for zone in zones])
+        else:
+            zones_formatted = None
 
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': target_deploy_site,
-            'zones': ','.join([zone.name for zone in zones])
+            'zones': zones_formatted
         }
 
     @classmethod
     def _get_default_region(cls):
-        return "GRA11"
+        return 'GRA1'
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
@@ -205,7 +213,7 @@ class OVHCloud(clouds.Cloud):
         }
         # TODO(ewzeng): filter by hash_filter_string to be safe
         status_list = []
-        vms = OVHCloudClient(cls._get_default_region())._get_filtered_nodes(
+        vms = OVHCloudClient(cls._get_default_region()).get_filtered_nodes(
             tag_filters=tag_filters)
         possible_names = [f'{name}-head', f'{name}-worker']
         for node in vms:
@@ -273,11 +281,14 @@ class OVHCloud(clouds.Cloud):
         creds_file_exists = path.exists(path.expanduser(creds_file_path))
         if creds_file_exists:
             return [creds_file_exists, 'ok']
-        return [creds_file_exists, f'Please create a correct credentials file at {creds_file_path}']
+        return [
+            creds_file_exists,
+            f'Please create a correct credentials file at {creds_file_path}'
+        ]
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            "~/.config/openstack/clouds.yaml": "~/.config/openstack/clouds.yaml"
+            '~/.config/openstack/clouds.yaml': '~/.config/openstack/clouds.yaml'
         }
 
     @classmethod

@@ -172,6 +172,7 @@ local_ray = [
     # Excluded 2.6.0 as it has a bug in the cluster launcher:
     # https://github.com/ray-project/ray/releases/tag/ray-2.6.1
     'ray[default] >= 2.2.0, <= 2.6.3, != 2.6.0',
+    'pydantic <2.0, >=1.10.8'
 ]
 
 remote = [
@@ -233,7 +234,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': [] + local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
-    'ovhcloud': ['apache-libcloud'],
+    'ovhcloud': ['apache-libcloud'] + local_ray,
     'remote': remote,
     'serve': ['uvicorn', 'fastapi'],
 }

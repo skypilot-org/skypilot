@@ -34,7 +34,7 @@ class OVHCloudClient:
             f"https://compute.{region}.cloud.ovh.net/v2.1/{os_tenant_id}/",
         )
 
-    def _get_filtered_nodes(self, tag_filters):
+    def get_filtered_nodes(self, tag_filters):
         found_nodes = {}
         for node in self.client.list_nodes():
             if node.state == 'running':

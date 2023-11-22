@@ -1,7 +1,7 @@
+"""OVHCloud catalog
+"""
 import typing
 from typing import Dict, List, Optional, Tuple
-
-import pandas as pd
 
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
@@ -53,7 +53,7 @@ def get_vcpus_mem_from_instance_type(
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
-                              disk_tier: Optional[str] = None) -> Optional[str]:
+                              _: Optional[str] = None) -> Optional[str]:
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory)
@@ -72,8 +72,7 @@ def get_instance_type_for_accelerator(
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
-    """
-    Returns a list of instance types satisfying the required count of
+    """Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     if zone is not None:

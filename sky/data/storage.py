@@ -1033,7 +1033,6 @@ class S3Store(AbstractStore):
 
         # Check if the storage is enabled
         if not _is_storage_cloud_enabled(str(clouds.AWS())):
-            return
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     'Storage \'store: s3\' specified, but ' \
