@@ -257,11 +257,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
+                self.upscale_counter = 0
                 return target_num_replicas
         elif target_num_replicas < self.target_num_replicas:
             self.downscale_counter += 1
             self.upscale_counter = 0
             if self.downscale_counter >= self.scale_down_consecutive_periods:
+                self.downscale_counter = 0
                 return target_num_replicas
         return self.target_num_replicas
 
