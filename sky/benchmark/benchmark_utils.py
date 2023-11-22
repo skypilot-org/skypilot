@@ -301,6 +301,11 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     run_end_path = os.path.join(local_dir, _RUN_END)
     end_time = None
     if os.path.exists(run_end_path):
+        # The job has terminated with a zero exit code. See
+        # generate_benchmark_configs() which ensures the 'run' commands write
+        # out end_time remotely on success; and the caller of this func which
+        # downloads all benchmark log files including the end_time file to
+        # local.
         end_time = _read_timestamp(run_end_path)
 
     # Get the status of the benchmarking cluster and job.
@@ -324,25 +329,6 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     logger.debug(f'Cluster {cluster}, cluster_status: {cluster_status}, '
                  f'benchmark_status {benchmark_status}, job_status: '
                  f'{job_status}, start_time {start_time}, end_time {end_time}')
-
-    def _determine_finished_or_terminated(
-        end_time: Optional[float],
-        job_status: Optional[job_lib.JobStatus] = None
-    ) -> Tuple[Optional[float], benchmark_state.BenchmarkStatus]:
-        # The cluster has terminated or stopped, or
-        # the cluster is UP and the job has terminated.
-        if end_time is not None:
-            # The job has terminated with zero exit code.
-            return end_time, benchmark_state.BenchmarkStatus.FINISHED
-        elif job_status == job_lib.JobStatus.SUCCEEDED:
-            # Since we download the benchmark logs before checking the cluster
-            # status, there is a chance that the end timestamp is saved
-            # and the cluster is stopped AFTER we download the logs.
-            # In this case, we consider the current timestamp as the end time.
-            end_time = time.time()
-            return end_time, benchmark_state.BenchmarkStatus.FINISHED
-        else:
-            return end_time, benchmark_state.BenchmarkStatus.TERMINATED
 
     # Update the benchmark status.
     if end_time is not None:
@@ -368,12 +354,11 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
     elif cluster_status == status_lib.ClusterStatus.STOPPED:
         # Candidate cluster is auto-stopped, or user manually stops it at any
-        # time.
+        # time. Also, end_time is None.
 
         # See above: if cluster_status is not UP, job_status is defined as None.
         assert job_status is None, job_status
-        end_time, benchmark_status = _determine_finished_or_terminated(
-            end_time, job_status)
+        benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
     else:
         assert cluster_status == status_lib.ClusterStatus.UP, (
             'ClusterStatus enum should have been handled')
@@ -386,8 +371,18 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                 benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
             else:
                 assert job_status.is_terminal(), '> RUNNING means terminal'
-                end_time, benchmark_status = _determine_finished_or_terminated(
-                    end_time, job_status)
+                # Case: cluster_status UP, job_status.is_terminal()
+                if job_status == job_lib.JobStatus.SUCCEEDED:
+                    # Since we download the benchmark logs before checking the
+                    # cluster status, there is a chance that the end timestamp
+                    # is saved and the cluster is stopped AFTER we download the
+                    # logs.  In this case, we consider the current timestamp as
+                    # the end time.
+                    end_time = time.time()
+                    benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+                else:
+                    benchmark_status = (
+                        benchmark_state.BenchmarkStatus.TERMINATED)
 
     callback_log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
     if callback_log_dirs:
