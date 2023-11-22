@@ -313,8 +313,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                                        target=(1, spot_override)))
             return scaling_options
 
+        # Don't count over-provision here.
         self.target_num_replicas = self._get_desired_num_replicas(
-            num_ready_replicas)
+            num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM)
         logger.info(
             f'Current target number of replicas: {self.target_num_replicas}, '
             f'Upscale counter: {self.upscale_counter}/'
@@ -331,8 +332,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             else:
                 num_on_demand += 1
         logger.info(f'Number of alive spot instances: {num_alive_spot}, '
-                    f'number of ready spot instances: {num_ready_spot}, '
-                    f'number of alive on-demand instances: {num_on_demand}')
+                    f'Number of ready spot instances: {num_ready_spot}, '
+                    f'Number of alive on-demand instances: {num_on_demand}')
 
         scaling_options = []
         replica_ids_to_scale_down: List[int] = []
