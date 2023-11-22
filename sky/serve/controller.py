@@ -23,13 +23,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-class SuppressSuccessGetAccessLogsFilter(logging.Filter):
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        return not ('GET' in message and '200' in message)
-
-
 class SkyServeController:
     """SkyServeController: control everything about replica.
 
