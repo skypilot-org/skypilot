@@ -929,10 +929,7 @@ class GCPTPU(GCPResource):
                 )
                 .execute()
             )
-            if wait_for_operation:
-                result = self.wait_for_operation(create_operation, max_polls=MAX_POLLS)
-            else:
-                result = create_operation
+            time.sleep(3)
 
         except HttpError as e:
             # Catch HttpError for issues during disk creation or attachment
