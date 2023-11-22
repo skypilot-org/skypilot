@@ -646,7 +646,7 @@ class SSHConfigHelper(object):
                     sky_autogen_comment, host_name, ip, username, key_path,
                     proxy_command, port, docker_proxy_command)
 
-        # All workers go to constants.SKY_USER_FILE_PATH/ssh/{cluster_name}
+        # All workers go to {constants.SKY_USER_FILE_PATH}/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
             if line.strip() in host_lines:
                 idx = host_lines.index(line.strip())
