@@ -133,7 +133,8 @@ def get_resource(container_resources: Dict[str, Any],
     rounded_count = math.ceil(res_count)
     if resource_name == 'cpu':
         # For CPU, we set minimum count to 1 because if CPU count is set to 0,
-        # (e.g., when request=0.5), ray will not be able to schedule any tasks.
+        # (e.g. when the user sets --cpu 0.5), ray will not be able to schedule
+        # any tasks.
         return max(1, rounded_count)
     else:
         # For GPU and memory, return the rounded count.
