@@ -246,11 +246,12 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # Edge case: num_replicas is zero.
         requests_per_replica = (num_requests_per_second / num_ready_replicas if
                                 num_ready_replicas else num_requests_per_second)
-        logger.info(f'Requests per replica: {requests_per_replica}')
         target_num_replicas = math.ceil(requests_per_replica /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
+        logger.info(f'Requests per replica: {requests_per_replica}, '
+                    f'Current target number of replicas: {target_num_replicas}')
 
         if target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
@@ -317,7 +318,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.target_num_replicas = self._get_desired_num_replicas(
             num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM)
         logger.info(
-            f'Current target number of replicas: {self.target_num_replicas}, '
+            f'Final target number of replicas: {self.target_num_replicas}, '
             f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
