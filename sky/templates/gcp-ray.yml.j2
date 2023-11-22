@@ -28,6 +28,10 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
+{% if gcp_vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
+  vpc_name: {{gcp_vpc_name}}
+{% endif %}
   # The firewall rule name for customized firewall rules. Only enabled
   # if we have ports requirement.
 {% if firewall_rule is not none %}

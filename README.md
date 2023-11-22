@@ -27,6 +27,7 @@
 
 ----
 :fire: *News* :fire:
+- [Nov, 2023] Example: Using [Axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) to finetune Mistral 7B on the cloud (on-demand and spot): [**example**](./llm/axolotl/)
 - [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a high-quality open LLM, was released! Deploy via SkyPilot on any cloud: [**Mistral docs**](https://docs.mistral.ai/cloud-deployment/skypilot/)
 - [Sep, 2023] Case study: [**Covariant**](https://covariant.ai/) transformed AI development on the cloud using SkyPilot, delivering models 4x faster cost-effectively: [**read the case study**](https://blog.skypilot.co/covariant/)
 - [Aug, 2023] Cookbook: Finetuning Llama 2 in your own cloud environment, privately: [**example**](./llm/vicuna-llama-2/), [**blog post**](https://blog.skypilot.co/finetuning-llama2-operational-guide/)

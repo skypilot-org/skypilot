@@ -73,6 +73,18 @@ def _setup_logger():
     _root_logger.propagate = False
 
 
+def reload_logger():
+    """Reload the logger.
+
+    This is useful when the logging configuration is changed.
+    e.g., the logging level is changed or stdout/stderr is reset.
+    """
+    global _default_handler
+    _root_logger.removeHandler(_default_handler)
+    _default_handler = None
+    _setup_logger()
+
+
 # The logger is initialized when the module is imported.
 # This is thread-safe as the module is only imported once,
 # guaranteed by the Python GIL.

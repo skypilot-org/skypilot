@@ -391,9 +391,13 @@ class SSHCommandRunner:
             resolved_source = pathlib.Path(source).expanduser().resolve()
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
+                #
+                # We shlex.quote() because the path may contain spaces:
+                #   'my dir/.git/info/exclude'
+                # Without quoting rsync fails.
                 rsync_command.append(
                     RSYNC_EXCLUDE_OPTION.format(
-                        str(resolved_source / GIT_EXCLUDE)))
+                        shlex.quote(str(resolved_source / GIT_EXCLUDE))))
 
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(['ssh'])

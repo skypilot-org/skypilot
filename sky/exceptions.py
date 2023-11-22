@@ -173,6 +173,12 @@ class StorageModeError(StorageSpecError):
     pass
 
 
+class StorageExternalDeletionError(StorageBucketGetError):
+    # Error raised when the bucket is attempted to be fetched while it has been
+    # deleted externally.
+    pass
+
+
 class FetchIPError(Exception):
     """Raised when fetching the IP fails."""
 
@@ -250,3 +256,8 @@ class AWSAzFetchingError(Exception):
         self.reason = reason
 
         super().__init__(reason.message)
+
+
+class ServeUserTerminatedError(Exception):
+    """Raised by serve controller when a user tear down the service."""
+    pass
