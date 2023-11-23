@@ -233,9 +233,13 @@ class ReplicaStatusProperty:
         notify the user that something is wrong with the user code / setup.
         """
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
-            return False
+            # sky_launch_status == RUNNING: a scale down happened before
+            # the sky.launch finished.
+            return self.sky_launch_status != ProcessStatus.FAILED
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
+        if self.preempted:
+            return True
         if (auto_restart and self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
             # If the service is up for more than `initial_delay_seconds`,
@@ -253,7 +257,7 @@ class ReplicaStatusProperty:
             return True
         if self.user_app_failed:
             return False
-        if self.preempted:
+        if self.first_ready_time is None:
             return True
         if not self.service_ready_now:
             return False
@@ -663,6 +667,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         # cluster record from the cluster table.
         handle = global_user_state.get_handle_from_cluster_name(
             info.cluster_name)
+        if handle is None:
+            logger.error(f'Cannot find cluster {info.cluster_name} for '
+                         f'replica {info.replica_id} in the cluster table. '
+                         'Skipping preemption handling.')
+            return False
         assert isinstance(handle, backends.CloudVmRayResourceHandle)
         # Pull the actual cluster status from the cloud provider to
         # determine whether the cluster is preempted.
