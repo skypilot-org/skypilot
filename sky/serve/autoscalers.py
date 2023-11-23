@@ -224,6 +224,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.target_qps_per_replica = spec.target_qps_per_replica
         # TODO(tian): Maybe add init_replicas?
         self.target_num_replicas = spec.min_replicas
+        self.initialized = False
 
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
@@ -278,26 +279,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         current_time = time.time()
-        # TODO(tian): Consider non-alive replicas.
-        alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_replicas = len(alive_replica_infos)
-        num_ready_replicas = len([
-            info for info in replica_infos
-            if info.status == serve_state.ReplicaStatus.READY
-        ])
-
-        # Check if cooldown period has passed since the last scaling operation.
-        # Only cooldown if bootstrapping is done.
-        if num_replicas >= self.min_replicas:
-            if current_time - self.last_scale_operation < self.cooldown:
-                logger.info(
-                    f'Current time: {current_time}, '
-                    f'last scale operation: {self.last_scale_operation}, '
-                    f'cooldown: {self.cooldown}')
-                logger.info('Cooldown period has not passed since last scaling '
-                            'operation. Skipping scaling.')
-                return []
-        else:
+        if not self.initialized:
+            self.initialized = True
+            self.last_scale_operation = current_time
             # Bootstrap.
             scaling_options = []
             for _ in range(self.target_num_replicas +
@@ -310,6 +294,21 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=(1, spot_override)))
             return scaling_options
+
+        # TODO(tian): Consider non-alive replicas.
+        alive_replica_infos = [info for info in replica_infos if info.is_alive]
+        num_ready_replicas = len([
+            info for info in replica_infos
+            if info.status == serve_state.ReplicaStatus.READY
+        ])
+
+        # Check if cooldown period has passed since the last scaling operation.
+        elapsed_time_since_last_scale = current_time - self.last_scale_operation
+        if elapsed_time_since_last_scale < self.cooldown:
+            logger.info('Cooldown period has not passed since last scaling '
+                        f'operation ({elapsed_time_since_last_scale}/'
+                        f'{self.cooldown}). Skipping scaling.')
+            return []
 
         # Don't count over-provision here.
         self.target_num_replicas = self._get_desired_num_replicas(
@@ -395,4 +394,6 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             scaling_options.append(
                 AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                    target=replica_ids_to_scale_down))
+        if scaling_options:
+            self.last_scale_operation = current_time
         return scaling_options
