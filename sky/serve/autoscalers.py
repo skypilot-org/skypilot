@@ -279,10 +279,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     ) -> List[AutoscalerDecision]:
         current_time = time.time()
         # TODO(tian): Consider non-alive replicas.
-        alive_replica_infos = [
-            info for info in replica_infos if info.is_alive or
-            info.status == serve_state.ReplicaStatus.NOT_READY
-        ]
+        alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_replicas = len(alive_replica_infos)
         num_ready_replicas = len([
             info for info in replica_infos
@@ -316,7 +313,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
         # Don't count over-provision here.
         self.target_num_replicas = self._get_desired_num_replicas(
-            num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM)
+            max(num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM, 0))
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas}, '
             f'Upscale counter: {self.upscale_counter}/'
