@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -33,19 +33,16 @@ class AutoscalerDecisionOperator(enum.Enum):
 class AutoscalerDecision:
     """Autoscaling decisions.
 
-    |-------------------------------------------------------------------------|
-    | Operator   | TargetType                 | Meaning                       |
-    |------------|----------------------------|-------------------------------|
-    | SCALE_UP   | Tuple[int, Dict[str, Any]] | Num and override to add       |
-    |------------|----------------------------|-------------------------------|
-    | SCALE_DOWN | List[int]                  | List of replica ids to remove |
-    |-------------------------------------------------------------------------|
+    |---------------------------------------------------------------|
+    | Operator   | TargetType       | Meaning                       |
+    |------------|------------------|-------------------------------|
+    | SCALE_UP   | Dict[str, Any]   | Resource override to add      |
+    |------------|------------------|-------------------------------|
+    | SCALE_DOWN | int              | Replica id to remove          |
+    |---------------------------------------------------------------|
     """
-    # TODO(tian): Make one decision only handle one replica. Therefore we could
-    # limit the TargetType to Union[Dict[str, Any], int] that represent override
-    # and replica id respectively. (Probably Optional[Dict[str, Any]])
     operator: AutoscalerDecisionOperator
-    target: Union[Tuple[int, Dict[str, Any]], List[int]]
+    target: Union[Optional[Dict[str, Any]], int]
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -181,7 +178,7 @@ class RequestRateAutoscaler(Autoscaler):
             logger.info(f'Scaling up by {num_replicas_delta} replicas.')
             return [
                 AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                   target=(num_replicas_delta, {}))
+                                   target={}) for _ in range(num_replicas_delta)
             ]
         else:
             num_replicas_to_remove = -num_replicas_delta
@@ -201,7 +198,8 @@ class RequestRateAutoscaler(Autoscaler):
                         f'(id: {replica_ids_to_remove}).')
             return [
                 AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_ids_to_remove)
+                                   target=replica_id)
+                for replica_id in replica_ids_to_remove
             ]
 
 
@@ -224,7 +222,6 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.target_qps_per_replica = spec.target_qps_per_replica
         # TODO(tian): Maybe add init_replicas?
         self.target_num_replicas = spec.min_replicas
-        self.initialized = False
 
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
@@ -278,23 +275,6 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
-        current_time = time.time()
-        if not self.initialized:
-            self.initialized = True
-            self.last_scale_operation = current_time
-            # Bootstrap.
-            scaling_options = []
-            for _ in range(self.target_num_replicas +
-                           _DEFAULT_OVER_PROVISION_NUM):
-                spot_override = self._get_spot_resources_override_dict()
-                zone = self.spot_placer.select()
-                spot_override.update({'zone': zone})
-                logger.info(f'Chosen zone {zone} with {self.spot_placer}')
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                       target=(1, spot_override)))
-            return scaling_options
-
         # TODO(tian): Consider non-alive replicas.
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_ready_replicas = len([
@@ -302,20 +282,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             if info.status == serve_state.ReplicaStatus.READY
         ])
 
-        # Check if cooldown period has passed since the last scaling operation.
-        elapsed_time_since_last_scale = current_time - self.last_scale_operation
-        if elapsed_time_since_last_scale < self.cooldown:
-            logger.info('Cooldown period has not passed since last scaling '
-                        f'operation ({elapsed_time_since_last_scale}/'
-                        f'{self.cooldown}). Skipping scaling.')
-            return []
-
         # Don't count over-provision here.
         self.target_num_replicas = self._get_desired_num_replicas(
             max(num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM, 0))
         logger.info(
-            f'Final target number of replicas: {self.target_num_replicas}, '
-            f'Upscale counter: {self.upscale_counter}/'
+            f'Final target number of replicas: {self.target_num_replicas} '
+            f'({self.target_num_replicas + _DEFAULT_OVER_PROVISION_NUM} with '
+            f'over-provision), Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
@@ -333,67 +306,81 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     f'Number of alive on-demand instances: {num_on_demand}')
 
         scaling_options = []
-        replica_ids_to_scale_down: List[int] = []
+        all_replica_ids_to_scale_down: List[int] = []
 
-        def _add_to_scale_down(
+        def _get_replica_ids_to_scale_down(
             info_filter: Callable[['replica_managers.ReplicaInfo'], bool],
             status_order: List['serve_state.ReplicaStatus'],
             num_limit: int,
-        ) -> None:
+        ) -> List[int]:
+            replica_ids_to_scale_down: List[int] = []
             for target_status in status_order:
                 for info in alive_replica_infos:
                     if info_filter(info) and info.status == target_status:
                         if len(replica_ids_to_scale_down) >= num_limit:
-                            return
+                            return replica_ids_to_scale_down
                         replica_ids_to_scale_down.append(info.replica_id)
             for info in alive_replica_infos:
                 if info_filter(info) and info.status not in status_order:
                     if len(replica_ids_to_scale_down) >= num_limit:
-                        return
+                        return replica_ids_to_scale_down
                     replica_ids_to_scale_down.append(info.replica_id)
+            return replica_ids_to_scale_down
 
         num_to_provision = (self.target_num_replicas +
                             _DEFAULT_OVER_PROVISION_NUM)
+
+        # Scale spot instances.
         if num_alive_spot < num_to_provision:
-            num_on_demand_to_scale_up = (num_to_provision - num_alive_spot -
-                                         num_on_demand)
-            if num_on_demand_to_scale_up > 0:
-                scaling_options.append(
-                    AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=(num_on_demand_to_scale_up,
-                                self._get_on_demand_resources_override_dict())))
-            for _ in range(num_to_provision - num_alive_spot):
+            # Not enough spot instances, scale up.
+            num_spot_to_scale_up = num_to_provision - num_alive_spot
+            for _ in range(num_spot_to_scale_up):
                 spot_override = self._get_spot_resources_override_dict()
                 zone = self.spot_placer.select()
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                       target=(1, spot_override)))
+                                       target=spot_override))
         elif num_alive_spot > num_to_provision:
             # Too many spot instances, scale down.
             num_spot_to_scale_down = num_alive_spot - num_to_provision
-            _add_to_scale_down(
-                info_filter=lambda info: info.is_spot,
-                status_order=serve_state.ReplicaStatus.
-                scale_down_decision_order(),
-                num_limit=num_spot_to_scale_down,
-            )
-        elif num_ready_spot + num_on_demand >= num_to_provision:
+            all_replica_ids_to_scale_down.extend(
+                _get_replica_ids_to_scale_down(
+                    info_filter=lambda info: info.is_spot,
+                    status_order=serve_state.ReplicaStatus.
+                    scale_down_decision_order(),
+                    num_limit=num_spot_to_scale_down,
+                ))
+
+        # OnDemand fallback.
+        if num_ready_spot + num_on_demand < num_to_provision:
+            # Enable OnDemand fallback.
+            num_on_demand_to_scale_up = (num_to_provision - num_ready_spot -
+                                         num_on_demand)
+            for _ in range(num_on_demand_to_scale_up):
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=self._get_on_demand_resources_override_dict()))
+        elif num_ready_spot + num_on_demand > num_to_provision:
             # OnDemand fallback is not needed.
             num_on_demand_to_scale_down = (num_ready_spot + num_on_demand -
                                            num_to_provision)
-            _add_to_scale_down(
-                info_filter=lambda info: not info.is_spot,
-                status_order=serve_state.ReplicaStatus.
-                scale_down_decision_order(),
-                num_limit=num_on_demand_to_scale_down,
-            )
-        if replica_ids_to_scale_down:
+            all_replica_ids_to_scale_down.extend(
+                _get_replica_ids_to_scale_down(
+                    info_filter=lambda info: not info.is_spot,
+                    status_order=serve_state.ReplicaStatus.
+                    scale_down_decision_order(),
+                    num_limit=num_on_demand_to_scale_down,
+                ))
+
+        # TODO(tian): Safety Net.
+
+        for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
                 AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_ids_to_scale_down))
-        if scaling_options:
-            self.last_scale_operation = current_time
+                                   target=replica_id))
+        if not scaling_options:
+            logger.info('No scaling needed.')
         return scaling_options

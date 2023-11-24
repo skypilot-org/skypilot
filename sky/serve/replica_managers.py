@@ -479,16 +479,13 @@ class ReplicaManager:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
 
-    def scale_up(
-        self,
-        n: int,
-        resources_override: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Scale up the service by n replicas."""
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        """Scale up the service by 1 replica with resources_override."""
         raise NotImplementedError
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        """Scale down all replicas in replica_ids."""
+    def scale_down(self, replica_id: int) -> None:
+        """Scale down replica with replica_id."""
         raise NotImplementedError
 
 
@@ -567,14 +564,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
-    def scale_up(
-        self,
-        n: int,
-        resources_override: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        for _ in range(n):
-            self._launch_replica(self._next_replica_id, resources_override)
-            self._next_replica_id += 1
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        self._launch_replica(self._next_replica_id, resources_override)
+        self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
         if replica_id in self._down_process_pool:
@@ -649,9 +642,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        for replica_id in replica_ids:
-            self._terminate_replica(replica_id, sync_down_logs=False)
+    def scale_down(self, replica_id: int) -> None:
+        self._terminate_replica(replica_id, sync_down_logs=False)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
