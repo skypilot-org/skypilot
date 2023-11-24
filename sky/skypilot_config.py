@@ -128,7 +128,7 @@ def overwrite_config_file(config: dict) -> None:
                                  schemas.get_config_schema(),
                                  f'Invalid config YAML: {config!r}',
                                  skip_none=False)
-    common_utils.write_yaml(_loaded_config_path, config)
+    common_utils.dump_yaml(_loaded_config_path, config)
     _dict = config
 
 
