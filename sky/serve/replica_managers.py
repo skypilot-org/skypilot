@@ -304,6 +304,9 @@ class ReplicaStatusProperty:
             if self.user_app_failed:
                 # Failed on user setup/run
                 return serve_state.ReplicaStatus.FAILED
+            if self.sky_launch_status == ProcessStatus.FAILED:
+                # sky.launch failed
+                return serve_state.ReplicaStatus.FAILED
             if self.first_ready_time is None:
                 # readiness probe is not executed yet, but a scale down is
                 # triggered.
@@ -313,9 +316,6 @@ class ReplicaStatusProperty:
                 return serve_state.ReplicaStatus.FAILED
             if not self.service_ready_now:
                 # Max continuous failure exceeded
-                return serve_state.ReplicaStatus.FAILED
-            if self.sky_launch_status == ProcessStatus.FAILED:
-                # sky.launch failed
                 return serve_state.ReplicaStatus.FAILED
             # This indicate it is a scale_down with correct teardown.
             # Should have been cleaned from the replica table.
