@@ -294,7 +294,6 @@ class RayCodeGen:
 
     def add_gang_scheduling_placement_group_and_setup(
         self,
-        cloud: clouds.Cloud,
         num_nodes: int,
         resources_dict: Dict[str, float],
         stable_cluster_internal_ips: List[str],
@@ -313,11 +312,9 @@ class RayCodeGen:
             'add_gang_scheduling_placement_group_and_setup().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
-        self._provider_name = str(cloud).lower()
 
         if envs is None:
             envs = {}
-        envs['SKYPILOT_PROVIDER_NAME'] = self._provider_name
 
         bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
@@ -4833,7 +4830,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
-            handle.launched_resources.cloud,
             1,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
@@ -4901,7 +4897,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
-            handle.launched_resources.cloud,
             num_actual_nodes,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
