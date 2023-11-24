@@ -1021,7 +1021,8 @@ def write_cluster_config(
                 'use_internal_ips': skypilot_config.get_nested(
                     (str(cloud).lower(), 'use_internal_ips'), False),
                 'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': skypilot_config.get_nested((str(cloud).lower(), 'vpc_name'), None),
+                'vpc_name': skypilot_config.get_nested(
+                    (str(cloud).lower(), 'vpc_name'), None),
 
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,

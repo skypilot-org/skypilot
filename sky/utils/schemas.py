@@ -457,6 +457,7 @@ def get_cluster_schema():
         }
     }
 
+
 _NETWORK_CONFIG_SCHEMA = {
     'vpc_name': {
         'oneOf': [{
@@ -489,6 +490,7 @@ _NETWORK_CONFIG_SCHEMA = {
         }]
     },
 }
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
