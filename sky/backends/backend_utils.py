@@ -1016,13 +1016,13 @@ def write_cluster_config(
                 # execution.py::_shared_controller_env_vars).
                 'user': get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
+
+                # Private IPs
                 'use_internal_ips': skypilot_config.get_nested(
                     (str(cloud).lower(), 'use_internal_ips'), False),
                 'ssh_proxy_command': ssh_proxy_command,
+                'vpc_name': skypilot_config.get_nested((str(cloud).lower(), 'vpc_name'), None),
 
-                # AWS only:
-                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                           None),
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
 
@@ -1031,8 +1031,6 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
-                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
-                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
