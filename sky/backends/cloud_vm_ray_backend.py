@@ -201,6 +201,7 @@ class RayCodeGen:
         # For n nodes gang scheduling.
         self._has_gang_scheduling = False
         self._num_nodes = 0
+        self._provider_name = None
 
         self._has_register_run_fn = False
 
@@ -293,6 +294,7 @@ class RayCodeGen:
 
     def add_gang_scheduling_placement_group_and_setup(
         self,
+        cloud: clouds.Cloud,
         num_nodes: int,
         resources_dict: Dict[str, float],
         stable_cluster_internal_ips: List[str],
@@ -311,6 +313,11 @@ class RayCodeGen:
             'add_gang_scheduling_placement_group_and_setup().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
+        self._provider_name = str(cloud).lower()
+
+        if envs is None:
+            envs = {}
+        envs['SKYPILOT_PROVIDER_NAME'] = self._provider_name
 
         bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
@@ -503,11 +510,12 @@ class RayCodeGen:
             f'placement_group_bundle_index={gang_scheduling_id})')
 
         sky_env_vars_dict_str = [
-            textwrap.dedent("""\
-            sky_env_vars_dict = {}
+            textwrap.dedent(f"""\
+            sky_env_vars_dict = {{}}
             sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
+            sky_env_vars_dict['SKYPILOT_PROVIDER_NAME'] = {self._provider_name}
             """)
         ]
 
@@ -2505,10 +2513,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             f'cached ({self.cached_external_ips}), new ({cluster_external_ips})'
         )
 
-        is_cluster_aws = (self.launched_resources is not None and
-                          isinstance(self.launched_resources.cloud, clouds.AWS))
-        if is_cluster_aws and skypilot_config.get_nested(
-                keys=('aws', 'use_internal_ips'), default_value=False):
+        if (self.launched_resources is not None and
+                skypilot_config.get_nested(keys=(str(
+                    self.launched_resources.cloud).lower(), 'use_internal_ips'),
+                                           default_value=False)):
             # Optimization: if we know use_internal_ips is True (currently
             # only exposed for AWS), then our AWS NodeProvider is
             # guaranteed to pick subnets that will not assign public IPs,
@@ -4825,6 +4833,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
+            handle.launched_resources.cloud,
             1,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,
@@ -4892,6 +4901,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id, is_local=is_local)
         codegen.add_gang_scheduling_placement_group_and_setup(
+            handle.launched_resources.cloud,
             num_actual_nodes,
             resources_dict,
             stable_cluster_internal_ips=internal_ips,

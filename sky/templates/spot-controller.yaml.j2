@@ -33,6 +33,7 @@ setup: |
   ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
 
 run: |
+  # Start the controller for the current spot job.
   python -u -m sky.spot.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 

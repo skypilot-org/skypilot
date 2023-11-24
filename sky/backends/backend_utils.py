@@ -44,6 +44,7 @@ from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import cluster_yaml_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -64,7 +65,6 @@ logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
-SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
@@ -1016,15 +1016,13 @@ def write_cluster_config(
                 # execution.py::_shared_controller_env_vars).
                 'user': get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
+                'use_internal_ips': skypilot_config.get_nested(
+                    (str(cloud).lower(), 'use_internal_ips'), False),
+                'ssh_proxy_command': ssh_proxy_command,
 
                 # AWS only:
                 'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
                                                            None),
-                'use_internal_ips': skypilot_config.get_nested(
-                    ('aws', 'use_internal_ips'), False),
-                # Not exactly AWS only, but we only test it's supported on AWS
-                # for now:
-                'ssh_proxy_command': ssh_proxy_command,
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
 
@@ -1057,7 +1055,8 @@ def write_cluster_config(
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
-                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+                'sky_ray_yaml_remote_path':
+                    cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,

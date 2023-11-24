@@ -18,6 +18,7 @@ from sky.data import storage as storage_lib
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.spot import spot_utils
+from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -219,49 +220,7 @@ def skypilot_config_setup(
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)
     if skypilot_config.loaded():
-        # Look up the contents of the already loaded configs via the
-        # 'skypilot_config' module. Don't simply read the on-disk file as
-        # it may have changed since this process started.
-        #
-        # Set any proxy command to None, because the controller would've
-        # been launched behind the proxy, and in general any nodes we
-        # launch may not have or need the proxy setup. (If the controller
-        # needs to launch mew clusters in another region/VPC, the user
-        # should properly set up VPC peering, which will allow the
-        # cross-region/VPC communication. The proxy command is orthogonal
-        # to this scenario.)
-        #
-        # This file will be uploaded to the controller node and will be
-        # used throughout the spot job's / service's recovery attempts
-        # (i.e., if it relaunches due to preemption, we make sure the
-        # same config is used).
-        #
-        # NOTE: suppose that we have a controller in old VPC, then user
-        # changes 'vpc_name' in the config and does a 'spot launch' /
-        # 'serve up'. In general, the old controller may not successfully
-        # launch the job in the new VPC. This happens if the two VPCs don’t
-        # have peering set up. Like other places in the code, we assume
-        # properly setting up networking is user's responsibilities.
-        # TODO(zongheng): consider adding a basic check that checks
-        # controller VPC (or name) == the spot job's / service's VPC
-        # (or name). It may not be a sufficient check (as it's always
-        # possible that peering is not set up), but it may catch some
-        # obvious errors.
-        # TODO(zhwu): hacky. We should only set the proxy command of the
-        # cloud where the controller is launched (currently, only aws user
-        # uses proxy_command).
-        proxy_command_key = ('aws', 'ssh_proxy_command')
-        ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
         config_dict = skypilot_config.to_dict()
-        if isinstance(ssh_proxy_command, str):
-            config_dict = skypilot_config.set_nested(proxy_command_key, None)
-        elif isinstance(ssh_proxy_command, dict):
-            # Instead of removing the key, we set the value to empty string
-            # so that the controller will only try the regions specified by
-            # the keys.
-            ssh_proxy_command = {k: None for k in ssh_proxy_command}
-            config_dict = skypilot_config.set_nested(proxy_command_key,
-                                                     ssh_proxy_command)
 
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
             common_utils.dump_yaml(tmpfile.name, config_dict)
@@ -286,6 +245,55 @@ def skypilot_config_setup(
 
     vars_to_fill['controller_envs'] = controller_envs
     return vars_to_fill, controller_resources_config_copied
+
+
+def setup_proxy_command_on_controller():
+    # Look up the contents of the already loaded configs via the
+    # 'skypilot_config' module. Don't simply read the on-disk file as
+    # it may have changed since this process started.
+    #
+    # Set any proxy command to None, because the controller would've
+    # been launched behind the proxy, and in general any nodes we
+    # launch may not have or need the proxy setup. (If the controller
+    # needs to launch mew clusters in another region/VPC, the user
+    # should properly set up VPC peering, which will allow the
+    # cross-region/VPC communication. The proxy command is orthogonal
+    # to this scenario.)
+    #
+    # This file will be uploaded to the controller node and will be
+    # used throughout the spot job's / service's recovery attempts
+    # (i.e., if it relaunches due to preemption, we make sure the
+    # same config is used).
+    #
+    # NOTE: suppose that we have a controller in old VPC, then user
+    # changes 'vpc_name' in the config and does a 'spot launch' /
+    # 'serve up'. In general, the old controller may not successfully
+    # launch the job in the new VPC. This happens if the two VPCs don’t
+    # have peering set up. Like other places in the code, we assume
+    # properly setting up networking is user's responsibilities.
+    # TODO(zongheng): consider adding a basic check that checks
+    # controller VPC (or name) == the spot job's / service's VPC
+    # (or name). It may not be a sufficient check (as it's always
+    # possible that peering is not set up), but it may catch some
+    # obvious errors.
+    provider_name = cluster_yaml_utils.get_provider_name()
+    if skypilot_config.loaded():
+        # We only set the proxy command of the cloud where the controller is
+        # launched.
+        proxy_command_key = (provider_name, 'ssh_proxy_command')
+        ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
+        config_dict = skypilot_config.to_dict()
+        if isinstance(ssh_proxy_command, str):
+            config_dict = skypilot_config.set_nested(proxy_command_key, None)
+        elif isinstance(ssh_proxy_command, dict):
+            # Instead of removing the key, we set the value to empty string
+            # so that the controller will only try the regions specified by
+            # the keys.
+            ssh_proxy_command = {k: None for k in ssh_proxy_command}
+            config_dict = skypilot_config.set_nested(proxy_command_key,
+                                                     ssh_proxy_command)
+
+        skypilot_config.overwrite_config_file(config_dict)
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

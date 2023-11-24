@@ -523,4 +523,5 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
+    controller_utils.setup_proxy_command_on_controller()
     start(args.job_id, args.dag_yaml, args.retry_until_up)

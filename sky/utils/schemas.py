@@ -557,6 +557,9 @@ def get_config_schema():
                             'type': 'null',
                         }],
                     },
+                    'use_internal_ips': {
+                        'type': 'boolean',
+                    },
                 }
             },
             'kubernetes': {
