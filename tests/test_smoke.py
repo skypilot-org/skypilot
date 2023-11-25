@@ -222,7 +222,6 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   zone=None)
 
     original_resources = sky.Resources(cloud=sky.GCP(),
-                                       region=region.name,
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
 
