@@ -1,23 +1,12 @@
-"""Execution layer: resource provisioner + task launcher.
+"""Execution layer.
 
-Usage:
-
-   >> sky.launch(planned_dag)
-
-Current resource privisioners:
-
-  - Ray autoscaler
-
-Current task launcher:
-
-  - ray exec + each task's commands
+See `Stage` for a Task's life cycle.
 """
 import copy
 import enum
-import getpass
 import os
 import tempfile
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -25,20 +14,17 @@ import colorama
 import sky
 from sky import backends
 from sky import clouds
-from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import skypilot_config
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
-from sky.data import data_utils
-from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -158,12 +144,12 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     return task
 
 
-def _execute(
+def execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
     down: bool = False,
     stream_logs: bool = True,
-    handle: Any = None,
+    handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
     optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
@@ -177,7 +163,8 @@ def _execute(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
-) -> None:
+    _is_launched_by_sky_serve_controller: bool = False,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
     If sky.Task is given or DAG has not been optimized yet, this will call
@@ -193,8 +180,8 @@ def _execute(
         Note that if errors occur during provisioning/data syncing/setting up,
         the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-      handle: Any; if provided, execution will use an existing backend cluster
-        handle instead of provisioning a new one.
+      handle: Optional[backends.ResourceHandle]; if provided, execution will use
+        an existing backend cluster handle instead of provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
       retry_until_up: bool; whether to retry the provisioning until the cluster
@@ -215,6 +202,13 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
+        if dryrun.
     """
     dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -329,9 +323,11 @@ def _execute(
                                            cluster_name=cluster_name,
                                            retry_until_up=retry_until_up)
 
-        if dryrun and handle is None:
+        if handle is None:
+            assert dryrun, ('If not dryrun, handle must be set or '
+                            'Stage.PROVISION must be included in stages.')
             logger.info('Dryrun finished.')
-            return
+            return None, None
 
         if Stage.SYNC_WORKDIR in stages and not dryrun:
             if task.workdir is not None:
@@ -349,6 +345,7 @@ def _execute(
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
+                assert isinstance(handle, backends.CloudVmRayResourceHandle)
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      down=down)
@@ -356,7 +353,10 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run, dryrun=dryrun)
+                job_id = backend.execute(handle,
+                                         task,
+                                         detach_run,
+                                         dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -366,20 +366,26 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        if cluster_name != spot.SPOT_CONTROLLER_NAME:
+        controller = controller_utils.Controllers.from_name(cluster_name)
+        if controller is None and not _is_launched_by_sky_serve_controller:
             # UX: print live clusters to make users aware (to save costs).
             #
             # Don't print if this job is launched by the spot controller,
             # because spot jobs are serverless, there can be many of them, and
             # users tend to continuously monitor spot jobs using `sky spot
-            # status`.
+            # status`. Also don't print if this job is a skyserve controller
+            # job or launched by a skyserve controller job, because the
+            # redirect for this subprocess.run won't success and it will
+            # pollute the controller logs.
             #
             # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run('sky status --no-show-spot-jobs', env=env)
+            subprocess_utils.run(
+                'sky status --no-show-spot-jobs --no-show-services', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
+    return job_id, handle
 
 
 @timeline.event
@@ -401,9 +407,10 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
-) -> None:
+    _is_launched_by_sky_serve_controller: bool = False,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a task.
+    """Launch a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
     (when specified, it is synced to remote cluster).  The task undergoes job
@@ -480,12 +487,19 @@ def launch(
         exceptions.CommandError: any ssh command error.
         exceptions.NoCloudAccessError: if all clouds are disabled.
     Other exceptions may be raised depending on the backend.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
+        if dryrun.
     """
     entrypoint = task
-    backend_utils.check_cluster_name_not_reserved(cluster_name,
-                                                  operation_str='sky.launch')
+    controller_utils.check_cluster_name_not_controller(
+        cluster_name, operation_str='sky.launch')
 
-    _execute(
+    return execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
@@ -501,6 +515,8 @@ def launch(
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         _is_launched_by_spot_controller=_is_launched_by_spot_controller,
+        _is_launched_by_sky_serve_controller=
+        _is_launched_by_sky_serve_controller,
     )
 
 
@@ -513,7 +529,7 @@ def exec(  # pylint: disable=redefined-builtin
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     detach_run: bool = False,
-) -> None:
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task on an existing cluster.
 
@@ -557,7 +573,14 @@ def exec(  # pylint: disable=redefined-builtin
         ValueError: if the specified cluster does not exist or is not in UP
             status.
         sky.exceptions.NotSupportedError: if the specified cluster is a
-            reserved cluster that does not support this operation.
+            controller that does not support this operation.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
+        if dryrun.
     """
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):
@@ -565,26 +588,28 @@ def exec(  # pylint: disable=redefined-builtin
             f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
             'deprecated. Pass sky.Task instead.'
             f'{colorama.Style.RESET_ALL}')
-    backend_utils.check_cluster_name_not_reserved(cluster_name,
-                                                  operation_str='sky.exec')
+    controller_utils.check_cluster_name_not_controller(cluster_name,
+                                                       operation_str='sky.exec')
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='executing tasks',
         check_cloud_vm_ray_backend=False,
         dryrun=dryrun)
-    _execute(entrypoint=entrypoint,
-             dryrun=dryrun,
-             down=down,
-             stream_logs=stream_logs,
-             handle=handle,
-             backend=backend,
-             stages=[
-                 Stage.SYNC_WORKDIR,
-                 Stage.EXEC,
-             ],
-             cluster_name=cluster_name,
-             detach_run=detach_run)
+    return execute(
+        entrypoint=entrypoint,
+        dryrun=dryrun,
+        down=down,
+        stream_logs=stream_logs,
+        handle=handle,
+        backend=backend,
+        stages=[
+            Stage.SYNC_WORKDIR,
+            Stage.EXEC,
+        ],
+        cluster_name=cluster_name,
+        detach_run=detach_run,
+    )
 
 
 @usage_lib.entrypoint
@@ -629,109 +654,45 @@ def spot_launch(
                 'generated) .')
         task_names.add(task_.name)
 
-    dag_utils.fill_default_spot_config_in_dag(dag)
+    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
 
     for task_ in dag.tasks:
-        _maybe_translate_local_file_mounts_and_sync_up(task_)
+        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+            task_, path='spot')
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
                                      mode='w') as f:
         dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller_name = spot.SPOT_CONTROLLER_NAME
-        vars_to_fill = {
-            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-            'user_yaml_path': f.name,
-            'user_config_path': None,
-            'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task.name>-<spot job ID>
-            'dag_name': dag.name,
-            'uuid': dag_uuid,
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
-            'is_dev': env_options.Options.IS_DEVELOPER.get(),
-            'is_debug': env_options.Options.SHOW_DEBUG_INFO.get(),
-            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-            'logging_user_hash': common_utils.get_user_hash(),
-            'retry_until_up': retry_until_up,
-            # Should not use $USER here, as that env var can be empty when
-            # running in a container.
-            'user': getpass.getuser(),
-        }
-        controller_resources_config = copy.copy(
-            spot.constants.CONTROLLER_RESOURCES)
-        if skypilot_config.loaded():
-            # Look up the contents of the already loaded configs via the
-            # 'skypilot_config' module. Don't simply read the on-disk file as
-            # it may have changed since this process started.
-            #
-            # Set any proxy command to None, because the controller would've
-            # been launched behind the proxy, and in general any nodes we
-            # launch may not have or need the proxy setup. (If the controller
-            # needs to launch spot clusters in another region/VPC, the user
-            # should properly set up VPC peering, which will allow the
-            # cross-region/VPC communication. The proxy command is orthogonal
-            # to this scenario.)
-            #
-            # This file will be uploaded to the controller node and will be
-            # used throughout the spot job's recovery attempts (i.e., if it
-            # relaunches due to preemption, we make sure the same config is
-            # used).
-            #
-            # NOTE: suppose that we have a controller in old VPC, then user
-            # changes 'vpc_name' in the config and does a 'spot launch'. In
-            # general, the old controller may not successfully launch the job
-            # in the new VPC. This happens if the two VPCs don’t have peering
-            # set up. Like other places in the code, we assume properly setting
-            # up networking is user's responsibilities.
-            # TODO(zongheng): consider adding a basic check that checks
-            # controller VPC (or name) == the spot job's VPC (or name). It may
-            # not be a sufficient check (as it's always possible that peering
-            # is not set up), but it may catch some obvious errors.
-            # TODO(zhwu): hacky. We should only set the proxy command of the
-            # cloud where the controller is launched (currently, only aws user
-            # uses proxy_command).
-            proxy_command_key = ('aws', 'ssh_proxy_command')
-            ssh_proxy_command = skypilot_config.get_nested(
-                proxy_command_key, None)
-            config_dict = skypilot_config.to_dict()
-            if isinstance(ssh_proxy_command, str):
-                config_dict = skypilot_config.set_nested(
-                    proxy_command_key, None)
-            elif isinstance(ssh_proxy_command, dict):
-                # Instead of removing the key, we set the value to empty string
-                # so that the controller will only try the regions specified by
-                # the keys.
-                ssh_proxy_command = {k: None for k in ssh_proxy_command}
-                config_dict = skypilot_config.set_nested(
-                    proxy_command_key, ssh_proxy_command)
-
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
-                common_utils.dump_yaml(tmpfile.name, config_dict)
-                vars_to_fill.update({
-                    'user_config_path': tmpfile.name,
-                    'env_var_skypilot_config':
-                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
-                })
-
-            # Override the controller resources with the ones specified in the
-            # config.
-            custom_controller_resources_config = skypilot_config.get_nested(
-                ('spot', 'controller', 'resources'), None)
-            if custom_controller_resources_config is not None:
-                controller_resources_config.update(
-                    custom_controller_resources_config)
+        prefix = spot.SPOT_TASK_YAML_PREFIX
+        remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
+        remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
+        extra_vars, controller_resources_config = (
+            controller_utils.skypilot_config_setup(
+                controller_type='spot',
+                controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
+                remote_user_config_path=remote_user_config_path))
         try:
             controller_resources = sky.Resources.from_yaml_config(
                 controller_resources_config)
         except ValueError as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Spot controller resources is not valid, please check '
-                    '~/.sky/config.yaml file and make sure '
-                    'spot.controller.resources is a valid resources spec. '
-                    'Details:\n'
-                    f'  {common_utils.format_exception(e, use_bracket=True)}'
-                ) from e
+                    controller_utils.CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.
+                    format(controller_type='spot',
+                           err=common_utils.format_exception(
+                               e, use_bracket=True))) from e
+        vars_to_fill = {
+            'remote_user_yaml_path': remote_user_yaml_path,
+            'user_yaml_path': f.name,
+            'spot_controller': controller_name,
+            # Note: actual spot cluster name will be <task.name>-<spot job ID>
+            'dag_name': dag.name,
+            'google_sdk_installation_commands':
+                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
+            'retry_until_up': retry_until_up,
+            **extra_vars,
+        }
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
                                  f'{name}-{dag_uuid}.yaml')
@@ -755,182 +716,12 @@ def spot_launch(
               f'Launching managed spot job {dag.name!r} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
-        _execute(
+        execute(
             entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
-            idle_minutes_to_autostop=spot.
-            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            idle_minutes_to_autostop=constants.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
-
-
-def _maybe_translate_local_file_mounts_and_sync_up(task: task_lib.Task):
-    """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
-
-    Eagerly syncing up local->Storage ensures Storage->VM would work at task
-    launch time.
-
-    If there are no local source paths to be translated, this function would
-    still sync up any storage mounts with local source paths (which do not
-    undergo translation).
-    """
-    # ================================================================
-    # Translate the workdir and local file mounts to cloud file mounts.
-    # ================================================================
-    run_id = common_utils.get_usage_run_id()[:8]
-    original_file_mounts = task.file_mounts if task.file_mounts else {}
-    original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
-
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts is None:
-        copy_mounts = {}
-
-    has_local_source_paths_file_mounts = bool(copy_mounts)
-    has_local_source_paths_workdir = task.workdir is not None
-
-    msg = None
-    if has_local_source_paths_workdir and has_local_source_paths_file_mounts:
-        msg = 'workdir and file_mounts with local source paths'
-    elif has_local_source_paths_file_mounts:
-        msg = 'file_mounts with local source paths'
-    elif has_local_source_paths_workdir:
-        msg = 'workdir'
-    if msg:
-        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
-                    f'Storage...{colorama.Style.RESET_ALL}')
-
-    # Step 1: Translate the workdir to SkyPilot storage.
-    new_storage_mounts = {}
-    if task.workdir is not None:
-        bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
-            username=getpass.getuser(), id=run_id)
-        workdir = task.workdir
-        task.workdir = None
-        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
-                constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
-            raise ValueError(
-                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
-                'workdir and file_mounts contains it as the target.')
-        new_storage_mounts[
-            constants.
-            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-            })
-        # Check of the existence of the workdir in file_mounts is done in
-        # the task construction.
-        logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
-                    f'{bucket_name!r}.')
-
-    # Step 2: Translate the local file mounts with folder in src to SkyPilot
-    # storage.
-    # TODO(zhwu): Optimize this by:
-    # 1. Use the same bucket for all the mounts.
-    # 2. When the src is the same, use the same bucket.
-    copy_mounts_with_file_in_src = {}
-    for i, (dst, src) in enumerate(copy_mounts.items()):
-        assert task.file_mounts is not None
-        task.file_mounts.pop(dst)
-        if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
-            copy_mounts_with_file_in_src[dst] = src
-            continue
-        bucket_name = spot.constants.SPOT_FM_BUCKET_NAME.format(
-            username=getpass.getuser(),
-            id=f'{run_id}-{i}',
-        )
-        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
-            'name': bucket_name,
-            'source': src,
-            'persistent': False,
-            'mode': 'COPY',
-        })
-        logger.info(
-            f'Folder in local file mount {src!r} will be synced to SkyPilot '
-            f'storage {bucket_name}.')
-
-    # Step 3: Translate local file mounts with file in src to SkyPilot storage.
-    # Hard link the files in src to a temporary directory, and upload folder.
-    local_fm_path = os.path.join(
-        tempfile.gettempdir(),
-        spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
-    os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
-        username=getpass.getuser(), id=run_id)
-    if copy_mounts_with_file_in_src:
-        src_to_file_id = {}
-        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-            src_to_file_id[src] = i
-            os.link(os.path.abspath(os.path.expanduser(src)),
-                    os.path.join(local_fm_path, f'file-{i}'))
-
-        new_storage_mounts[
-            spot.constants.
-            SPOT_FM_REMOTE_TMP_DIR] = storage_lib.Storage.from_yaml_config({
-                'name': file_bucket_name,
-                'source': local_fm_path,
-                'persistent': False,
-                'mode': 'MOUNT',
-            })
-        if spot.constants.SPOT_FM_REMOTE_TMP_DIR in original_storage_mounts:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Failed to translate file mounts, due to the default '
-                    f'destination {spot.constants.SPOT_FM_REMOTE_TMP_DIR} '
-                    'being taken.')
-        sources = list(src_to_file_id.keys())
-        sources_str = '\n\t'.join(sources)
-        logger.info('Source files in file_mounts will be synced to '
-                    f'cloud storage {file_bucket_name}:'
-                    f'\n\t{sources_str}')
-    task.update_storage_mounts(new_storage_mounts)
-
-    # Step 4: Upload storage from sources
-    # Upload the local source to a bucket. The task will not be executed
-    # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote spot controller.
-    if task.storage_mounts:
-        # There may be existing (non-translated) storage mounts, so log this
-        # whenever task.storage_mounts is non-empty.
-        logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
-    task.sync_storage_mounts()
-
-    # Step 5: Add the file download into the file mounts, such as
-    #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
-    new_file_mounts = {}
-    for dst, src in copy_mounts_with_file_in_src.items():
-        storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
-        store_type = list(storage.stores.keys())[0]
-        store_prefix = storage_lib.get_store_prefix(store_type)
-        bucket_url = store_prefix + file_bucket_name
-        file_id = src_to_file_id[src]
-        new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
-    task.update_file_mounts(new_file_mounts)
-
-    # Step 6: Replace the source field that is local path in all storage_mounts
-    # with bucket URI and remove the name field.
-    for storage_obj in task.storage_mounts.values():
-        if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
-            # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the storage mount can work on the spot
-            # controller.
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            if store_type == storage_lib.StoreType.S3:
-                storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == storage_lib.StoreType.GCS:
-                storage_obj.source = f'gs://{storage_obj.name}'
-            elif store_type == storage_lib.StoreType.R2:
-                storage_obj.source = f'r2://{storage_obj.name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'Unsupported store type: {store_type}')
-            storage_obj.force_delete = True

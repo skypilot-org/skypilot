@@ -17,7 +17,6 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -37,7 +36,8 @@ logger = sky_logging.init_logger(__name__)
 
 # Add user hash so that two users don't have the same controller VM on
 # shared-account clouds such as GCP.
-SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
+SPOT_CONTROLLER_NAME: str = (
+    f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -768,68 +768,3 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
         return None
     with cache_file.open('r') as f:
         return json.load(f)
-
-
-def is_spot_controller_up(
-    stopped_message: str,
-    non_existent_message: str = 'No managed spot jobs are found.',
-) -> Tuple[Optional[status_lib.ClusterStatus],
-           Optional['backends.CloudVmRayResourceHandle']]:
-    """Check if the spot controller is up.
-
-    It can be used to check the actual controller status (since the autostop is
-    set for the controller) before the spot commands interact with the
-    controller.
-
-    Args:
-        stopped_message: Message to print if the controller is STOPPED.
-        non_existent_message: Message to show if the controller does not exist.
-
-    Returns:
-        controller_status: The status of the spot controller. If it fails during
-          refreshing the status, it will be the cached status. None if the
-          controller does not exist.
-        handle: The ResourceHandle of the spot controller. None if the
-          controller is not UP or does not exist.
-
-    Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
-          the same as the user who created the cluster.
-        exceptions.CloudUserIdentityError: if we fail to get the current user
-          identity.
-    """
-    try:
-        # Set force_refresh_statuses=None to make sure the refresh only happens
-        # when the controller is INIT/UP (triggered in these statuses as the
-        # autostop is always set for spot controller). This optimization avoids
-        # unnecessary costly refresh when the controller is already stopped.
-        # This optimization is based on the assumption that the user will not
-        # start the controller manually from the cloud console.
-        controller_status, handle = backend_utils.refresh_cluster_status_handle(
-            SPOT_CONTROLLER_NAME, force_refresh_statuses=None)
-    except exceptions.ClusterStatusFetchingError as e:
-        # We do not catch the exceptions related to the cluster owner identity
-        # mismatch, please refer to the comment in
-        # `backend_utils.check_cluster_available`.
-        logger.warning(
-            f'Failed to get the status of the spot controller. '
-            'It is not fatal, but spot commands/calls may hang or return stale '
-            'information, when the controller is not up.\n'
-            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
-        record = global_user_state.get_cluster_from_name(SPOT_CONTROLLER_NAME)
-        controller_status, handle = None, None
-        if record is not None:
-            controller_status, handle = record['status'], record['handle']
-
-    if controller_status is None:
-        sky_logging.print(non_existent_message)
-    elif controller_status != status_lib.ClusterStatus.UP:
-        msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == status_lib.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == status_lib.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        sky_logging.print(msg)
-        handle = None
-    return controller_status, handle

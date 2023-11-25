@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import azure
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -64,10 +65,17 @@ def open_ports(
                     destination_address_prefix='*',
                     destination_port_ranges=ports,
                 ))
-            update_network_security_groups(resource_group, nsg.name, nsg)
+            poller = update_network_security_groups(resource_group, nsg.name,
+                                                    nsg)
+            poller.wait()
+            if poller.status() != 'Succeeded':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Failed to open ports {ports} in NSG '
+                                     f'{nsg.name}: {poller.status()}')
         except azure.http_error_exception() as e:
-            logger.warning(
-                f'Failed to open ports {ports} in NSG {nsg.name}: {e}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to open ports {ports} in NSG {nsg.name}.') from e
 
 
 def cleanup_ports(

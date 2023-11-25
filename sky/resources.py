@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import functools
+import textwrap
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
@@ -10,11 +11,12 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.provision import docker_utils
 from sky.skylet import constants
-from sky.skylet.providers import command_runner
 from sky.utils import accelerator_registry
+from sky.utils import common_utils
+from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import tpu_utils
@@ -61,7 +63,7 @@ class Resources:
         disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         # Internal use only.
-        _docker_login_config: Optional[command_runner.DockerLoginConfig] = None,
+        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
         _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.
@@ -134,7 +136,7 @@ class Resources:
         self._cloud = cloud
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
-        self._set_region_zone(region, zone)
+        self._validate_and_set_region_zone(region, zone)
 
         self._instance_type = instance_type
 
@@ -254,7 +256,7 @@ class Resources:
             if None in self.image_id:
                 image_id = f', image_id={self.image_id[None]}'
             else:
-                image_id = f', image_id={self.image_id!r}'
+                image_id = f', image_id={self.image_id}'
 
         disk_tier = ''
         if self.disk_tier is not None:
@@ -290,6 +292,21 @@ class Resources:
             cloud_str = f'{self.cloud}'
 
         return f'{cloud_str}({hardware_str})'
+
+    @property
+    def repr_with_region_zone(self) -> str:
+        region_str = ''
+        if self.region is not None:
+            region_str = f', region={self.region}'
+        zone_str = ''
+        if self.zone is not None:
+            zone_str = f', zone={self.zone}'
+        repr_str = str(self)
+        if repr_str.endswith(')'):
+            repr_str = repr_str[:-1] + f'{region_str}{zone_str})'
+        else:
+            repr_str += f'{region_str}{zone_str}'
+        return repr_str
 
     @property
     def cloud(self):
@@ -522,22 +539,62 @@ class Resources:
         return self.cloud is not None and self._instance_type is not None
 
     def need_cleanup_after_preemption(self) -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
+        """Returns whether a spot resource needs cleanup after preemption."""
         assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption(self)
 
-    def _set_region_zone(self, region: Optional[str],
-                         zone: Optional[str]) -> None:
+    def _validate_and_set_region_zone(self, region: Optional[str],
+                                      zone: Optional[str]) -> None:
         if region is None and zone is None:
             return
 
         if self._cloud is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cloud must be specified when region/zone are specified.')
+            # Try to infer the cloud from region/zone, if unique. If 0 or >1
+            # cloud corresponds to region/zone, errors out.
+            valid_clouds = []
+            enabled_clouds = global_user_state.get_enabled_clouds()
+            cloud_to_errors = {}
+            for cloud in enabled_clouds:
+                try:
+                    cloud.validate_region_zone(region, zone)
+                except ValueError as e:
+                    cloud_to_errors[repr(cloud)] = e
+                    continue
+                valid_clouds.append(cloud)
 
-        # Validate whether region and zone exist in the catalog, and set the
-        # region if zone is specified.
+            if len(valid_clouds) == 0:
+                if len(enabled_clouds) == 1:
+                    cloud_str = f'for cloud {enabled_clouds[0]}'
+                else:
+                    cloud_str = f'for any cloud among {enabled_clouds}'
+                with ux_utils.print_exception_no_traceback():
+                    if len(cloud_to_errors) == 1:
+                        # UX: if 1 cloud, don't print a table.
+                        hint = list(cloud_to_errors.items())[0][-1]
+                    else:
+                        table = log_utils.create_table(['Cloud', 'Hint'])
+                        table.add_row(['-----', '----'])
+                        for cloud, error in cloud_to_errors.items():
+                            reason_str = '\n'.join(textwrap.wrap(
+                                str(error), 80))
+                            table.add_row([str(cloud), reason_str])
+                        hint = table.get_string()
+                    raise ValueError(
+                        f'Invalid (region {region!r}, zone {zone!r}) '
+                        f'{cloud_str}. Details:\n{hint}')
+            elif len(valid_clouds) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot infer cloud from (region {region!r}, zone '
+                        f'{zone!r}). Multiple enabled clouds have region/zone '
+                        f'of the same names: {valid_clouds}. '
+                        f'To fix: explicitly specify `cloud`.')
+            logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
+                         f'inferred from region {region!r} and zone {zone!r}')
+            self._cloud = valid_clouds[0]
+
+        # Validate if region and zone exist in the catalog, and set the region
+        # if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
@@ -826,6 +883,18 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_accelerators_str(self) -> str:
+        accelerators = self.accelerators
+        if accelerators is None:
+            accelerators = '-'
+        elif isinstance(accelerators, dict) and len(accelerators) == 1:
+            accelerators, count = list(accelerators.items())[0]
+            accelerators = f'{accelerators}:{count}'
+        return accelerators
+
+    def get_spot_str(self) -> str:
+        return '[Spot]' if self.use_spot else ''
+
     def make_deploy_variables(
             self, cluster_name_on_cloud: str, region: clouds.Region,
             zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
@@ -1052,8 +1121,8 @@ class Resources:
         if config is None:
             return Resources()
 
-        backend_utils.validate_schema(config, schemas.get_resources_schema(),
-                                      'Invalid resources YAML: ')
+        common_utils.validate_schema(config, schemas.get_resources_schema(),
+                                     'Invalid resources YAML: ')
 
         resources_fields = {}
         resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
@@ -1107,8 +1176,8 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-        config['spot_recovery'] = self.spot_recovery
-        config['disk_size'] = self.disk_size
+            add_if_not_none('spot_recovery', self.spot_recovery)
+        add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)

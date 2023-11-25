@@ -5,6 +5,8 @@ import logging
 import sys
 import threading
 
+import colorama
+
 from sky.utils import env_options
 from sky.utils import rich_utils
 
@@ -18,14 +20,17 @@ _DATE_FORMAT = '%m-%d %H:%M:%S'
 class NewLineFormatter(logging.Formatter):
     """Adds logging prefix to newlines to align multi-line messages."""
 
-    def __init__(self, fmt, datefmt=None):
+    def __init__(self, fmt, datefmt=None, dim=False):
         logging.Formatter.__init__(self, fmt, datefmt)
+        self.dim = dim
 
     def format(self, record):
         msg = logging.Formatter.format(self, record)
         if record.message != '':
-            parts = msg.split(record.message)
+            parts = msg.partition(record.message)
             msg = msg.replace('\n', '\r\n' + parts[0])
+            if self.dim:
+                msg = colorama.Style.DIM + msg + colorama.Style.RESET_ALL
         return msg
 
 
@@ -39,6 +44,9 @@ class RichSafeStreamHandler(logging.StreamHandler):
 _root_logger = logging.getLogger('sky')
 _default_handler = None
 _logging_config = threading.local()
+
+FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
+DIM_FORMATTER = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT, dim=True)
 
 # All code inside the library should use sky_logging.print()
 # rather than print().
@@ -59,11 +67,22 @@ def _setup_logger():
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
-    _default_handler.setFormatter(fmt)
+    _default_handler.setFormatter(FORMATTER)
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
+
+
+def reload_logger():
+    """Reload the logger.
+
+    This is useful when the logging configuration is changed.
+    e.g., the logging level is changed or stdout/stderr is reset.
+    """
+    global _default_handler
+    _root_logger.removeHandler(_default_handler)
+    _default_handler = None
+    _setup_logger()
 
 
 # The logger is initialized when the module is imported.

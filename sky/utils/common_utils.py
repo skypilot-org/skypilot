@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import difflib
 import functools
 import getpass
 import hashlib
@@ -16,10 +17,13 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
 import colorama
+import jsonschema
 import yaml
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import ux_utils
+from sky.utils import validator
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -392,7 +396,7 @@ def decode_payload(payload_str: str) -> Any:
     return payload
 
 
-def class_fullname(cls):
+def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
@@ -406,10 +410,13 @@ def class_fullname(cls):
     Returns:
         The full name of the class.
     """
+    module_name = getattr(cls, '__module__', '')
+    if not module_name or (module_name == 'builtins' and skip_builtins):
+        return cls.__name__
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Union[Exception, SystemExit],
+def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
                      use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
@@ -486,3 +493,57 @@ def format_float(num: Union[float, int], precision: int = 1) -> str:
     if isinstance(num, int):
         return str(num)
     return '{:.0f}'.format(num) if num.is_integer() else f'{num:.{precision}f}'
+
+
+def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
+    """Validates an object against a given JSON schema.
+
+    Args:
+        obj: The object to validate.
+        schema: The JSON schema against which to validate the object.
+        err_msg_prefix: The string to prepend to the error message if
+          validation fails.
+        skip_none: If True, removes fields with value None from the object
+          before validation. This is useful for objects that will never contain
+          None because yaml.safe_load() loads empty fields as None.
+
+    Raises:
+        ValueError: if the object does not match the schema.
+    """
+    if skip_none:
+        obj = {k: v for k, v in obj.items() if v is not None}
+    err_msg = None
+    try:
+        validator.SchemaValidator(schema).validate(obj)
+    except jsonschema.ValidationError as e:
+        if e.validator == 'additionalProperties':
+            if tuple(e.schema_path) == ('properties', 'envs',
+                                        'additionalProperties'):
+                # Hack. Here the error is Task.envs having some invalid keys. So
+                # we should not print "unsupported field".
+                #
+                # This will print something like:
+                # 'hello world' does not match any of the regexes: <regex>
+                err_msg = (err_msg_prefix +
+                           'The `envs` field contains invalid keys:\n' +
+                           e.message)
+            else:
+                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                known_fields = set(e.schema.get('properties', {}).keys())
+                for field in e.instance:
+                    if field not in known_fields:
+                        most_similar_field = difflib.get_close_matches(
+                            field, known_fields, 1)
+                        if most_similar_field:
+                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                                        f'{most_similar_field[0]!r}?')
+                        else:
+                            err_msg += f'\nFound unsupported field {field!r}.'
+        else:
+            # Example e.json_path value: '$.resources'
+            err_msg = (err_msg_prefix + e.message +
+                       f'. Check problematic field(s): {e.json_path}')
+
+    if err_msg:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(err_msg)

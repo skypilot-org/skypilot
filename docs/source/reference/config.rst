@@ -57,7 +57,7 @@ Available fields and semantics:
     # with this name (provisioner automatically looks for such regions).
     # Regions without a VPC with this name will not be used to launch nodes.
     #
-    # Default: None (use the default VPC in each region).
+    # Default: null (use the default VPC in each region).
     vpc_name: skypilot-vpc
 
     # Should instances be assigned private IPs only? (optional)
@@ -88,7 +88,7 @@ Available fields and semantics:
     # and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
     # since they are behind the proxy / may not have such a proxy set up.)
     #
-    # Optional; default: None.
+    # Optional; default: null.
     ### Format 1 ###
     # A string; the same proxy command is used for all regions.
     ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
@@ -103,6 +103,24 @@ Available fields and semantics:
   # Advanced GCP configurations (optional).
   # Apply to all new instances but not existing ones.
   gcp:
+    # VPC to use (optional).
+    #
+    # Default: null, which implies the following behavior. First, all existing
+    # VPCs in the project are checked against the minimal recommended firewall
+    # rules for SkyPilot to function. If any VPC satisfies these rules, it is
+    # used. Otherwise, a new VPC named 'skypilot-vpc' is automatically created
+    # with the minimal recommended firewall rules and will be used.
+    #
+    # If this field is set, SkyPilot will use the VPC with this name. Useful for
+    # when users want to manually set up a VPC and precisely control its
+    # firewall rules. If no region restrictions are given, SkyPilot only
+    # provisions in regions for which a subnet of this VPC exists. Errors are
+    # thrown if VPC with this name is not found. The VPC does not get modified
+    # in any way, except when opening ports (e.g., via `resources.ports`) in
+    # which case new firewall rules permitting public traffic to those ports
+    # will be added.
+    vpc_name: skypilot-vpc
+
     # Reserved capacity (optional).
     #
     # The specific reservation to be considered when provisioning clusters on GCP.
@@ -113,3 +131,42 @@ Available fields and semantics:
       # Only one element is allowed in this list, as GCP disallows multiple
       # specific_reservations in a single request.
       - projects/my-project/reservations/my-reservation
+
+  # Advanced Kubernetes configurations (optional).
+  kubernetes:
+    # The networking mode for accessing SSH jump pod (optional).
+    #
+    # This must be either: 'nodeport' or 'portforward'. If not specified,
+    # defaults to 'portforward'.
+    #
+    # nodeport: Exposes the jump pod SSH service on a static port number on each
+    # Node, allowing external access to using <NodeIP>:<NodePort>. Using this
+    # mode requires opening multiple ports on nodes in the Kubernetes cluster.
+    #
+    # portforward: Uses `kubectl port-forward` to create a tunnel and directly
+    # access the jump pod SSH service in the Kubernetes cluster. Does not
+    # require opening ports the cluster nodes and is more secure. 'portforward'
+    # is used as default if 'networking' is not specified.
+    networking: portforward
+
+  # Advanced OCI configurations (optional).
+  oci:
+    # A dict mapping region names to region-specific configurations, or
+    # `default` for the default configuration.
+    default:
+      # The OCID of the profile to use for launching instances (optional).
+      oci_config_profile: DEFAULT
+      # The OCID of the compartment to use for launching instances (optional).
+      compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
+      # The image tag to use for launching general instances (optional).
+      image_tag_general: skypilot:cpu-ubuntu-2004
+      # The image tag to use for launching GPU instances (optional).
+      image_tag_gpu: skypilot:gpu-ubuntu-2004
+
+    ap-seoul-1:
+      # The OCID of the subnet to use for instances (optional).
+      vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
+
+    us-ashburn-1:
+      vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
+

@@ -134,37 +134,47 @@ class Azure(clouds.Cloud):
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
+        # TODO(tian): images for Azure is not well organized. We should refactor
+        # it to images.csv like AWS.
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
-        # nvidia-driver: 495.29.05, cuda: 11.5
-
-        # The latest image 2022.09.14/2022.08.11/22.06.10/22.05.11/
-        # 22.04.27/22.04.05 has even older nvidia driver 470.57.02,
-        # cuda: 11.4
+        # nvidia-driver: 535.54.03, cuda: 12.2
+        # see: https://github.com/Azure/azhpc-images/releases/tag/ubuntu-hpc-20230803
+        # All A100 instances is of gen2, so it will always use
+        # the latest ubuntu-hpc:2204 image.
         image_config = {
             'image_publisher': 'microsoft-dsvm',
-            'image_offer': 'ubuntu-2004',
-            'image_sku': '2004-gen2',
-            'image_version': '21.11.04'
+            'image_offer': 'ubuntu-hpc',
+            'image_sku': '2204',
+            'image_version': '22.04.2023080201'
         }
 
-        # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
-        # due to an NVIDIA driver issue.
+        # ubuntu-2004 v21.08.30, K80 requires image with old NVIDIA driver version
         acc = self.get_accelerators_from_instance_type(instance_type)
         if acc is not None:
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                image_config['image_version'] = '21.08.30'
+                image_config = {
+                    'image_publisher': 'microsoft-dsvm',
+                    'image_offer': 'ubuntu-2004',
+                    'image_sku': '2004-gen2',
+                    'image_version': '21.08.30'
+                }
 
-        # ubuntu-2004 does not work on A100
-        if instance_type in [
-                'Standard_ND96asr_v4', 'Standard_ND96amsr_A100_v4'
-        ]:
-            image_config['image_offer'] = 'ubuntu-hpc'
-            image_config['image_sku'] = '2004'
-            image_config['image_version'] = '20.04.2021120101'
+        # ubuntu-2004 v21.11.04, the previous image we used in the past for
+        # V1 HyperV instance before we change default image to ubuntu-hpc.
+        # In Azure, all instances with K80 (Standard_NC series), some
+        # instances with M60 (Standard_NV series) and some cpu instances
+        # (Basic_A, Standard_D, ...) are V1 instance. For these instances,
+        # we use the previous image.
         if gen_version == 'V1':
-            image_config['image_sku'] = '2004'
+            image_config = {
+                'image_publisher': 'microsoft-dsvm',
+                'image_offer': 'ubuntu-2004',
+                'image_sku': '2004',
+                'image_version': '21.11.04'
+            }
+
         return image_config
 
     @classmethod
@@ -251,13 +261,15 @@ class Azure(clouds.Cloud):
         # This script will modify /etc/ssh/sshd_config and add a bash script
         # into .bashrc. The bash script will restart sshd if it has not been
         # restarted, identified by a file /tmp/__restarted is existing.
+        # Also, add default user to docker group.
         # pylint: disable=line-too-long
         cloud_init_setup_commands = base64.b64encode(
             textwrap.dedent("""\
             #cloud-config
             runcmd:
               - sed -i 's/#Banner none/Banner none/' /etc/ssh/sshd_config
-              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/azureuser/.bashrc
+              - echo '\\nif [ ! -f "/tmp/__restarted" ]; then\\n  sudo systemctl restart ssh\\n  sleep 2\\n  touch /tmp/__restarted\\nfi' >> /home/skypilot:ssh_user/.bashrc
+              - usermod -aG docker skypilot:ssh_user
             write_files:
               - path: /etc/apt/apt.conf.d/20auto-upgrades
                 content: |

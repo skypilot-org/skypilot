@@ -290,6 +290,16 @@ class GCPResource(metaclass=abc.ABCMeta):
         """
         return
 
+    @abc.abstractmethod
+    def resize_disk(
+        self, base_config: dict, instance_name: str, wait_for_operation: bool = True
+    ) -> dict:
+        """Resize a Google Cloud disk based on the provided configuration.
+
+        Returns the response of resize operation.
+        """
+        return
+
     def create_instances(
         self,
         base_config: dict,
@@ -518,7 +528,6 @@ class GCPCompute(GCPResource):
     def create_instance(
         self, base_config: dict, labels: dict, wait_for_operation: bool = True
     ) -> Tuple[dict, str]:
-
         config = self._convert_resources_to_urls(base_config)
         # removing TPU-specific default key set in config.py
         config.pop("networkConfig", None)
@@ -621,6 +630,53 @@ class GCPCompute(GCPResource):
 
         return result
 
+    def resize_disk(
+        self, base_config: dict, instance_name: str, wait_for_operation: bool = True
+    ) -> dict:
+        """Resize a Google Cloud disk based on the provided configuration."""
+
+        # Extract the specified disk size from the configuration
+        new_size_gb = base_config["disks"][0]["initializeParams"]["diskSizeGb"]
+
+        # Fetch the instance details to get the disk name and current disk size
+        response = (
+            self.resource.instances()
+            .get(
+                project=self.project_id,
+                zone=self.availability_zone,
+                instance=instance_name,
+            )
+            .execute()
+        )
+        disk_name = response["disks"][0]["source"].split("/")[-1]
+
+        try:
+            # Execute the resize request and return the response
+            operation = (
+                self.resource.disks()
+                .resize(
+                    project=self.project_id,
+                    zone=self.availability_zone,
+                    disk=disk_name,
+                    body={
+                        "sizeGb": str(new_size_gb),
+                    },
+                )
+                .execute()
+            )
+        except HttpError as e:
+            # Catch HttpError when provided with invalid value for new disk size.
+            # Allowing users to create instances with the same size as the image
+            logger.warning(f"googleapiclient.errors.HttpError: {e.reason}")
+            return {}
+
+        if wait_for_operation:
+            result = self.wait_for_operation(operation)
+        else:
+            result = operation
+
+        return result
+
 
 class GCPTPU(GCPResource):
     """Abstraction around GCP TPU resource"""
@@ -698,7 +754,6 @@ class GCPTPU(GCPResource):
         label_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
         def filter_instance(instance: GCPTPUNode) -> bool:
-
             labels = instance.get_labels()
             if label_filters:
                 for key, value in label_filters.items():
@@ -839,3 +894,12 @@ class GCPTPU(GCPResource):
             result = operation
 
         return result
+
+    def resize_disk(
+        self, base_config: dict, instance_name: str, wait_for_operation: bool = True
+    ) -> dict:
+        """
+        TODO: Implement the feature to attach persistent disks for TPU VMs.
+        The boot disk of TPU VMs is not resizable, and users need to add a
+        persistent disk to expand disk capacity. Related issue: #2387
+        """

@@ -14,11 +14,20 @@ docker:
     {%- if custom_resources is not none %}
       --gpus all
     {%- endif %}
+  {%- if docker_login_config is not none %}
+  docker_login_config:
+    username: |-
+      {{docker_login_config.username}}
+    password: |-
+      {{docker_login_config.password}}
+    server: |-
+      {{docker_login_config.server}}
+  {%- endif %}
 {%- endif %}
 
 provider:
   type: external
-  module: sky.skylet.providers.aws.AWSNodeProviderV2
+  module: sky.provision.aws
   region: {{region}}
   availability_zone: {{zones}}
   # Keep (otherwise cannot reuse when re-provisioning).
@@ -27,10 +36,9 @@ provider:
   security_group:
     # AWS config file must include security group name
     GroupName: {{security_group}}
-{% if vpc_name is not none %}
-  # NOTE: This is a new field added by SkyPilot and parsed by our own
-  # AWSNodeProvider.
-  vpc_name: {{vpc_name}}
+{% if aws_vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
+  vpc_name: {{aws_vpc_name}}
 {% endif %}
 {%- if docker_login_config is not none %}
   # We put docker login config in provider section because ray's schema disabled
@@ -97,7 +105,7 @@ available_node_types:
             shell: /bin/bash
             sudo: ALL=(ALL) NOPASSWD:ALL
             ssh_authorized_keys:
-              - |
+              - |-
                 skypilot:ssh_public_key_content
         write_files:
           - path: /etc/apt/apt.conf.d/20auto-upgrades
@@ -118,61 +126,6 @@ available_node_types:
             - Key: {{ tag_key }}
               Value: {{ tag_value }}
 {%- endfor %}
-
-{% if num_nodes > 1 %}
-  ray.worker.default:
-    min_workers: {{num_nodes - 1}}
-    max_workers: {{num_nodes - 1}}
-    resources: {}
-    node_config:
-      InstanceType: {{instance_type}}
-      ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
-      BlockDeviceMappings:
-        - DeviceName: /dev/sda1
-          Ebs:
-            VolumeSize: {{disk_size}}
-            VolumeType: {{disk_tier}}
-            {% if custom_disk_perf %}
-            Iops: {{disk_iops}}
-            Throughput: {{disk_throughput}}
-            {% endif %}
-      {% if use_spot %}
-      InstanceMarketOptions:
-          MarketType: spot
-          # Additional options can be found in the boto docs, e.g.
-          #   SpotOptions:
-          #       MaxPrice: MAX_HOURLY_PRICE
-      {% endif %}
-      UserData: |
-        #cloud-config
-        users:
-          - name: skypilot:ssh_user
-            shell: /bin/bash
-            sudo: ALL=(ALL) NOPASSWD:ALL
-            ssh_authorized_keys:
-              - |
-                skypilot:ssh_public_key_content
-        write_files:
-          - path: /etc/apt/apt.conf.d/20auto-upgrades
-            content: |
-              APT::Periodic::Update-Package-Lists "0";
-              APT::Periodic::Download-Upgradeable-Packages "0";
-              APT::Periodic::AutocleanInterval "0";
-              APT::Periodic::Unattended-Upgrade "0";
-          - path: /etc/apt/apt.conf.d/10cloudinit-disable
-            content: |
-              APT::Periodic::Enable "0";
-      TagSpecifications:
-        - ResourceType: instance
-          Tags:
-            - Key: skypilot-user
-              Value: {{ user }}
-{%- for tag_key, tag_value in instance_tags.items() %}
-            - Key: {{ tag_key }}
-              Value: {{ tag_value }}
-{%- endfor %}
-
-{%- endif %}
 
 head_node_type: ray.head.default
 
@@ -185,9 +138,6 @@ file_mounts: {
 {%- endfor %}
 }
 
-rsync_exclude: []
-
-initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
@@ -211,7 +161,7 @@ setup_commands:
     source ~/.bashrc;
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});
-    (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    (pip3 list | grep "skypilot " && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws, remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
@@ -220,38 +170,7 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
 
-# Command to start ray on the head node. You don't need to change this.
-# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
-# connection, which is expensive. Try your best to co-locate commands into fewer
-# items! The same comment applies for worker_start_ray_commands.
-#
-# Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 1
-head_start_ray_commands:
-  # Unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY to avoid using credentials from environment
-  #   variables set by user. SkyPilot's ray cluster should use the `~/.aws/` credentials, as that is
-  #   the one used to create the cluster, and the autoscaler module started by the `ray start` command
-  #   should use the same credentials. Otherwise, `ray status` will fail to fetch the available nodes. Reference: https://github.com/skypilot-org/skypilot/issues/2441
-  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
-  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
-  # all the sessions to be reloaded. This is a workaround.
-  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-    {{dump_port_command}};
+# Command to start ray clusters are now placed in `sky.provision.instance_setup`.
+# We do not need to list it here anymore.
 
-{%- if num_nodes > 1 %}
-worker_start_ray_commands:
-  - ray stop; unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} || exit 1;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
-{%- else %}
-worker_start_ray_commands: []
-{%- endif %}
 
-head_node: {}
-worker_nodes: {}
-
-# These fields are required for external cloud providers.
-head_setup_commands: []
-worker_setup_commands: []
-cluster_synced_files: []
-file_mounts_sync_continuously: False
