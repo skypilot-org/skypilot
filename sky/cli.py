@@ -2897,7 +2897,6 @@ def _down_or_stop_clusters(
     with progress:
         subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
-        # Make sure the progress bar not mess up the terminal.
         progress.refresh()
 
 
