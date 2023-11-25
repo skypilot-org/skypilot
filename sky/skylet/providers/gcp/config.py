@@ -922,7 +922,10 @@ def _configure_subnet(config, compute):
         # TPU
         if "networkConfig" not in node_config:
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
+            # TPU doesn't have accessConfigs
             node_config["networkConfig"].pop("accessConfigs", None)
+            if config["provider"].get("use_internal_ips", False):
+                node_config["networkConfig"]["enableExternalIps"] = False
 
     return config
 
