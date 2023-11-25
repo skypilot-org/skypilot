@@ -56,7 +56,7 @@ class _NoOpProgress:
     def start(self):
         pass
 
-      
+
 def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
