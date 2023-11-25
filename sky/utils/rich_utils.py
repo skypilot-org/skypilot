@@ -82,11 +82,11 @@ def safe_progress(transient: bool, redirect_stdout: bool,
         return _progress
     return _NoOpProgress()
 
-# def force_update_status(msg: str):
-#     """Update the status message even if sky_logging.is_silent() is true."""
-#     if (threading.current_thread() is threading.main_thread() and
-#             _status is not None):
-#         _status.update(msg)
+def force_update_status(msg: str):
+    """Update the status message even if sky_logging.is_silent() is true."""
+    if (threading.current_thread() is threading.main_thread() and
+            _status is not None):
+        _status.update(msg)
 
 
 @contextlib.contextmanager
