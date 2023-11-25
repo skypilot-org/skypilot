@@ -356,8 +356,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # OnDemand fallback.
         if num_ready_spot + num_on_demand < num_to_provision:
             # Enable OnDemand fallback.
-            num_on_demand_to_scale_up = (num_to_provision - num_ready_spot -
-                                         num_on_demand)
+            num_on_demand_to_scale_up = min(
+                self.target_num_replicas,
+                num_to_provision - num_ready_spot) - num_on_demand
             for _ in range(num_on_demand_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(
