@@ -194,12 +194,19 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
+    original_resources = sky.Resources(cloud=sky.AWS(),
+                                       instance_type='p3.16xlarge',
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
 
     for region in candidate_regions:
-        resources = sky.Resources(cloud=sky.AWS(),
-                                  instance_type='p3.16xlarge',
-                                  region=region.name,
-                                  use_spot=True)
+        resources = original_resources.copy(region=region.name)
         if not AWS.check_quota_available(resources):
             return region.name
 
@@ -214,12 +221,21 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
+    original_resources = sky.Resources(cloud=sky.GCP(),
+                                       region=region.name,
+                                       accelerators={'A100-80GB': 1},
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
+
     for region in candidate_regions:
         if not GCP.check_quota_available(
-                sky.Resources(cloud=sky.GCP(),
-                              region=region.name,
-                              accelerators={'A100-80GB': 1},
-                              use_spot=True)):
+                original_resources.copy(region=region.name)):
             return region.name
 
     return None
