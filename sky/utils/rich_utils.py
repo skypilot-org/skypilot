@@ -34,7 +34,7 @@ class _NoOpProgress:
     """An empty class for multi-threaded rich.progress."""
 
     def __enter__(self):
-        pass
+        self.live.transient = False
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
