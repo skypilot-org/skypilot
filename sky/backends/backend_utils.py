@@ -2557,8 +2557,8 @@ def get_clusters(
         return records
 
     plural = 's' if len(records) > 1 else ''
-    progress = rich_utils.safe_progress(transient=True, 
-                                        redirect_stdout=False, 
+    progress = rich_utils.safe_progress(transient=True,
+                                        redirect_stdout=False,
                                         redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
