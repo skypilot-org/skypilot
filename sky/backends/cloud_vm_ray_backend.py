@@ -2486,6 +2486,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return (ips is not None and len(ips) == self.num_node_ips and
                     all(ip is not None for ip in ips))
 
+        use_internal_ips = skypilot_config.get_nested(keys=(str(
+            self.launched_resources.cloud).lower(), 'use_internal_ips'),
+                                                      default_value=False)
         if is_provided_ips_valid(external_ips):
             logger.debug(f'Using provided external IPs: {external_ips}')
             cluster_external_ips = typing.cast(List[str], external_ips)
@@ -2496,7 +2499,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 handle=self,
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
-                get_internal_ips=False)
+                get_internal_ips=use_internal_ips)
 
         if self.cached_external_ips == cluster_external_ips:
             logger.debug('Skipping the fetching of internal IPs as the cached '
@@ -2510,10 +2513,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             f'cached ({self.cached_external_ips}), new ({cluster_external_ips})'
         )
 
-        if (self.launched_resources is not None and
-                skypilot_config.get_nested(keys=(str(
-                    self.launched_resources.cloud).lower(), 'use_internal_ips'),
-                                           default_value=False)):
+        if (self.launched_resources is not None and use_internal_ips):
             # Optimization: if we know use_internal_ips is True (currently
             # only exposed for AWS), then our AWS NodeProvider is
             # guaranteed to pick subnets that will not assign public IPs,
