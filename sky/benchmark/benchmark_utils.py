@@ -574,8 +574,8 @@ def update_benchmark_state(benchmark: str) -> None:
     num_candidates = len(benchmark_results)
     plural = 's' if num_candidates > 1 else ''
     progress = rich_utils.safe_progress(transient=True,
-                                      redirect_stdout=False,
-                                      redirect_stderr=False)
+                                        redirect_stdout=False,
+                                        redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]Processing {num_candidates} benchmark result{plural}[/]',
         total=num_candidates)

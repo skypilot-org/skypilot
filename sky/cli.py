@@ -2834,8 +2834,8 @@ def _down_or_stop_clusters(
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_utils.safe_progress(transient=True,
-                                      redirect_stdout=False,
-                                      redirect_stderr=False)
+                                        redirect_stdout=False,
+                                        redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
@@ -4542,8 +4542,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             show_default=True)
 
     progress = rich_utils.safe_progress(transient=True,
-                                      redirect_stdout=False,
-                                      redirect_stderr=False)
+                                        redirect_stdout=False,
+                                        redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
         total=len(to_delete))
