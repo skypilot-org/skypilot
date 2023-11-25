@@ -54,8 +54,6 @@ class _NoOpProgress:
     def start(self):
         pass
 
-
-
 def safe_status(msg: str):
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
@@ -67,6 +65,7 @@ def safe_status(msg: str):
         _status.update(msg)
         return _status
     return _NoOpConsoleStatus()
+
 
 def safe_progress(transient: bool, redirect_stdout: bool,
                   redirect_stderr: bool):
