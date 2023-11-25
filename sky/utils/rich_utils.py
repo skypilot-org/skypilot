@@ -30,6 +30,7 @@ class _NoOpConsoleStatus:
     def start(self):
         pass
 
+
 class _NoOpProgress:
     """An empty class for multi-threaded rich.progress."""
 
@@ -53,6 +54,7 @@ class _NoOpProgress:
 
     def start(self):
         pass
+
 
 def safe_status(msg: str):
     """A wrapper for multi-threaded console.status."""
@@ -80,6 +82,7 @@ def safe_progress(transient: bool, redirect_stdout: bool,
                                                redirect_stderr=redirect_stderr)
         return _progress
     return _NoOpProgress()
+
 
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
