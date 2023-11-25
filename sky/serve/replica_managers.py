@@ -515,6 +515,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
+        self.active_history: List[str] = []
         self.preemption_history: List[str] = []
 
         threading.Thread(target=self._process_pool_refresher).start()
@@ -733,6 +734,15 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
+                        handle = info.handle()
+                        if handle is not None:
+                            self.active_history.append(
+                                handle.launched_resources.zone)
+                        else:
+                            logger.error('Cannot find cluster handle for '
+                                         f'replica {replica_id} in the '
+                                         'cluster table. Skipping adding '
+                                         'active history.')
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:

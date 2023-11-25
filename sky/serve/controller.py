@@ -69,6 +69,12 @@ class SkyServeController:
                                autoscalers.SpotRequestRateAutoscaler) and
                         isinstance(self._replica_manager,
                                    replica_managers.SkyPilotReplicaManager)):
+                    if self._replica_manager.active_history:
+                        logger.info('Handle active history: '
+                                    f'{self._replica_manager.active_history}')
+                        self._autoscaler.handle_active_history(
+                            self._replica_manager.active_history)
+                        self._replica_manager.active_history.clear()
                     if self._replica_manager.preemption_history:
                         logger.info(
                             'Handle preemption history: '

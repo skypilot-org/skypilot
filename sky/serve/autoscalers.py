@@ -267,6 +267,10 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
 
+    def handle_active_history(self, history: List[str]) -> None:
+        for zone in history:
+            self.spot_placer.handle_active(zone)
+
     def handle_preemption_history(self, history: List[str]) -> None:
         for zone in history:
             self.spot_placer.handle_preemption(zone)

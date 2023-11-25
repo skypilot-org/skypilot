@@ -32,6 +32,10 @@ class SpotPlacer:
         """Select next zone to place spot instance."""
         raise NotImplementedError
 
+    def handle_active(self, zone: str) -> None:
+        """Handle active of spot instance in given zone."""
+        del zone  # Unused.
+
     def handle_preemption(self, zone: str) -> None:
         """Handle preemption of spot instance in given zone."""
         del zone  # Unused.
@@ -83,7 +87,10 @@ class HistoricalSpotPlacer(SpotPlacer):
         assert zone in self.zone2type
         self.zone2type[zone] = SpotZoneType.PREEMPTED
 
-    def handle_preemption(self, zone) -> None:
+    def handle_active(self, zone: str) -> None:
+        self.move_zone_to_active(zone)
+
+    def handle_preemption(self, zone: str) -> None:
         self.move_zone_to_preempted(zone)
 
     def clear_preempted_zones(self) -> None:
