@@ -203,20 +203,6 @@ class Backoff:
         return self._backoff
 
 
-class Jitter:
-    """Random jittering."""
-    JITTER = 0.4
-
-    def __init__(self, initial: int = 5):
-        self._initial = initial
-
-    def current_delay(self) -> float:
-        """Returns the current delay in seconds with random jitter."""
-        jitter = self._initial + random.uniform(-self.JITTER * self._initial,
-                                                self.JITTER * self._initial)
-        return jitter
-
-
 def get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 
