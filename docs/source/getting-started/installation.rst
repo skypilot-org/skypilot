@@ -1,6 +1,6 @@
 .. _installation:
 
-Local Installation
+Installation
 ==================
 
 .. note::
