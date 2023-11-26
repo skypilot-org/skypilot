@@ -201,7 +201,8 @@ class Backoff:
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
         return self._backoff
-    
+
+
 class Jitter:
     """Random jittering."""
     JITTER = 0.4
