@@ -2859,8 +2859,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                backoff = common_utils.Backoff(initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
-                                               max_backoff_factor=1)
+                backoff = common_utils.Backoff(
+                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
+                    max_backoff_factor=1)
             attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
