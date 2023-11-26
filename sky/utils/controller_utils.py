@@ -135,7 +135,7 @@ def _get_cloud_dependencies_installation_commands(
         'boto3>=1.26.1 > /dev/null 2>&1',
         # gcp
         'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-        'google-api-python-client>=2.69.0 google-cloud-storage '
+        'pip install google-api-python-client>=2.69.0 google-cloud-storage '
         '> /dev/null 2>&1',
         f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
     ]
@@ -151,7 +151,7 @@ def _get_cloud_dependencies_installation_commands(
         # subscription does not support spot instances.
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
-            'pip3 install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
+            'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
             'azure-mgmt-network > /dev/null')
     return commands
 
