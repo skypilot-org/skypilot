@@ -59,7 +59,7 @@ Docker Installation
 .. _cloud-account-setup:
 
 Cloud account setup
-===================
+-------------------
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
