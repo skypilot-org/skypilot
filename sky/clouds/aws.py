@@ -113,6 +113,8 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = 2
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:

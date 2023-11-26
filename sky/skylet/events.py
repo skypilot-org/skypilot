@@ -13,6 +13,7 @@ import yaml
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.clouds import cloud_registry
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
@@ -149,7 +150,8 @@ class AutostopEvent(SkyletEvent):
                                         provider_module)
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
-            if provider_name in ('aws', 'gcp'):
+            if (cloud_registry.CLOUD_REGISTRY.from_str(
+                    provider_name).PROVISIONER_VERSION >= 2):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)

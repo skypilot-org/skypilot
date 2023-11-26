@@ -225,6 +225,8 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = 2
+
     def __init__(self):
         super().__init__()
 

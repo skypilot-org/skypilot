@@ -60,6 +60,8 @@ class Cloud:
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
+    PROVISIONER_VERSION = 1
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[CloudImplementationFeatures, str]:
@@ -679,3 +681,10 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __setstate__(self, state):
+        state.pop('PROVISIONER_VERSION', None)
+        self.__dict__.update(state)
+        # Make sure the provisioner version is always the latest.
+        # pylint: disable=invalid-name
+        self.PROVISIONER_VERSION = type(self).PROVISIONER_VERSION

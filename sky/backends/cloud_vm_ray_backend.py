@@ -1611,10 +1611,8 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
-            if isinstance(
-                    to_provision.cloud,
-                (clouds.AWS,
-                 clouds.GCP)) and not tpu_utils.is_tpu_vm(to_provision):
+            if (to_provision.cloud.PROVISIONER_VERSION >= 2 and
+                    not tpu_utils.is_tpu_vm(to_provision)):
                 # Use the new provisioner for AWS.
                 # TODO (suquark): Gradually move the other clouds to
                 #  the new provisioner once they are ready.
