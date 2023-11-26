@@ -2859,6 +2859,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
+                jitter = common_utils.Jitter(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
@@ -2906,12 +2907,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
-                        gap_seconds = _RETRY_UNTIL_UP_INIT_GAP_SECONDS
+                        gap_seconds = jitter.current_delay()
                         plural = 's' if attempt_cnt > 1 else ''
                         logger.info(
                             f'{colorama.Style.BRIGHT}=== Retry until up ==='
                             f'{colorama.Style.RESET_ALL}\n'
                             f'Retrying provisioning after {gap_seconds:.0f}s '
+                            '(random jittering). '
                             f'Already tried {attempt_cnt} attempt{plural}.')
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
