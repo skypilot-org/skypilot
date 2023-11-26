@@ -152,7 +152,7 @@ def _get_cloud_dependencies_installation_commands(
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
-            'azure-mgmt-network > /dev/null')
+            'azure-mgmt-network > /dev/null 2>&1')
     return commands
 
 

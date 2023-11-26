@@ -11,7 +11,8 @@ setup: |
   {%- endfor %}
 
   # Install serve dependencies.
-  pip install uvicorn fastapi 2>&1 > /dev/null
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
