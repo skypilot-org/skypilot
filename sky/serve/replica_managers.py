@@ -734,15 +734,19 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
-                        handle = info.handle()
-                        if handle is not None:
-                            self.active_history.append(
+                    handle = info.handle()
+                    if handle is not None:
+                        if p.exitcode != 0:
+                            self.preemption_history.append(
                                 handle.launched_resources.zone)
                         else:
-                            logger.error('Cannot find cluster handle for '
-                                         f'replica {replica_id} in the '
-                                         'cluster table. Skipping adding '
-                                         'active history.')
+                            self.active_history.append(
+                                handle.launched_resources.zone)
+                    else:
+                        logger.error('Cannot find cluster handle for '
+                                     f'replica {replica_id} in the '
+                                     'cluster table. Skipping adding '
+                                     'active or preemption history.')
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:

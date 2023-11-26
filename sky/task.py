@@ -689,6 +689,7 @@ class Task:
         Returns:
           self: The current task, with service set.
         """
+        # TODO(tian): Check region/zone is not set when spot policy is enabled
         self._service = service
         return self
 
