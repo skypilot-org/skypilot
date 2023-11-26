@@ -49,8 +49,11 @@ class SkyServeController:
         autoscaler_class: Type[autoscalers.Autoscaler]
         if service_spec.spot_zones is not None:
             autoscaler_class = autoscalers.SpotRequestRateAutoscaler
+        elif service_spec.on_demand_zones is not None:
+            autoscaler_class = autoscalers.OnDemandRateAutoscaler
         else:
             autoscaler_class = autoscalers.RequestRateAutoscaler
+        logger.info(f'Using autoscaler: {autoscaler_class}')
         self._autoscaler: autoscalers.Autoscaler = autoscaler_class(
             service_spec,
             frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,

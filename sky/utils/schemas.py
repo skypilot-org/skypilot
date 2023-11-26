@@ -353,6 +353,13 @@ def get_service_schema():
                             'type': 'string'
                         },
                     },
+                    'on_demand_zones': {
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'string'
+                        },
+                    },
                 }
             },
             'replicas': {
