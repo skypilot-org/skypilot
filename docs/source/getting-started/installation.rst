@@ -49,8 +49,6 @@ or install from source:
   $ pip install ".[all]"
 
 
-Docker Installation
-===================
 
 .. note::
 
