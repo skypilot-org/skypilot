@@ -1686,7 +1686,7 @@ def _get_spot_jobs(
               required=False,
               default=None,
               type=int,
-              help=('Get a single exposed endpoint URL of a'
+              help=('Get the endpoint URL for the specified port number on the'
                     'cluster. This option will override all other options.'))
 @click.option('--show-spot-jobs/--no-show-spot-jobs',
               default=True,
@@ -1780,7 +1780,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if ip or show_endpoints:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip or --endpoint/s with --refresh is not supported for now. '
+                    'Using --ip or --endpoint(s) with --refresh is not supported for now. '
                     'To fix, refresh first, then query the IP or endpoint.')
 
             if ip and show_endpoints:
@@ -1805,7 +1805,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='specified',
-                            property='IP address' if ip else 'endpoint/s',
+                            property='IP address' if ip else 'endpoint(s)',
                             flag='ip' if ip else 'endpoint/s {port}'))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
@@ -1857,12 +1857,12 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
-                                f'Port {endpoint} not exposed yet.')
+                                f'Port {endpoint} not exposed yet. If the cluster was recently started, please retry.')
                     click.echo(port_details[endpoint][0])
                     return -1
 
                 if not port_details:
-                    click.echo('No endpoints exposed yet.')
+                    click.echo('No endpoints exposed yet. If the cluster was recently started, please retry.'')
 
                 for port, urls in port_details.items():
                     click.echo(

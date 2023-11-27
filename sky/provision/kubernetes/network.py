@@ -7,8 +7,8 @@ from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 from sky.utils.resources_utils import port_ranges_to_set
 
-_PATH_PREFIX = "/skypilot/{cluster_name_on_cloud}/{port}"
-_LOADBALANCER_SERVICE_NAME = "{cluster_name_on_cloud}-skypilot-loadbalancer"
+_PATH_PREFIX = '/skypilot/{cluster_name_on_cloud}/{port}'
+_LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}-skypilot-loadbalancer'
 
 
 def _get_port_mode(
