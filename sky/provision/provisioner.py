@@ -413,6 +413,7 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
+        ray_port = constants.SKY_REMOTE_RAY_PORT
         if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
             # Check if head node Ray is alive
@@ -422,7 +423,6 @@ def _post_provision_setup(
                 require_outputs=True)
             if returncode:
                 logger.info('Ray cluster on head is not up. Restarting...')
-                ray_port = constants.SKY_REMOTE_RAY_PORT
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
