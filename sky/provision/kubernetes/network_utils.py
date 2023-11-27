@@ -22,7 +22,7 @@ def get_port_mode(
         ('kubernetes', 'ports'),
         kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
     try:
-        port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
+        port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'

@@ -2,6 +2,8 @@
 import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
+from sky.utils.resources_utils import port_ranges_to_set
+
 # NOTE: we can use pydantic instead of dataclasses or namedtuples, because
 # pydantic provides more features like validation or parsing from
 # nested dictionaries. This makes our API more extensible and easier
@@ -176,3 +178,19 @@ class HTTPSEndpoint(Endpoint):
 
     def __str__(self):
         return self.url
+
+
+def query_ports_with_ip(
+    cluster_name_on_cloud: str,
+    ip: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Endpoint]]:
+    """Common function to query ports for AWS, GCP and Azure."""
+    del cluster_name_on_cloud, provider_config  # Unused.
+    ports = list(port_ranges_to_set(ports))
+    result: Dict[int, List[Endpoint]] = {}
+    for port in ports:
+        result[port] = [SocketEndpoint(host=ip, port=port)]
+
+    return result

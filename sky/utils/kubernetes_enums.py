@@ -35,16 +35,3 @@ class KubernetesPortMode(enum.Enum):
     """
     INGRESS = 'ingress'
     LOADBALANCER = 'loadbalancer'
-
-    @classmethod
-    def from_str(cls, mode: str) -> 'KubernetesPortMode':
-        """Returns the enum value for the given string."""
-        if mode.lower() == cls.LOADBALANCER.value:
-            return cls.LOADBALANCER
-        elif mode.lower() == cls.INGRESS.value:
-            return cls.INGRESS
-        else:
-            raise ValueError(f'Unsupported kubernetes port mode: '
-                             f'{mode}. The mode must be either '
-                             f'\'{cls.LOADBALANCER.value}\' or '
-                             f'\'{cls.INGRESS.value}\'. ')

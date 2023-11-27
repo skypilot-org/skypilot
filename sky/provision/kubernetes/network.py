@@ -201,7 +201,7 @@ def _query_ports_for_ingress(
         result[port] = [
             common.HTTPEndpoint(
                 url=os.path.join(http_url, path_prefix.lstrip('/'))),
-            common.HTTPEndpoint(
+            common.HTTPSEndpoint(
                 url=os.path.join(https_url, path_prefix.lstrip('/'))),
         ]
 
