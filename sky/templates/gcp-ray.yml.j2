@@ -79,7 +79,7 @@ available_node_types:
         # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
+        ssh-keys: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
   {%- if use_spot %}
       schedulingConfig:
@@ -111,7 +111,7 @@ available_node_types:
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
+            value: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
   {%- if gpu is not none %}
           - key: install-nvidia-driver
@@ -142,7 +142,7 @@ available_node_types:
         # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
+        ssh-keys: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
     {%- if use_spot %}
       schedulingConfig:
@@ -174,7 +174,7 @@ available_node_types:
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
+            value: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
     {%- if gpu is not none %}
           - key: install-nvidia-driver
@@ -211,7 +211,7 @@ available_node_types:
         # TPU VM's metadata has different format than normal VMs.
         # After replacing the variables, this will become username:ssh_public_key_content.
         # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-        ssh-keys: |
+        ssh-keys: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
     {%- if use_spot %}
       schedulingConfig:
@@ -243,7 +243,7 @@ available_node_types:
           - key: ssh-keys
             # After replacing the variables, this will become username:ssh_public_key_content.
             # This is a specific syntax required by GCP https://cloud.google.com/compute/docs/connect/add-ssh-keys
-            value: |
+            value: |-
               skypilot:ssh_user:skypilot:ssh_public_key_content
     {%- if gpu is not none %}
           - key: install-nvidia-driver
