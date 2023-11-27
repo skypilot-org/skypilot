@@ -547,8 +547,8 @@ def get_config_schema():
                         'items': {
                             'type': 'string',
                         },
-                        'minItems': 1,
-                        'maxItems': 1,
+                        # 'minItems': 1,
+                        # 'maxItems': 1,
                     },
                     'vpc_name': {
                         'oneOf': [{
