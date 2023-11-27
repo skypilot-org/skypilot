@@ -1764,9 +1764,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     # up. The pool provides a AsyncResult object that can be used as a future.
     with multiprocessing.Pool(1) as pool:
         # Do not show spot queue if user specifies clusters, and if user
-        # specifies --ip or --endpoint/s.
+        # specifies --ip or --endpoint(s).
         show_spot_jobs = show_spot_jobs and not any([clusters, ip, endpoints])
         show_endpoints = endpoints or endpoint is not None
+        show_single_endpoint = endpoint is not None
         if show_spot_jobs:
             # Run the spot job query in parallel to speed up the status query.
             spot_jobs_future = pool.apply_async(
@@ -1786,7 +1787,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if ip and show_endpoints:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify both --ip and --endpoint/s at the same time.'
+                        'Cannot specify both --ip and --endpoint(s) at the same time.'
                     )
 
             if endpoint is not None and endpoints:
@@ -1806,7 +1807,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             plural=plural,
                             verb='specified',
                             property='IP address' if ip else 'endpoint(s)',
-                            flag='ip' if ip else 'endpoint/s {port}'))
+                            flag='ip' if ip else
+                            f'endpoint{" port" if show_single_endpoint else "s"}'
+                        ))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1826,8 +1829,10 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='found',
-                            property='IP address' if ip else 'endpoint/s',
-                            flag='ip' if ip else 'endpoint/s \{port\}'))
+                            property='IP address' if ip else 'endpoint(s)',
+                            flag='ip' if ip else
+                            f'endpoint{" port" if show_single_endpoint else "s"}'
+                        ))
 
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
@@ -1857,12 +1862,15 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
-                                f'Port {endpoint} not exposed yet. If the cluster was recently started, please retry.')
+                                f'Port {endpoint} not exposed yet. If the cluster was recently started, please retry.'
+                            )
                     click.echo(port_details[endpoint][0])
                     return -1
 
                 if not port_details:
-                    click.echo('No endpoints exposed yet. If the cluster was recently started, please retry.'')
+                    click.echo(
+                        'No endpoints exposed yet. If the cluster was recently started, please retry.'
+                    )
 
                 for port, urls in port_details.items():
                     click.echo(

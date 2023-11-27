@@ -1,29 +1,13 @@
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.utils import kubernetes_enums
-from sky.utils import ux_utils
 from sky.utils.resources_utils import port_ranges_to_set
 
 _PATH_PREFIX = '/skypilot/{cluster_name_on_cloud}/{port}'
 _LOADBALANCER_SERVICE_NAME = '{cluster_name_on_cloud}-skypilot-loadbalancer'
-
-
-def _get_port_mode(
-        provider_config: Dict[str, Any]) -> kubernetes_enums.KubernetesPortMode:
-    mode_str = provider_config.get(
-        "port_mode", kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
-    try:
-        port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'
-                              + 'Please check the port_mode in provider config.') \
-                from None
-
-    return port_mode
 
 
 def open_ports(
@@ -33,7 +17,8 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
-    port_mode = _get_port_mode(provider_config=provider_config)
+    port_mode = network_utils.get_port_mode(
+        provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
@@ -110,7 +95,8 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
-    port_mode = _get_port_mode(provider_config=provider_config)
+    port_mode = network_utils.get_port_mode(
+        provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
@@ -161,7 +147,8 @@ def query_ports(
     """See sky/provision/__init__.py"""
     del ip  # Unused.
     assert provider_config is not None, 'provider_config is required'
-    port_mode = _get_port_mode(provider_config=provider_config)
+    port_mode = network_utils.get_port_mode(
+        provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         return _query_ports_for_loadbalancer(

@@ -4124,7 +4124,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                 handle.launched_resources.ports,
                                                 config['provider'])
                 except exceptions.PortDoesNotExistError:
-                    pass
+                    logger.debug('Ports do not exist. Skipping cleanup.')
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

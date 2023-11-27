@@ -6,10 +6,30 @@ import yaml
 
 import sky
 from sky import exceptions
+from sky import skypilot_config
 from sky.adaptors import kubernetes
+from sky.utils import kubernetes_enums
+from sky.utils import ux_utils
 
 _INGRESS_TEMPLATE_NAME = 'kubernetes-ingress.yml.j2'
 _LOADBALANCER_TEMPLATE_NAME = 'kubernetes-loadbalancer.yml.j2'
+
+
+def get_port_mode(
+        mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
+    """Get the port mode from the provider config."""
+    mode_str = mode_str or skypilot_config.get_nested(
+        ('kubernetes', 'ports'),
+        kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
+    try:
+        port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'
+                              + 'Please check the port_mode in provider config.') \
+                from None
+
+    return port_mode
 
 
 def fill_loadbalancer_template(namespace: str, service_name: str,

@@ -7,13 +7,11 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
-from sky.utils import kubernetes_enums
 from sky.utils import kubernetes_utils
 from sky.utils import ux_utils
 
@@ -225,15 +223,7 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-        mode_str = skypilot_config.get_nested(
-            ('kubernetes', 'ports'),
-            kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
-        try:
-            port_mode = kubernetes_enums.KubernetesPortMode.from_str(mode_str)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(str(e) + ' Please check: ~/.sky/config.yaml.') \
-                    from None
+        port_mode = network_utils.get_port_mode(None)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
