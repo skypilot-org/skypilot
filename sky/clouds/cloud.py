@@ -698,9 +698,7 @@ class Cloud:
     def __repr__(self):
         return self._REPR
 
-    def __setstate__(self, state):
+    def __getstate__(self):
+        state = self.__dict__.copy()
         state.pop('PROVISIONER_VERSION', None)
-        self.__dict__.update(state)
-        # Make sure the provisioner version is always the latest.
-        # pylint: disable=invalid-name
-        self.PROVISIONER_VERSION = type(self).PROVISIONER_VERSION
+        return state

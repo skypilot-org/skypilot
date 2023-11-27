@@ -1231,7 +1231,7 @@ class GCP(clouds.Cloud):
             stream_logs=True)
 
     def __getstate__(self) -> Dict[str, Any]:
-        state = self.__dict__.copy()
+        state = super().__getstate__()
         # We should avoid saving third-party object to the state, as it may
         # cause unpickling error when the third-party API is updated.
         state.pop('_list_reservations_cache', None)
