@@ -6,13 +6,14 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.serve import serve_utils
@@ -122,6 +123,39 @@ class Controllers(enum.Enum):
         return None
 
 
+# Install cli dependencies. Not using SkyPilot wheels because the wheel
+# can be cleaned up by another process.
+# TODO(zhwu): Keep the dependencies align with the ones in setup.py
+def _get_cloud_dependencies_installation_commands(
+        controller_type: str) -> List[str]:
+    commands = [
+        # aws
+        'pip list | grep boto3 > /dev/null 2>&1 || '
+        'pip install "urllib3<2" awscli>=1.27.10 botocore>=1.29.10 '
+        'boto3>=1.26.1 > /dev/null 2>&1',
+        # gcp
+        'pip list | grep google-api-python-client > /dev/null 2>&1 || '
+        'pip install google-api-python-client>=2.69.0 google-cloud-storage '
+        '> /dev/null 2>&1',
+        f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
+    ]
+    # k8s and ibm doesn't support open port and spot instance yet, so we don't
+    # install them for either controller.
+    if controller_type == 'spot':
+        # oci doesn't support open port yet, so we don't install oci
+        # dependencies for sky serve controller.
+        commands.append('pip list | grep oci > /dev/null 2>&1 || '
+                        'pip install oci > /dev/null 2>&1')
+    else:
+        # We do not install azure dependencies for spot controller since our
+        # subscription does not support spot instances.
+        commands.append(
+            'pip list | grep azure-cli > /dev/null 2>&1 || '
+            'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
+            'azure-mgmt-network > /dev/null 2>&1')
+    return commands
+
+
 def check_cluster_name_not_controller(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
@@ -214,7 +248,10 @@ def skypilot_config_setup(
         The controller_resources_config is the resources config that will be
         used to launch the controller.
     """
-    vars_to_fill: Dict[str, Any] = {}
+    vars_to_fill: Dict[str, Any] = {
+        'cloud_dependencies_installation_commands':
+            _get_cloud_dependencies_installation_commands(controller_type)
+    }
     controller_envs = _shared_controller_env_vars()
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)

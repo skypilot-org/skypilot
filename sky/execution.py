@@ -20,7 +20,6 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds import gcp
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
@@ -689,8 +688,6 @@ def spot_launch(
             'spot_controller': controller_name,
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
-            'google_sdk_installation_commands':
-                gcp.GOOGLE_SDK_INSTALLATION_COMMAND,
             'retry_until_up': retry_until_up,
             **extra_vars,
         }
