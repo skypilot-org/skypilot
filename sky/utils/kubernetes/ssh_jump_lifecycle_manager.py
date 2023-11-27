@@ -7,11 +7,15 @@ kubeapi), if it does not see ray pods in the duration of 10 minutes. If the
 user re-launches a task before the duration is over, then ssh jump pod is being
 reused and will terminate itself when it sees that no ray cluster exist in that
 duration.
+
+Further, this script reloads SSH keys from the mounted secret volume on an
+interval.
 """
 import datetime
 import os
 import sys
 import time
+import subprocess
 
 from kubernetes import client
 from kubernetes import config
@@ -50,6 +54,14 @@ def poll():
     while True:
         sys.stdout.write(f'Sleeping {retry_interval} seconds..\n')
         time.sleep(retry_interval)
+
+        # Reload SSH keys from mounted secret volume
+        cmd = 'cat /etc/secret-volume/ssh-key-* > ~/.ssh/authorized_keys'
+        try:
+            subprocess.check_output(cmd, shell=True)
+        except Exception as e:
+            sys.stdout.write(f'Error: failed to reload SSH keys: {e}\n')
+            raise
 
         # List the pods in the current namespace
         try:
