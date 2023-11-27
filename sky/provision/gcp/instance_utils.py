@@ -636,6 +636,17 @@ class GCPComputeInstance(GCPInstance):
         # just for possible backward compat.
         config = cls._convert_resources_to_urls(project_id, zone, node_config)
 
+        if 'scheduling' in config and isinstance(config['scheduling'], list):
+            # For backeward compatibility: converting the list of dictionaries
+            # to a dictionary due to the use of deprecated API.
+            # [{'preemptible': True}, {'onHostMaintenance': 'TERMINATE'}]
+            # to {'preemptible': True, 'onHostMaintenance': 'TERMINATE'}
+            config['scheduling'] = {
+                k: v
+                for d in config['scheduling']
+                for k, v in d.items()
+            }
+
         for disk in config.get('disks', []):
             disk_type = disk.get('initializeParams', {}).get('diskType')
             if disk_type:
@@ -669,6 +680,7 @@ class GCPComputeInstance(GCPInstance):
                     TAG_SKYPILOT_CLUSTER_NAME: cluster_name
                 }),
         })
+
         source_instance_template = config.pop('sourceInstanceTemplate', None)
         body = {
             'count': count,
@@ -691,11 +703,15 @@ class GCPComputeInstance(GCPInstance):
         #
         # https://cloud.google.com/compute/docs/instance-templates
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
-        operation = (cls.load_resource().instances().bulkInsert(
-            project=project_id,
-            zone=zone,
-            body=body,
-        ).execute())
+        try:
+            operation = cls.load_resource().instances().bulkInsert(
+                project=project_id,
+                zone=zone,
+                body=body,
+            ).execute()
+        except gcp.http_error_exception() as e:
+            logger.warning(f'googleapiclient.errors.HttpError: {e}')
+            return False, names
 
         if wait_for_operation:
             result = cls.load_resource().zoneOperations().wait(
@@ -710,7 +726,9 @@ class GCPComputeInstance(GCPInstance):
                     p.starmap(cls.create_node_tag,
                               [(cluster_name, project_id, zone, names[i],
                                 head_tag_needed[i]) for i in range(count)])
-
+            else:
+                # Print out the error message
+                logger.warning(f'Failed to create instances: {result["error"]}')
             return success, names
 
         return operation

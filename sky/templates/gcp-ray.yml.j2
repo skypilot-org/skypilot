@@ -117,12 +117,14 @@ available_node_types:
           - key: install-nvidia-driver
             value: "True"
   {%- endif %}
+  {%- if use_spot or gpu is not none %}
       scheduling:
   {%- if use_spot %}
-        - preemptible: true
+        preemptible: true
   {%- endif %}
   {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+        onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+  {%- endif %}
   {%- endif %}
 {%- endif %}
 {% if num_nodes - 1 - num_specific_reserved_workers > 0 %}
@@ -178,12 +180,14 @@ available_node_types:
           - key: install-nvidia-driver
             value: "True"
     {%- endif %}
+    {%- if use_spot or gpu is not none %}
       scheduling:
     {%- if use_spot %}
-        - preemptible: true
+        preemptible: true
     {%- endif %}
     {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+        onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+    {%- endif %}
     {%- endif %}
   {%- endif %}
 {%- endif %}
@@ -245,12 +249,14 @@ available_node_types:
           - key: install-nvidia-driver
             value: "True"
     {%- endif %}
+    {%- if use_spot or gpu is not none %}
       scheduling:
     {%- if use_spot %}
-        - preemptible: true
+        preemptible: true
     {%- endif %}
     {%- if gpu is not none %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+        onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+    {%- endif %}
     {%- endif %}
   {%- endif %}
 {%- endif %}
