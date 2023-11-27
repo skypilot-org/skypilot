@@ -48,7 +48,7 @@ SkyPilot **maximizes GPU availability for your jobs**:
 
 SkyPilot **cuts your cloud costs**:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): 3-6x cost savings using spot VMs, with auto-recovery from preemptions
-* Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
+* [Optimizer](https://skypilot.readthedocs.io/en/latest/examples/auto-failover.html): 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
@@ -112,7 +112,7 @@ Prepare the workdir by cloning:
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/reference/quota.html) is needed for this example):
+Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html) is needed for this example):
 ```bash
 sky launch my_task.yaml
 ```
