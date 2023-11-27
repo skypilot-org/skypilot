@@ -242,8 +242,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
 @_log_start_end
 @_auto_retry
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
-                              custom_resource: Optional[str],
-                              ray_port: int,
+                              custom_resource: Optional[str], ray_port: int,
                               cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the worker nodes."""
