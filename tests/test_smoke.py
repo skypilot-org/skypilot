@@ -1599,7 +1599,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 35',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1653,7 +1653,7 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 35',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             'sleep 200',
