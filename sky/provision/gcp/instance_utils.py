@@ -691,6 +691,11 @@ class GCPComputeInstance(GCPInstance):
                                       key=lambda x: x[1],
                                       reverse=True)
             # TODO(zhwu): Convert this to parallel execution.
+            # TODO(zhwu): This is not atomic as the reservation count may change
+            # between the time we check and the time we create the instances, as
+            # other users may be creating instances at the same time.
+            # Our current implementation will skip the current region if the
+            # reservation count is not enough, which is suboptimal.
             for reservation, reservation_count in reservation_list:
                 if reservation_count <= 0:
                     continue
