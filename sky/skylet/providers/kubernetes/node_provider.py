@@ -427,7 +427,7 @@ class KubernetesNodeProvider(NodeProvider):
              '$(prefix_cmd) sed "s@session\\s*required\\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd; '
              'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
              '$(prefix_cmd) mkdir -p ~/.ssh; '
-             '$(prefix_cmd) cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys; '
+             '$(prefix_cmd) cat /etc/secret-volume/ssh-key-* > ~/.ssh/authorized_keys; '
              '$(prefix_cmd) service ssh restart')
         ]
 

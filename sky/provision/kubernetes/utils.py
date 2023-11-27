@@ -1139,3 +1139,21 @@ def combine_pod_config_fields(config_yaml_path: str) -> None:
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(config_yaml_path, yaml_obj)
+
+
+def check_secret_exists(secret_name: str, namespace: str) -> bool:
+    """Checks if a secret exists in a namespace
+
+    Args:
+        secret_name: Name of secret to check
+        namespace: Namespace to check
+    """
+
+    try:
+        kubernetes.core_api().read_namespaced_secret(secret_name, namespace)
+    except kubernetes.api_exception() as e:
+        if e.status == 404:
+            return False
+        raise
+    else:
+        return True

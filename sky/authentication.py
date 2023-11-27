@@ -44,6 +44,7 @@ from sky.adaptors import ibm
 from sky.adaptors import runpod
 from sky.clouds.utils import lambda_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.adaptors import kubernetes
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import subprocess_utils
@@ -399,29 +400,24 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 from None
     get_or_generate_keys()
 
-    # Run kubectl command to add the public key to the cluster.
+    # Run kubectl command to add the public key to the cluster, patching
+    # the secret if it already exists.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    key_label = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
-    cmd = f'kubectl create secret generic {key_label} ' \
-          f'--from-file=ssh-publickey={public_key_path}'
-    try:
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode('utf-8')
-        suffix = f'\nError message: {output}'
-        if 'already exists' in output:
-            logger.debug(
-                f'Key {key_label} already exists in the cluster, using it...')
-        elif any(err in output for err in ['connection refused', 'timeout']):
-            with ux_utils.print_exception_no_traceback():
-                raise ConnectionError(
-                    'Failed to connect to the cluster. Check if your '
-                    'cluster is running, your kubeconfig is correct '
-                    'and you can connect to it using: '
-                    f'kubectl get namespaces.{suffix}') from e
-        else:
-            logger.error(suffix)
-            raise
+    secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
+    secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
+    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+        secret = kubernetes.core_api().V1Secret(metadata=kubernetes.core_api().V1ObjectMeta(name=secret_name), string_data={
+            secret_field_name: public_key
+        })
+    if kubernetes_utils.check_secret_exists(secret_name, namespace):
+        logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
+        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace, secret)
+    else:
+        logger.debug(
+            f'Key {secret_name} does not exist in the cluster, creating it...')
+        kubernetes.core_api().create_namespaced_secret(namespace, secret)
 
     ssh_jump_name = clouds.Kubernetes.SKY_SSH_JUMP_NAME
     if network_mode == nodeport_mode:
@@ -439,7 +435,6 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Setup service for SSH jump pod. We create the SSH jump service here
     # because we need to know the service IP address and port to set the
     # ssh_proxy_command in the autoscaler config.
-    namespace = kubernetes_utils.get_current_kube_config_context_namespace()
     kubernetes_utils.setup_ssh_jump_svc(ssh_jump_name, namespace, service_type)
 
     ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
