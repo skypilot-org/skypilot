@@ -1611,7 +1611,8 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
-            if (to_provision.cloud.PROVISIONER_VERSION >= 2 and
+            if (to_provision.cloud.PROVISIONER_VERSION
+                    == clouds.ProvisionerVersion.SKYPILOT and
                     not tpu_utils.is_tpu_vm(to_provision)):
                 # Use the new provisioner for AWS.
                 # TODO (suquark): Gradually move the other clouds to
@@ -3957,7 +3958,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, (clouds.AWS, clouds.GCP)):
+        if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.

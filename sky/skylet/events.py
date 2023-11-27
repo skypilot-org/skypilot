@@ -10,6 +10,7 @@ import traceback
 import psutil
 import yaml
 
+from sky import clouds
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
@@ -151,7 +152,8 @@ class AutostopEvent(SkyletEvent):
             assert provider_search is not None, config
             provider_name = provider_search.group(1).lower()
             if (cloud_registry.CLOUD_REGISTRY.from_str(
-                    provider_name).PROVISIONER_VERSION >= 2):
+                    provider_name).PROVISIONER_VERSION >= clouds.
+                    ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)

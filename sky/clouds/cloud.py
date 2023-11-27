@@ -54,13 +54,29 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
+
+    1: ray node provider based implementation
+    2: ray node provider for provisioning and SkyPilot provisioner for
+    stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
-    PROVISIONER_VERSION = 1
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
 
     @classmethod
     def _cloud_unsupported_features(

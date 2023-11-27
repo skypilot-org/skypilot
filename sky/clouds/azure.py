@@ -60,6 +60,8 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
