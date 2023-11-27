@@ -4226,7 +4226,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # provision_lib.supports(cloud, 'cleanup_ports')
             # so that our backend do not need to know the specific details
             # for different clouds.
-            if isinstance(cloud, (clouds.AWS, clouds.GCP, clouds.Azure)):
+            if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.
+                    RAY_PROVISIONER_SKYPILOT_TERMINATOR):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 
