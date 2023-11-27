@@ -22,6 +22,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -415,13 +416,16 @@ def _post_provision_setup(
         if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
             # Check if head node Ray is alive
-            returncode = head_runner.run(
+            returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                stream_logs=False)
+                stream_logs=False,
+                require_outputs=True)
             if returncode:
                 logger.info('Ray cluster on head is not up. Restarting...')
+                ray_port = constants.SKY_REMOTE_RAY_PORT
             else:
                 logger.debug('Ray cluster on head is up.')
+                ray_port = common_utils.decode_payload(stdout)['ray_port']
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:
@@ -446,6 +450,11 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
+                # Pass the ray_port to worker nodes for backward compatibilirt
+                # as in some existing clusters the ray_port is not dumped with
+                # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
+                # from the head node for worker nodes.
+                ray_port=ray_port,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
 

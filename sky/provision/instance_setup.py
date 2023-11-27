@@ -37,7 +37,9 @@ _DUMP_RAY_PORTS = (
 
 _RAY_PORT_COMMAND = (
     'RAY_PORT=$(python -c "from sky.skylet import job_lib; '
-    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379)')
+    'print(job_lib.get_ray_port())" 2> /dev/null || echo 6379);'
+    'python -c "from sky.utils import common_utils; '
+    'print(common_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
 
 # Command that calls `ray status` with SkyPilot's Ray port set.
 RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
@@ -241,6 +243,7 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
 @_auto_retry
 def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               custom_resource: Optional[str],
+                              ray_port: int,
                               cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the worker nodes."""
@@ -269,14 +272,14 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     cmd = (f'unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; '
            'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
            f'ray start --disable-usage-stats {ray_options} || exit 1;' +
-           _RAY_PRLIMIT + _DUMP_RAY_PORTS)
+           _RAY_PRLIMIT)
     if no_restart:
         # We do not use ray status to check whether ray is running, because
         # on worker node, if the user started their own ray cluster, ray status
         # will return 0, i.e., we don't know skypilot's ray cluster is running.
         # Instead, we check whether the raylet process is running on gcs address
         # that is connected to the head with the correct port.
-        cmd = (f'{_RAY_PORT_COMMAND}; ps aux | grep "ray/raylet/raylet" | '
+        cmd = (f'RAY_PORT={ray_port}; ps aux | grep "ray/raylet/raylet" | '
                f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
                f'{{ {cmd}; }}')
     else:
