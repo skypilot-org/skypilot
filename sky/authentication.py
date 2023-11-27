@@ -405,9 +405,10 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
     namespace = kubernetes_utils.get_current_kube_config_context_namespace()
+    k8s = kubernetes.get_kubernetes()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
-        secret = kubernetes.core_api().V1Secret(metadata=kubernetes.core_api().V1ObjectMeta(name=secret_name), string_data={
+        secret = k8s.client.V1Secret(metadata=k8s.client.V1ObjectMeta(name=secret_name), string_data={
             secret_field_name: public_key
         })
     if kubernetes_utils.check_secret_exists(secret_name, namespace):
