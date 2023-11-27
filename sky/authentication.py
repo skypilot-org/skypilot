@@ -400,8 +400,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
                 from None
     get_or_generate_keys()
 
-    # Run kubectl command to add the public key to the cluster, patching
-    # the secret if it already exists.
+    # Add the user's public key to the SkyPilot cluster.
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     secret_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_NAME
     secret_field_name = clouds.Kubernetes.SKY_SSH_KEY_SECRET_FIELD_NAME
