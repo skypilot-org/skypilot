@@ -3,6 +3,7 @@ from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
+from sky.clouds.cloud import StatusVersion
 from sky.clouds.cloud import Zone
 from sky.clouds.cloud_registry import CLOUD_REGISTRY
 
@@ -33,4 +34,6 @@ __all__ = [
     'Region',
     'Zone',
     'CLOUD_REGISTRY',
+    'ProvisionerVersion',
+    'StatusVersion',
 ]

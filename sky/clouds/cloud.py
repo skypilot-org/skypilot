@@ -70,6 +70,19 @@ class ProvisionerVersion(enum.Enum):
         return self.value >= other.value
 
 
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
@@ -77,6 +90,7 @@ class Cloud:
     _DEFAULT_DISK_TIER = 'medium'
 
     PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
     def _cloud_unsupported_features(
@@ -701,4 +715,5 @@ class Cloud:
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
         return state

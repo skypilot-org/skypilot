@@ -114,6 +114,7 @@ class AWS(clouds.Cloud):
     )
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
     def _cloud_unsupported_features(
