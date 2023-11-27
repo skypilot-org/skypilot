@@ -409,6 +409,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     k8s = kubernetes.get_kubernetes()
     with open(public_key_path, 'r') as f:
         public_key = f.read()
+        if not public_key.endswith('\n'):
+            public_key += '\n'
         secret = k8s.client.V1Secret(metadata=k8s.client.V1ObjectMeta(name=secret_name), string_data={
             secret_field_name: public_key
         })
