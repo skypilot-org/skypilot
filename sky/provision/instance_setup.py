@@ -280,7 +280,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         # that is connected to the head with the correct port.
         cmd = (f'RAY_PORT={ray_port}; ps aux | grep "ray/raylet/raylet" | '
                f'grep "gcs-address={head_private_ip}:${{RAY_PORT}}" || '
-               f'{{ {cmd}; }}')
+               f'{{ {cmd} }}')
     else:
         cmd = 'ray stop; ' + cmd
 
