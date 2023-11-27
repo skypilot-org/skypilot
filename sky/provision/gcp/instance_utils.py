@@ -642,9 +642,7 @@ class GCPComputeInstance(GCPInstance):
             # [{'preemptible': True}, {'onHostMaintenance': 'TERMINATE'}]
             # to {'preemptible': True, 'onHostMaintenance': 'TERMINATE'}
             config['scheduling'] = {
-                k: v
-                for d in config['scheduling']
-                for k, v in d.items()
+                k: v for d in config['scheduling'] for k, v in d.items()
             }
 
         for disk in config.get('disks', []):
