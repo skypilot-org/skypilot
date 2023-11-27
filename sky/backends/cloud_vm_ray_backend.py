@@ -3959,6 +3959,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         # Use the new provisioner for AWS.
         if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):
+            logger.debug(f'Provisioner version: {cloud.PROVISIONER_VERSION} '
+                         'using new provisioner for teardown.')
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.
