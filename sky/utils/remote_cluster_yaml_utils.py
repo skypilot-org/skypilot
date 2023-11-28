@@ -1,4 +1,7 @@
-"""Utility functions for cluster yaml file."""
+"""Utility functions for cluster yaml file on remote cluster.
+
+This module should only be used on the remote cluster.
+"""
 
 import os
 import re
@@ -9,16 +12,17 @@ SKY_CLUSTER_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 
 
 def get_cluster_yaml_absolute_path() -> str:
-    """Return the absolute path of the cluster yaml file.
-
-    This function should be called on the remote machine.
-    """
+    """Return the absolute path of the cluster yaml file."""
     return os.path.abspath(os.path.expanduser(SKY_CLUSTER_YAML_REMOTE_PATH))
 
 
-def get_provider_name() -> str:
+def load_cluster_yaml() -> dict:
+    """Load the cluster yaml file."""
+    return common_utils.read_yaml(get_cluster_yaml_absolute_path())
+
+
+def get_provider_name(config: dict) -> str:
     """Return the name of the provider."""
-    config = common_utils.read_yaml(get_cluster_yaml_absolute_path())
 
     provider_module = config['provider']['module']
     # Examples:

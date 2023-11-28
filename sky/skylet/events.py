@@ -16,8 +16,8 @@ from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.spot import spot_utils
-from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import ux_utils
 
 # Seconds of sleep between the processing of skylet events.
@@ -104,8 +104,8 @@ class AutostopEvent(SkyletEvent):
     def __init__(self):
         super().__init__()
         autostop_lib.set_last_active_time_to_now()
-        self._ray_yaml_path = cluster_yaml_utils.get_cluster_yaml_absolute_path(
-        )
+        self._ray_yaml_path = (
+            remote_cluster_yaml_utils.get_cluster_yaml_absolute_path())
 
     def _run(self):
         autostop_config = autostop_lib.get_autostop_config()
@@ -139,8 +139,9 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
-            provider_name = cluster_yaml_utils.get_provider_name()
-            config = common_utils.read_yaml(self._ray_yaml_path)
+            config = remote_cluster_yaml_utils.load_cluster_yaml()
+            provider_name = remote_cluster_yaml_utils.get_provider_name(config)
+
             if provider_name in ('aws', 'gcp'):
                 logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,

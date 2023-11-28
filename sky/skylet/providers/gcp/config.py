@@ -911,6 +911,7 @@ def _configure_subnet(config, compute):
         }
     ]
     if config["provider"].get("use_internal_ips", False):
+        # Removing this key means the VM will not be assigned an external IP.
         default_interfaces[0].pop("accessConfigs")
 
     for node_config in node_configs:

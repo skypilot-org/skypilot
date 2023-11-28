@@ -18,9 +18,9 @@ from sky.data import storage as storage_lib
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.spot import spot_utils
-from sky.utils import cluster_yaml_utils
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -248,6 +248,11 @@ def skypilot_config_setup(
 
 
 def setup_proxy_command_on_controller():
+    """Sets up proxy command on the controller.
+
+    This function should be called on the controller (remote cluster), which
+    has the `~/.sky/sky_ray.yaml` file.
+    """
     # Look up the contents of the already loaded configs via the
     # 'skypilot_config' module. Don't simply read the on-disk file as
     # it may have changed since this process started.
@@ -276,24 +281,26 @@ def setup_proxy_command_on_controller():
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    provider_name = cluster_yaml_utils.get_provider_name()
-    if skypilot_config.loaded():
-        # We only set the proxy command of the cloud where the controller is
-        # launched.
-        proxy_command_key = (provider_name, 'ssh_proxy_command')
-        ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
-        config_dict = skypilot_config.to_dict()
-        if isinstance(ssh_proxy_command, str):
-            config_dict = skypilot_config.set_nested(proxy_command_key, None)
-        elif isinstance(ssh_proxy_command, dict):
-            # Instead of removing the key, we set the value to empty string
-            # so that the controller will only try the regions specified by
-            # the keys.
-            ssh_proxy_command = {k: None for k in ssh_proxy_command}
-            config_dict = skypilot_config.set_nested(proxy_command_key,
-                                                     ssh_proxy_command)
+    if not skypilot_config.loaded():
+        return
+    provider_name = remote_cluster_yaml_utils.get_provider_name(
+        remote_cluster_yaml_utils.load_cluster_yaml())
+    # We only set the proxy command of the cloud where the controller is
+    # launched.
+    proxy_command_key = (provider_name, 'ssh_proxy_command')
+    ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
+    config_dict = skypilot_config.to_dict()
+    if isinstance(ssh_proxy_command, str):
+        config_dict = skypilot_config.set_nested(proxy_command_key, None)
+    elif isinstance(ssh_proxy_command, dict):
+        # Instead of removing the key, we set the value to empty string
+        # so that the controller will only try the regions specified by
+        # the keys.
+        ssh_proxy_command = {k: None for k in ssh_proxy_command}
+        config_dict = skypilot_config.set_nested(proxy_command_key,
+                                                 ssh_proxy_command)
 
-        skypilot_config.overwrite_config_file(config_dict)
+    skypilot_config.overwrite_config_file(config_dict)
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

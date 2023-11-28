@@ -120,7 +120,13 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
 
 
 def overwrite_config_file(config: dict) -> None:
-    """Overwrites the config file with the current config."""
+    """Overwrites the config file with the current config.
+
+    This function should only be called very carefully to avoid unexpected
+    behavior due to the overwrite. Currently, it is only used by the spot/serve
+    controllers to reconfigure the network settings before any further
+    operations are done.
+    """
     global _dict, _loaded_config_path
     if _loaded_config_path is None:
         raise RuntimeError('No config file loaded.')

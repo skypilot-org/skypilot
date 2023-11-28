@@ -33,7 +33,6 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky import task as task_lib
@@ -201,7 +200,6 @@ class RayCodeGen:
         # For n nodes gang scheduling.
         self._has_gang_scheduling = False
         self._num_nodes = 0
-        self._provider_name = None
 
         self._has_register_run_fn = False
 
@@ -312,9 +310,6 @@ class RayCodeGen:
             'add_gang_scheduling_placement_group_and_setup().')
         self._has_gang_scheduling = True
         self._num_nodes = num_nodes
-
-        if envs is None:
-            envs = {}
 
         bundles = [copy.copy(resources_dict) for _ in range(num_nodes)]
         # Set CPU to avoid ray hanging the resources allocation
@@ -507,12 +502,11 @@ class RayCodeGen:
             f'placement_group_bundle_index={gang_scheduling_id})')
 
         sky_env_vars_dict_str = [
-            textwrap.dedent(f"""\
-            sky_env_vars_dict = {{}}
+            textwrap.dedent("""\
+            sky_env_vars_dict = {}
             sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
-            sky_env_vars_dict['SKYPILOT_PROVIDER_NAME'] = {self._provider_name}
             """)
         ]
 
@@ -2379,6 +2373,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     def get_cluster_name(self):
         return self.cluster_name
 
+    def _use_internal_ips(self):
+        """Returns whether to use internal IPs for SSH connections."""
+        # Directly load the `use_internal_ips` flag from the cluster yaml
+        # instead of `skypilot_config` as the latter can be changed after the
+        # cluster is UP.
+        return common_utils.read_yaml(self.cluster_yaml).get(
+            'provider', {}).get('use_internal_ips', False)
+
     def _maybe_make_local_handle(self):
         """Adds local handle for the local cloud case.
 
@@ -2486,9 +2488,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return (ips is not None and len(ips) == self.num_node_ips and
                     all(ip is not None for ip in ips))
 
-        use_internal_ips = skypilot_config.get_nested(keys=(str(
-            self.launched_resources.cloud).lower(), 'use_internal_ips'),
-                                                      default_value=False)
+        use_internal_ips = self._use_internal_ips()
+
         if is_provided_ips_valid(external_ips):
             logger.debug(f'Using provided external IPs: {external_ips}')
             cluster_external_ips = typing.cast(List[str], external_ips)
@@ -2513,7 +2514,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             f'cached ({self.cached_external_ips}), new ({cluster_external_ips})'
         )
 
-        if (self.launched_resources is not None and use_internal_ips):
+        if use_internal_ips:
             # Optimization: if we know use_internal_ips is True (currently
             # only exposed for AWS), then our AWS NodeProvider is
             # guaranteed to pick subnets that will not assign public IPs,

@@ -44,11 +44,11 @@ from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
-from sky.utils import cluster_yaml_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1017,7 +1017,7 @@ def write_cluster_config(
                 'user': get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
-                # Private IPs
+                # Networking configs
                 'use_internal_ips': skypilot_config.get_nested(
                     (str(cloud).lower(), 'use_internal_ips'), False),
                 'ssh_proxy_command': ssh_proxy_command,
@@ -1055,7 +1055,7 @@ def write_cluster_config(
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
                 'sky_ray_yaml_remote_path':
-                    cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
+                    remote_cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,
