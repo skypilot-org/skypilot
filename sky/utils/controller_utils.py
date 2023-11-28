@@ -300,7 +300,7 @@ def setup_proxy_command_on_controller():
         config_dict = skypilot_config.set_nested(proxy_command_key,
                                                  ssh_proxy_command)
 
-    skypilot_config.overwrite_config_file(config_dict)
+    skypilot_config.unsafe_overwrite_config_file_on_controller(config_dict)
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',

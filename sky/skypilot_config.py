@@ -119,11 +119,11 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     return to_return
 
 
-def overwrite_config_file(config: dict) -> None:
+def unsafe_overwrite_config_file_on_controller(config: dict) -> None:
     """Overwrites the config file with the current config.
 
-    This function should only be called very carefully to avoid unexpected
-    behavior due to the overwrite. Currently, it is only used by the spot/serve
+    This function should be called very carefully to avoid unexpected behavior
+    due to the overwrite. Currently, it is only used by the spot/serve
     controllers to reconfigure the network settings before any further
     operations are done.
     """

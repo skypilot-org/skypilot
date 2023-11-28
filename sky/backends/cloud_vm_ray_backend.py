@@ -2342,8 +2342,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cluster_name_on_cloud = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
-        # List of (internal_ip, external_ip) tuples for all the nodes
-        # in the cluster, sorted by the external ips.
+        # List of (internal_ip, feasible_ip) tuples for all the nodes in the
+        # cluster, sorted by the feasible ips. The feasible ips can be either
+        # internal or external ips, depending on the use_internal_ips flag.
         self.stable_internal_external_ips = stable_internal_external_ips
         self.stable_ssh_ports = stable_ssh_ports
         self.launched_nodes = launched_nodes
@@ -2511,7 +2512,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             logger.debug('Skipping the fetching of internal IPs as the cached '
                          'external IPs matches the newly fetched ones.')
             # Optimization: If the cached external IPs are the same as the
-            # retrieved external IPs, then we can skip retrieving internal
+            # retrieved feasible IPs, then we can skip retrieving internal
             # IPs since the cached IPs are up-to-date.
             return
         logger.debug(
@@ -2521,10 +2522,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if use_internal_ips:
             # Optimization: if we know use_internal_ips is True (currently
-            # only exposed for AWS), then our AWS NodeProvider is
-            # guaranteed to pick subnets that will not assign public IPs,
-            # thus the first list of IPs returned above are already private
-            # IPs. So skip the second query.
+            # only exposed for AWS and GCP), then our provisioner is guaranteed
+            # to not assign public IPs, thus the first list of IPs returned
+            # above are already private IPs. So skip the second query.
             cluster_internal_ips = list(cluster_feasible_ips)
         elif is_provided_ips_valid(internal_ips):
             logger.debug(f'Using provided internal IPs: {internal_ips}')
@@ -2543,6 +2543,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             f'Expected same number of internal IPs {cluster_internal_ips}'
             f' and external IPs {cluster_feasible_ips}.')
 
+        # List of (internal_ip, feasible_ip) tuples for all the nodes in the
+        # cluster, sorted by the feasible ips. The feasible ips can be either
+        # internal or external ips, depending on the use_internal_ips flag.
         internal_external_ips: List[Tuple[str, str]] = list(
             zip(cluster_internal_ips, cluster_feasible_ips))
 
