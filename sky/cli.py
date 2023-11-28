@@ -1865,7 +1865,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                                 f'Port {endpoint} not exposed yet. If the cluster was recently started, please retry.'
                             )
                     click.echo(port_details[endpoint][0])
-                    return -1
+                    return
 
                 if not port_details:
                     click.echo(
