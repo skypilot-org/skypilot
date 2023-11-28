@@ -20,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 
 # TODO(tian): Expose this to config.
 _UPSCALE_DELAY_S = 300
-_DOWNSCALE_DELAY_S = 6000
+_DOWNSCALE_DELAY_S = 1200
 _DEFAULT_OVER_PROVISION_NUM = 1
 
 
