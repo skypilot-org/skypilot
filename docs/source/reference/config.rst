@@ -136,14 +136,14 @@ Available fields and semantics:
     # Please refer to the aws.ssh_proxy_command section above for more details.
     ### Format 1 ###
     # A string; the same proxy command is used for all regions.
-    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
     ### Format 2 ###
     # A dict mapping region names to region-specific proxy commands.
     # NOTE: This restricts SkyPilot's search space for this cloud to only use
     # the specified regions and not any other regions in this cloud.
     ssh_proxy_command:
-      us-east-1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-east-1.proxy
-      us-east-2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no ec2-user@<jump server public ip>
+      us-central1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+      us-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
 
 
     # Reserved capacity (optional).

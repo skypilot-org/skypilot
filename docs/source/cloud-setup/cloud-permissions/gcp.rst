@@ -295,7 +295,15 @@ Instances created with internal IPs only on GCP cannot access public internet by
 cloud NAT needs to be setup for the VPC (see `GCP's documentation <https://cloud.google.com/nat/docs/overview>`__ for details).
 
 
-Cloud NAT is a regional resource, so it will need to be created in each region that SkyPilot will be used in. To limit SkyPilot to use some specific regions only, you can specify the ``gcp.ssh_proxy_command`` to be a dict mapping from region to the SSH proxy command for that region (see :ref:`config-yaml` for details):
+Cloud NAT is a regional resource, so it will need to be created in each region that SkyPilot will be used in.
+
+
+.. image:: ../../images/screenshots/gcp/cloud-nat.png
+    :width: 80%
+    :align: center
+    :alt: GCP Cloud NAT
+
+To limit SkyPilot to use some specific regions only, you can specify the ``gcp.ssh_proxy_command`` to be a dict mapping from region to the SSH proxy command for that region (see :ref:`config-yaml` for details):
 
 .. code-block:: yaml
 
