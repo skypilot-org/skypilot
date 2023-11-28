@@ -309,6 +309,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     f'Number of ready spot instances: {num_ready_spot}, '
                     f'Number of alive on-demand instances: {num_on_demand}')
 
+        if isinstance(self.spot_placer, spot_policy.HistoricalSpotPlacer):
+            log_zone_to_type = {
+                zone: zone_type.value
+                for zone, zone_type in self.spot_placer.zone2type.items()
+            }
+            logger.info(f'Current zone to type: {log_zone_to_type}')
+
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
 

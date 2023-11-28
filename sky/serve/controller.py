@@ -2,7 +2,9 @@
 
 Responsible for autoscaling and replica management.
 """
+import json
 import logging
+import os
 import threading
 import time
 import traceback
@@ -17,6 +19,7 @@ from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -58,6 +61,9 @@ class SkyServeController:
             rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS)
         self._port = port
         self._app = fastapi.FastAPI()
+        self.dump_path = os.path.expanduser(
+            serve_utils.generate_remote_service_dir_name(
+                self._service_name)) + '/dump_infos.jsonl'
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler.')
@@ -90,6 +96,13 @@ class SkyServeController:
                     for info in replica_info
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
+
+                dump_infos = {
+                    'time': time.time(),
+                    'replica_info': [info.json() for info in replica_info],
+                }
+                with open(self.dump_path, 'a') as f:
+                    f.write(json.dumps(dump_infos) + '\n')
 
                 scaling_options = self._autoscaler.evaluate_scaling(
                     replica_info)

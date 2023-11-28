@@ -1,10 +1,12 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
+import base64
 import dataclasses
 import enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
+import pickle
 import threading
 import time
 import traceback
@@ -85,11 +87,12 @@ def launch_cluster(task_yaml_path: str,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
+            # remove retry until up to avoid infinite retry on
+            # zone without capacity.
             sky.launch(task,
                        cluster_name,
                        detach_setup=True,
                        detach_run=True,
-                       retry_until_up=True,
                        _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -343,17 +346,30 @@ class ReplicaStatusProperty:
             # No readiness probe passed and sky.launch finished
             return serve_state.ReplicaStatus.STARTING
 
+    def json(self) -> Dict[str, Any]:
+        return {
+            'sky_launch_status': self.sky_launch_status.value if
+                                 self.sky_launch_status is not None else None,
+            'user_app_failed': self.user_app_failed,
+            'service_ready_now': self.service_ready_now,
+            'first_ready_time': self.first_ready_time,
+            'sky_down_status': self.sky_down_status.value
+                               if self.sky_down_status is not None else None,
+            'preempted': self.preempted,
+        }
+
 
 class ReplicaInfo:
     """Replica info for each replica."""
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool) -> None:
+                 is_spot: bool, zone: Optional[str]) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
         # TODO(tian): Use setstate for backward compatibility
         self.is_spot: bool = is_spot
+        self.zone: Optional[str] = zone
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -410,6 +426,19 @@ class ReplicaInfo:
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
         return info_dict
+
+    def json(self) -> Dict[str, Any]:
+        cluster_record = global_user_state.get_cluster_from_name(
+            self.cluster_name)
+        return {
+            'replica_id': self.replica_id,
+            'cluster_name': self.cluster_name,
+            'is_spot': self.is_spot,
+            'status': self.status.value,
+            'status_property': self.status_property.json(),
+            'cluster_record': base64.b64encode(pickle.dumps(cluster_record)
+                                              ).decode('utf-8'),
+        }
 
     def probe(
         self,
@@ -559,7 +588,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _get_use_spot_override(self._task_yaml_path,
                                           resources_override)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot)
+        zone = None
+        if resources_override is not None:
+            zone = resources_override.get('zone')
+        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
+                           zone)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -681,7 +714,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         # TODO(MaoZiming): Support spot recovery policies
-        self.preemption_history.append(handle.launched_resources.zone)
+        if info.zone is None:
+            logger.error(f'Cannot find zone for replica {info.replica_id}. '
+                         'Skipping adding to preemption list.')
+        else:
+            self.preemption_history.append(info.zone)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -734,19 +771,20 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
-                    handle = info.handle()
-                    if handle is not None:
-                        if p.exitcode != 0:
-                            self.preemption_history.append(
-                                handle.launched_resources.zone)
+                    if info.is_spot:
+                        if info.zone is None:
+                            logger.error(f'Cannot find zone for replica '
+                                         f'{replica_id}. Skipping adding '
+                                         'active or preemption history.')
                         else:
-                            self.active_history.append(
-                                handle.launched_resources.zone)
+                            if p.exitcode != 0:
+                                self.preemption_history.append(info.zone)
+                            else:
+                                self.active_history.append(info.zone)
                     else:
-                        logger.error('Cannot find cluster handle for '
-                                     f'replica {replica_id} in the '
-                                     'cluster table. Skipping adding '
-                                     'active or preemption history.')
+                        logger.info(f'replica {replica_id} is on-demand. '
+                                    'Skipping adding active or preemption '
+                                    'history.')
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:
@@ -921,6 +959,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     if info.status_property.first_ready_time is None:
                         info.status_property.first_ready_time = probe_time
                 else:
+                    # TODO(tian): This might take a lot of time. Shouldn't
+                    # blocking probe to other replicas.
                     is_preempted = self._handle_preemption(info)
                     if is_preempted:
                         continue
