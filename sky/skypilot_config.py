@@ -119,25 +119,6 @@ def set_nested(keys: Iterable[str], value: Any) -> Dict[str, Any]:
     return to_return
 
 
-def unsafe_overwrite_config_file_on_controller(config: dict) -> None:
-    """Overwrites the config file with the current config.
-
-    This function should be called very carefully to avoid unexpected behavior
-    due to the overwrite. Currently, it is only used by the spot/serve
-    controllers to reconfigure the network settings before any further
-    operations are done.
-    """
-    global _dict, _loaded_config_path
-    if _loaded_config_path is None:
-        raise RuntimeError('No config file loaded.')
-    common_utils.validate_schema(config,
-                                 schemas.get_config_schema(),
-                                 f'Invalid config YAML: {config!r}',
-                                 skip_none=False)
-    common_utils.dump_yaml(_loaded_config_path, config)
-    _dict = config
-
-
 def to_dict() -> Dict[str, Any]:
     """Returns a deep-copied version of the current config."""
     global _dict

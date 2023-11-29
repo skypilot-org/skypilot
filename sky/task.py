@@ -759,8 +759,9 @@ class Task:
                     raise ValueError(
                         'File mount destination paths cannot be cloud storage')
             if not data_utils.is_cloud_store_url(source):
-                if not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))):
+                if (not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))) and
+                        not source.startswith('skypilot:')):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'File mount source {source!r} does not exist '

@@ -17,7 +17,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -1459,7 +1459,7 @@ class RetryingVmProvisioner(object):
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
-    ):
+    ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -2179,7 +2179,7 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
-    ):
+    ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
@@ -2217,7 +2217,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle)
                 if dryrun:
-                    return
+                    return config_dict
             except (exceptions.InvalidClusterNameError,
                     exceptions.NotSupportedError,
                     exceptions.CloudUserIdentityError) as e:
@@ -3218,6 +3218,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """Mounts all user files to the remote nodes."""
+        controller_utils.replace_skypilot_config_path_in_file_mounts(
+            handle.launched_resources.cloud, all_file_mounts)
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
         self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)

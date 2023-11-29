@@ -6,11 +6,12 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import colorama
 
 from sky import exceptions
+from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.data import data_utils
@@ -20,10 +21,10 @@ from sky.skylet import constants
 from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.utils import remote_cluster_yaml_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -36,6 +37,9 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
+
+# The placeholder for the local skypilot config path in file mounts.
+LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 
 @dataclasses.dataclass
@@ -187,7 +191,7 @@ def download_and_stream_latest_job_log(
     return log_file
 
 
-def _shared_controller_env_vars() -> Dict[str, str]:
+def shared_controller_env_vars() -> Dict[str, str]:
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
     }
@@ -202,11 +206,10 @@ def _shared_controller_env_vars() -> Dict[str, str]:
     return env_vars
 
 
-def skypilot_config_setup(
+def get_controller_resources(
     controller_type: str,
     controller_resources_config: Dict[str, Any],
-    remote_user_config_path: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> resources.Resources:
     """Read the skypilot config and setup the controller resources.
 
     Returns:
@@ -216,21 +219,9 @@ def skypilot_config_setup(
         used to launch the controller.
     """
     vars_to_fill: Dict[str, Any] = {}
-    controller_envs = _shared_controller_env_vars()
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)
     if skypilot_config.loaded():
-        config_dict = skypilot_config.to_dict()
-
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
-            common_utils.dump_yaml(tmpfile.name, config_dict)
-            controller_envs[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
-                remote_user_config_path)
-            vars_to_fill.update({
-                'user_config_path': tmpfile.name,
-                'remote_user_config_path': remote_user_config_path,
-            })
-
         # Override the controller resources with the ones specified in the
         # config.
         custom_controller_resources_config = skypilot_config.get_nested(
@@ -243,11 +234,22 @@ def skypilot_config_setup(
         # so that the template won't render this.
         vars_to_fill['user_config_path'] = None
 
-    vars_to_fill['controller_envs'] = controller_envs
-    return vars_to_fill, controller_resources_config_copied
+    try:
+        controller_resources = resources.Resources.from_yaml_config(
+            controller_resources_config_copied)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=common_utils.format_exception(e,
+                                                      use_bracket=True))) from e
+
+    return controller_resources
 
 
-def setup_proxy_command_on_controller():
+def _get_skypilot_config_for_controller_task(
+        cloud: 'clouds.Cloud') -> Dict[str, Any]:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -281,13 +283,7 @@ def setup_proxy_command_on_controller():
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    if not skypilot_config.loaded():
-        return
-    provider_name = remote_cluster_yaml_utils.get_provider_name(
-        remote_cluster_yaml_utils.load_cluster_yaml())
-    # We only set the proxy command of the cloud where the controller is
-    # launched.
-    proxy_command_key = (provider_name, 'ssh_proxy_command')
+    proxy_command_key = (str(cloud).lower(), 'ssh_proxy_command')
     ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
     config_dict = skypilot_config.to_dict()
     if isinstance(ssh_proxy_command, str):
@@ -300,7 +296,26 @@ def setup_proxy_command_on_controller():
         config_dict = skypilot_config.set_nested(proxy_command_key,
                                                  ssh_proxy_command)
 
-    skypilot_config.unsafe_overwrite_config_file_on_controller(config_dict)
+    return config_dict
+
+
+def replace_skypilot_config_path_in_file_mounts(
+        cloud: 'clouds.Cloud', file_mounts: Optional[Dict[str, str]]):
+    """Replaces the SkyPilot config path in file mounts with the real path."""
+    if file_mounts is None or not skypilot_config.loaded():
+        return
+    replaced = False
+    with tempfile.NamedTemporaryFile('w', delete=False) as f:
+        new_skypilot_config = _get_skypilot_config_for_controller_task(cloud)
+        if new_skypilot_config is not None:
+            common_utils.dump_yaml(f.name, new_skypilot_config)
+            for remote_path, local_path in file_mounts.items():
+                if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+                    file_mounts[remote_path] = f.name
+                    replaced = True
+    if replaced:
+        logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
+                     f'the real path in file mounts: {file_mounts}')
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
