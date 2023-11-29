@@ -60,20 +60,21 @@ class SkyServiceSpec:
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         on_demand_args_num = sum(
             [on_demand_arg is not None for on_demand_arg in on_demand_args])
-        if (on_demand_args_num != 0 and
-                on_demand_args_num != len(on_demand_args)):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'target_qps_per_replica and on_demand_zones must be all '
-                    'specified or all not specified in the service YAML.')
-
-        if spot_args_num != 0 and spot_args_num != len(
-                spot_args) and on_demand_args_num == 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'spot_placer, spot_mixer, '
-                    'target_qps_per_replica, and spot_zones must be all '
-                    'specified or all not specified in the service YAML.')
+        if not spot_placer:
+            if (on_demand_args_num != 0 and
+                    on_demand_args_num != len(on_demand_args)):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'target_qps_per_replica and on_demand_zones must be all '
+                        'specified or all not specified in the service YAML.')
+        if spot_placer:
+            if spot_args_num != 0 and spot_args_num != len(
+                    spot_args) and on_demand_args_num == 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'spot_placer, spot_mixer, '
+                        'target_qps_per_replica, and spot_zones must be all '
+                        'specified or all not specified in the service YAML.')
         # TODO(tian): Check vanilla autoscaler argument not exist if spot
         # TODO(tian): Warning user that the use_spot in resources is ignored
         # if spot policy is specified.
