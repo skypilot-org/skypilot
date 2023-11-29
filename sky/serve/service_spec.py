@@ -29,6 +29,7 @@ class SkyServiceSpec:
         spot_placer: Optional[str] = None,
         spot_mixer: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
+        on_demand_zones: Optional[List[str]] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -55,11 +56,23 @@ class SkyServiceSpec:
         spot_args = [
             spot_placer, spot_mixer, spot_zones, target_qps_per_replica
         ]
+        on_demand_args = [target_qps_per_replica, on_demand_zones]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
-        if spot_args_num != 0 and spot_args_num != len(spot_args):
+        on_demand_args_num = sum(
+            [on_demand_arg is not None for on_demand_arg in on_demand_args])
+        if (on_demand_args_num != 0 and
+                on_demand_args_num != len(on_demand_args)):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'spot_placer, spot_mixer, and spot_zones must be all '
+                    'target_qps_per_replica and on_demand_zones must be all '
+                    'specified or all not specified in the service YAML.')
+
+        if spot_args_num != 0 and spot_args_num != len(
+                spot_args) and on_demand_args_num == 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'spot_placer, spot_mixer, '
+                    'target_qps_per_replica, and spot_zones must be all '
                     'specified or all not specified in the service YAML.')
         # TODO(tian): Check vanilla autoscaler argument not exist if spot
         # TODO(tian): Warning user that the use_spot in resources is ignored
@@ -68,6 +81,7 @@ class SkyServiceSpec:
         self._spot_mixer = spot_mixer
         # TODO(tian): If no zone specified, default to all enabled zones
         self._spot_zones = spot_zones
+        self._on_demand_zones = on_demand_zones
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -135,6 +149,8 @@ class SkyServiceSpec:
                 'spot_mixer', None)
             service_config['spot_zones'] = policy_section.get(
                 'spot_zones', None)
+            service_config['on_demand_zones'] = policy_section.get(
+                'on_demand_zones', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -188,7 +204,8 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
         add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
-
+        add_if_not_none('replica_policy', 'on_demand_zones',
+                        self._on_demand_zones)
         return config
 
     def probe_str(self):
@@ -271,3 +288,7 @@ class SkyServiceSpec:
     @property
     def spot_zones(self) -> Optional[List[str]]:
         return self._spot_zones
+
+    @property
+    def on_demand_zones(self) -> Optional[List[str]]:
+        return self._on_demand_zones
