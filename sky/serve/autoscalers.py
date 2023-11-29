@@ -229,20 +229,16 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
-    def _get_desired_num_replicas(self, num_ready_replicas: int) -> int:
-
+    def _get_desired_num_replicas(self) -> int:
         assert self.target_qps_per_replica is not None
         # Convert to requests per second.
         num_requests_per_second = len(
             self.request_timestamps) / self.rps_window_size
-        # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second / num_ready_replicas if
-                                num_ready_replicas else num_requests_per_second)
-        target_num_replicas = math.ceil(requests_per_replica /
+        target_num_replicas = math.ceil(num_requests_per_second /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
-        logger.info(f'Requests per replica: {requests_per_replica}, '
+        logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
         if target_num_replicas > self.target_num_replicas:
@@ -267,14 +263,9 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_ready_replicas = len([
-            info for info in replica_infos
-            if info.status == serve_state.ReplicaStatus.READY
-        ])
 
         # Don't count over-provision here.
-        self.target_num_replicas = self._get_desired_num_replicas(
-            max(num_ready_replicas, 0))
+        self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
             f'({self.target_num_replicas} with '
@@ -381,18 +372,15 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
-    def _get_desired_num_replicas(self, num_ready_replicas: int) -> int:
+    def _get_desired_num_replicas(self) -> int:
         # Convert to requests per second.
         num_requests_per_second = len(
             self.request_timestamps) / self.rps_window_size
-        # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second / num_ready_replicas if
-                                num_ready_replicas else num_requests_per_second)
-        target_num_replicas = math.ceil(requests_per_replica /
+        target_num_replicas = math.ceil(num_requests_per_second /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
-        logger.info(f'Requests per replica: {requests_per_replica}, '
+        logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
         if target_num_replicas > self.target_num_replicas:
@@ -425,14 +413,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_ready_replicas = len([
-            info for info in replica_infos
-            if info.status == serve_state.ReplicaStatus.READY
-        ])
 
         # Don't count over-provision here.
-        self.target_num_replicas = self._get_desired_num_replicas(
-            max(num_ready_replicas - _DEFAULT_OVER_PROVISION_NUM, 0))
+        self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
             f'({self.target_num_replicas + _DEFAULT_OVER_PROVISION_NUM} with '
