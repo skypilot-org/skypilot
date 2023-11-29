@@ -64,9 +64,10 @@ class SkyServiceSpec:
             if (on_demand_args_num != 0 and
                     on_demand_args_num != len(on_demand_args)):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'target_qps_per_replica and on_demand_zones must be all'
-                        ' specified or all not specified in the service YAML.')
+                    raise ValueError('target_qps_per_replica and'
+                                     'on_demand_zones must be all '
+                                     'specified or all not specified'
+                                     'in the service YAML.')
         if spot_placer:
             if spot_args_num != 0 and spot_args_num != len(
                     spot_args) and on_demand_args_num == 0:
