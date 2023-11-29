@@ -242,7 +242,7 @@ def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
     vars_to_fill['controller_envs'] = env_vars
-    return env_vars
+    return vars_to_fill
 
 
 def get_controller_resources(
