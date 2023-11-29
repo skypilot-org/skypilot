@@ -12,7 +12,7 @@ setup: |
     conda activate ray
   fi
 
-  pip install "ray[train]<2.8" # Have to use ray < 2.8 as the later version will cause a conflict with the existing ray cluster
+  pip install "ray[train]" # Have to use ray < 2.8 as the later version will cause a conflict with the existing ray cluster
   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 run: |
