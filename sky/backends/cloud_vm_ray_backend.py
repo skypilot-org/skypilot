@@ -2859,9 +2859,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-                # The most frequent reason for the failure of a provision request is
-                # resource unavailability instead of rate limiting; to make users
-                # wait shorter, we do not make backoffs exponential.
+                # The most frequent reason for the failure of a provision
+                # request is resource unavailability instead of rate 
+                # limiting; to make users wait shorter, we do not make 
+                # backoffs exponential.
                 backoff = common_utils.Backoff(
                     initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
                     max_backoff_factor=1)
