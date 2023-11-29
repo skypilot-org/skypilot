@@ -3870,3 +3870,18 @@ def test_multiple_resources():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
+
+# ---------- Sky Benchmark ----------
+def test_sky_bench(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'sky-bench',
+        [
+            f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
+            'sleep 120',
+            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
+        ],
+        f'sky bench down {name} -y; sky bench delete {name} -y',
+    )
+    run_one_test(test)

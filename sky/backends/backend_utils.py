@@ -1013,7 +1013,7 @@ def write_cluster_config(
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see
-                # execution.py::_shared_controller_env_vars).
+                # controller_utils.shared_controller_vars_to_fill().
                 'user': get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
