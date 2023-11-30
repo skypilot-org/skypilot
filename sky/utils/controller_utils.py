@@ -317,7 +317,8 @@ def _setup_proxy_command_on_controller(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    proxy_command_key = (str(controller_launched_cloud).lower(), 'ssh_proxy_command')
+    proxy_command_key = (str(controller_launched_cloud).lower(),
+                         'ssh_proxy_command')
     ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
     config_dict = skypilot_config.to_dict()
     if isinstance(ssh_proxy_command, str):
