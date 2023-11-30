@@ -32,6 +32,7 @@ def OptimalAllocation_BruteForce(request_distribution, request_rate, profiling):
         num_a100s = total_gpus - num_a10s
         remaining_load = request_rates.copy()
 
+        # Compute the load that A100 can handle
         if num_a100s > 0:
           a100_capacity = profiling['A100']['capacity'] *  num_a100s
           for bucket_idx in range(len(remaining_load) - 1, -1, -1):
