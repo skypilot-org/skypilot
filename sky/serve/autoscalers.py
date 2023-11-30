@@ -89,8 +89,13 @@ class RequestRateAutoscaler(Autoscaler):
     the threshold.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+    def __init__(self,
+                 spec: 'service_spec.SkyServiceSpec',
+                 frequency: int,
+                 cooldown: int,
+                 rps_window_size: int,
+                 overprovision: bool = False,
+                 static_spot_provision: bool = False) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -109,6 +114,8 @@ class RequestRateAutoscaler(Autoscaler):
         self.rps_window_size: int = rps_window_size
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
+        self.overprovision = overprovision
+        self.static_spot_provision = static_spot_provision
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -210,8 +217,13 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
     rate.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+    def __init__(self,
+                 spec: 'service_spec.SkyServiceSpec',
+                 frequency: int,
+                 cooldown: int,
+                 rps_window_size: int,
+                 overprovision: bool = False,
+                 static_spot_provision: bool = False) -> None:
         super().__init__(spec, frequency, cooldown, rps_window_size)
 
         self.target_qps_per_replica = spec.target_qps_per_replica
@@ -225,6 +237,8 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
                                                      self.frequency)
         self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
                                                        self.frequency)
+        self.overprovision = overprovision
+        self.static_spot_provision = static_spot_provision
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
@@ -307,6 +321,8 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
             return replica_ids_to_scale_down
 
         num_to_provision = self.target_num_replicas
+        if self.overprovision:
+            num_to_provision += _DEFAULT_OVER_PROVISION_NUM
 
         if num_on_demand < num_to_provision:
             num_on_demand_to_scale_up = num_to_provision - num_on_demand
@@ -345,8 +361,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     same performance as OnDemand instances.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+    def __init__(self,
+                 spec: 'service_spec.SkyServiceSpec',
+                 frequency: int,
+                 cooldown: int,
+                 rps_window_size: int,
+                 overprovision: bool = False,
+                 static_spot_provision: bool = False) -> None:
         super().__init__(spec, frequency, cooldown, rps_window_size)
         assert (spec.spot_placer is not None and spec.spot_mixer is not None and
                 spec.spot_zones is not None and
@@ -365,6 +386,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                                                      self.frequency)
         self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
                                                        self.frequency)
+        self.static_spot_provision = static_spot_provision
+        self.overprovision = overprovision
 
     def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': True, 'spot_recovery': None}
@@ -492,27 +515,29 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                 ))
 
         # OnDemand fallback.
-        if num_ready_spot + num_on_demand < num_to_provision:
-            # Enable OnDemand fallback.
-            num_on_demand_to_scale_up = min(
-                self.target_num_replicas,
-                num_to_provision - num_ready_spot) - num_on_demand
-            for _ in range(num_on_demand_to_scale_up):
-                scaling_options.append(
-                    AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=self._get_on_demand_resources_override_dict()))
-        elif num_ready_spot + num_on_demand > num_to_provision:
-            # OnDemand fallback is not needed.
-            num_on_demand_to_scale_down = (num_ready_spot + num_on_demand -
-                                           num_to_provision)
-            all_replica_ids_to_scale_down.extend(
-                _get_replica_ids_to_scale_down(
-                    info_filter=lambda info: not info.is_spot,
-                    status_order=serve_state.ReplicaStatus.
-                    scale_down_decision_order(),
-                    num_limit=num_on_demand_to_scale_down,
-                ))
+        if not self.static_spot_provision:
+            if num_ready_spot + num_on_demand < num_to_provision:
+                # Enable OnDemand fallback.
+                num_on_demand_to_scale_up = min(
+                    self.target_num_replicas,
+                    num_to_provision - num_ready_spot) - num_on_demand
+                for _ in range(num_on_demand_to_scale_up):
+                    scaling_options.append(
+                        AutoscalerDecision(
+                            AutoscalerDecisionOperator.SCALE_UP,
+                            target=self._get_on_demand_resources_override_dict(
+                            )))
+            elif num_ready_spot + num_on_demand > num_to_provision:
+                # OnDemand fallback is not needed.
+                num_on_demand_to_scale_down = (num_ready_spot + num_on_demand -
+                                               num_to_provision)
+                all_replica_ids_to_scale_down.extend(
+                    _get_replica_ids_to_scale_down(
+                        info_filter=lambda info: not info.is_spot,
+                        status_order=serve_state.ReplicaStatus.
+                        scale_down_decision_order(),
+                        num_limit=num_on_demand_to_scale_down,
+                    ))
 
         # TODO(tian): Safety Net.
 

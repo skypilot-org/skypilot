@@ -30,6 +30,7 @@ class SkyServiceSpec:
         spot_mixer: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
         on_demand_zones: Optional[List[str]] = None,
+        on_demand_type: Optional[str] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -84,6 +85,7 @@ class SkyServiceSpec:
         # TODO(tian): If no zone specified, default to all enabled zones
         self._spot_zones = spot_zones
         self._on_demand_zones = on_demand_zones
+        self._on_demand_type = on_demand_type
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -153,6 +155,8 @@ class SkyServiceSpec:
                 'spot_zones', None)
             service_config['on_demand_zones'] = policy_section.get(
                 'on_demand_zones', None)
+            service_config['on_demand_type'] = policy_section.get(
+                'on_demand_type', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -208,6 +212,8 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         add_if_not_none('replica_policy', 'on_demand_zones',
                         self._on_demand_zones)
+        add_if_not_none('replica_policy', 'on_demand_type',
+                        self._on_demand_type)
         return config
 
     def probe_str(self):
@@ -294,3 +300,7 @@ class SkyServiceSpec:
     @property
     def on_demand_zones(self) -> Optional[List[str]]:
         return self._on_demand_zones
+
+    @property
+    def on_demand_type(self) -> Optional[str]:
+        return self._on_demand_type
