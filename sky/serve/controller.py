@@ -59,7 +59,8 @@ class SkyServeController:
             elif service_spec.spot_mixer == 'OnDemandFallback':
                 static_spot_provision = False
             else:
-                raise ValueError(f'Unknown spot mixer: {service_spec.spot_mixer}')
+                raise ValueError(
+                    f'Unknown spot mixer: {service_spec.spot_mixer}')
             autoscaler_class = autoscalers.SpotRequestRateAutoscaler
 
         elif service_spec.on_demand_zones is not None:

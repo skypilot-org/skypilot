@@ -436,7 +436,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
-
+        existing_zones = set()
         # Don't count over-provision here.
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -453,6 +453,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                 if info.status == serve_state.ReplicaStatus.READY:
                     num_ready_spot += 1
                 num_alive_spot += 1
+                existing_zones.add(info.zone)
             else:
                 num_on_demand += 1
         logger.info(f'Number of alive spot instances: {num_alive_spot}, '
@@ -497,7 +498,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             num_spot_to_scale_up = num_to_provision - num_alive_spot
             for _ in range(num_spot_to_scale_up):
                 spot_override = self._get_spot_resources_override_dict()
-                zone = self.spot_placer.select()
+                zone = self.spot_placer.select(existing_zones)
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(

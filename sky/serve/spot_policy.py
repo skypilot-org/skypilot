@@ -28,7 +28,7 @@ class SpotPlacer:
         assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
         cls.REGISTRY[cls.NAME] = cls
 
-    def select(self) -> str:
+    def select(self, existing_zones: set) -> str:
         """Select next zone to place spot instance."""
         raise NotImplementedError
 
@@ -57,8 +57,10 @@ class EvenSpreadSpotPlacer(SpotPlacer):
         super().__init__(spec)
         self.current_zone_idx: int = 0
 
-    def select(self) -> str:
+    def select(self, existing_zones: set) -> str:
         zone = self.zones[self.current_zone_idx % len(self.zones)]
+        logger.info(f'EvenSpreadSpotPlacer: {self.current_zone_idx}, {zone},'
+                    f'{self.zones}')
         self.current_zone_idx += 1
         return zone
 
@@ -114,7 +116,7 @@ class EagerFailoverSpotPlacer(HistoricalSpotPlacer):
     """Eagerly failover to a different zone when preempted."""
     NAME: Optional[str] = 'EagerFailover'
 
-    def select(self) -> str:
+    def select(self, existing_zones: set) -> str:
         zone = random.choice(self.zones)
         while zone in self.preempted_zones():
             zone = random.choice(self.zones)
@@ -126,7 +128,20 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
     """Dynamic failover to an active zone when preempted."""
     NAME: Optional[str] = 'DynamicFailover'
 
-    def select(self) -> str:
-        if len(self.active_zones()) == 0:
+    def select(self, existing_zones: set) -> str:
+        # TODO(MaoZiming): Confirm with simualtor.
+        if len(self.active_zones()) <= 1:
             self.clear_preempted_zones()
+
+        if len(list(existing_zones)) == self.active_zones():
+            return random.choice(self.active_zones())
+
+        while True:
+            zone = random.choice(self.active_zones())
+            if zone not in existing_zones:
+                break
+
+        logger.info(f'DynamicFailoverSpotPlacer: {existing_zones}, {zone},'
+                    f'{self.active_zones()}')
+
         return random.choice(self.active_zones())
