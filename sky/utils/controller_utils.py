@@ -282,8 +282,8 @@ def get_controller_resources(
     return controller_resources
 
 
-def _get_skypilot_config_for_controller_task(
-        cloud: 'clouds.Cloud') -> Dict[str, Any]:
+def _setup_proxy_command_on_controller(
+        controller_launched_cloud: 'clouds.Cloud') -> Dict[str, Any]:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -317,7 +317,7 @@ def _get_skypilot_config_for_controller_task(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    proxy_command_key = (str(cloud).lower(), 'ssh_proxy_command')
+    proxy_command_key = (str(controller_launched_cloud).lower(), 'ssh_proxy_command')
     ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
     config_dict = skypilot_config.to_dict()
     if isinstance(ssh_proxy_command, str):
@@ -336,11 +336,16 @@ def _get_skypilot_config_for_controller_task(
 def replace_skypilot_config_path_in_file_mounts(
         cloud: 'clouds.Cloud', file_mounts: Optional[Dict[str, str]]):
     """Replaces the SkyPilot config path in file mounts with the real path."""
+    # TODO(zhwu): This function can be moved to `backend_utils` once we have
+    # more predefined file mounts that needs to be replaced after the cluster
+    # is provisioned, e.g., we may need to decide which cloud to create a bucket
+    # to be mounted to the cluster based on the cloud the cluster is actually
+    # launched on (after failover).
     if file_mounts is None or not skypilot_config.loaded():
         return
     replaced = False
     with tempfile.NamedTemporaryFile('w', delete=False) as f:
-        new_skypilot_config = _get_skypilot_config_for_controller_task(cloud)
+        new_skypilot_config = _setup_proxy_command_on_controller(cloud)
         if new_skypilot_config is not None:
             common_utils.dump_yaml(f.name, new_skypilot_config)
             for remote_path, local_path in file_mounts.items():
