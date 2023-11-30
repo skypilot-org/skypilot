@@ -1,5 +1,4 @@
 """Kubernetes utilities for SkyPilot."""
-import enum
 import math
 import os
 import re
@@ -17,6 +16,7 @@ from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
 
 DEFAULT_NAMESPACE = 'default'
@@ -35,33 +35,6 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 To further debug, run: sky check.'
 
 logger = sky_logging.init_logger(__name__)
-
-
-class KubernetesNetworkingMode(enum.Enum):
-    """Enum for the different types of networking modes for accessing
-    jump pods.
-    """
-    NODEPORT = 'nodeport'
-    PORTFORWARD = 'portforward'
-
-    @classmethod
-    def from_str(cls, mode: str) -> 'KubernetesNetworkingMode':
-        """Returns the enum value for the given string."""
-        if mode.lower() == cls.NODEPORT.value:
-            return cls.NODEPORT
-        elif mode.lower() == cls.PORTFORWARD.value:
-            return cls.PORTFORWARD
-        else:
-            raise ValueError(f'Unsupported kubernetes networking mode: '
-                             f'{mode}. The mode must be either '
-                             f'\'{cls.PORTFORWARD.value}\' or '
-                             f'\'{cls.NODEPORT.value}\'. ')
-
-
-class KubernetesServiceType(enum.Enum):
-    """Enum for the different types of services."""
-    NODEPORT = 'NodePort'
-    CLUSTERIP = 'ClusterIP'
 
 
 class GPULabelFormatter:
@@ -86,6 +59,20 @@ class GPULabelFormatter:
     def get_accelerator_from_label_value(cls, value: str) -> str:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Validates if the specified label value is correct.
+
+        Used to check if the labelling on the cluster is correct and
+        preemptively raise an error if it is not.
+
+        Returns:
+            bool: True if the label value is valid, False otherwise.
+            str: Error message if the label value is invalid, None otherwise.
+        """
+        del value
+        return True, ''
 
 
 def get_gke_accelerator_name(accelerator: str) -> str:
@@ -123,6 +110,14 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value.upper()
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Values must be all lowercase for the SkyPilot formatter."""
+        is_valid = value == value.lower()
+        return is_valid, (f'Label value {value!r} must be lowercase if using '
+                          f'the {cls.get_label_key()} label.'
+                          if not is_valid else '')
 
 
 class CoreWeaveLabelFormatter(GPULabelFormatter):
@@ -184,31 +179,32 @@ LABEL_FORMATTER_REGISTRY = [
 
 
 def detect_gpu_label_formatter(
-) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
     Returns:
         GPULabelFormatter: The GPU label formatter for the cluster, if found.
-        List[Tuple[str, str]]: The set of labels and values across all nodes.
+        Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
+             labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
     # Get all labels across all nodes
-    node_labels: List[Tuple[str, str]] = []
+    node_labels: Dict[str, List[Tuple[str, str]]] = {}
     nodes = get_kubernetes_nodes()
     for node in nodes:
-        node_labels.extend(node.metadata.labels.items())
+        node_labels[node.metadata.name] = []
+        for label, value in node.metadata.labels.items():
+            node_labels[node.metadata.name].append((label, value))
 
     label_formatter = None
 
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         label_key = lf.get_label_key()
-        for label, _ in node_labels:
-            if label.startswith(label_key):
-                label_formatter = lf()
-                break
-
-        if label_formatter is not None:
-            break
+        for _, label_list in node_labels.items():
+            for label, _ in label_list:
+                if label.startswith(label_key):
+                    label_formatter = lf()
+                    return label_formatter, node_labels
 
     return label_formatter, node_labels
 
@@ -370,6 +366,17 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
         if label_formatter is not None:
+            # Validate the label value on all nodes labels to ensure they are
+            # correctly setup and will behave as expected.
+            for node_name, label_list in node_labels.items():
+                for label, value in label_list:
+                    if label == label_formatter.get_label_key():
+                        is_valid, reason = label_formatter.validate_label_value(
+                            value)
+                        if not is_valid:
+                            raise exceptions.ResourcesUnavailableError(
+                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
@@ -382,17 +389,22 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # node. It does not (and should not) check if the resource
             # quantity is available since that is dynamic and can change
             # during scheduling.
-            for label, value in node_labels:
-                if label == k8s_acc_label_key and value == k8s_acc_label_value:
-                    # If a node is found, we can break out of the loop
-                    # and proceed to deploy.
-                    return k8s_acc_label_key, k8s_acc_label_value
+            for node_name, label_list in node_labels.items():
+                for label, value in label_list:
+                    if (label == k8s_acc_label_key and
+                            value == k8s_acc_label_value):
+                        # If a node is found, we can break out of the loop
+                        # and proceed to deploy.
+                        return k8s_acc_label_key, k8s_acc_label_value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
+                    all_labels = []
+                    for node_name, label_list in node_labels.items():
+                        all_labels.extend(label_list)
                     gpus_available = set(
-                        v for k, v in node_labels if k == k8s_acc_label_key)
+                        v for k, v in all_labels if k == k8s_acc_label_key)
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
@@ -435,8 +447,9 @@ def get_port(svc_name: str, namespace: str) -> int:
     return head_service.spec.ports[0].node_port
 
 
-def get_external_ip(network_mode: Optional[KubernetesNetworkingMode]):
-    if network_mode == KubernetesNetworkingMode.PORTFORWARD:
+def get_external_ip(
+        network_mode: Optional[kubernetes_enums.KubernetesNetworkingMode]):
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
         return '127.0.0.1'
     # Return the IP address of the first node with an external IP
     nodes = kubernetes.core_api().list_node().items
@@ -704,10 +717,10 @@ def construct_ssh_jump_command(private_key_path: str,
     return ssh_jump_proxy_command
 
 
-def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
-                          network_mode: KubernetesNetworkingMode,
-                          namespace: str, port_fwd_proxy_cmd_path: str,
-                          port_fwd_proxy_cmd_template: str) -> str:
+def get_ssh_proxy_command(
+        private_key_path: str, ssh_jump_name: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode, namespace: str,
+        port_fwd_proxy_cmd_path: str, port_fwd_proxy_cmd_template: str) -> str:
     """Generates the SSH proxy command to connect through the SSH jump pod.
 
     By default, establishing an SSH connection creates a communication
@@ -755,7 +768,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
     """
     # Fetch IP to connect to for the jump svc
     ssh_jump_ip = get_external_ip(network_mode)
-    if network_mode == KubernetesNetworkingMode.NODEPORT:
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         ssh_jump_port = get_port(ssh_jump_name, namespace)
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
@@ -776,7 +789,7 @@ def get_ssh_proxy_command(private_key_path: str, ssh_jump_name: str,
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
-                       service_type: KubernetesServiceType):
+                       service_type: kubernetes_enums.KubernetesServiceType):
     """Sets up Kubernetes service resource to access for SSH jump pod.
 
     This method acts as a necessary complement to be run along with
@@ -815,10 +828,14 @@ def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
                     name=ssh_jump_name, namespace=namespace)
                 kubernetes.core_api().create_namespaced_service(
                     namespace, content['service_spec'])
-                port_forward_mode = KubernetesNetworkingMode.PORTFORWARD.value
-                nodeport_mode = KubernetesNetworkingMode.NODEPORT.value
-                clusterip_svc = KubernetesServiceType.CLUSTERIP.value
-                nodeport_svc = KubernetesServiceType.NODEPORT.value
+                port_forward_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value)
+                nodeport_mode = (
+                    kubernetes_enums.KubernetesNetworkingMode.NODEPORT.value)
+                clusterip_svc = (
+                    kubernetes_enums.KubernetesServiceType.CLUSTERIP.value)
+                nodeport_svc = (
+                    kubernetes_enums.KubernetesServiceType.NODEPORT.value)
                 curr_network_mode = port_forward_mode \
                     if curr_svc_type == clusterip_svc else nodeport_mode
                 new_network_mode = nodeport_mode \
@@ -945,12 +962,13 @@ def clean_zombie_ssh_jump_pod(namespace: str, node_id: str):
             ssh_jump_name, namespace)
         cont_ready_cond = find(ssh_jump_pod.status.conditions,
                                lambda c: c.type == 'ContainersReady')
-        if cont_ready_cond and \
-            cont_ready_cond.status == 'False':
-            # The main container is not ready. To be on the safe side
-            # and prevent a dangling ssh jump pod, lets remove it and
-            # the service. Otherwise main container is ready and its lifecycle
-            # management script takes care of the cleaning.
+        if (cont_ready_cond and cont_ready_cond.status
+                == 'False') or ssh_jump_pod.status.phase == 'Pending':
+            # Either the main container is not ready or the pod failed
+            # to schedule. To be on the safe side and prevent a dangling
+            # ssh jump pod, lets remove it and the service. Otherwise, main
+            # container is ready and its lifecycle management script takes
+            # care of the cleaning.
             kubernetes.core_api().delete_namespaced_pod(ssh_jump_name,
                                                         namespace)
             kubernetes.core_api().delete_namespaced_service(
@@ -1006,8 +1024,8 @@ def check_port_forward_mode_dependencies() -> None:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'`{name}` is required to setup Kubernetes cloud with '
-                    f'`{KubernetesNetworkingMode.PORTFORWARD.value}` default '
-                    'networking mode and it is not installed. '
+                    f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
+                    'default networking mode and it is not installed. '
                     'On Debian/Ubuntu, install it with:\n'
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'

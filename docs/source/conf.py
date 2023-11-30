@@ -34,6 +34,7 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    'sphinx_design',
 ]
 
 intersphinx_mapping = {

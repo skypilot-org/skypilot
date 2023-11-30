@@ -73,9 +73,9 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
         with open(path, 'r') as f:
             yaml_config = yaml.safe_load(f)
             if not suppress_error:
-                backend_utils.validate_schema(yaml_config,
-                                              schemas.get_cluster_schema(),
-                                              'Invalid cluster YAML: ')
+                common_utils.validate_schema(yaml_config,
+                                             schemas.get_cluster_schema(),
+                                             'Invalid cluster YAML: ')
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
         sky_local_path = SKY_USER_LOCAL_CONFIG_PATH
@@ -105,7 +105,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     # Remove clusters that are in global user state but are not in
     # ~/.sky/local.
     records = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     saved_clusters = [r['name'] for r in records]

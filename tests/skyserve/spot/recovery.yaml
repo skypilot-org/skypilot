@@ -1,0 +1,18 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replicas: 1
+
+
+resources:
+  ports: 8080
+  cloud: gcp
+  cpus: 2+
+  zone: us-central1-a
+  use_spot: true
+
+workdir: examples/serve/http_server
+
+# Use 8080 to test jupyter service is terminated
+run: python3 server.py --port 8080
