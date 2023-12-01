@@ -239,7 +239,6 @@ extras_require: Dict[str, List[str]] = {
 
 extras_require['all'] = sum(extras_require.values(), [])
 
-
 long_description = ''
 readme_filepath = 'README.md'
 # When sky/backends/wheel_utils.py builds wheels, it will not contain the

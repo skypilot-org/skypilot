@@ -24,7 +24,8 @@ def _filter_instances(cluster_name_on_cloud: str,
     def _get_internal_ip(node: Dict[str, Any]):
         # TODO(ewzeng): cache internal ips in metadata file to reduce
         # ssh overhead.
-        if node['ip'] is None:
+        if node.get('ip') is None:
+            node['ip'] = None
             node['internal_ip'] = None
             return
         runner = command_runner.SSHCommandRunner(
@@ -113,6 +114,20 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
             head_instance_id = instance_id
+
+    # Wait for instances to be ready.
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+        ready_instance_cnt = 0
+        for instance_id, instance in instances.items():
+            if instance.get('ssh_port') is not None:
+                ready_instance_cnt += 1
+        if ready_instance_cnt == config.count:
+            break
+
+        logger.info('Waiting for instances to be ready '
+                    f'({len(instances)}/{config.count}).')
+        time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='runpod',
                                   cluster_name=cluster_name_on_cloud,
