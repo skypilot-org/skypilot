@@ -57,7 +57,7 @@ class SkyServiceSpec:
         spot_args = [
             spot_placer, spot_mixer, spot_zones, target_qps_per_replica
         ]
-        on_demand_args = [target_qps_per_replica, on_demand_zones]
+        on_demand_args = [target_qps_per_replica, on_demand_type]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         on_demand_args_num = sum(
             [on_demand_arg is not None for on_demand_arg in on_demand_args])
@@ -66,7 +66,7 @@ class SkyServiceSpec:
                     on_demand_args_num != len(on_demand_args)):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('target_qps_per_replica and'
-                                     'on_demand_zones must be all '
+                                     'on_demand_type must be all '
                                      'specified or all not specified'
                                      'in the service YAML.')
         if spot_placer:
