@@ -24,7 +24,7 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.',  # pylint: disable=line-too-long
+        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
