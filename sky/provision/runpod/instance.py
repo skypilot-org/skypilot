@@ -33,9 +33,23 @@ def _filter_instances(cluster_name_on_cloud: str,
             'root',
             os.path.expanduser(PRIVATE_SSH_KEY_PATH),
             port=node['ssh_port'])
-        rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
-                                        require_outputs=True,
-                                        stream_logs=False)
+        retry_cnt = 0
+        while True:
+            rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
+                                            require_outputs=True,
+                                            stream_logs=False)
+            if not rc or rc != 255:
+                break
+            if retry_cnt >= 3:
+                if rc != 255:
+                    break
+                # If we fail to connect the node for 3 times:
+                # 1. The node is terminated.
+                # 2. We are on the same node as the node we are trying to
+                #    connect to, and runpod does not allow ssh to itself.
+                node['internal_ip'] = None
+                return
+            time.sleep(1)
         subprocess_utils.handle_returncode(
             rc,
             _GET_INTERNAL_IP_CMD,
