@@ -7,13 +7,13 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import status_lib
 from sky.clouds import service_catalog
-import sky.skylet.providers.runpod.rp_helper as runpod_api
+import sky.clouds.utils.runpod_utils as runpod_api
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 _CREDENTIAL_FILES = [
-    'credentials.toml',
+    'config.toml',
 ]
 
 
@@ -26,7 +26,12 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.',  # pylint: disable=line-too-long
+        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances not supported.',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'docker image not supported.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node unsupported.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Customize disk tier not supported.',
+        clouds.CloudImplementationFeatures.OPEN_PORTS: 'Ports not supported.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -271,11 +276,11 @@ class RunPod(clouds.Cloud):
             'DEAD': status_lib.ClusterStatus.INIT,
             'TERMINATED': None
         }
+        possible_names = [f'{name}-head', f'{name}-worker']
         status_list = []
         vms = runpod_api.list_instances()
-        for instance_id, instance_property in vms.items():
-            del instance_id
-            if instance_property['name'] == name:
+        for instance_property in vms.values():
+            if instance_property['name'] in possible_names:
                 node_status = status_map[instance_property['status']]
                 if node_status is not None:
                     status_list.append(node_status)

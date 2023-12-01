@@ -133,11 +133,9 @@ def parse_readme(readme: str) -> str:
 install_requires = [
     'wheel',
     'cachetools',
+    'colorama>=0.4.4',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
@@ -207,6 +205,9 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama < 0.4.5',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -233,7 +234,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
-    'runpod': ['runpod>=1.3.0'],
+    'runpod': ['runpod>=1.3.7'],
     'remote': remote,
 }
 
@@ -241,7 +242,7 @@ extras_require['all'] = sum(extras_require.values(), [])
 
 # Install aws requirements by default, as it is the most common cloud provider,
 # and the installation is quick.
-install_requires += extras_require['aws']
+# install_requires += extras_require['aws']
 
 long_description = ''
 readme_filepath = 'README.md'

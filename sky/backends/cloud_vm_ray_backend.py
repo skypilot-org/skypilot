@@ -40,6 +40,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.clouds.utils import runpod_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import instance_setup
@@ -49,7 +50,6 @@ from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.providers.runpod import rp_helper
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
@@ -2477,9 +2477,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
 
         if isinstance(self.launched_resources.cloud, clouds.RunPod):
-            self.stable_ssh_ports = rp_helper.get_ssh_ports(
+            self.stable_ssh_ports = runpod_utils.get_ssh_ports(
                 self.cluster_name_on_cloud)
-            print(f"SSH ports: {self.stable_ssh_ports}")
+            logger.debug(f'SSH ports: {self.stable_ssh_ports}')
             return
 
         head_ssh_port = 22
