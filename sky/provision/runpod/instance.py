@@ -155,6 +155,8 @@ def get_cluster_info(
     for node_id, node_info in nodes.items():
         instances[node_id] = common.InstanceInfo(
             instance_id=node_id,
+            # We have to use external IP as we are not able to connect to the
+            # ray cluster using internal IP.
             internal_ip=node_info['external_ip'],
             external_ip=node_info['external_ip'],
             ssh_port=node_info['ssh_port'],
