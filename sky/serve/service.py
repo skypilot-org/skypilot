@@ -180,8 +180,14 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             controller_port = common_utils.find_free_port(
                 constants.CONTROLLER_PORT_START)
             # Start the controller.
+            #controller_process = multiprocessing.Process(
+            #    target=controller.run_controller,
+            #    args=(service_name, service_spec, task_yaml, controller_port))
+            controller_log_file = os.path.expanduser('~/.sky/serve/test_serve/controller.log')
             controller_process = multiprocessing.Process(
-                target=controller.run_controller,
+                target=ux_utils.RedirectOutputForProcess(
+                    controller.run_controller,
+                    controller_log_file).run,
                 args=(service_name, service_spec, task_yaml, controller_port))
             controller_process.start()
             serve_state.set_service_controller_port(service_name,

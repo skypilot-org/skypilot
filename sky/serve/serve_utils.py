@@ -165,6 +165,47 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+class RequestHeteroGPU(RequestsAggregator):
+    """RequestTimestamp: Aggregates request timestamps.
+
+    This is useful for HeteroGPU-autoscaling.
+    """
+
+    def __init__(self) -> None:
+        self.total_requests = 0
+        self.buckets = [(0, 25), (25, 100), (100, 250), (250, 500), (500, 1000), (1000, 2000), (2000, 4000)]
+        self.request_timestamp_distribution = [[],[],[],[],[],[],[]]
+        self.timestamps = []
+
+    def add(self, request: 'fastapi.Request', input_token_length: float) -> None:
+        """Add a request to the request aggregator."""
+        del request  # unused
+        self.total_requests += 1
+        for idx, (lower, upper) in enumerate(self.buckets):
+            if lower == 2000 and lower <= input_token_length:
+                self.request_timestamp_distribution[idx].append(time.time())
+                break
+            elif lower <= input_token_length < upper:
+                self.request_timestamp_distribution[idx].append(time.time())
+                break
+        
+        print(f'RequestTimeStamp.add(self.request_timestamp_distribution): {self.request_timestamp_distribution}')
+        self.timestamps.append(time.time())
+
+    def clear(self) -> None:
+        """Clear all current request aggregator."""
+        self.total_requests = 0
+        self.request_timestamp_distribution = [[],[],[],[],[],[],[]]
+        self.timestamps = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
+        return {'timestamps' : self.request_timestamp_distribution}
+
+    def __repr__(self) -> str:
+        return f'RequestTimestamp(timestamps={self.timestamps})'
+
+
 def generate_service_name():
     return f'sky-service-{uuid.uuid4().hex[:4]}'
 

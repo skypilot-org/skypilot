@@ -194,3 +194,91 @@ class RequestRateAutoscaler(Autoscaler):
                         f'(id: {replica_ids_to_remove}).')
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                       target=replica_ids_to_remove)
+
+
+class HeteroGPUAutoscaler(Autoscaler):
+    """RequestRateAutoscaler: Autoscale according to request rate.
+
+    Scales when the number of requests in the given interval is above or below
+    the threshold.
+    """
+
+    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
+                 cooldown: int, rps_window_size: int) -> None:
+        """Initialize the request rate autoscaler.
+
+        Variables:
+            upper_threshold: Upper threshold for scale up. If None, no scale up.
+            lower_threshold: Lower threshold for scale down. If None, no scale
+                down.
+            cooldown: Cooldown between two scaling operations in seconds.
+            rps_window_size: Window size for rps calculating.
+            last_scale_operation: Time of last scale operation.
+            request_timestamps: All request timestamps within the window.
+        """
+        super().__init__(spec, frequency)
+        self.upper_threshold: Optional[float] = spec.qps_upper_threshold
+        self.lower_threshold: Optional[float] = spec.qps_lower_threshold
+        self.cooldown: int = cooldown
+        self.rps_window_size: int = 600
+        self.last_scale_operation: float = 0.
+        self.request_timestamps: List[float] = []
+        self.request_timestamps_distribution: List[List[float]] = [[],[],[],[],[],[],[]]
+        self.request_distribution: List[int] = [0, 0, 0, 0, 0, 0, 0]
+        self.total_request_in_window = 0
+
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling.
+
+        request_aggregator_info should be a dict with the following format:
+
+        {
+            'timestamps': [timestamp1 (float), timestamp2 (float), ...]
+        }
+        """
+        self.total_request_in_window = 0
+        timestamps_from_loadbalancer = request_aggregator_info.get('timestamps', [[],[],[],[],[],[],[]])
+        current_time = time.time()
+        for idx, lst in enumerate(self.request_timestamps_distribution):
+            lst.extend(timestamps_from_loadbalancer[idx])
+            index = bisect.bisect_left(lst,
+                                       current_time - self.rps_window_size)
+            lst = lst[index:]
+            self.total_request_in_window += len(lst)
+
+        if self.total_request_in_window != 0:
+            for idx, lst in enumerate(self.request_timestamps_distribution):
+                self.request_distribution[idx] = len(lst) / self.total_request_in_window
+
+        print(f'autoscaler.collect_request_information(timestamps_from_loadbalancer): {timestamps_from_loadbalancer}')
+        print(f'autoscaler.collect_request_information(self.request_timestamps_distribution): {self.request_timestamps_distribution}')
+        print(f'autoscaler.collect_request_information(self.total_request_in_window): {self.total_request_in_window}')
+        print(f'autoscaler.collect_request_information(self.request_distribution): {self.request_distribution}')        
+
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> AutoscalerDecision:
+        current_time = time.time()
+        num_replicas = len(replica_infos)
+
+        # Check if cooldown period has passed since the last scaling operation.
+        # Only cooldown if bootstrapping is done.
+        if num_replicas >= self.min_replicas:
+            if current_time - self.last_scale_operation < self.cooldown:
+                logger.info(
+                    f'Current time: {current_time}, '
+                    f'last scale operation: {self.last_scale_operation}, '
+                    f'cooldown: {self.cooldown}')
+                logger.info('Cooldown period has not passed since last scaling '
+                            'operation. Skipping scaling.')
+                return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
+                                          target=None)
+    
+        if num_replicas == 0:
+            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                      target=1)
+        else:
+            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
+                                    target=None)

@@ -1,4 +1,5 @@
 """LoadBalancer: redirect any incoming request to an endpoint replica."""
+import json
 import logging
 import threading
 import time
@@ -110,7 +111,59 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
+class HeteroGPULoadBalancer(SkyServeLoadBalancer):
+    """SkyServeLoadBalancer: redirect incoming traffic.
+
+    This class accept any traffic to the controller and redirect it
+    to the appropriate endpoint replica according to the load balancing
+    policy.
+
+    NOTE: HTTP redirect is used. Thus, when using `curl`, be sure to use
+    `curl -L`.
+    """
+
+    def __init__(self, controller_url: str, load_balancer_port: int) -> None:
+        """Initialize the load balancer.
+
+        Args:
+            controller_url: The URL of the controller.
+            load_balancer_port: The port where the load balancer listens to.
+        """
+        super.__init__(controller_url, load_balancer_port)
+        self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
+            lb_policies.RoundRobinPolicy())
+        self._request_aggregator: serve_utils.RequestsAggregator = (
+            serve_utils.RequestHeteroGPU())
+
+
+    async def _redirect_handler(self, request: fastapi.Request):
+        body_bytes = await request.body()
+        body_str = body_bytes.decode("utf-8")
+        body_json = json.loads(body_str)
+        messages = body_json['messages']
+        input_text = " ".join(message["content"] for message in messages)
+        input_token_length = 1.25 * len(input_text)
+        print(f'_redirect_handler(input_text): {input_text}')
+        print(f'_redirect_handler(input_token_length): {input_token_length}')
+        print(f"_redirect_handler(body_json): {body_json}")
+        print(f"_redirect_handler(type(body_json)): {type(body_json)}")
+
+        self._request_aggregator.add(request, input_token_length)
+        ready_replica_url = self._load_balancing_policy.select_replica(request)
+
+        if ready_replica_url is None:
+            raise fastapi.HTTPException(status_code=503,
+                                        detail='No available replicas. '
+                                        'Use "sky serve status [SERVICE_NAME]" '
+                                        'to check the replica status.')
+
+        path = f'http://{ready_replica_url}{request.url.path}'
+        logger.info(f'Redirecting request to {path}')
+        return fastapi.responses.RedirectResponse(url=path)
+
 def run_load_balancer(controller_addr: str, load_balancer_port: int):
-    load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)
+    #load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
+    #                                     load_balancer_port=load_balancer_port)
+    load_balancer = HeteroGPULoadBalancer(controller_url=controller_addr,
+                                         load_balancer_port=load_balancer_port)   
     load_balancer.run()

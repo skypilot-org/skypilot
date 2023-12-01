@@ -64,6 +64,7 @@ def launch_cluster(task_yaml_path: str,
     """
     try:
         task = sky.Task.from_yaml(task_yaml_path)
+        logger.info("lauch_cluster(task): ", task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -122,6 +123,7 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
     retry_cnt = 0
     backoff = common_utils.Backoff()
+    logger.info("terminate_cluster(cluster_name): ", cluster_name)
     while True:
         retry_cnt += 1
         try:
@@ -900,3 +902,52 @@ class SkyPilotReplicaManager(ReplicaManager):
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
+
+class HeteroGPUReplicaManager(SkyPilotReplicaManager):
+    """Replica Manager for SkyPilot clusters.
+
+    It will run three daemon to monitor the status of the replicas:
+        (1) _process_pool_refresher: Refresh the launch/down process pool
+            to monitor the progress of the launch/down process.
+        (2) _job_status_fetcher: Fetch the job status of the service to
+            monitor the status of the service jobs.
+        (3) _replica_prober: Do readiness probe to the replicas to monitor
+            whether it is still responding to requests.
+    """
+
+    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
+                 task_yaml_path: str) -> None:
+        super().__init__(service_name, spec, task_yaml_path)
+
+    def _launch_replica(self, replica_id: int) -> None:
+        if replica_id in self._launch_process_pool:
+            logger.warning(f'Launch process for replica {replica_id} '
+                           'already exists. Skipping.')
+            return
+        logger.info(f'Launching replica {replica_id}...')
+        cluster_name = serve_utils.generate_replica_cluster_name(
+            self._service_name, replica_id)
+        log_file_name = serve_utils.generate_replica_launch_log_file_name(
+            self._service_name, replica_id)
+        p = multiprocessing.Process(
+            target=ux_utils.RedirectOutputForProcess(
+                launch_cluster,
+                log_file_name,
+            ).run,
+            args=(self._task_yaml_path, cluster_name),
+        )
+        replica_port = _get_resources_ports(self._task_yaml_path)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port)
+        serve_state.add_or_update_replica(self._service_name, replica_id, info)
+        # Don't start right now; we will start it later in _refresh_process_pool
+        # to avoid too many sky.launch running at the same time.
+        self._launch_process_pool[replica_id] = p
+
+    def scale_up(self, n: int) -> None:
+        for _ in range(n):
+            self._launch_replica(self._next_replica_id)
+            self._next_replica_id += 1
+
+    def scale_down(self, replica_ids: List[int]) -> None:
+        for replica_id in replica_ids:
+            self._terminate_replica(replica_id, sync_down_logs=False)
