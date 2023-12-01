@@ -96,7 +96,7 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
     return tags.get(instance_id, {})
 
 
-@retry
+# @retry
 def list_instances():
     """Lists instances associated with API key."""
     instances = runpod.runpod().get_pods()
@@ -111,9 +111,11 @@ def list_instances():
         if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
             for port in instance['runtime']['ports']:
                 if port['privatePort'] == 22 and port['isIpPublic']:
-                    instance_list[instance['id']]['ip'] = port['ip']
+                    instance_list[instance['id']]['external_ip'] = port['ip']
                     instance_list[
                         instance['id']]['ssh_port'] = port['publicPort']
+                elif not port['isIpPublic']:
+                    instance_list[instance['id']]['internal_ip'] = port['ip']
 
         instance_list[instance['id']]['tags'] = get_set_tags(
             instance['id'], None)
@@ -121,7 +123,7 @@ def list_instances():
     return instance_list
 
 
-def launch(name: str, instance_type: str, region: str):
+def launch(name: str, instance_type: str, region: str, disk_size: int):
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -138,13 +140,13 @@ def launch(name: str, instance_type: str, region: str):
         image_name='runpod/base:0.0.2',
         gpu_type_id=gpu_type,
         cloud_type=cloud_type,
-        container_disk_in_gb=50,
+        container_disk_in_gb=disk_size,
         min_vcpu_count=4 * gpu_quantity,
         min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
         country_code=region,
         ports=(f'22/tcp,'
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-               f'{constants.SKY_REMOTE_RAY_PORT}/tcp'),
+               f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
     )
 
@@ -156,7 +158,7 @@ def set_tags(instance_id: str, tags: Dict):
     get_set_tags(instance_id, tags)
 
 
-@retry
+# @retry
 def remove(instance_id: str):
     """Terminates the given instance."""
     runpod.runpod().terminate_pod(instance_id)

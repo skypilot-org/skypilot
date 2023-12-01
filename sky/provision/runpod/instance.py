@@ -1,5 +1,4 @@
 """GCP instance provisioning."""
-import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -7,56 +6,15 @@ from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.runpod import utils
-from sky.utils import command_runner
-from sky.utils import subprocess_utils
+from sky.utils import common_utils
 
 POLL_INTERVAL = 5
-PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
-
-_GET_INTERNAL_IP_CMD = r'ip -4 -br addr show | grep UP | grep -Eo "(10\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|172\.(1[6-9]|2[0-9][0-9]?|3[0-1]))\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"'  # pylint: disable=line-too-long
 
 logger = sky_logging.init_logger(__name__)
 
 
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]]) -> Dict[str, Any]:
-
-    def _get_internal_ip(node: Dict[str, Any]):
-        # TODO(ewzeng): cache internal ips in metadata file to reduce
-        # ssh overhead.
-        if node.get('ip') is None:
-            node['ip'] = None
-            node['internal_ip'] = None
-            return
-        runner = command_runner.SSHCommandRunner(
-            node['ip'],
-            'root',
-            os.path.expanduser(PRIVATE_SSH_KEY_PATH),
-            port=node['ssh_port'])
-        retry_cnt = 0
-        while True:
-            rc, stdout, stderr = runner.run(_GET_INTERNAL_IP_CMD,
-                                            require_outputs=True,
-                                            stream_logs=False)
-            if not rc or rc != 255:
-                break
-            if retry_cnt >= 3:
-                if rc != 255:
-                    break
-                # If we fail to connect the node for 3 times, it is likely that:
-                # 1. The node is terminated.
-                # 2. We are on the same node as the node we are trying to
-                #    connect to, and runpod does not allow ssh to itself.
-                # In both cases, we can safely set the internal ip to None.
-                node['internal_ip'] = None
-                return
-            time.sleep(1)
-        subprocess_utils.handle_returncode(
-            rc,
-            _GET_INTERNAL_IP_CMD,
-            'Failed get obtain private IP from node',
-            stderr=stdout + stderr)
-        node['internal_ip'] = stdout.strip()
 
     instances = utils.list_instances()
     possible_names = [
@@ -65,13 +23,11 @@ def _filter_instances(cluster_name_on_cloud: str,
 
     filtered_nodes = {}
     for instance_id, instance in instances.items():
-        if status_filters is not None and instance[
-                'status'] not in status_filters:
+        if (status_filters is not None and
+                instance['status'] not in status_filters):
             continue
         if instance.get('name') in possible_names:
             filtered_nodes[instance_id] = instance
-    subprocess_utils.run_in_parallel(_get_internal_ip,
-                                     list(filtered_nodes.values()))
     return filtered_nodes
 
 
@@ -121,10 +77,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     created_instance_ids = []
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
-        instance_id = utils.launch(
-            name=f'{cluster_name_on_cloud}-{node_type}',
-            instance_type=config.node_config['InstanceType'],
-            region=region)
+        try:
+            instance_id = utils.launch(
+                name=f'{cluster_name_on_cloud}-{node_type}',
+                instance_type=config.node_config['InstanceType'],
+                region=region,
+                disk_size=config.node_config['DiskSize'])
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'run_instances error: {e}')
+            raise
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
         if head_instance_id is None:
@@ -172,11 +133,14 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    del provider_config
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
+        logger.info(f'Terminating instance {inst_id}.'
+                    f'{inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
+        logger.info(f'Start {inst_id}: {inst}')
         utils.remove(inst_id)
 
 
@@ -191,8 +155,8 @@ def get_cluster_info(
     for node_id, node_info in nodes.items():
         instances[node_id] = common.InstanceInfo(
             instance_id=node_id,
-            internal_ip=node_info['internal_ip'],
-            external_ip=node_info['ip'],
+            internal_ip=node_info['external_ip'],
+            external_ip=node_info['external_ip'],
             ssh_port=node_info['ssh_port'],
             tags={},
         )
@@ -234,4 +198,3 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     del cluster_name_on_cloud, provider_config
-    pass
