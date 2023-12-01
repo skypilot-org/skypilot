@@ -255,7 +255,7 @@ def _wait_ssh_connection_direct(
                 # following error:
                 # "System is booting up. Unprivileged users are not permitted to
                 # log in yet".
-                return _wait_ssh_connection_indirect(ip, ssh_user,
+                return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
                                                      ssh_private_key,
                                                      ssh_control_name,
                                                      ssh_proxy_command)

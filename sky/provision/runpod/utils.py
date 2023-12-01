@@ -145,8 +145,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int):
         min_memory_in_gb=gpu_specs['memoryInGb'] * gpu_quantity,
         country_code=region,
         ports=(f'22/tcp,'
-               f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/tcp,'
-               f'{constants.SKY_REMOTE_RAY_PORT}/http'),
+               f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
+               f'{constants.SKY_REMOTE_RAY_PORT}/tcp'),
         support_public_ip=True,
     )
 
