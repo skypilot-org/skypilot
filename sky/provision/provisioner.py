@@ -196,6 +196,7 @@ def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
 
 
 def _ssh_probe_command(ip: str,
+                       ssh_port: int,
                        ssh_user: str,
                        ssh_private_key: str,
                        ssh_proxy_command: Optional[str] = None) -> List[str]:
@@ -207,6 +208,8 @@ def _ssh_probe_command(ip: str,
         '-i',
         ssh_private_key,
         f'{ssh_user}@{ip}',
+        '-p',
+        str(ssh_port),
         '-o',
         'StrictHostKeyChecking=no',
         '-o',
@@ -239,13 +242,14 @@ def _shlex_join(command: List[str]) -> str:
 
 def _wait_ssh_connection_direct(
         ip: str,
+        ssh_port: int,
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
-        with socket.create_connection((ip, 22), timeout=1) as s:
+        with socket.create_connection((ip, ssh_port), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
@@ -259,7 +263,7 @@ def _wait_ssh_connection_direct(
         pass
     except Exception:  # pylint: disable=broad-except
         pass
-    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+    command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
                  f'{_shlex_join(command)}')
@@ -268,12 +272,13 @@ def _wait_ssh_connection_direct(
 
 def _wait_ssh_connection_indirect(
         ip: str,
+        ssh_port: int,
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
     del ssh_control_name
-    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+    command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     proc = subprocess.run(command,
                           shell=False,
@@ -299,14 +304,17 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
         # See https://github.com/skypilot-org/skypilot/pull/1512
         waiter = _wait_ssh_connection_indirect
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
 
     timeout = 60 * 10  # 10-min maximum timeout
     start = time.time()
     # use a queue for SSH querying
     ips = collections.deque(ip_list)
+    ssh_ports = collections.deque(port_list)
     while ips:
         ip = ips.popleft()
-        if not waiter(ip, **ssh_credentials):
+        ssh_port = ssh_ports.popleft()
+        if not waiter(ip, ssh_port, **ssh_credentials):
             ips.append(ip)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
@@ -348,6 +356,7 @@ def _post_provision_setup(
 
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
     # TODO(suquark): Handle TPU VMs when dealing with GCP later.
@@ -413,7 +422,7 @@ def _post_provision_setup(
             cluster_info, ssh_credentials)
 
         head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=22,
+                                                      port=port_list[0],
                                                       **ssh_credentials)
 
         status.update(

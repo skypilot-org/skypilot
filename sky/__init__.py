@@ -82,6 +82,7 @@ SCP = clouds.SCP
 Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+RunPod = clouds.RunPod
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -94,6 +95,7 @@ __all__ = [
     'Lambda',
     'Local',
     'OCI',
+    'RunPod',
     'SCP',
     'Optimizer',
     'OptimizeTarget',

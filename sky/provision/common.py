@@ -70,6 +70,7 @@ class InstanceInfo:
     internal_ip: str
     external_ip: Optional[str]
     tags: Dict[str, str]
+    ssh_port: int = 22
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -143,3 +144,13 @@ class ClusterInfo:
         if self.head_instance_id not in self.instances:
             raise ValueError('Head instance ID not in the cluster metadata.')
         return self.instances[self.head_instance_id]
+
+    def get_ssh_ports(self) -> List[int]:
+        """Get the SSH port of all the instances."""
+        head_node_port, other_ports = [], []
+        for instance in self.instances.values():
+            if instance.instance_id == self.head_instance_id:
+                head_node_port.append(instance.ssh_port)
+            else:
+                other_ports.append(instance.ssh_port)
+        return head_node_port + other_ports

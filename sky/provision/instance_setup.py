@@ -102,7 +102,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
         results = []
         for instance_id, metadata in cluster_info.instances.items():
             runner = command_runner.SSHCommandRunner(metadata.get_feasible_ip(),
-                                                     port=22,
+                                                     port=metadata.ssh_port,
                                                      **ssh_credentials)
             wrapper = metadata_utils.cache_func(cluster_name, instance_id,
                                                 stage_name, digest)
@@ -198,8 +198,9 @@ def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
                            ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the head node."""
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                 port=22,
+                                                 port=port_list[0],
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, (cluster_name,
                                                        cluster_info)
@@ -251,7 +252,9 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
     _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
     ip_list = cluster_info.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
-        ip_list[1:], port_list=None, **ssh_credentials)
+        ip_list[1:],
+        port_list=cluster_info.get_ssh_ports()[1:],
+        **ssh_credentials)
     worker_ids = [
         instance_id for instance_id in cluster_info.instances
         if instance_id != cluster_info.head_instance_id
@@ -319,8 +322,9 @@ def start_skylet_on_head_node(cluster_name: str,
     """Start skylet on the head node."""
     del cluster_name
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
     ssh_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                 port=22,
+                                                 port=port_list[0],
                                                  **ssh_credentials)
     assert cluster_info.head_instance_id is not None, cluster_info
     log_path_abs = str(provision_logging.get_log_path())

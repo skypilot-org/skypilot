@@ -147,6 +147,7 @@ def _get_cluster_config_template(cloud):
         clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
+        clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -1170,6 +1171,36 @@ class RetryingVmProvisioner(object):
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
 
+    def _update_blocklist_on_runpod_error(
+            self, launchable_resources: 'resources_lib.Resources',
+            region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
+            stdout: str, stderr: str):
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if any(err in s.strip()
+                   for err in ['runpod.error.QueryError:', 'RunPodError:'])
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_resources.add(launchable_resources.copy(zone=None))
+
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -1209,6 +1240,7 @@ class RetryingVmProvisioner(object):
             clouds.Local: self._update_blocklist_on_local_error,
             clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
+            clouds.RunPod: self._update_blocklist_on_runpod_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
@@ -2451,6 +2483,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         Use this method to use any cloud-specific port fetching logic.
         """
         del max_attempts  # Unused.
+        if isinstance(self.launched_resources.cloud, clouds.RunPod):
+            cluster_info = provision_lib.get_cluster_info(
+                str(self.launched_resources.cloud).lower(),
+                region=self.launched_resources.region,
+                cluster_name_on_cloud=self.cluster_name_on_cloud,
+                provider_config=None)
+            self.stable_ssh_ports = cluster_info.get_ssh_ports()
+            return
+
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
                                  (self.num_node_ips - 1))
