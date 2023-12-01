@@ -5,7 +5,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Union
 
 import colorama
 
@@ -178,7 +178,9 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                auto_restart: bool, requested_resources: 'sky.Resources',
+                auto_restart: bool,
+                requested_resources: Union[Set['sky.Resources'],
+                                           List['sky.Resources']],
                 status: ServiceStatus) -> bool:
     """Add a service in the database.
 

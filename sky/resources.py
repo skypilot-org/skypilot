@@ -1,7 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import functools
 import textwrap
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 from typing_extensions import Literal
@@ -1117,10 +1117,75 @@ class Resources:
         return features
 
     @classmethod
-    def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
+    def from_yaml_config(
+        cls, config: Optional[Dict[str, Any]]
+    ) -> Union[Set['Resources'], List['Resources']]:
         if config is None:
-            return Resources()
+            return {Resources()}
 
+        def _override_resources(base_resource_config,
+                                override_configs) -> List[Resources]:
+            resources_list = []
+            for override_config in override_configs:
+                new_resource_config = base_resource_config.copy()
+                new_resource_config.update(override_config)
+                resources_list.append(
+                    Resources._from_yaml_config_single(new_resource_config))
+            return resources_list
+
+        config = config.copy()
+        any_of_configs = config.pop('any_of', None)
+        ordered_configs = config.pop('ordered', None)
+        if any_of_configs and ordered_configs:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both "any_of" and "ordered" in resources.')
+
+        # Parse resources.accelerators field.
+        accelerators = config.get('accelerators')
+        if config and accelerators is not None:
+            accelerators = config.get('accelerators')
+            if isinstance(accelerators, str):
+                accelerators = {accelerators}
+            elif isinstance(accelerators, dict):
+                accelerators = [
+                    f'{k}:{v}' if v is not None else f'{k}'
+                    for k, v in accelerators.items()
+                ]
+                accelerators = set(accelerators)
+            if len(accelerators) > 1 and (any_of_configs or ordered_configs):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify multiple "accelerators" with "any_of" '
+                        'or "ordered" in resources.')
+
+        if any_of_configs:
+            resources_list = _override_resources(config, any_of_configs)
+            return set(resources_list)
+        if ordered_configs:
+            resources_list = _override_resources(config, ordered_configs)
+            return resources_list
+        # Translate accelerators field to potential multiple resources.
+        if accelerators:
+            # In yaml file, we store accelerators as a list.
+            # In Task, we store a list of resources, each with 1 accelerator.
+            # This for loop is for format conversion.
+            tmp_resources_list = []
+            for acc in accelerators:
+                tmp_resource = config.copy()
+                tmp_resource['accelerators'] = acc
+                tmp_resources_list.append(
+                    Resources._from_yaml_config_single(tmp_resource))
+
+            if isinstance(accelerators, (list, set)):
+                return type(accelerators)(tmp_resources_list)
+            else:
+                raise RuntimeError('Accelerators must be a list or a set.')
+
+        return {Resources._from_yaml_config_single(config)}
+
+    @classmethod
+    def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
