@@ -96,7 +96,6 @@ def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
     return tags.get(instance_id, {})
 
 
-# @retry
 def list_instances():
     """Lists instances associated with API key."""
     instances = runpod.runpod().get_pods()
@@ -146,7 +145,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int):
         country_code=region,
         ports=(f'22/tcp,'
                f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-               f'{constants.SKY_REMOTE_RAY_PORT}/tcp'),
+               f'{constants.SKY_REMOTE_RAY_PORT}/http'),
         support_public_ip=True,
     )
 
@@ -158,7 +157,6 @@ def set_tags(instance_id: str, tags: Dict):
     get_set_tags(instance_id, tags)
 
 
-# @retry
 def remove(instance_id: str):
     """Terminates the given instance."""
     runpod.runpod().terminate_pod(instance_id)

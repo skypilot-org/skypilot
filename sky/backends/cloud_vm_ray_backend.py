@@ -1171,7 +1171,6 @@ class RetryingVmProvisioner(object):
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
 
-
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],

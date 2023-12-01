@@ -45,7 +45,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    assert not use_spot, 'FluffyCloud does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('RunPod does not support zones.')

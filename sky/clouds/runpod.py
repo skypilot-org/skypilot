@@ -25,6 +25,11 @@ class RunPod(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
+            ('Spot is not supported, as runpod API does not implement spot .'),
+        clouds.CloudImplementationFeatures.MULTI_NODE:
+            ('Multi-node not supported yet, as the interconnection among nodes '
+             'are non-trival on RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

@@ -6,7 +6,6 @@ from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.runpod import utils
-from sky.utils import common_utils
 
 POLL_INTERVAL = 5
 
@@ -155,9 +154,7 @@ def get_cluster_info(
     for node_id, node_info in nodes.items():
         instances[node_id] = common.InstanceInfo(
             instance_id=node_id,
-            # We have to use external IP as we are not able to connect to the
-            # ray cluster using internal IP.
-            internal_ip=node_info['external_ip'],
+            internal_ip=node_info['internal_ip'],
             external_ip=node_info['external_ip'],
             ssh_port=node_info['ssh_port'],
             tags={},
