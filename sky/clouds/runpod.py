@@ -29,7 +29,7 @@ class RunPod(clouds.Cloud):
             ('Spot is not supported, as runpod API does not implement spot .'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trival on RunPod.'),
+             'are non-trivial on RunPod.'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
