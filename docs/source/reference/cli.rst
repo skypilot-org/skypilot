@@ -69,23 +69,6 @@ Managed Spot Jobs CLI
    :prog: sky spot logs
    :nested: full
 
-Interactive Node CLI
------------------------
-
-.. click:: sky.cli:cpunode
-   :prog: sky cpunode
-   :nested: full
-
-.. _sky-gpunode:
-.. click:: sky.cli:gpunode
-   :prog: sky gpunode
-   :nested: full
-
-.. click:: sky.cli:tpunode
-   :prog: sky tpunode
-   :nested: full
-
-
 Storage CLI
 ------------
 

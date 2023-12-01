@@ -12,7 +12,6 @@ import yaml
 
 from sky import clouds
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.clouds import cloud_registry
 from sky.serve import serve_utils
@@ -20,6 +19,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import ux_utils
 
 # Seconds of sleep between the processing of skylet events.
@@ -106,8 +106,8 @@ class AutostopEvent(SkyletEvent):
     def __init__(self):
         super().__init__()
         autostop_lib.set_last_active_time_to_now()
-        self._ray_yaml_path = os.path.abspath(
-            os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
+        self._ray_yaml_path = (
+            remote_cluster_yaml_utils.get_cluster_yaml_absolute_path())
 
     def _run(self):
         autostop_config = autostop_lib.get_autostop_config()
@@ -141,16 +141,9 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
-            config = common_utils.read_yaml(self._ray_yaml_path)
+            config = remote_cluster_yaml_utils.load_cluster_yaml()
+            provider_name = remote_cluster_yaml_utils.get_provider_name(config)
 
-            provider_module = config['provider']['module']
-            # Examples:
-            #   'sky.skylet.providers.aws.AWSNodeProviderV2' -> 'aws'
-            #   'sky.provision.aws' -> 'aws'
-            provider_search = re.search(r'(?:providers|provision)\.(\w+)\.?',
-                                        provider_module)
-            assert provider_search is not None, config
-            provider_name = provider_search.group(1).lower()
             if (cloud_registry.CLOUD_REGISTRY.from_str(
                     provider_name).PROVISIONER_VERSION >= clouds.
                     ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):

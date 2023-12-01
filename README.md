@@ -48,7 +48,7 @@ SkyPilot **maximizes GPU availability for your jobs**:
 
 SkyPilot **cuts your cloud costs**:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): 3-6x cost savings using spot VMs, with auto-recovery from preemptions
-* Optimizer: 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
+* [Optimizer](https://skypilot.readthedocs.io/en/latest/examples/auto-failover.html): 2x cost savings by auto-picking the cheapest VM/zone/region/cloud
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
@@ -112,7 +112,7 @@ Prepare the workdir by cloning:
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/reference/quota.html) is needed for this example):
+Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/cloud-setup/quota.html) is needed for this example):
 ```bash
 sky launch my_task.yaml
 ```
@@ -147,7 +147,7 @@ Runnable examples:
   - [LocalGPT](./llm/localgpt)
   - [Falcon](./llm/falcon)
   - Add yours here & see more in [`llm/`](./llm)!
-- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml), [DeepSpeed](./examples/deepspeed-multinode/sky.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [NeMo](https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more (`examples/`)](./examples).
+- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml), [DeepSpeed](./examples/deepspeed-multinode/sky.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [Ray Train](examples/distributed_ray_train/ray_train.yaml), [NeMo](https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more (`examples/`)](./examples).
 
 Follow updates:
 - [Twitter](https://twitter.com/skypilot_org)

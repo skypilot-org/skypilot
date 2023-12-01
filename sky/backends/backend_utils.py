@@ -48,6 +48,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -64,7 +65,6 @@ logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
-SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
@@ -1013,18 +1013,17 @@ def write_cluster_config(
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see
-                # execution.py::_shared_controller_env_vars).
+                # controller_utils.shared_controller_vars_to_fill().
                 'user': get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
-                # AWS only:
-                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                           None),
+                # Networking configs
                 'use_internal_ips': skypilot_config.get_nested(
-                    ('aws', 'use_internal_ips'), False),
-                # Not exactly AWS only, but we only test it's supported on AWS
-                # for now:
+                    (str(cloud).lower(), 'use_internal_ips'), False),
                 'ssh_proxy_command': ssh_proxy_command,
+                'vpc_name': skypilot_config.get_nested(
+                    (str(cloud).lower(), 'vpc_name'), None),
+
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
 
@@ -1033,8 +1032,6 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
-                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
-                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1057,7 +1054,8 @@ def write_cluster_config(
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
-                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+                'sky_ray_yaml_remote_path':
+                    remote_cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,
@@ -1171,10 +1169,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """
     config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
-    if isinstance(cloud, (clouds.AWS, clouds.Azure, clouds.OCI, clouds.SCP)):
+    if isinstance(cloud, (clouds.AWS, clouds.OCI, clouds.SCP)):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
+    elif isinstance(cloud, clouds.Azure):
+        config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
     elif isinstance(cloud, clouds.Kubernetes):

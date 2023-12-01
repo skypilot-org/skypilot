@@ -65,7 +65,13 @@ def open_ports(
                     destination_address_prefix='*',
                     destination_port_ranges=ports,
                 ))
-            update_network_security_groups(resource_group, nsg.name, nsg)
+            poller = update_network_security_groups(resource_group, nsg.name,
+                                                    nsg)
+            poller.wait()
+            if poller.status() != 'Succeeded':
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Failed to open ports {ports} in NSG '
+                                     f'{nsg.name}: {poller.status()}')
         except azure.http_error_exception() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
