@@ -22,7 +22,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -666,21 +665,10 @@ def spot_launch(
         prefix = spot.SPOT_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-        extra_vars, controller_resources_config = (
-            controller_utils.skypilot_config_setup(
-                controller_type='spot',
-                controller_resources_config=spot.constants.CONTROLLER_RESOURCES,
-                remote_user_config_path=remote_user_config_path))
-        try:
-            controller_resources = sky.Resources.from_yaml_config(
-                controller_resources_config)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    controller_utils.CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.
-                    format(controller_type='spot',
-                           err=common_utils.format_exception(
-                               e, use_bracket=True))) from e
+        controller_resources = (controller_utils.get_controller_resources(
+            controller_type='spot',
+            controller_resources_config=spot.constants.CONTROLLER_RESOURCES))
+
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
@@ -688,7 +676,8 @@ def spot_launch(
             # Note: actual spot cluster name will be <task.name>-<spot job ID>
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
-            **extra_vars,
+            'remote_user_config_path': remote_user_config_path,
+            **controller_utils.shared_controller_vars_to_fill('spot'),
         }
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
