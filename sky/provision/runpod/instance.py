@@ -43,10 +43,11 @@ def _filter_instances(cluster_name_on_cloud: str,
             if retry_cnt >= 3:
                 if rc != 255:
                     break
-                # If we fail to connect the node for 3 times:
+                # If we fail to connect the node for 3 times, it is likely that:
                 # 1. The node is terminated.
                 # 2. We are on the same node as the node we are trying to
                 #    connect to, and runpod does not allow ssh to itself.
+                # In both cases, we can safely set the internal ip to None.
                 node['internal_ip'] = None
                 return
             time.sleep(1)
