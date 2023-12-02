@@ -122,7 +122,7 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def _adjust_cluster_name(cluster_name: str) -> str:
+def adjust_cluster_name(cluster_name: str) -> str:
     adjusted_cluster_name_arr = []
     for ch in cluster_name:
         if ch.isalnum() or ch == '-':
@@ -154,7 +154,7 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
                 f'{valid_regex}')
 
 
-def make_cluster_name_on_cloud(local_cluster_name: str,
+def make_cluster_name_on_cloud(cluster_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
@@ -166,13 +166,11 @@ def make_cluster_name_on_cloud(local_cluster_name: str,
       2. Append the hash of the cluster name
 
     Args:
-        local_cluster_name: The cluster name to be truncated and hashed.
+        cluster_name: The cluster name to be truncated and hashed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
-    cluster_name = _adjust_cluster_name(local_cluster_name)
-    check_cluster_name_is_valid(cluster_name)
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
