@@ -9,9 +9,7 @@ from sky.utils import timeline
 from sky.utils.common_utils import adjust_cluster_name
 from sky.utils.common_utils import check_cluster_name_is_valid
 
-
 logger = sky_logging.init_logger(__name__)
-
 
 if typing.TYPE_CHECKING:
     from sky import resources
