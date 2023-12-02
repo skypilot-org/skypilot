@@ -5,7 +5,8 @@ from typing import Dict, Generic, Optional
 import sky
 from sky.usage import usage_lib
 from sky.utils import timeline
-from sky.utils.common_utils import adjust_cluster_name, check_cluster_name_is_valid
+from sky.utils.common_utils import adjust_cluster_name
+from sky.utils.common_utils import check_cluster_name_is_valid
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -51,15 +52,15 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name: Optional[str] = None,
             retry_until_up: bool = False) -> Optional[_ResourceHandleType]:
         if cluster_name is None:
-            actual_cluster_name = sky.backends.backend_utils.generate_cluster_name(
+            cluster_name = sky.backends.backend_utils.generate_cluster_name(
             )
         else:
-            actual_cluster_name = adjust_cluster_name(cluster_name)
-            check_cluster_name_is_valid(actual_cluster_name)
-        usage_lib.record_cluster_name_for_current_operation(actual_cluster_name)
+            cluster_name = adjust_cluster_name(cluster_name)
+            check_cluster_name_is_valid(cluster_name)
+        usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
         return self._provision(task, to_provision, dryrun, stream_logs,
-                               actual_cluster_name, retry_until_up)
+                               cluster_name, retry_until_up)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
