@@ -504,6 +504,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=spot_override))
+                # Add zone here.
+                existing_zones.add(zone)
         elif num_alive_spot > num_to_provision:
             # Too many spot instances, scale down.
             num_spot_to_scale_down = num_alive_spot - num_to_provision

@@ -790,7 +790,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
-                    self._terminate_replica(replica_id, sync_down_logs=True)
+                    self._terminate_replica(replica_id, sync_down_logs=False)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():
                 logger.info(
