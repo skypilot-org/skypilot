@@ -52,8 +52,7 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name: Optional[str] = None,
             retry_until_up: bool = False) -> Optional[_ResourceHandleType]:
         if cluster_name is None:
-            cluster_name = sky.backends.backend_utils.generate_cluster_name(
-            )
+            cluster_name = sky.backends.backend_utils.generate_cluster_name()
         else:
             cluster_name = adjust_cluster_name(cluster_name)
             check_cluster_name_is_valid(cluster_name)
