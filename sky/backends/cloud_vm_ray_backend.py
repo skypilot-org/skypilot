@@ -88,7 +88,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
-_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
+_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 30
 
 # The maximum retry count for fetching IP address.
 _FETCH_IP_MAX_ATTEMPTS = 3
