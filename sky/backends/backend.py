@@ -3,10 +3,15 @@ import typing
 from typing import Dict, Generic, Optional
 
 import sky
+from sky import sky_logging
 from sky.usage import usage_lib
 from sky.utils import timeline
 from sky.utils.common_utils import adjust_cluster_name
 from sky.utils.common_utils import check_cluster_name_is_valid
+
+
+logger = sky_logging.init_logger(__name__)
+
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -54,7 +59,12 @@ class Backend(Generic[_ResourceHandleType]):
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         else:
+            prev_cluster_name = cluster_name
             cluster_name = adjust_cluster_name(cluster_name)
+            if prev_cluster_name != cluster_name:
+                logger.info(f"Changed cluster name from "
+                            f"'{prev_cluster_name}' to '{cluster_name}' "
+                            f"to ensure name is valid for provisioning")
             check_cluster_name_is_valid(cluster_name)
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
