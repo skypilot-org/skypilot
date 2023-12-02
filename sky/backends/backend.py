@@ -60,9 +60,9 @@ class Backend(Generic[_ResourceHandleType]):
             prev_cluster_name = cluster_name
             cluster_name = adjust_cluster_name(cluster_name)
             if prev_cluster_name != cluster_name:
-                logger.info(f"Changed cluster name from "
-                            f"'{prev_cluster_name}' to '{cluster_name}' "
-                            f"to ensure name is valid for provisioning")
+                logger.info(f'Changed cluster name from '
+                            f'"{prev_cluster_name}" to "{cluster_name}" '
+                            f'to ensure name is valid for provisioning')
             check_cluster_name_is_valid(cluster_name)
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
