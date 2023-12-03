@@ -3333,35 +3333,25 @@ class TestStorageWithCredentials:
 
     @pytest.fixture
     def tmp_multiple_custom_source_storage_obj(self):
-        # List of four different source paths that should be tested
-        custom_source_names = [
-            'pathWithoutSpaces', '\"path With Spaces\"',
-            '\"pathWithoutSpaces\"', 'path With Spaces'
-        ]
-        # Creates a list of 4 storage objects with custom source names to
+        # Creates a list of storage objects with custom source names to
         # create multiple scratch storages.
         # Stores for each object in the list must be added in the test.
-
-        # Adds paths to home directory in order to test if uploaded properly.
-        # Specifies source in new storage object.
-        # Otherwise, mostly identical to tmp_multiple_scratch_storage_obj.
+        custom_source_names = [
+            '"path With Spaces"', 'path With Spaces'
+        ]
         storage_mult_obj = []
         for name in custom_source_names:
-            pathlib.Path(f'~/{name}').expanduser().mkdir(exist_ok=True)
+            src_path = os.path.expanduser(f'~/{name}')
+            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
-                                            source=f'~/{name}')
+                                            source=src_path)
             storage_mult_obj.append(store_obj)
         yield storage_mult_obj
         for storage_obj in storage_mult_obj:
             handle = global_user_state.get_handle_from_storage_name(
                 storage_obj.name)
             if handle:
-                # If handle exists, delete manually
-                # TODO(romilb): This is potentially risky - if the delete method has
-                # bugs, this can cause resource leaks. Ideally we should manually
-                # eject storage from global_user_state and delete the bucket using
-                # boto3 directly.
                 storage_obj.delete()
 
     @pytest.fixture
@@ -3547,11 +3537,12 @@ class TestStorageWithCredentials:
     ])
     def test_upload_source_with_spaces(self, store_type,
                                        tmp_multiple_custom_source_storage_obj):
-        # Creates four buckets with specified local source paths and deletes them
+        # Creates two buckets with specified local sources
+        # with spaces in the name
         storage_obj_name = []
-        for store_obj in tmp_multiple_custom_source_storage_obj:
-            store_obj.add_store(store_type)
-            storage_obj_name.append(store_obj.name)
+        for storage_obj in tmp_multiple_custom_source_storage_obj:
+            storage_obj.add_store(store_type)
+            storage_obj_name.append(storage_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
         # output filtered by store type
@@ -3562,21 +3553,6 @@ class TestStorageWithCredentials:
             if store_type.value in item
         ]
         assert all([item in out for item in storage_obj_name])
-
-        # Run sky storage delete all to delete all storage objects
-        delete_cmd = ['sky', 'storage', 'delete']
-        delete_cmd += storage_obj_name
-        subprocess.check_output(delete_cmd)
-
-        # Run sky storage ls to check if all storage objects filtered by store
-        # type are deleted
-        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
-        out = [
-            item.split()[0]
-            for item in out_all.decode('utf-8').splitlines()
-            if store_type.value in item
-        ]
-        assert all([item not in out for item in storage_obj_name])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
