@@ -1179,8 +1179,10 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include {shlex.quote(file_name)}' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
@@ -1192,8 +1194,10 @@ class S3Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude {shlex.quote(file_name)}' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
@@ -1970,8 +1974,10 @@ class R2Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include {shlex.quote(file_name)}' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
@@ -1988,8 +1994,10 @@ class R2Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude {shlex.quote(file_name)}' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
@@ -2419,8 +2427,10 @@ class IBMCosStore(AbstractStore):
             """
 
             # wrapping file_name with "" to support spaces
-            includes = ' '.join(
-                [f'--include {shlex.quote(file_name)}' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('rclone copy '
                             f'{includes} {base_dir_path} '

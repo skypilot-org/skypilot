@@ -3336,9 +3336,7 @@ class TestStorageWithCredentials:
         # Creates a list of storage objects with custom source names to
         # create multiple scratch storages.
         # Stores for each object in the list must be added in the test.
-        custom_source_names = [
-            '"path With Spaces"', 'path With Spaces'
-        ]
+        custom_source_names = ['"path With Spaces"', 'path With Spaces']
         storage_mult_obj = []
         for name in custom_source_names:
             src_path = os.path.expanduser(f'~/{name}')
