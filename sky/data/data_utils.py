@@ -243,7 +243,7 @@ def _group_files_by_dir(
     for source in source_list:
         source = os.path.abspath(os.path.expanduser(source))
         if os.path.isdir(source):
-            dirs.append(f'\'{source}\'')
+            dirs.append(source)
         else:
             base_path = os.path.dirname(source)
             file_name = os.path.basename(source)
@@ -292,7 +292,7 @@ def parallel_upload(source_path_list: List[str],
     # Generate dir upload commands
     for dir_path in dirs:
         if create_dirs:
-            dest_dir_name = os.path.basename(dir_path[1:-1])
+            dest_dir_name = os.path.basename(dir_path)
         else:
             dest_dir_name = ''
         sync_command = dirsync_command_generator(dir_path, dest_dir_name)
