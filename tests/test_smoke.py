@@ -3537,10 +3537,10 @@ class TestStorageWithCredentials:
                                        tmp_multiple_custom_source_storage_obj):
         # Creates two buckets with specified local sources
         # with spaces in the name
-        storage_obj_name = []
+        storage_obj_names = []
         for storage_obj in tmp_multiple_custom_source_storage_obj:
             storage_obj.add_store(store_type)
-            storage_obj_name.append(storage_obj.name)
+            storage_obj_names.append(storage_obj.name)
 
         # Run sky storage ls to check if all storage objects exists in the
         # output filtered by store type
@@ -3550,7 +3550,7 @@ class TestStorageWithCredentials:
             for item in out_all.decode('utf-8').splitlines()
             if store_type.value in item
         ]
-        assert all([item in out for item in storage_obj_name])
+        assert all([item in out for item in storage_obj_names])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
