@@ -6,18 +6,18 @@ setup: |
   # Install all cloud dependencies.
   # This is for multicloud support. To allow controller launch on all clouds,
   # we need to install all cloud dependencies.
-  # This also includes all serve dependencies.
   source {{skypilot_runtime_env}}/bin/activate
-  pip install skypilot[all] > /dev/null 2>&1
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
 
-  # Install gcloud CLI.
-  {{google_sdk_installation_commands}}
+  # Install serve dependencies.
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
-{% if user_config_path is not none %}
-  {{remote_user_config_path}}: {{user_config_path}}
-{% endif %}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
 
 run: |
   # Start sky serve service.

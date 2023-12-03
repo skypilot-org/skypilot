@@ -194,12 +194,19 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
+    original_resources = sky.Resources(cloud=sky.AWS(),
+                                       instance_type='p3.16xlarge',
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
 
     for region in candidate_regions:
-        resources = sky.Resources(cloud=sky.AWS(),
-                                  instance_type='p3.16xlarge',
-                                  region=region.name,
-                                  use_spot=True)
+        resources = original_resources.copy(region=region.name)
         if not AWS.check_quota_available(resources):
             return region.name
 
@@ -214,12 +221,21 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
+    original_resources = sky.Resources(cloud=sky.GCP(),
+                                       instance_type='a2-ultragpu-1g',
+                                       accelerators={'A100-80GB': 1},
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
+
     for region in candidate_regions:
         if not GCP.check_quota_available(
-                sky.Resources(cloud=sky.GCP(),
-                              region=region.name,
-                              accelerators={'A100-80GB': 1},
-                              use_spot=True)):
+                original_resources.copy(region=region.name)):
             return region.name
 
     return None
@@ -1226,7 +1242,7 @@ def test_large_job_queue(generic_cloud: str):
             ],
         ],
         f'sky down -y {name}',
-        timeout=22 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1611,7 +1627,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 40',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1669,7 +1685,7 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
@@ -2964,7 +2980,6 @@ def test_skyserve_cancel():
 
 
 # ------- Testing user ray cluster --------
-@pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -3848,5 +3863,20 @@ def test_multiple_resources():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Sky Benchmark ----------
+def test_sky_bench(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'sky-bench',
+        [
+            f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
+            'sleep 120',
+            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
+        ],
+        f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)

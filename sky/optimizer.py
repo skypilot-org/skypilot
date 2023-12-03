@@ -1220,8 +1220,8 @@ def _fill_in_launchable_resources(
                     num_node_str = f'{task.num_nodes}x '
                 if not quiet:
                     logger.info(
-                        f'No resource satisfying {num_node_str}{resources} '
-                        f'on {clouds_str}.')
+                        f'No resource satisfying {num_node_str}'
+                        f'{resources.repr_with_region_zone} on {clouds_str}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '
                                 f'{colorama.Fore.CYAN}'

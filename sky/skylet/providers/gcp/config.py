@@ -910,6 +910,9 @@ def _configure_subnet(config, compute):
             ],
         }
     ]
+    if config["provider"].get("use_internal_ips", False):
+        # Removing this key means the VM will not be assigned an external IP.
+        default_interfaces[0].pop("accessConfigs")
 
     for node_config in node_configs:
         # The not applicable key will be removed during node creation
@@ -920,7 +923,10 @@ def _configure_subnet(config, compute):
         # TPU
         if "networkConfig" not in node_config:
             node_config["networkConfig"] = copy.deepcopy(default_interfaces)[0]
-            node_config["networkConfig"].pop("accessConfigs")
+            # TPU doesn't have accessConfigs
+            node_config["networkConfig"].pop("accessConfigs", None)
+            if config["provider"].get("use_internal_ips", False):
+                node_config["networkConfig"]["enableExternalIps"] = False
 
     return config
 
