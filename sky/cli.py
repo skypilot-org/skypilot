@@ -1407,6 +1407,7 @@ def launch(
     and they undergo job queue scheduling.
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    logger.info('Launching cluster...')
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
