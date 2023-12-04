@@ -151,8 +151,7 @@ def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
                 - projects/my-project/reservations/my-reservation
                 - projects/my-project/reservations/my-reservation2
         """))
-    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
-                        tmp_path / 'valid.yaml')
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
     _reload_config()
 
 
