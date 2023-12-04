@@ -10,6 +10,7 @@ import uuid
 
 from sky import sky_logging
 from sky.adaptors import gcp
+from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
 from sky.provision.gcp.constants import MAX_POLLS
 from sky.provision.gcp.constants import POLL_INTERVAL
@@ -216,7 +217,6 @@ class GCPInstance:
         labels: dict,
         count: int,
         include_head_node: bool,
-        wait_for_operation: bool = True,
     ) -> Tuple[bool, List[str]]:
         """Creates multiple instances and returns result.
 
@@ -626,7 +626,6 @@ class GCPComputeInstance(GCPInstance):
         labels: dict,
         count: int,
         include_head_node: bool,
-        wait_for_operation: bool = True,
     ) -> Tuple[bool, List[str]]:
         # NOTE: The syntax for bulkInsert() is different from insert().
         # bulkInsert expects resource names without prefix. Otherwise
@@ -679,6 +678,62 @@ class GCPComputeInstance(GCPInstance):
                 }),
         })
 
+        all_names = []
+        if 'reservationAffinity' in config:
+            reservations = gcp_cloud.GCP().get_reservations_available_resources(
+                config['machineType'],
+                region=zone[:-2],
+                zone=zone,
+                specific_reservations=set(
+                    config['reservationAffinity']['values']))
+            # Sort the reservations by the number of available resources
+            reservation_list = sorted(reservations.items(),
+                                      key=lambda x: x[1],
+                                      reverse=True)
+            # TODO(zhwu): Convert this to parallel execution.
+            # TODO(zhwu): This is not atomic as the reservation count may change
+            # between the time we check and the time we create the instances, as
+            # other users may be creating instances at the same time.
+            # Our current implementation will skip the current region if the
+            # reservation count is not enough, which is suboptimal.
+            for reservation, reservation_count in reservation_list:
+                if reservation_count <= 0:
+                    continue
+                reservation_count = min(reservation_count, count)
+                logger.debug(f'Creating {reservation_count} instances '
+                             f'with reservation {reservation}')
+                config['reservationAffinity']['values'] = [reservation]
+                success, created_names = cls._create_instances(
+                    cluster_name, names[:reservation_count], project_id, zone,
+                    config, reservation_count,
+                    head_tag_needed[:reservation_count])
+                all_names.extend(names)
+                if not success:
+                    return False, all_names
+                count -= reservation_count
+                if count <= 0:
+                    return True, all_names
+                names = names[reservation_count:]
+                head_tag_needed = head_tag_needed[reservation_count:]
+            config.pop('reservationAffinity', None)
+
+        success, created_names = cls._create_instances(cluster_name, names,
+                                                       project_id, zone, config,
+                                                       count, head_tag_needed)
+        all_names.extend(created_names)
+        return success, all_names
+
+    @classmethod
+    def _create_instances(
+        cls,
+        cluster_name: str,
+        names: List[str],
+        project_id: str,
+        zone: str,
+        config: dict,
+        count: int,
+        head_tag_needed: List[bool],
+    ) -> Tuple[bool, List[str]]:
         source_instance_template = config.pop('sourceInstanceTemplate', None)
         body = {
             'count': count,
@@ -711,25 +766,22 @@ class GCPComputeInstance(GCPInstance):
             logger.warning(f'googleapiclient.errors.HttpError: {e}')
             return False, names
 
-        if wait_for_operation:
-            result = cls.load_resource().zoneOperations().wait(
-                project=project_id,
-                operation=operation['name'],
-                zone=zone,
-            ).execute()
-            success = result['status'] == 'DONE'
-            if success:
-                # assign labels for head node
-                with pool.ThreadPool() as p:
-                    p.starmap(cls.create_node_tag,
-                              [(cluster_name, project_id, zone, names[i],
-                                head_tag_needed[i]) for i in range(count)])
-            else:
-                # Print out the error message
-                logger.warning(f'Failed to create instances: {result["error"]}')
-            return success, names
-
-        return operation
+        result = cls.load_resource().zoneOperations().wait(
+            project=project_id,
+            operation=operation['name'],
+            zone=zone,
+        ).execute()
+        success = result['status'] == 'DONE'
+        if success:
+            # assign labels for head node
+            with pool.ThreadPool() as p:
+                p.starmap(cls.create_node_tag, [(cluster_name, project_id, zone,
+                                                 names[i], head_tag_needed[i])
+                                                for i in range(count)])
+        else:
+            # Print out the error message
+            logger.warning(f'Failed to create instances: {result["error"]}')
+        return success, names
 
     @classmethod
     def start_instance(cls,
