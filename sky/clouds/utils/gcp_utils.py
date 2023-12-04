@@ -1,4 +1,9 @@
-"""Utility functions for GCP."""
+"""Utility functions for GCP.
+
+The functions that are used to access GCP APIs. We have the reservation-related
+functions here, so that the cache of the reservations can be shared across
+multiple clouds.GCP() objects.
+"""
 
 import dataclasses
 import json
@@ -7,7 +12,10 @@ from typing import List, Set
 
 import cachetools
 
+from sky import sky_logging
 from sky.utils import subprocess_utils
+
+logger = sky_logging.init_logger(__name__)
 
 
 @dataclasses.dataclass
@@ -93,6 +101,7 @@ def _list_reservations_for_instance_type(
     For example, if we have a specific reservation with n1-highmem-8
     in us-central1-c. `sky launch --gpus V100` will fail.
     """
+    logger.debug(f'Querying GCP reservations for instance {instance_type!r}')
     list_reservations_cmd = (
         'gcloud compute reservations list '
         '--filter="specificReservation.instanceProperties.machineType='

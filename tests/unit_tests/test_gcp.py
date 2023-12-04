@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from sky.clouds.gcp import GCP
-from sky.clouds.gcp import gcp_utils
+from sky.clouds.utils import gcp_utils
 
 
 @pytest.mark.parametrize((
@@ -42,7 +42,7 @@ from sky.clouds.gcp import gcp_utils
 def test_gcp_get_reservations_available_resources(mock_return, expected):
     gcp = GCP()
     with patch.object(gcp_utils,
-                      'list_reservations_for_instance_type',
+                      'list_reservations_for_instance_type_in_zone',
                       return_value=mock_return):
         reservations = gcp.get_reservations_available_resources(
             'instance_type', 'region', 'zone',
