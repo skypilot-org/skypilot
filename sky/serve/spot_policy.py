@@ -139,6 +139,9 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
     ) -> List[str]:
         existing_zones = set()
         for info in existing_replicas:
+            if not info.is_spot:
+                # filter on demand fallbacks
+                continue
             handle = info.handle()
             if handle is not None and handle.launched_resources is not None:
                 existing_zones.add(handle.launched_resources.zone)
