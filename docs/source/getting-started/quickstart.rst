@@ -126,7 +126,7 @@ This may show multiple clusters, if you have created several:
   mygcp      1 day ago    1x GCP(n1-highmem-8)  sky launch -c mygcp --cloud gcp    STOPPED
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
-:ref:`See here for a list of all possible cluster states. <sky-status>`
+See here for a list of all possible :ref:`cluster states <sky-status>`.
 
 .. _ssh:
 
