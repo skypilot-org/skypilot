@@ -230,11 +230,10 @@ extras_require: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': local_ray,
     'cloudflare': aws_dependencies,
-    'scp': [] + local_ray,
+    'scp': local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes'] + local_ray,
     'remote': remote,
-    'serve': ['uvicorn', 'fastapi'],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

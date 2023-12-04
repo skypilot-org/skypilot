@@ -121,6 +121,31 @@ Available fields and semantics:
     # will be added.
     vpc_name: skypilot-vpc
 
+    # Should instances be assigned private IPs only? (optional)
+    #
+    # Set to true to use private IPs to communicate between the local client and
+    # any SkyPilot nodes. This requires the networking stack be properly set up.
+    #
+    # This flag is typically set together with 'vpc_name' above and
+    # 'ssh_proxy_command' below.
+    #
+    # Default: false.
+    use_internal_ips: true
+    # SSH proxy command (optional).
+    #
+    # Please refer to the aws.ssh_proxy_command section above for more details.
+    ### Format 1 ###
+    # A string; the same proxy command is used for all regions.
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
+    ### Format 2 ###
+    # A dict mapping region names to region-specific proxy commands.
+    # NOTE: This restricts SkyPilot's search space for this cloud to only use
+    # the specified regions and not any other regions in this cloud.
+    ssh_proxy_command:
+      us-central1: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.us-central1.proxy
+      us-west1: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no gcpuser@<jump server public ip>
+
+
     # Reserved capacity (optional).
     #
     # The specific reservation to be considered when provisioning clusters on GCP.
