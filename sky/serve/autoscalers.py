@@ -474,7 +474,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             num_spot_to_scale_up = num_to_provision - num_alive_spot
             for _ in range(num_spot_to_scale_up):
                 spot_override = self._get_spot_resources_override_dict()
-                zone = self.spot_placer.select()
+                zone = self.spot_placer.select(alive_replica_infos)
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
