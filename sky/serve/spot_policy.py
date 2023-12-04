@@ -63,6 +63,8 @@ class EvenSpreadSpotPlacer(SpotPlacer):
                existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
         del existing_replicas  # Unused.
         zone = self.zones[self.current_zone_idx % len(self.zones)]
+        logger.info(f'EvenSpreadSpotPlacer: {self.current_zone_idx}, {zone},'
+                    f'{self.zones}')
         self.current_zone_idx += 1
         return zone
 

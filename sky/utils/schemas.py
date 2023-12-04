@@ -346,6 +346,9 @@ def get_service_schema():
                     'spot_mixer': {
                         'type': 'string',
                     },
+                    'on_demand_type': {
+                        'type': 'string',
+                    },
                     'spot_zones': {
                         'type': 'array',
                         'minItems': 1,
