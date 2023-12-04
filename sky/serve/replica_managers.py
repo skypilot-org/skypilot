@@ -760,17 +760,25 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(
                         f'Launch process for replica {replica_id} finished.')
                     del self._launch_process_pool[replica_id]
+                    info.status_property.sky_launch_status = (
+                        ProcessStatus.SUCCEEDED)
                     if p.exitcode != 0:
-                        logger.warning(
-                            f'Launch process for replica {replica_id} '
-                            f'exited abnormally with code {p.exitcode}. '
-                            'Terminating...')
-                        info.status_property.sky_launch_status = (
-                            ProcessStatus.FAILED)
-                        error_in_sky_launch = True
-                    else:
-                        info.status_property.sky_launch_status = (
-                            ProcessStatus.SUCCEEDED)
+                        sky_launch_log_file = (
+                            serve_utils.generate_replica_launch_log_file_name(
+                                self._service_name, replica_id))
+                        with open(sky_launch_log_file, 'r') as f:
+                            if 'InsufficientInstanceCapacity' in f.read():
+                                logger.error(
+                                    f'Insufficient instance capacity for '
+                                    f'replica {replica_id}.')
+                            else:
+                                logger.warning(
+                                    f'Launch process for replica {replica_id} '
+                                    f'exited abnormally with code {p.exitcode}.'
+                                    ' Terminating...')
+                                info.status_property.sky_launch_status = (
+                                    ProcessStatus.FAILED)
+                                error_in_sky_launch = True
                     if info.is_spot:
                         if info.zone is None:
                             logger.error(f'Cannot find zone for replica '
