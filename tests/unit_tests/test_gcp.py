@@ -53,11 +53,11 @@ def test_gcp_get_reservations_available_resources(mock_return, expected):
 def test_gcp_reservation_from_dict():
     r = gcp_utils.GCPReservation.from_dict({
         'selfLink': 'test',
-        'gcp_utils.SpecificReservation': {
+        'specificReservation': {
             'count': '1',
             'inUseCount': '0'
         },
-        'gcp_utils.SpecificReservationRequired': True,
+        'specificReservationRequired': True,
         'zone': 'zone'
     })
 
