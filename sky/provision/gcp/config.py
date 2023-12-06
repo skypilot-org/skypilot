@@ -637,6 +637,9 @@ def _configure_subnet(region: str, cluster_name: str,
             'type': 'ONE_TO_ONE_NAT',
         }],
     }]
+    if config.provider_config.get('use_internal_ips', False):
+        # Removing this key means the VM will not be assigned an external IP.
+        default_interfaces[0].pop('accessConfigs')
 
     # The not applicable key will be removed during node creation
 
@@ -646,7 +649,10 @@ def _configure_subnet(region: str, cluster_name: str,
     # TPU
     if 'networkConfig' not in node_config:
         node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
-        node_config['networkConfig'].pop('accessConfigs')
+        # TPU doesn't have accessConfigs
+        node_config['networkConfig'].pop('accessConfigs', None)
+        if config.provider_config.get('use_internal_ips', False):
+            node_config['networkConfig']['enableExternalIps'] = False
 
     return config
 
