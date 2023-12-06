@@ -64,6 +64,7 @@ FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
     'standardNDSH100v5Family': 'H100',
 }
 
+
 def get_regions() -> List[str]:
     """Get all available regions."""
     proc = subprocess.run(
