@@ -29,6 +29,12 @@ TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
 
+# This is the maximum number of times we will retry a GCP API call.
+# The number is identical to those we use for AWS boto3.
+GCP_MAX_RETRIES = 12
+GCP_CREATE_MAX_RETRIES = 5
+GCP_TIMEOUT = 300
+
 logger = sky_logging.init_logger(__name__)
 
 # Using v2 according to
@@ -533,7 +539,7 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             instance=node_id,
             zone=availability_zone,
-        ).execute()
+        ).execute(num_retries=GCP_CREATE_MAX_RETRIES)
         body = {
             'labels': dict(node['labels'], **labels),
             'labelFingerprint': node['labelFingerprint'],
@@ -543,7 +549,7 @@ class GCPComputeInstance(GCPInstance):
             zone=availability_zone,
             instance=node_id,
             body=body,
-        ).execute())
+        ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
         if wait_for_operation:
             result = cls.wait_for_operation(operation, project_id,
@@ -720,6 +726,7 @@ class GCPComputeInstance(GCPInstance):
         success, created_names = cls._create_instances(cluster_name, names,
                                                        project_id, zone, config,
                                                        count, head_tag_needed)
+
         all_names.extend(created_names)
         return success, all_names
 
@@ -757,20 +764,24 @@ class GCPComputeInstance(GCPInstance):
         # https://cloud.google.com/compute/docs/instance-templates
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
         try:
-            operation = cls.load_resource().instances().bulkInsert(
+            request = cls.load_resource().instances().bulkInsert(
                 project=project_id,
                 zone=zone,
                 body=body,
-            ).execute()
+            )
+            request.http.timeout = GCP_TIMEOUT
+            operation = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
         except gcp.http_error_exception() as e:
             logger.warning(f'googleapiclient.errors.HttpError: {e}')
             return False, names
 
-        result = cls.load_resource().zoneOperations().wait(
+        request = cls.load_resource().zoneOperations().wait(
             project=project_id,
             operation=operation['name'],
             zone=zone,
-        ).execute()
+        )
+        request.http.timeout = GCP_TIMEOUT
+        result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
         success = result['status'] == 'DONE'
         if success:
             # assign labels for head node
