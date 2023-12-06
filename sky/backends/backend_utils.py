@@ -1,7 +1,6 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
-import getpass
 import json
 import os
 import pathlib

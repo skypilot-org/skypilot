@@ -550,7 +550,7 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
 
 def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username as some cloud provider have limitation on 
+    """Cleans the username as some cloud provider have limitation on
     characters usage such as dot (.) is not allowed in GCP.
 
     Clean up includes:
