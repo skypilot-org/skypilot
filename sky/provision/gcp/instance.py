@@ -236,11 +236,12 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             )
 
     if to_start_count > 0:
-        success, created_instance_ids = resource.create_instances(
+        errors, created_instance_ids = resource.create_instances(
             cluster_name_on_cloud, project_id, availability_zone,
             config.node_config, labels, to_start_count,
             head_instance_id is None)
-        if not success:
+        if errors:
+            # TODO: expose errors to outside?
             raise RuntimeError('Failed to launch instances.')
         if head_instance_id is None:
             head_instance_id = created_instance_ids[0]

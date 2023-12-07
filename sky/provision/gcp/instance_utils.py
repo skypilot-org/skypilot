@@ -223,10 +223,10 @@ class GCPInstance:
         labels: dict,
         count: int,
         include_head_node: bool,
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[Optional[List], List[str]]:
         """Creates multiple instances and returns result.
 
-        Returns a tuple of (result, list[instance_names]).
+        Returns a tuple of (errors, list[instance_names]).
         """
         raise NotImplementedError
 
@@ -632,7 +632,7 @@ class GCPComputeInstance(GCPInstance):
         labels: dict,
         count: int,
         include_head_node: bool,
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[Optional[List], List[str]]:
         # NOTE: The syntax for bulkInsert() is different from insert().
         # bulkInsert expects resource names without prefix. Otherwise
         # it causes a 503 error.
@@ -709,26 +709,26 @@ class GCPComputeInstance(GCPInstance):
                 logger.debug(f'Creating {reservation_count} instances '
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
-                success, created_names = cls._create_instances(
+                errors, created_names = cls._create_instances(
                     cluster_name, names[:reservation_count], project_id, zone,
                     config, reservation_count,
                     head_tag_needed[:reservation_count])
                 all_names.extend(names)
-                if not success:
-                    return False, all_names
+                if errors:
+                    return errors, all_names
                 count -= reservation_count
                 if count <= 0:
-                    return True, all_names
+                    return None, all_names
                 names = names[reservation_count:]
                 head_tag_needed = head_tag_needed[reservation_count:]
             config.pop('reservationAffinity', None)
 
-        success, created_names = cls._create_instances(cluster_name, names,
-                                                       project_id, zone, config,
-                                                       count, head_tag_needed)
+        errors, created_names = cls._create_instances(cluster_name, names,
+                                                      project_id, zone, config,
+                                                      count, head_tag_needed)
 
         all_names.extend(created_names)
-        return success, all_names
+        return errors, all_names
 
     @classmethod
     def _create_instances(
@@ -740,7 +740,7 @@ class GCPComputeInstance(GCPInstance):
         config: dict,
         count: int,
         head_tag_needed: List[bool],
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[Optional[List], List[str]]:
         source_instance_template = config.pop('sourceInstanceTemplate', None)
         body = {
             'count': count,
@@ -764,17 +764,37 @@ class GCPComputeInstance(GCPInstance):
         # https://cloud.google.com/compute/docs/instance-templates
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
         try:
+            logger.debug('Launching GCP instances with "bulkInsert" ...')
             request = cls.load_resource().instances().bulkInsert(
                 project=project_id,
                 zone=zone,
                 body=body,
             )
-            request.http.timeout = GCP_TIMEOUT
-            operation = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            operation = request.execute(num_retries=0)
         except gcp.http_error_exception() as e:
+            # NOTE: Error example:
+            # {
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",
+            #   'domain': 'usageLimits',
+            #   'reason': 'quotaExceeded'
+            # }
+            error_details = getattr(e, 'error_details', [])
             logger.warning(f'googleapiclient.errors.HttpError: {e}')
-            return False, names
+            errors = []
+            for e in error_details:
+                # To be consistent with error messages returned by operation wait.
+                errors.append({
+                    'code': e.get('reason'),
+                    'domain': e.get('domain'),
+                    'message': e.get('message'),
+                })
+            return errors, names
+        errors = operation.get('error', {}).get('errors')
+        if errors:
+            logger.warning(f'Failed to create instances. Reason: {errors}')
+            return errors, names
 
+        logger.debug('Waiting GCP instances to be ready ...')
         request = cls.load_resource().zoneOperations().wait(
             project=project_id,
             operation=operation['name'],
@@ -783,16 +803,23 @@ class GCPComputeInstance(GCPInstance):
         request.http.timeout = GCP_TIMEOUT
         result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
         success = result['status'] == 'DONE'
-        if success:
-            # assign labels for head node
-            with pool.ThreadPool() as p:
-                p.starmap(cls.create_node_tag, [(cluster_name, project_id, zone,
-                                                 names[i], head_tag_needed[i])
-                                                for i in range(count)])
-        else:
-            # Print out the error message
-            logger.warning(f'Failed to create instances: {result["error"]}')
-        return success, names
+        # NOTE: Error example:
+        # {
+        #   'code': 'VM_MIN_COUNT_NOT_REACHED',
+        #   'message': 'Requested minimum count of 4 VMs could not be created.'
+        # }
+        errors = result.get('error', {}).get('errors')
+        if errors:
+            logger.warning(f'Failed to create instances. Reason: {errors}')
+            return errors, names
+        assert success, 'Failed to create instances, but there is no error.'
+        # assign labels for head node
+        with pool.ThreadPool() as p:
+            p.starmap(
+                cls.create_node_tag,
+                [(cluster_name, project_id, zone, names[i], head_tag_needed[i])
+                 for i in range(count)])
+        return None, names
 
     @classmethod
     def start_instance(cls,
