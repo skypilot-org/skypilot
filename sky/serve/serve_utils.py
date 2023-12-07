@@ -667,7 +667,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
     service_table = log_utils.create_table(service_columns)
 
     replica_infos = []
-    for record in service_records:
+    for record in sorted(service_records, key=lambda x: x['name']):
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
             replica_infos.append(replica)

@@ -31,7 +31,7 @@ BOTO_MAX_RETRIES = 12
 # Max retries for creating an instance.
 BOTO_CREATE_MAX_RETRIES = 5
 # Max retries for deleting security groups etc.
-BOTO_DELETE_MAX_ATTEMPTS = 6
+BOTO_DELETE_MAX_ATTEMPTS = 1
 
 _DEPENDENCY_VIOLATION_PATTERN = re.compile(
     r'An error occurred \(DependencyViolation\) when calling the '
