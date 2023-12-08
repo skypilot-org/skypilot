@@ -261,22 +261,10 @@ See all running services:
 
     $ sky serve status
 
-.. code-block:: console
-
-    Services
-    NAME         UPTIME      STATUS  REPLICAS  ENDPOINT
-    llama2-spot  2h 29m 36s  READY   1/2       34.238.42.4:30001
-    vicuna       3h 5m 56s   READY   2/2       34.238.42.4:30003
-    http-server  3h 20m 50s  READY   2/2       34.238.42.4:30002
-
-    Service Replicas
-    SERVICE_NAME  ID  IP              LAUNCHED   RESOURCES                   STATUS  REGION
-    llama2-spot   1   34.90.186.40    2 hrs ago  1x GCP([Spot]{'A100': 1}))  READY   europe-west4
-    llama2-spot   2   34.147.124.113  2 hrs ago  1x GCP([Spot]{'A100': 1}))  READY   europe-west4
-    vicuna        1   35.247.122.252  3 hrs ago  1x GCP({'A100': 1}))        READY   us-west1
-    vicuna        2   34.141.221.32   3 hrs ago  1x GCP({'A100': 1}))        READY   europe-west4
-    http-server   1   3.95.5.141      3 hrs ago  1x AWS(vCPU=2)              READY   us-east-1
-    http-server   2   54.175.170.174  3 hrs ago  1x AWS(vCPU=2)              READY   us-east-1
+.. image:: ../images/sky-serve-status-full.png
+    :width: 600
+    :align: center
+    :alt: sky-serve-status-full
 
 Stream the logs of a service:
 
