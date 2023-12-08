@@ -24,6 +24,7 @@ release = version
 # -- General configuration
 
 extensions = [
+    'sphinxemoji.sphinxemoji',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.duration',

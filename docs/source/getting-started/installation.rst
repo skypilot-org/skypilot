@@ -107,8 +107,10 @@ If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
 section :ref:`below <cloud-account-setup>`.
 
-If your clouds are ``enabled``: Congratulations! You can now head over to
-:ref:`Quickstart <quickstart>` to get started with SkyPilot.
+.. tip::
+
+  If your clouds show ``enabled``: |:tada:| |:tada:| Congratulations! |:tada:| |:tada:| You can now head over to
+  :ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
 .. _cloud-account-setup:
 
