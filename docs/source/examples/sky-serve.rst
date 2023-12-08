@@ -104,7 +104,7 @@ Sky Serve will start a centralized controller/load balancer and deploy the servi
 Under the hood, :code:`sky serve up`:
 
 #. Launches a controller which handles autoscaling, monitoring and load balancing;
-#. Returns an Service Endpoint which will be used to accept traffic;
+#. Returns a Service Endpoint which will be used to accept traffic;
 #. Meanwhile, the controller provisions replica VMs which later run the services;
 #. Once any replica is ready, the requests sent to the Service Endpoint will be **HTTP-redirect** to one of the endpoint replicas.
 
