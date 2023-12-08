@@ -33,7 +33,9 @@ Available fields:
       # and the default initial delay, you can use the following syntax:
       readiness_probe: /v1/models
 
-      # Replica autoscaling policy (required). This describe how SkyServe autoscale
+      # One of the two following fields (replica_policy or replicas) is required.
+
+      # Replica autoscaling policy. This describe how SkyServe autoscale
       # your service based on the QPS (queries per second) of your service.
       replica_policy:
         # Minimum number of replicas (required).
