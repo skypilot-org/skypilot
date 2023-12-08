@@ -254,6 +254,26 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         axis='columns',
     )
 
+    # As of Dec 2023, a few H100 instance types fetched from Azure APIs do not
+    # have pricing:
+    #
+    # df[df['InstanceType'].str.contains('H100')][['InstanceType', 'Price',
+    # 'SpotPrice']]
+    #                 InstanceType    Price  SpotPrice
+    # 5830   Standard_NC40ads_H100_v5      NaN        NaN
+    # 5831   Standard_NC40ads_H100_v5      NaN        NaN
+    # 5875  Standard_NC80adis_H100_v5      NaN        NaN
+    # 5876  Standard_NC80adis_H100_v5      NaN        NaN
+    # 5901     Standard_ND48s_H100_v5      NaN        NaN
+    # 5910   Standard_ND96isr_H100_v5  117.984    29.4960
+    # 5911    Standard_ND96is_H100_v5  106.186    26.5465
+    #
+    # But these instance types are still launchable. We fill in $0 to enable
+    # launching.
+    h100_row_idx = df_ret['InstanceType'].str.contains('H100')
+    df_ret.loc[h100_row_idx, ['Price', 'SpotPrice']] = df_ret.loc[
+        h100_row_idx, ['Price', 'SpotPrice']].fillna(0)
+
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
