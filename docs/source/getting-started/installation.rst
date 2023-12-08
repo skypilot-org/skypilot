@@ -7,40 +7,66 @@ Installation
 
     For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`pip uninstall grpcio; conda install -c conda-forge grpcio=1.43.0` prior to installing SkyPilot.
 
-
 Install SkyPilot using pip:
 
-.. code-block:: console
+.. tab-set::
 
-  $ # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
-  $ # Recommended: use a new conda env to avoid package conflicts.
-  $ conda create -y -n sky python=3.8
-  $ conda activate sky
+    .. tab-item:: Nightly (recommended)
 
-  $ # Choose an extra (default: [aws])
-  $ pip install skypilot
-  $ # pip install "skypilot[gcp]"
-  $ # pip install "skypilot[azure]"
-  $ # pip install "skypilot[kubernetes]"
-  $ # pip install "skypilot[lambda]"
-  $ # pip install "skypilot[ibm]"
-  $ # pip install "skypilot[scp]"
-  $ # pip install "skypilot[oci]"
-  $ # pip install "skypilot[all]"
+        .. code-block:: shell
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, IBM, OCI, SCP, Lambda Cloud, and Cloudflare (for R2 object store).
-If you only have access to certain clouds, use any combination of
-the pip extras above (e.g., :code:`"[aws,gcp]"`) to reduce the
-dependencies installed.
+          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Recommended: use a new conda env to avoid package conflicts.
+          conda create -y -n sky python=3.8
+          conda activate sky
 
+          pip install skypilot-nightly
 
-To get the latest features/updates, either install the nightly build:
+          # Or, choose an extra (defaults to [aws]):
+          pip install "skypilot-nightly[aws]"
+          pip install "skypilot-nightly[gcp]"
+          pip install "skypilot-nightly[azure]"
+          pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[ibm]"
+          pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[all]"
 
-.. code-block:: console
+    .. tab-item:: Latest Release
 
-  $ pip install -U "skypilot-nightly[all]"
+        .. code-block:: shell
 
-or install from source:
+          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Recommended: use a new conda env to avoid package conflicts.
+          conda create -y -n sky python=3.8
+          conda activate sky
+
+          pip install skypilot
+
+          # Or, choose an extra (defaults to [aws]):
+          pip install "skypilot[aws]"
+          pip install "skypilot[gcp]"
+          pip install "skypilot[azure]"
+          pip install "skypilot[kubernetes]"
+          pip install "skypilot[lambda]"
+          pip install "skypilot[ibm]"
+          pip install "skypilot[scp]"
+          pip install "skypilot[oci]"
+          pip install "skypilot[all]"
+
+To use a subset of the clouds, you can combine some of the pip extras above to
+reduce the dependencies installed:
+
+.. code-block:: shell
+
+  # Nightly:
+  pip install -U "skypilot-nightly[aws,gcp]"
+  # Latest release:
+  pip install -U "skypilot[aws,gcp]"
+
+To get the latest features, either use a nightly build (the **Nightly**
+tab above), or install from source:
 
 .. code-block:: console
 
@@ -48,20 +74,53 @@ or install from source:
   $ cd skypilot
   $ pip install ".[all]"
 
+As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
 
+.. _verify-cloud-access:
 
-.. note::
+Verifying cloud access
+------------------------------------
 
-    As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
+After installation, run :code:`sky check` to verify that credentials are correctly set up:
+
+.. code-block:: console
+
+  $ sky check
+
+This will produce a summary like:
+
+.. code-block:: text
+
+  Checking credentials to enable clouds for SkyPilot.
+    AWS: enabled
+    GCP: enabled
+    Azure: enabled
+    Lambda: enabled
+    IBM: enabled
+    SCP: enabled
+    OCI: enabled
+    Cloudflare (for R2 object store): enabled
+
+  SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+
+If any cloud's credentials or dependencies are missing, ``sky check`` will
+output hints on how to resolve them. You can also refer to the cloud setup
+section :ref:`below <cloud-account-setup>`.
+
+If your clouds are ``enabled``: Congratulations! You can now head over to
+:ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
 .. _cloud-account-setup:
 
 Cloud account setup
 -------------------
 
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, IBM, OCI,
+SCP, Lambda Cloud, and Cloudflare (for R2 object store).
+
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
-Otherwise, configure access to at least one cloud, then run ``sky check``:
+Otherwise, configure access to at least one cloud using the following guides.
 
 .. _aws-installation:
 
@@ -258,32 +317,6 @@ SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g.
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
-.. _verify-cloud-access:
-
-Verifying cloud access
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
-
-.. code-block:: console
-
-  $ sky check
-
-This will produce a summary like:
-
-.. code-block:: text
-
-  Checking credentials to enable clouds for SkyPilot.
-    AWS: enabled
-    GCP: enabled
-    Azure: enabled
-    Lambda: enabled
-    IBM: enabled
-    SCP: enabled
-    OCI: enabled
-    Cloudflare (for R2 object store): enabled
-
-  SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
 Requesting quotas for first time users
 --------------------------------------
@@ -300,28 +333,38 @@ increases before proceeding.
 Quick alternative: trying in Docker
 ------------------------------------------------------
 
-As a **quick alternative to installing SkyPilot on your laptop**, we also provide a Docker image with SkyPilot and
-its AWS and GCP dependencies installed for users to quickly try out SkyPilot. You can simply run:
+As a **quick alternative to installing SkyPilot on your laptop**, we also
+provide a Docker image with SkyPilot main branch automatically cloned.
+You can simply run:
 
 .. code-block:: console
 
-  $ docker run -td --name sky --rm -v "$HOME/.sky:/root/.sky:rw" -v "$HOME/.aws:/root/.aws:rw" -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" berkeleyskypilot/skypilot:latest
+  $ # NOTE: '--platform linux/amd64' is needed for Apple silicon Macs
+  $ docker run --platform linux/amd64 \
+    -td --rm --name sky -e SKYPILOT_DEBUG=0 \
+    -v "$HOME/.sky:/root/.sky:rw" \
+    -v "$HOME/.aws:/root/.aws:rw" \
+    -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" \
+    berkeleyskypilot/skypilot-debug
   $ docker exec -it sky /bin/bash
 
-If your cloud CLIs are already setup, your credentials will be mounted to the
-container and you can proceed to :ref:`Quickstart <quickstart>`. Else you can
-follow the instructions in :ref:`Cloud account setup <cloud-account-setup>`
-inside the container to setup your cloud accounts.
+  $ # Run inside the container:
 
-If you exit from the shell in the container, the container will keep running
-in the background. You can start a new shell with :code:`docker exec -it sky /bin/bash`.
+  $ cd /sky_repo/skypilot
+  $ pip install -e .
 
-Once you are done with experimenting with sky, remember to delete any clusters
-and storage resources you may have created using the following commands:
+If your cloud CLIs are already setup, your credentials (AWS and GCP) will be
+mounted to the container and you can proceed to :ref:`Quickstart <quickstart>`.
+Otherwise, you can follow the instructions in :ref:`Cloud account setup
+<cloud-account-setup>` inside the container to set up your cloud accounts.
+
+Once you are done with experimenting with SkyPilot, remember to delete any
+clusters and storage resources you may have created using the following
+commands:
 
 .. code-block:: console
 
-  # Run inside the container
+  $ # Run inside the container:
 
   $ sky down -a -y
   $ sky storage delete -a -y
@@ -331,6 +374,10 @@ Finally, you can stop the container with:
 .. code-block:: console
 
   $ docker stop sky
+
+See more details about the dev container image
+``berkeleyskypilot/skypilot-debug`` `here
+<https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md#testing-in-a-container>`_.
 
 .. _shell-completion:
 
