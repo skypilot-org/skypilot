@@ -82,7 +82,7 @@ Notice that task YAML already have a running HTTP endpoint at 8080, and exposed 
 
     # hello-sky-serve.yaml
     service:
-      readiness_probe: /health
+      readiness_probe: /
       replicas: 2
 
     resources:
@@ -108,26 +108,14 @@ Under the hood, :code:`sky serve up`:
 #. Meanwhile, the controller provisions replica VMs which later run the services;
 #. Once any replica is ready, the requests sent to the Service Endpoint will be **HTTP-redirect** to one of the endpoint replicas.
 
-After the controller is provisioned, you'll see:
+After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
-.. code-block:: console
+.. image:: ../images/sky-serve-status-output-provisioning.png
+    :width: 600
+    :align: center
+    :alt: sky-serve-status-output-provisioning
 
-    Service name: sky-service-e4fb
-    Endpoint URL: <endpoint-url>
-    To see detailed info:           sky serve status sky-service-e4fb [--endpoint]
-    To teardown the service:        sky serve down sky-service-e4fb
-
-    To see logs of a replica:       sky serve logs sky-service-e4fb [REPLICA_ID]
-    To see logs of load balancer:   sky serve logs --load-balancer sky-service-e4fb
-    To see logs of controller:      sky serve logs --controller sky-service-e4fb
-
-    To monitor replica status:      watch -n10 sky serve status sky-service-e4fb
-    To send a test request:         curl -L <endpoint-url>
-
-    SkyServe is spinning up your service now.
-    The replicas should be ready within a short time.
-
-Once any of the replicas becomes ready to serve, you can start sending requests to :code:`<endpoint-url>`. You can use :code:`watch -n10 sky serve status sky-service-e4fb` to monitor the latest status of the service. Once its status becomes :code:`READY`, you can start sending requests to :code:`<endpoint-url>`:
+Once any of the replicas becomes ready to serve, you can start sending requests to :code:`<endpoint-url>`. You can use :code:`watch -n10 sky serve status sky-service-b0a0` to monitor the latest status of the service. Once its status becomes :code:`READY`, you can start sending requests to :code:`<endpoint-url>`:
 
 .. code-block:: console
 
@@ -204,9 +192,9 @@ Below we show an end-to-end example of deploying a LLM model with Sky Serve. We'
       python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8080 | tee ~/openai_api_server.log
 
     envs:
-      MODEL_SIZE: 13
+      MODEL_SIZE: 7
 
-The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 13B Vicuna model. This YAML can be used with :code:`sky launch` to launch a single replica of the service. By adding a :code:`service` section to the YAML, we can scale it into multiple replicas across multiple regions/clouds:
+The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 7B Vicuna model. This YAML can be used with :code:`sky launch` to launch a single replica of the service. By adding a :code:`service` section to the YAML, we can scale it into multiple replicas across multiple regions/clouds:
 
 .. code-block:: yaml
 
@@ -221,30 +209,21 @@ The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 13B Vicun
 
     # Here goes other task config
 
-Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, you'll see:
+Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, there will be an OpenAI Compatible API endpoint ready to accept traffic (:code:`44.201.113.28` in the following example):
 
-.. code-block:: console
+.. image:: ../images/sky-serve-status-vicuna-ready.png
+    :width: 600
+    :align: center
+    :alt: sky-serve-status-vicuna-ready
 
-    Service name: vicuna
-    Endpoint URL: <vicuna-url>
-    To see detailed info:           sky serve status vicuna [--endpoint]
-    To teardown the service:        sky serve down vicuna
-
-    To see logs of a replica:       sky serve logs vicuna [REPLICA_ID]
-    To see logs of load balancer:   sky serve logs --load-balancer vicuna
-    To see logs of controller:      sky serve logs --controller vicuna
-
-    To monitor replica status:      watch -n10 sky serve status vicuna
-    To send a test request:         curl -L <vicuna-url>
-
-After a while, there will be an OpenAI Compatible API endpoint ready to serve at :code:`<vicuna-url>`. Try out by the following simple chatbot Python script:
+Try out by the following simple chatbot Python script:
 
 .. code-block:: python
 
     import openai
 
     stream = True
-    model = 'vicuna-13b-v1.3' # This is aligned with the MODEL_SIZE env in the YAML
+    model = 'vicuna-7b-v1.3' # This is aligned with the MODEL_SIZE env in the YAML
     init_prompt = 'You are a helpful assistant.'
     history = [{'role': 'system', 'content': init_prompt}]
     endpoint = input('Endpoint: ')
