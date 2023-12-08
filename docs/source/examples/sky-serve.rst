@@ -221,7 +221,7 @@ The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 13B Vicun
 
     # Here goes other task config
 
-Now you have an Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, you'll see:
+Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, you'll see:
 
 .. code-block:: console
 
