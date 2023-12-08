@@ -772,9 +772,10 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(region=None, zone=None))
             elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
                   in stderr):
-                if (any(acc.lower().startswith('tpu-v4')
-                        for acc in launchable_resources.accelerators.keys()) and
-                        region.name == 'us-central2'):
+                if (region.name == 'us-central2' and
+                        launchable_resources.accelerators is not None and
+                        any(acc.lower().startswith('tpu-v4')
+                            for acc in launchable_resources.accelerators)):
                     # us-central2 is a TPU v4 only region. The subnet for
                     # this region may not exist when the user does not have
                     # the TPU v4 quota. We should skip this region.
