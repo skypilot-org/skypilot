@@ -93,7 +93,7 @@ Notice that task YAML already have a running HTTP endpoint at 8080, and exposed 
 
     run: python -m http.server 8080
 
-You can found more configurations in :ref:`here <service-yaml-spec>`. This example will spin up two replicas of the service, each listening on port 8080. The service is considered ready when it responds to :code:`GET /health` with a 200 status code. You can customize the readiness probe by specifying a different path in the :code:`readiness_probe` field. By calling:
+You can find more configurations in :ref:`here <service-yaml-spec>`. This example will spin up two replicas of the service, each listening on port 8080. The service is considered ready when it responds to :code:`GET /health` with a 200 status code. You can customize the readiness probe by specifying a different path in the :code:`readiness_probe` field. By calling:
 
 .. code-block:: console
 
