@@ -111,7 +111,7 @@ Under the hood, :code:`sky serve up`:
 After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
 .. image:: ../images/sky-serve-status-output-provisioning.png
-    :width: 600
+    :width: 800
     :align: center
     :alt: sky-serve-status-output-provisioning
 
@@ -137,7 +137,7 @@ Sky Serve Architecture
 ----------------------
 
 .. image:: ../images/sky-serve-architecture.png
-    :width: 600
+    :width: 800
     :align: center
     :alt: Sky Serve Architecture
 
@@ -201,7 +201,7 @@ The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 7B Vicuna
     # vicuna.yaml
     service:
       readiness_probe: /v1/models
-      replicas: 2
+      replicas: 3
 
     resources:
       ports: 8080
@@ -209,10 +209,10 @@ The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 7B Vicuna
 
     # Here goes other task config
 
-Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, there will be an OpenAI Compatible API endpoint ready to accept traffic (:code:`44.201.113.28` in the following example):
+Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, there will be an OpenAI Compatible API endpoint ready to accept traffic (:code:`44.201.113.28:30001` in the following example):
 
 .. image:: ../images/sky-serve-status-vicuna-ready.png
-    :width: 600
+    :width: 800
     :align: center
     :alt: sky-serve-status-vicuna-ready
 
@@ -262,7 +262,7 @@ See all running services:
     $ sky serve status
 
 .. image:: ../images/sky-serve-status-full.png
-    :width: 600
+    :width: 800
     :align: center
     :alt: sky-serve-status-full
 
