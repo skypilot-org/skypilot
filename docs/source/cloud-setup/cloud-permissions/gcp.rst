@@ -134,9 +134,18 @@ User
     compute.firewalls.list
     compute.firewalls.update
 
-8. Click **Create** to create the role.
-9. Go back to the "IAM" tab and click on **GRANT ACCESS**.
-10. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
+8. **Optional**: If the user needs to use custom machine images with ``sky launch --image-id``, you can additionally add the following permissions:
+
+.. code-block:: text
+    
+    compute.disks.get
+    compute.disks.resize
+    compute.images.get
+    compute.images.useReadOnly
+
+9. Click **Create** to create the role.
+10. Go back to the "IAM" tab and click on **GRANT ACCESS**.
+11. Fill in the email address of the user in the “Add principals” section, and select ``minimal-skypilot-role`` in the “Assign roles” section. Click **Save**.
 
 
 .. image:: ../../images/screenshots/gcp/create-iam.png
@@ -144,7 +153,7 @@ User
     :align: center
     :alt: GCP Grant Access
 
-11. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
+12. The user should receive an invitation to the project and should be able to setup SkyPilot by following the instructions in :ref:`Installation <installation-gcp>`.
 
 .. note::
 
@@ -161,7 +170,7 @@ Service Account
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Service Accounts" tab in the "IAM & Admin" console, and click on the **CREATE SERVICE ACCOUNT**.
+1. Click the "Service Accounts" tab in the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__, and click on **CREATE SERVICE ACCOUNT**.
 
 .. image:: ../../images/screenshots/gcp/create-service-account.png
     :width: 80%
@@ -175,7 +184,9 @@ Service Account
     :align: center
     :alt: Set Service Account Name
 
-3. Select the ``minimal-skypilot-role`` (or the name you set) created in the last section and click on **DONE**.
+3. Select the ``minimal-skypilot-role`` (or the name you set) created in the
+last section and click on **DONE**. You can also choose to use the Default or
+Medium Permissions roles as described in the previous sections.
 
 .. image:: ../../images/screenshots/gcp/service-account-grant-role.png
     :width: 60%
@@ -256,3 +267,60 @@ See details in :ref:`config-yaml`.  Example use cases include using a private VP
 VPC with fine-grained constraints, typically created via Terraform or manually.
 
 The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-firewall-rules>`.
+
+
+.. _gcp-use-internal-ips:
+
+
+Using Internal IPs
+-----------------------
+For security reason, users may only want to use internal IPs for SkyPilot instances.
+To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      # VPC with NAT setup, see below
+      vpc_name: my-vpc-name
+      ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.proxy      
+
+The ``gcp.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
+
+
+Cloud NAT Setup
+~~~~~~~~~~~~~~~~
+
+Instances created with internal IPs only on GCP cannot access public internet by default. To make sure SkyPilot can install the dependencies correctly on the instances,
+cloud NAT needs to be setup for the VPC (see `GCP's documentation <https://cloud.google.com/nat/docs/overview>`__ for details).
+
+
+Cloud NAT is a regional resource, so it will need to be created in each region that SkyPilot will be used in.
+
+
+.. image:: ../../images/screenshots/gcp/cloud-nat.png
+    :width: 80%
+    :align: center
+    :alt: GCP Cloud NAT
+
+To limit SkyPilot to use some specific regions only, you can specify the ``gcp.ssh_proxy_command`` to be a dict mapping from region to the SSH proxy command for that region (see :ref:`config-yaml` for details):
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      vpc_name: my-vpc-name
+      ssh_proxy_command:
+        us-west1: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.us-west1.proxy
+        us-east1: ssh -W %h:%p -o StrictHostKeyChecking=no myself@my.us-west2.proxy
+
+If proxy is not needed, but the regions need to be limited, you can set the ``gcp.ssh_proxy_command`` to be a dict mapping from region to ``null``:
+
+.. code-block:: yaml
+
+    gcp:
+      use_internal_ips: true
+      vpc_name: my-vpc-name
+      ssh_proxy_command:
+        us-west1: null
+        us-east1: null

@@ -194,12 +194,19 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
+    original_resources = sky.Resources(cloud=sky.AWS(),
+                                       instance_type='p3.16xlarge',
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
 
     for region in candidate_regions:
-        resources = sky.Resources(cloud=sky.AWS(),
-                                  instance_type='p3.16xlarge',
-                                  region=region.name,
-                                  use_spot=True)
+        resources = original_resources.copy(region=region.name)
         if not AWS.check_quota_available(resources):
             return region.name
 
@@ -214,12 +221,21 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
+    original_resources = sky.Resources(cloud=sky.GCP(),
+                                       instance_type='a2-ultragpu-1g',
+                                       accelerators={'A100-80GB': 1},
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
+
     for region in candidate_regions:
         if not GCP.check_quota_available(
-                sky.Resources(cloud=sky.GCP(),
-                              region=region.name,
-                              accelerators={'A100-80GB': 1},
-                              use_spot=True)):
+                original_resources.copy(region=region.name)):
             return region.name
 
     return None
@@ -733,6 +749,7 @@ def test_gcp_stale_job_manual_restart():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
     test = Test(
         'env_check',
         [
@@ -740,6 +757,7 @@ def test_env_check(generic_cloud: str):
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1150,6 +1168,7 @@ def test_scp_job_queue():
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = Test(
         'job_queue_multinode',
         [
@@ -1180,6 +1199,7 @@ def test_job_queue_multinode(generic_cloud: str):
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1222,7 +1242,7 @@ def test_large_job_queue(generic_cloud: str):
             ],
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1444,6 +1464,7 @@ def test_tpu_vm_pod():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
+    total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
     test = Test(
         'multi_hostname',
         [
@@ -1454,6 +1475,7 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1589,6 +1611,12 @@ def test_azure_start_stop():
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
+    # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
+    # the VM is stopped.
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+    # Launching and starting Azure clusters can take a long time too. e.g., restart
+    # a stopped Azure cluster can take 7m. So we set the total timeout to 70m.
+    total_timeout_minutes = 70 if generic_cloud == 'azure' else 20
     test = Test(
         'autostop',
         [
@@ -1599,11 +1627,11 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -1621,7 +1649,7 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
@@ -1632,11 +1660,11 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            'sleep 250',
+            f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1645,6 +1673,10 @@ def test_autostop(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
+    # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
+    # the VM is terminated.
+    autodown_timeout = 900 if generic_cloud == 'azure' else 240
+    total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
     test = Test(
         'autodown',
         [
@@ -1653,26 +1685,26 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
-            'sleep 200',
+            f'sleep {autodown_timeout}',
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 240',
+            f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
-            'sleep 240',
+            f'sleep {autodown_timeout}',
             # Ensure the cluster is still UP.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=total_timeout_minutes * 60,
     )
     run_one_test(test)
 
@@ -1813,6 +1845,7 @@ def test_cancel_ibm():
 
 
 # ---------- Testing use-spot option ----------
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1834,6 +1867,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1867,6 +1901,7 @@ def test_spot(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1906,6 +1941,7 @@ def test_spot_pipeline(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1929,6 +1965,7 @@ def test_spot_failed_setup(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2121,6 +2158,7 @@ def test_spot_pipeline_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2342,6 +2380,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2397,6 +2436,7 @@ def test_spot_tpu():
 
 
 # ---------- Testing env for spot ----------
+@pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2940,7 +2980,6 @@ def test_skyserve_cancel():
 
 
 # ------- Testing user ray cluster --------
-@pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -3293,6 +3332,27 @@ class TestStorageWithCredentials:
                 storage_obj.delete()
 
     @pytest.fixture
+    def tmp_multiple_custom_source_storage_obj(self):
+        # Creates a list of storage objects with custom source names to
+        # create multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        custom_source_names = ['"path With Spaces"', 'path With Spaces']
+        storage_mult_obj = []
+        for name in custom_source_names:
+            src_path = os.path.expanduser(f'~/{name}')
+            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=src_path)
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -3336,7 +3396,7 @@ class TestStorageWithCredentials:
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
         # Creates a temporary storage object for testing .gitignore filter.
         # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
-        # foramt. Created storage object will contain the file structure along
+        # format. Created storage object will contain the file structure along
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3467,6 +3527,30 @@ class TestStorageWithCredentials:
             if store_type.value in item
         ]
         assert all([item not in out for item in storage_obj_name])
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_upload_source_with_spaces(self, store_type,
+                                       tmp_multiple_custom_source_storage_obj):
+        # Creates two buckets with specified local sources
+        # with spaces in the name
+        storage_obj_names = []
+        for storage_obj in tmp_multiple_custom_source_storage_obj:
+            storage_obj.add_store(store_type)
+            storage_obj_names.append(storage_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_names])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -3830,5 +3914,20 @@ def test_multiple_resources():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Sky Benchmark ----------
+def test_sky_bench(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'sky-bench',
+        [
+            f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
+            'sleep 120',
+            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
+        ],
+        f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)
