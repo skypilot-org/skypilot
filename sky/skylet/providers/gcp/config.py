@@ -818,9 +818,7 @@ def get_usable_vpc_and_subnet(
         if len(vpcnets_all) == 1:
             # Skip checking any firewall rules if the user has specified a VPC.
             logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
-            subnets = _list_subnets(
-                config, compute, network=specific_vpc_to_use
-            )
+            subnets = _list_subnets(config, compute, network=specific_vpc_to_use)
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
                     f"No subnet for region {config['provider']['region']} found for specified VPC {specific_vpc_to_use!r}. "
