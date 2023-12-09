@@ -35,7 +35,7 @@ Available fields:
 
       # One of the two following fields (replica_policy or replicas) is required.
 
-      # Replica autoscaling policy. This describe how SkyServe autoscale
+      # Replica autoscaling policy. This describes how SkyServe autoscales
       # your service based on the QPS (queries per second) of your service.
       replica_policy:
         # Minimum number of replicas (required).

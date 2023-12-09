@@ -3,7 +3,7 @@
 Sky Serve
 =========
 
-Sky Serve is SkyPilot's serving library. Sky Serve takes an existing serving
+SkyServe (short for SkyPilot Serving) takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
@@ -11,7 +11,7 @@ framework and deploys it across one or more regions or clouds.
 Why Sky Serve?
 
 * **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
-* **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware
+* **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
 * **Out-of-the-box load-balancing and autoscaling** of service replicas
 * Manage multi-cloud, multi-region deployments with a single control plane
 * Everything is launched inside your cloud accounts and VPCs
@@ -150,10 +150,10 @@ It is composed of the following components:
 
 All of the process group shares a single controller VM. The controller VM will be launched in the cloud with the best price/performance ratio. You can also :ref:`customize the controller resources <customizing-sky-serve-controller-resources>` based on your needs.
 
-An end-to-end LLM example
+Tutorial: Serve a Chatbot LLM!
 -------------------------
 
-Below we show an end-to-end example of deploying a LLM model with Sky Serve. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
+Let’s bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
 
 .. code-block:: yaml
 
