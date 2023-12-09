@@ -819,7 +819,7 @@ def get_usable_vpc_and_subnet(
             # Skip checking any firewall rules if the user has specified a VPC.
             logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
             subnets = _list_subnets(
-                config, compute, filter=f'(name="{specific_vpc_to_use}")'
+                config, compute, network=specific_vpc_to_use
             )
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
@@ -866,7 +866,7 @@ def get_usable_vpc_and_subnet(
     _create_rules(config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id)
 
     usable_vpc_name = SKYPILOT_VPC_NAME
-    subnets = _list_subnets(config, compute, filter=f'(name="{usable_vpc_name}")')
+    subnets = _list_subnets(config, compute, network=usable_vpc_name)
     if not subnets:
         _skypilot_log_error_and_exit_for_failover(
             f"No subnet for region {config['provider']['region']} found for generated VPC {usable_vpc_name!r}. "
@@ -994,19 +994,26 @@ def _list_vpcnets(config, compute, filter=None):
 
 
 def _list_subnets(
-    config, compute, filter=None
+    config, compute, network=None
 ) -> List["google.cloud.compute_v1.types.compute.Subnetwork"]:
     response = (
         compute.subnetworks()
         .list(
             project=config["provider"]["project_id"],
             region=config["provider"]["region"],
-            filter=filter,
         )
         .execute()
     )
 
-    return response["items"] if "items" in response else []
+    items = response["items"] if "items" in response else []
+    if network is None:
+        return items
+    matched_items = []
+    for item in items:
+        # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
+        if network == item["network"].split("/")[-1]:
+            matched_items.append(item)
+    return matched_items
 
 
 def _get_subnet(config, subnet_id, compute):
