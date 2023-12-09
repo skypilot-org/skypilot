@@ -1,14 +1,14 @@
 .. _sky-serve:
 
-Sky Serve
-=========
+SkyServe
+========
 
 SkyServe (short for SkyPilot Serving) takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
 
-Why Sky Serve?
+Why SkyServe?
 
 * **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
 * **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
@@ -20,11 +20,11 @@ Why Sky Serve?
 .. * Autoscale your endpoint deployment with load balancing
 .. * Manage your multi-cloud resources with a single control plane
 
-How it works
+How it works:
 
 - Each service gets an endpoint that automatically redirects requests to its underlying replicas.
 - The replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
-- Sky Serve transparently handles the load balancing, failover, and autoscaling of the serving replicas.
+- SkyServe transparently handles the load balancing, failover, and autoscaling of the serving replicas.
 
 .. GPU availability has become a critical bottleneck for many AI services. With Sky
 .. Serve, we offer a lightweight control plane that simplifies deployment across
@@ -33,14 +33,14 @@ How it works
 .. complexities of managing resources in a multi-cloud environment.
 
 
-Sky Serve provides a simple CLI interface to deploy and manage your services. It
+SkyServe provides a simple CLI interface to deploy and manage your services. It
 features a simple YAML spec to describe your services (referred to as a *service
 YAML* in the following) and a centralized controller to manage the deployments.
 
-Hello, Sky Serve!
------------------
+Hello, SkyServe!
+----------------
 
-Here we will go through an example to deploy a simple HTTP server with Sky Serve. To spin up a service, you can simply reuse your task YAML with the two following requirements:
+Here we will go through an example to deploy a simple HTTP server with SkyServe. To spin up a service, you can simply reuse your task YAML with the two following requirements:
 
 #. An HTTP endpoint and the port on which it listens;
 #. An extra :code:`service` section in your task YAML to describe the service configuration.
@@ -63,10 +63,10 @@ And under the same directory, we have an :code:`index.html`:
 
     <html>
     <head>
-        <title>My First Sky Serve Service</title>
+        <title>My First SkyServe Service</title>
     </head>
     <body>
-        <p>Hello, Sky Serve!</p>
+        <p>Hello, SkyServe!</p>
     </body>
     </html>
 
@@ -76,7 +76,7 @@ And under the same directory, we have an :code:`index.html`:
   :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
   :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created, and cleaned up after the service is terminated.
 
-Notice that task YAML already have a running HTTP endpoint at 8080, and exposed through the :code:`ports` section under :code:`resources`. Suppose we want to scale it into multiple replicas across multiple regions/clouds with Sky Serve. We can simply add a :code:`service` section to the YAML:
+Notice that task YAML already have a running HTTP endpoint at 8080, and exposed through the :code:`ports` section under :code:`resources`. Suppose we want to scale it into multiple replicas across multiple regions/clouds with SkyServe. We can simply add a :code:`service` section to the YAML:
 
 .. code-block:: yaml
 
@@ -99,7 +99,7 @@ You can find more configurations in :ref:`here <service-yaml-spec>`. This exampl
 
     $ sky serve up hello-sky-serve.yaml
 
-Sky Serve will start a centralized controller/load balancer and deploy the service to the cloud with the best price/performance ratio. It will also monitor the service status and re-launch a new replica if one of them fails.
+SkyServe will start a centralized controller/load balancer and deploy the service to the cloud with the best price/performance ratio. It will also monitor the service status and re-launch a new replica if one of them fails.
 
 Under the hood, :code:`sky serve up`:
 
@@ -115,6 +115,10 @@ After the controller is provisioned, you'll see the following in :code:`sky serv
     :align: center
     :alt: sky-serve-status-output-provisioning
 
+.. raw:: html
+
+   <div style="height: 20px;"></div>
+
 Once any of the replicas becomes ready to serve, you can start sending requests to :code:`<endpoint-url>`. You can use :code:`watch -n10 sky serve status sky-service-b0a0` to monitor the latest status of the service. Once its status becomes :code:`READY`, you can start sending requests to :code:`<endpoint-url>`:
 
 .. code-block:: console
@@ -122,10 +126,10 @@ Once any of the replicas becomes ready to serve, you can start sending requests 
     $ curl -L <endpoint-url>
     <html>
     <head>
-        <title>My First Sky Serve Service</title>
+        <title>My First SkyServe Service</title>
     </head>
     <body>
-        <p>Hello, Sky Serve!</p>
+        <p>Hello, SkyServe!</p>
     </body>
     </html>
 
@@ -133,15 +137,15 @@ Once any of the replicas becomes ready to serve, you can start sending requests 
 
   The :code:`curl` command won't follow the redirect and print the content of the redirected page by default. Since we are using HTTP-redirect, you need to use :code:`curl -L <endpoint-url>`.
 
-Sky Serve Architecture
-----------------------
+SkyServe Architecture
+---------------------
 
 .. image:: ../images/sky-serve-architecture.png
     :width: 800
     :align: center
-    :alt: Sky Serve Architecture
+    :alt: SkyServe Architecture
 
-Sky Serve has a centralized controller VM that manages the deployment of your service. Each service will have a process group to manage its replicas and route traffic to them.
+SkyServe has a centralized controller VM that manages the deployment of your service. Each service will have a process group to manage its replicas and route traffic to them.
 
 It is composed of the following components:
 
@@ -151,7 +155,7 @@ It is composed of the following components:
 All of the process group shares a single controller VM. The controller VM will be launched in the cloud with the best price/performance ratio. You can also :ref:`customize the controller resources <customizing-sky-serve-controller-resources>` based on your needs.
 
 Tutorial: Serve a Chatbot LLM!
--------------------------
+------------------------------
 
 Let’s bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
 
@@ -209,7 +213,7 @@ The above SkyPilot Task YAML will launch an OpenAI API endpoint with a 7B Vicuna
 
     # Here goes other task config
 
-Now you have a Service YAML that can be used with Sky Serve! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, there will be an OpenAI Compatible API endpoint ready to accept traffic (:code:`44.201.113.28:30001` in the following example):
+Now you have a Service YAML that can be used with SkyServe! Simply run :code:`sky serve up vicuna.yaml -n vicuna` to deploy the service (use :code:`-n` to give your service a name!). After a while, there will be an OpenAI Compatible API endpoint ready to accept traffic (:code:`44.201.113.28:30001` in the following example):
 
 .. image:: ../images/sky-serve-status-vicuna-ready.png
     :width: 800
@@ -281,8 +285,8 @@ Terminate services:
     $ sky serve down http-server # terminate the http-server service
     $ sky serve down --all # terminate all services
 
-Sky Serve controller
---------------------
+SkyServe controller
+-------------------
 
 The sky serve controller is a small on-demand CPU VM running in the cloud that:
 

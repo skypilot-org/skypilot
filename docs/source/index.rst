@@ -114,8 +114,8 @@ Documentation
    :maxdepth: 1
    :caption: Multi-Cloud Serving
 
-   examples/sky-serve
-   examples/service-yaml-spec
+   serving/sky-serve
+   serving/service-yaml-spec
 
 .. toctree::
    :maxdepth: 1
