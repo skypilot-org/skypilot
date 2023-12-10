@@ -362,8 +362,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
+    _VERSION = 2
+
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
                  is_spot: bool, zone: Optional[str]) -> None:
+        self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
@@ -486,6 +489,18 @@ class ReplicaInfo:
                         f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
 
+    def __setstate__(self, state):
+        """Set state from pickled state, for backward compatibility."""
+        self._version = self._VERSION
+        
+        version = state.pop('_version', None)
+        # Handle old version(s) here.
+        if version is None:
+            version = -1
+        
+        if version < 2:
+            self.is_spot = False
+            self.zone = None
 
 class ReplicaManager:
     """Each replica manager monitors one service."""
