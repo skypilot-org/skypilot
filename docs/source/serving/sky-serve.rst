@@ -157,7 +157,7 @@ Here is a simple example of serving a TGI model with SkyServe:
 
 Use :code:`sky serve status` to check the status of the service:
 
-.. image:: ../images/sky-serve-status-full.png
+.. image:: ../images/sky-serve-status-tgi.png
     :width: 800
     :align: center
     :alt: sky-serve-status-tgi
@@ -175,7 +175,7 @@ Then it's ready to accept traffic!
         -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
         -H 'Content-Type: application/json'
     # Example output:
-    {"generated_text":"\n nobody knows"}
+    {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
 SkyServe Architecture
 ---------------------
