@@ -146,7 +146,7 @@ Here is a simple example of serving a TGI model with SkyServe:
 
     service:
       readiness_probe: /health
-      replicas: 1
+      replicas: 2
 
     resources:
       ports: 8080
@@ -166,7 +166,7 @@ Use :code:`sky serve status` to check the status of the service:
 
    <div style="height: 20px;"></div>
 
-Then it's ready to accept traffic!
+If you see the :code:`STATUS` column becomes :code:`READY`, then it's ready to accept traffic!
 
 .. code-block:: console
 
@@ -185,6 +185,10 @@ SkyServe Architecture
     :align: center
     :alt: SkyServe Architecture
 
+.. raw:: html
+
+   <div style="height: 20px;"></div>
+
 SkyServe has a centralized controller VM that manages the deployment of your service. Each service will have a process group to manage its replicas and route traffic to them.
 
 It is composed of the following components:
@@ -197,7 +201,7 @@ All of the process group shares a single controller VM. The controller VM will b
 Tutorial: Serve a Chatbot LLM!
 ------------------------------
 
-Let’s bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
+Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
 
 .. code-block:: yaml
 
@@ -320,6 +324,10 @@ See all running services:
     :width: 800
     :align: center
     :alt: sky-serve-status-full
+
+.. raw:: html
+
+   <div style="height: 20px;"></div>
 
 Stream the logs of a service:
 
