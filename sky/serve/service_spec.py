@@ -31,6 +31,7 @@ class SkyServiceSpec:
         spot_zones: Optional[List[str]] = None,
         on_demand_zones: Optional[List[str]] = None,
         on_demand_type: Optional[str] = None,
+        num_extra: Optional[int] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -55,7 +56,8 @@ class SkyServiceSpec:
         self._post_data = post_data
         self._auto_restart = auto_restart
         spot_args = [
-            spot_placer, spot_mixer, spot_zones, target_qps_per_replica
+            spot_placer, spot_mixer, spot_zones, target_qps_per_replica,
+            num_extra
         ]
         on_demand_args = [target_qps_per_replica, on_demand_type]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
@@ -75,13 +77,15 @@ class SkyServiceSpec:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'spot_placer, spot_mixer, '
-                        'target_qps_per_replica, and spot_zones must be all '
+                        'target_qps_per_replica, num_extra '
+                        'and spot_zones must be all '
                         'specified or all not specified in the service YAML.')
         # TODO(tian): Check vanilla autoscaler argument not exist if spot
         # TODO(tian): Warning user that the use_spot in resources is ignored
         # if spot policy is specified.
         self._spot_placer = spot_placer
         self._spot_mixer = spot_mixer
+        self._num_extra = num_extra
         # TODO(tian): If no zone specified, default to all enabled zones
         self._spot_zones = spot_zones
         self._on_demand_zones = on_demand_zones
@@ -157,6 +161,7 @@ class SkyServiceSpec:
                 'on_demand_zones', None)
             service_config['on_demand_type'] = policy_section.get(
                 'on_demand_type', None)
+            service_config['num_extra'] = policy_section.get('num_extra', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -214,6 +219,7 @@ class SkyServiceSpec:
                         self._on_demand_zones)
         add_if_not_none('replica_policy', 'on_demand_type',
                         self._on_demand_type)
+        add_if_not_none('replica_policy', 'num_extra', self._num_extra)
         return config
 
     def probe_str(self):
@@ -227,6 +233,8 @@ class SkyServiceSpec:
             policy += self.spot_placer
         if self.spot_mixer:
             policy += f' with {self.spot_mixer}'
+        if self.num_extra is not None and self.num_extra > 0:
+            policy += f' with {self.num_extra} extra spot instance(s)'
         return policy if policy else 'No spot policy'
 
     def policy_str(self):
@@ -304,3 +312,7 @@ class SkyServiceSpec:
     @property
     def on_demand_type(self) -> Optional[str]:
         return self._on_demand_type
+
+    @property
+    def num_extra(self) -> Optional[int]:
+        return self._num_extra

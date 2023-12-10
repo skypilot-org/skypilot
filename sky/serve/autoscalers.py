@@ -21,7 +21,6 @@ logger = sky_logging.init_logger(__name__)
 # TODO(tian): Expose this to config.
 _UPSCALE_DELAY_S = 300
 _DOWNSCALE_DELAY_S = 1200
-_DEFAULT_OVER_PROVISION_NUM = 2
 
 
 class AutoscalerDecisionOperator(enum.Enum):
@@ -76,6 +75,7 @@ class Autoscaler:
 
     def evaluate_scaling(
         self,
+        num_extra: int,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         """Evaluate autoscale options based on replica information."""
@@ -136,6 +136,7 @@ class RequestRateAutoscaler(Autoscaler):
 
     def evaluate_scaling(
         self,
+        num_extra: int,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         current_time = time.time()
@@ -273,6 +274,7 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
 
     def evaluate_scaling(
         self,
+        num_extra: int,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
@@ -322,7 +324,7 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
 
         num_to_provision = self.target_num_replicas
         if self.overprovision:
-            num_to_provision += _DEFAULT_OVER_PROVISION_NUM
+            num_to_provision += num_extra
 
         if num_on_demand < num_to_provision:
             num_on_demand_to_scale_up = num_to_provision - num_on_demand
@@ -370,7 +372,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                  static_spot_provision: bool = False) -> None:
         super().__init__(spec, frequency, cooldown, rps_window_size)
         assert (spec.spot_placer is not None and spec.spot_mixer is not None and
-                spec.spot_zones is not None and
+                spec.spot_zones is not None and spec.num_extra is not None and
                 spec.target_qps_per_replica is not None)
         # TODO(tian): Change spot_mixer to boolean and implement algorithm
         # without fallback.
@@ -432,6 +434,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
 
     def evaluate_scaling(
         self,
+        num_extra: int,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
@@ -440,7 +443,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
-            f'({self.target_num_replicas + _DEFAULT_OVER_PROVISION_NUM} with '
+            f'({self.target_num_replicas + num_extra} with '
             f'over-provision), Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
@@ -487,8 +490,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     replica_ids_to_scale_down.append(info.replica_id)
             return replica_ids_to_scale_down
 
-        num_to_provision = (self.target_num_replicas +
-                            _DEFAULT_OVER_PROVISION_NUM)
+        num_to_provision = (self.target_num_replicas + num_extra)
 
         # Scale spot instances.
         if num_alive_spot < num_to_provision:

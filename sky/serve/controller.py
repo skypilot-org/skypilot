@@ -87,6 +87,10 @@ class SkyServeController:
         self.dump_path = os.path.expanduser(
             serve_utils.generate_remote_service_dir_name(
                 self._service_name)) + '/dump_infos.jsonl'
+        if service_spec.num_extra is not None:
+            self._num_extra = service_spec.num_extra
+        else:
+            self._num_extra = 0
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler.')
@@ -128,7 +132,7 @@ class SkyServeController:
                     f.write(json.dumps(dump_infos) + '\n')
 
                 scaling_options = self._autoscaler.evaluate_scaling(
-                    replica_info)
+                    self._num_extra, replica_info)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
