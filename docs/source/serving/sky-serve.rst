@@ -137,6 +137,46 @@ Once any of the replicas becomes ready to serve, you can start sending requests 
 
   The :code:`curl` command won't follow the redirect and print the content of the redirected page by default. Since we are using HTTP-redirect, you need to use :code:`curl -L <endpoint-url>`.
 
+Quick Start: TGI service
+------------------------
+
+Here is a simple example of serving a TGI model with SkyServe:
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe: /health
+      replicas: 1
+
+    resources:
+      ports: 8080
+      accelerators: A100:1
+
+    run: |
+      docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id lmsys/vicuna-13b-v1.5
+
+Use :code:`sky serve status` to check the status of the service:
+
+.. image:: ../images/sky-serve-status-full.png
+    :width: 800
+    :align: center
+    :alt: sky-serve-status-tgi
+
+.. raw:: html
+
+   <div style="height: 20px;"></div>
+
+Then it's ready to accept traffic!
+
+.. code-block:: console
+
+    $ curl -L <endpoint-url>/generate \
+        -X POST \
+        -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
+        -H 'Content-Type: application/json'
+    # Example output:
+    {"generated_text":"\n nobody knows"}
+
 SkyServe Architecture
 ---------------------
 
@@ -220,7 +260,18 @@ Now you have a Service YAML that can be used with SkyServe! Simply run :code:`sk
     :align: center
     :alt: sky-serve-status-vicuna-ready
 
-Try out by the following simple chatbot Python script:
+Try out by the following cURL command:
+
+.. code-block:: console
+
+    $ curl -L http://<endpoint-url>/v1/chat/completions \
+        -X POST \
+        -d '{"model":"vicuna-13b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
+        -H 'Content-Type: application/json'
+    # Example output:
+    {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-13b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
+
+Or this simple chatbot Python script:
 
 .. code-block:: python
 
