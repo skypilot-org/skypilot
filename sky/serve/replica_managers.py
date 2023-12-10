@@ -492,15 +492,16 @@ class ReplicaInfo:
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
         self._version = self._VERSION
-        
+
         version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
             version = -1
-        
+
         if version < 2:
             self.is_spot = False
             self.zone = None
+
 
 class ReplicaManager:
     """Each replica manager monitors one service."""
