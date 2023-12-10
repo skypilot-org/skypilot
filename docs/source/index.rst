@@ -112,7 +112,7 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
-   :caption: Multi-Cloud Serving
+   :caption: SkyServe: Model Serving
 
    serving/sky-serve
    serving/service-yaml-spec
