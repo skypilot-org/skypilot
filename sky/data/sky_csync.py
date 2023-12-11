@@ -1,14 +1,19 @@
 """CSYNC module"""
 import functools
+import multiprocessing
 import os
 import subprocess
+import threading
 import time
 from typing import Any, List, Optional
 
 import click
+from fuse import FUSE, FuseOSError, Operations
 import psutil
 
 from sky import sky_logging
+from sky.data import mounting_utils
+from sky.data import storage_utils
 from sky.utils import common_utils
 from sky.utils import db_utils
 
@@ -125,6 +130,182 @@ def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
         return row[0]
     return None
 
+class Passthrough(Operations):
+    def __init__(self, root_read, root_write):
+        self.root_read = root_read
+        self.root_write = root_write
+
+    # Helpers
+    # =======
+    # _full_path to the mount point
+    def _full_path(self, partial, write: bool = False, read: bool = False):
+        if partial.startswith("/"):
+            partial = partial[1:]
+        
+        
+        # Unless specified with write boolean, we default to the
+        # read directory where the bucket is mounted.
+        if write:
+            full_path = self._full_write_path(partial)
+        elif read:
+            full_path = self._full_read_path(partial)
+        elif self.is_in_read_dir(partial):
+            full_path = self._full_read_path(partial)
+        elif self.is_in_write_dir(partial):
+            full_path = self._full_write_path(partial)
+        else:
+            full_path = self._full_read_path(partial)
+        return full_path
+        
+    def _full_read_path(self, partial):
+        if partial.startswith("/"):
+            partial = partial[1:]
+        path = os.path.join(self.root_read, partial)
+        return path
+
+    def _full_write_path(self, partial):
+        if partial.startswith("/"):
+            partial = partial[1:]
+        path = os.path.join(self.root_write, partial)
+        return path
+
+    def is_in_read_dir(self, filename):
+        # Construct the full file path
+        file_path = os.path.join(self.root_read, filename)
+        return os.path.isfile(file_path) or os.path.isdir(file_path)
+
+
+    def is_in_write_dir(self, filename):
+        # Construct the full file path
+        file_path = os.path.join(self.root_write, filename)
+        return os.path.isfile(file_path) or os.path.isdir(file_path)
+
+
+    # Filesystem methods
+    # ==================
+
+    def access(self, path, mode):
+        #print("access(path): ", path)
+        #print("access(mode): ", mode)
+        full_path = self._full_path(path)
+        print("access(full_path): ", full_path)
+        if not os.access(full_path, mode):
+            raise FuseOSError(errno.EACCES)
+
+    def chmod(self, path, mode):
+        full_path = self._full_path(path)
+        return os.chmod(full_path, mode)
+
+    def chown(self, path, uid, gid):
+        full_path = self._full_path(path)
+        return os.chown(full_path, uid, gid)
+
+
+    def getattr(self, path, fh=None):
+        # a path is passed to this function
+        full_path = self._full_path(path)
+        logger.warning('getattr(full_path): ', full_path)
+        st = os.lstat(full_path)
+        ret_dict = dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
+                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid', 'st_blocks'))
+
+        return ret_dict
+
+    def readdir(self, path, fh):
+        full_read_path = self._full_path(path, read=True)
+        full_write_path = self._full_path(path, write=True)
+        #print('readdir(path): ', path)
+        #print('readdir(full_read_path): ', full_read_path)
+        dirents = ['.','..']
+
+        if os.path.isdir(full_read_path):
+            dirents.extend(os.listdir(full_read_path))
+
+        if os.path.isdir(full_write_path):
+            dirents.extend(os.listdir(full_write_path))
+
+        for r in dirents:
+            #print('readdir(r): ', r)
+            yield r
+
+    def readlink(self, path):
+        pathname = os.readlink(self._full_path(path))
+        if pathname.startswith("/"):
+            # Path name is absolute, sanitize it.
+            return os.path.relpath(pathname, self.root)
+        else:
+            return pathname
+
+    def mknod(self, path, mode, dev):
+        return os.mknod(self._full_path(path), mode, dev)
+
+    def rmdir(self, path):
+        return os.rmdir(self._full_path(path))
+
+    def mkdir(self, path, mode):
+        return os.mkdir(self._full_path(path, write=True), mode)
+
+    def statfs(self, path):
+        full_path = self._full_path(path)
+        stv = os.statvfs(full_path)
+        return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
+            'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
+            'f_frsize', 'f_namemax'))
+
+    def unlink(self, path):
+        logger.warning("unlink(self._full_path(path)): ", self._full_path(path))
+        return os.unlink(self._full_path(path))
+
+    def symlink(self, name, target):
+        return os.symlink(name, self._full_path(target))
+
+    def rename(self, old, new):
+        return os.rename(self._full_path(old), self._full_path(new))
+
+    def link(self, target, name):
+        return os.link(self._full_path(target), self._full_path(name))
+
+    def utimens(self, path, times=None):
+        return os.utime(self._full_path(path), times)
+
+    # File methods
+    # ============
+
+    def open(self, path, flags):
+        return os.open(self._full_path(path), flags)
+
+    def create(self, path, mode, fi=None):
+        full_path = self._full_path(path, write=True)
+        print('create(full_path): ', full_path)
+        return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
+
+    def read(self, path, length, offset, fh):
+        #print('read(path): ', path)
+        #print('read(length): ', length)
+        #print('read(offset): ', offset)
+        #print('read(fh): ', fh)
+        os.lseek(fh, offset, os.SEEK_SET)
+        return os.read(fh, length)
+
+    def write(self, path, buf, offset, fh):
+        os.lseek(fh, offset, os.SEEK_SET)
+        return os.write(fh, buf)
+
+    def truncate(self, path, length, fh=None):
+        full_path = self._full_path(path)
+        with open(full_path, 'r+') as f:
+            f.truncate(length)
+
+    def flush(self, path, fh):
+        return os.fsync(fh)
+
+    def release(self, path, fh):
+        return os.close(fh)
+
+    def fsync(self, path, fdatasync, fh):
+        return self.flush(path, fh)
+
+
 
 @click.group()
 def main():
@@ -171,6 +352,11 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         if no_follow_symlinks:
             base_sync_cmd.append('-e')
 
+        base_sync_cmd.append('-x')
+        excluded_list = [r'\..*\.swp$']
+        excludes = '|'.join(excluded_list)
+        base_sync_cmd.append(excludes)
+        
         base_sync_cmd.extend([source, f'gs://{destination}'])
         full_cmd = ' '.join(base_sync_cmd)
     else:
@@ -179,10 +365,20 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
     return full_cmd
 
 
-def run_sync(source: str, storetype: str, destination: str, num_threads: int,
+def _clean_write_path(read_path, write_path):
+    # get a list of files/directories that exists in both paths.
+    
+    # remove those from write path.
+
+
+def run_sync(source: str, read_path: str, storetype: str, destination: str, num_threads: int,
              interval_seconds: int, delete: bool, no_follow_symlinks: bool,
              csync_pid: int):
     """Runs the sync command from source to storetype bucket"""
+    # Check if any files in the write path also exists in read path. If exists,
+    # then remove those from write path.
+    _clean_write_path(read_path, source)
+    
     # TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
     sync_cmd = get_upload_cmd(storetype, source, destination, num_threads,
@@ -218,6 +414,12 @@ def run_sync(source: str, storetype: str, destination: str, num_threads: int,
                        'the log file in ~/.sky/ for more'
                        'details') from None
 
+
+def run_fuse_operation(read_path, write_path, full_src):
+    try:
+        FUSE(Passthrough(read_path, write_path), full_src, nothreads=True, foreground=False)
+    except Exception as e:
+        print(f"Error in FUSE operation: {e}")
 
 @main.command()
 @click.argument('source', required=True, type=str)
@@ -267,9 +469,50 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         _terminate([full_src])
     csync_pid = os.getpid()
     _add_running_csync(csync_pid, full_src)
+    # create temp directories of /.tmp_csync and /.tmp_mount
+    write_path = '/home/gcpuser/.sky/tmp_write'
+    read_path = '/home/gcpuser/.sky/tmp_read'
+    if os.path.isdir(write_path):
+        os.rmdir(write_path)
+    if os.path.isdir(read_path):
+        os.rmdir(read_path)
+    os.mkdir(write_path)
+    os.mkdir(read_path)
+    # mount destination bucket to /.tmp_mount
+    # TODO(doyoung): Currently, manually getting the mount_command, but 
+    # later, we need to refactor the mount_command perhaps making some
+    # part of it a static method so it can be called from here by specifying
+    # the bucket name and or whatever. Need to try to think of a way to reuse the code.
+    mount_path = read_path
+    bucket_name = 'fuse-csync-test'
+    #install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+    #                f'/releases/download/v1.0.1/'
+    #                f'gcsfuse_1.0.1_amd64.deb '
+    #                '-O /tmp/gcsfuse.deb && '
+    #                'sudo dpkg --install /tmp/gcsfuse.deb')
+    mount_cmd = ('gcsfuse -o allow_other '
+                    '--implicit-dirs '
+                    f'--stat-cache-capacity 4096 '
+                    f'--stat-cache-ttl 5s '
+                    f'--type-cache-ttl 5s '
+                    f'--rename-dir-limit 10000 '
+                    f'{bucket_name} {mount_path}')
+    output = subprocess.run(mount_cmd,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            check=True,
+                            text=True)
+    # Use FUSE to mount both /.tmp_csync and /.tmp_mount to full_src
+    #fuse_thread = threading.Thread(target=run_fuse_operation, args=(read_path, write_path, full_src))
+    #fuse_thread.start()
+    fuse_process = multiprocessing.Process(target=run_fuse_operation, args=(read_path, write_path, full_src))
+    fuse_process.start()
     while True:
         start_time = time.time()
-        run_sync(full_src, storetype, destination, num_threads,
+        # run run_sync with /.tmp_csync and destination bucket
+        delete = False
+        run_sync(write_path, read_path, storetype, destination, num_threads,
                  interval_seconds, delete, no_follow_symlinks, csync_pid)
         end_time = time.time()
         # Given the interval_seconds and the time elapsed during the sync
