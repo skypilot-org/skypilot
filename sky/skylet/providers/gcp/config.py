@@ -1006,10 +1006,16 @@ def _list_subnets(
     items = response["items"] if "items" in response else []
     if network is None:
         return items
+
+    # Filter by network (VPC) name.
+    #
+    # Note we do not directly use the filter (network=<...>) arg of the list()
+    # call above, because it'd involve constructing a long URL of the following
+    # format and passing it as the filter value:
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
     matched_items = []
     for item in items:
-        # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
-        if network == item["network"].split("/")[-1]:
+        if network == _network_interface_to_vpc_name(item):
             matched_items.append(item)
     return matched_items
 
