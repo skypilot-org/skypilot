@@ -1,0 +1,6 @@
+cluster_hash,name,num_nodes,requested_resources,launched_resources,usage_intervals
+d9ad1063-6931-4ef0-9f9b-a23b12778299,t-minimal-b5,1,"€•U","€•u","€•"
+0259f334-e216-4c3c-bf9f-52831d6decfa,t-minimal-1e,1,"€•U","€•u","€•"
+22d70ebe-19e3-4d65-92d2-c70f0e458efb,t-minimal-9a,1,"€•U","€•u","€•"
+ef900477-42de-41a7-b731-c263137846c4,t-minimal-52,1,"€•U","€•u","€•"
+fd5ca574-1bb5-4f31-96f5-693cc04d6b03,t-minimal-b2,1,"€•U","€•u","€•"

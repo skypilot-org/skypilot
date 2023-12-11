@@ -21,6 +21,7 @@ types-cachetools
 pytest
 pytest-xdist
 pytest-env>=0.6
+testing.postgresql # requires PostgreSQL server in your PATH.
 
 # memory profiler
 memory_profiler==0.61.0

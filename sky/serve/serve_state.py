@@ -1,13 +1,15 @@
 """The database for services information."""
 import collections
 import enum
+import os
 import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
+import psycopg2
 
 from sky.serve import constants
 from sky.utils import db_utils
@@ -16,16 +18,23 @@ if typing.TYPE_CHECKING:
     import sky
     from sky.serve import replica_managers
 
-_DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
-_DB_PATH = _DB_PATH.expanduser().absolute()
-_DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
-_DB_PATH = str(_DB_PATH)
+# Retrieve environment variables to build the DB path
+username = os.getenv('DB_USERNAME', 'postgres')
+password = os.getenv('DB_PASSWORD', 'postgres')
+host = os.getenv('DB_HOST', 'localhost')
+port = os.getenv('DB_PORT', '5432')
+database = os.getenv('DB_NAME', 'services')
+_DB_PATH = f'postgres://{username}:{password}@{host}:{port}/{database}'
+#PG connection:
+pg = '?'
 
 
-def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
+def create_table(cursor: Union[sqlite3.Cursor, psycopg2.extensions.cursor],
+                 conn: Union[sqlite3.Connection,
+                             psycopg2.extensions.connection], pgs: str) -> None:
     """Creates the service and replica tables if they do not exist."""
 
-    cursor.execute("""\
+    cursor.execute(f"""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
         controller_job_id INTEGER DEFAULT NULL,
@@ -35,18 +44,30 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
         auto_restart INTEGER DEFAULT NULL,
-        requested_resources BLOB DEFAULT NULL)""")
-    cursor.execute("""\
+        requested_resources \
+                   {'BYTEA' if pgs == '%s' else 'BLOB'} DEFAULT NULL)""")
+    cursor.execute(f"""\
         CREATE TABLE IF NOT EXISTS replicas (
         service_name TEXT,
         replica_id INTEGER,
-        replica_info BLOB,
+        replica_info {'BYTEA' if pgs == '%s' else 'BLOB'},
         PRIMARY KEY (service_name, replica_id))""")
 
     conn.commit()
 
 
-_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+#Try to connect to PG, if it fails, connect to sqlite
+try:
+    _DB = db_utils.DBConn(_DB_PATH, create_table)
+    _DB.conn.autocommit = True  # type: ignore[union-attr]
+    pg = '%s'
+except psycopg2.Error:
+    path: pathlib.Path = pathlib.Path(
+        constants.SKYSERVE_METADATA_DIR) / 'services.db'
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    _DB_PATH = str(path)
+    _DB = db_utils.DBConn(_DB_PATH, create_table)
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -188,11 +209,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
     """
     try:
         _DB.cursor.execute(
-            """\
+            f"""\
             INSERT INTO services
             (name, controller_job_id, status, policy,
             auto_restart, requested_resources)
-            VALUES (?, ?, ?, ?, ?, ?)""",
+            VALUES ({pg}, {pg}, {pg}, {pg}, {pg}, {pg})""",
             (name, controller_job_id, status.value, policy, int(auto_restart),
              pickle.dumps(requested_resources)))
         _DB.conn.commit()
@@ -205,26 +226,26 @@ def add_service(name: str, controller_job_id: int, policy: str,
 
 def remove_service(service_name: str) -> None:
     """Removes a service from the database."""
-    _DB.cursor.execute("""\
-        DELETE FROM services WHERE name=(?)""", (service_name,))
+    _DB.cursor.execute(f"""\
+        DELETE FROM services WHERE name=({pg})""", (service_name,))
     _DB.conn.commit()
 
 
 def set_service_uptime(service_name: str, uptime: int) -> None:
     """Sets the uptime of a service."""
     _DB.cursor.execute(
-        """\
+        f"""\
         UPDATE services SET
-        uptime=(?) WHERE name=(?)""", (uptime, service_name))
+        uptime=({pg}) WHERE name=({pg})""", (uptime, service_name))
     _DB.conn.commit()
 
 
 def set_service_status(service_name: str, status: ServiceStatus) -> None:
     """Sets the service status."""
     _DB.cursor.execute(
-        """\
+        f"""\
         UPDATE services SET
-        status=(?) WHERE name=(?)""", (status.value, service_name))
+        status=({pg}) WHERE name=({pg})""", (status.value, service_name))
     _DB.conn.commit()
 
 
@@ -232,9 +253,10 @@ def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
     _DB.cursor.execute(
-        """\
+        f"""\
         UPDATE services SET
-        controller_port=(?) WHERE name=(?)""", (controller_port, service_name))
+        controller_port=({pg}) WHERE name=({pg})""",
+        (controller_port, service_name))
     _DB.conn.commit()
 
 
@@ -242,9 +264,9 @@ def set_service_load_balancer_port(service_name: str,
                                    load_balancer_port: int) -> None:
     """Sets the load balancer port of a service."""
     _DB.cursor.execute(
-        """\
+        f"""\
         UPDATE services SET
-        load_balancer_port=(?) WHERE name=(?)""",
+        load_balancer_port=({pg}) WHERE name=({pg})""",
         (load_balancer_port, service_name))
     _DB.conn.commit()
 
@@ -268,7 +290,8 @@ def _get_service_from_row(row) -> Dict[str, Any]:
 
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute('SELECT * FROM services').fetchall()
+    _DB.cursor.execute('SELECT * FROM services')
+    rows = _DB.cursor.fetchall()
     records = []
     for row in rows:
         records.append(_get_service_from_row(row))
@@ -277,8 +300,9 @@ def get_services() -> List[Dict[str, Any]]:
 
 def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
-    rows = _DB.cursor.execute('SELECT * FROM services WHERE name=(?)',
-                              (service_name,)).fetchall()
+    _DB.cursor.execute(f'SELECT * FROM services WHERE name=({pg})',
+                       (service_name,))
+    rows = _DB.cursor.fetchall()
     for row in rows:
         return _get_service_from_row(row)
     return None
@@ -296,37 +320,52 @@ def get_glob_service_names(
         A list of non-duplicated service names.
     """
     if service_names is None:
-        rows = _DB.cursor.execute('SELECT name FROM services').fetchall()
+        _DB.cursor.execute('SELECT name FROM services')
+        rows = _DB.cursor.fetchall()
     else:
         rows = []
         for service_name in service_names:
-            rows.extend(
-                _DB.cursor.execute(
-                    'SELECT name FROM services WHERE name GLOB (?)',
-                    (service_name,)).fetchall())
+            _DB.cursor.execute(
+                f'SELECT name FROM services WHERE name GLOB ({pg})',
+                (service_name,))
+            rows.extend(_DB.cursor.fetchall())
     return list({row[0] for row in rows})
 
 
 # === Replica functions ===
 def add_or_update_replica(service_name: str, replica_id: int,
                           replica_info: 'replica_managers.ReplicaInfo') -> None:
-    """Adds a replica to the database."""
-    _DB.cursor.execute(
-        """\
-        INSERT OR REPLACE INTO replicas
-        (service_name, replica_id, replica_info)
-        VALUES (?, ?, ?)""",
-        (service_name, replica_id, pickle.dumps(replica_info)))
+    """Adds or updates a replica in the database."""
+    replica_info_serialized = pickle.dumps(replica_info)
+
+    if pg == '%s':
+        # PostgreSQL syntax using ON CONFLICT to update existing rows
+        _DB.cursor.execute(
+            """\
+            INSERT INTO replicas (service_name, replica_id, replica_info)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (service_name, replica_id)
+            DO UPDATE SET replica_info = EXCLUDED.replica_info""",
+            (service_name, replica_id, replica_info_serialized))
+    else:
+        # SQLite syntax using INSERT OR REPLACE
+        _DB.cursor.execute(
+            """\
+            INSERT OR REPLACE INTO replicas
+            (service_name, replica_id, replica_info)
+            VALUES (?, ?, ?)""",
+            (service_name, replica_id, replica_info_serialized))
+
     _DB.conn.commit()
 
 
 def remove_replica(service_name: str, replica_id: int) -> None:
     """Removes a replica from the database."""
     _DB.cursor.execute(
-        """\
+        f"""\
         DELETE FROM replicas
-        WHERE service_name=(?)
-        AND replica_id=(?)""", (service_name, replica_id))
+        WHERE service_name=({pg})
+        AND replica_id=({pg})""", (service_name, replica_id))
     _DB.conn.commit()
 
 
@@ -334,11 +373,12 @@ def get_replica_info_from_id(
         service_name: str,
         replica_id: int) -> Optional['replica_managers.ReplicaInfo']:
     """Gets a replica info from the database."""
-    rows = _DB.cursor.execute(
-        """\
+    _DB.cursor.execute(
+        f"""\
         SELECT replica_info FROM replicas
-        WHERE service_name=(?)
-        AND replica_id=(?)""", (service_name, replica_id)).fetchall()
+        WHERE service_name=({pg})
+        AND replica_id=({pg})""", (service_name, replica_id))
+    rows = _DB.cursor.fetchall()
     for row in rows:
         return pickle.loads(row[0])
     return None
@@ -347,16 +387,18 @@ def get_replica_info_from_id(
 def get_replica_infos(
         service_name: str) -> List['replica_managers.ReplicaInfo']:
     """Gets all replica infos of a service."""
-    rows = _DB.cursor.execute(
-        """\
+    _DB.cursor.execute(
+        f"""\
         SELECT replica_info FROM replicas
-        WHERE service_name=(?)""", (service_name,)).fetchall()
+        WHERE service_name=({pg})""", (service_name,))
+    rows = _DB.cursor.fetchall()
     return [pickle.loads(row[0]) for row in rows]
 
 
 def total_number_provisioning_replicas() -> int:
     """Returns the total number of provisioning replicas."""
-    rows = _DB.cursor.execute('SELECT replica_info FROM replicas').fetchall()
+    _DB.cursor.execute('SELECT replica_info FROM replicas')
+    rows = _DB.cursor.fetchall()
     provisioning_count = 0
     for row in rows:
         replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])

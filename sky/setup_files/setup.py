@@ -132,6 +132,7 @@ def parse_readme(readme: str) -> str:
 
 install_requires = [
     'wheel',
+    'psycopg2-binary',
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
