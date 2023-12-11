@@ -1,43 +1,9 @@
-envs:
-  HF_TOKEN: MY_HF_TOKEN
-
 resources: 
-  accelerators: {A10:8, A10G:8, L4:8, A100:8, A100-80GB:8}
+  accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   ports: 8000
 
-setup: |
-  conda activate mixtral
-  if [ $? -ne 0 ]; then
-    conda create -n mixtral -y python=3.10
-    conda activate mixtral
-  fi
-  # We have to manually install Torch otherwise apex & xformers won't build
-  pip list | grep torch || pip install "torch>=2.0.0" --index-url https://download.pytorch.org/whl/cu118
-
-  # This build is slow but NVIDIA does not provide binaries. Increase MAX_JOBS as needed.
-  pip list | grep apex || { pip install packaging ninja && \
-      git clone https://github.com/NVIDIA/apex || true && \
-      cd apex && git checkout 2386a912164b0c5cfcd8be7a2b890fbac5607c82 && \
-      sed -i '/check_cuda_torch_binary_vs_bare_metal(CUDA_HOME)/d' setup.py && \
-      python setup.py install --cpp_ext --cuda_ext; }
-
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git@b5f882cc98e2c9c6dde7357dbac2ec0c2c57d8cd"
-  pip list | grep stanford-stk || pip install stanford-stk
-  pip list | grep megablocks || pip install megablocks
-  pip list | grep fschat || pip install "fschat[model_worker]==0.2.34"
-
-  if [[ ! -z "${HF_TOKEN}" ]]; then
-      echo "The HF_TOKEN environment variable set, logging to Hugging Face."
-      python3 -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
-  else
-      echo "The HF_TOKEN environment variable is not set or empty, not logging to Hugging Face."
-  fi
-
-
 run: |
-  # Run the provided command
-  conda activate mixtral
-  python3 -u -m vllm.entrypoints.openai.api_server \
+  docker run --gpus all -p 8000:8000 ghcr.io/mistralai/mistral-src/vllm:latest \
                    --host 0.0.0.0 \
-                   --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
-                   --tensor-parallel-size 1
+                   --model mistralai/Mixtral-7Bx8-Instruct-v0.1 \
+                   --tensor-parallel-size $SKYPILOT_NUM_GPUS
