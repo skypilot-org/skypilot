@@ -2,8 +2,14 @@ resources:
   accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
   ports: 8000
 
+service:
+  readiness_probe:
+    path: /v1/models
+    initial_delay_seconds: 1200
+  replicas: 2
+
 run: |
   docker run --gpus all -p 8000:8000 ghcr.io/mistralai/mistral-src/vllm:latest \
                    --host 0.0.0.0 \
-                   --model mistralai/Mixtral-7Bx8-Instruct-v0.1 \
+                   --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
                    --tensor-parallel-size $SKYPILOT_NUM_GPUS
