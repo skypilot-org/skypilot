@@ -197,12 +197,20 @@ def add_or_update_cluster(cluster_name: str,
                 %s,
                 COALESCE(%s, (SELECT last_use FROM clusters WHERE name=%s)),
                 %s,
-                COALESCE((SELECT autostop FROM clusters WHERE name=%s AND status!=%s), -1),
-                COALESCE((SELECT to_down FROM clusters WHERE name=%s AND status!=%s), 0),
+                COALESCE(
+                (SELECT autostop FROM clusters WHERE name=%s AND status!=%s),
+                    -1
+                ),
+                COALESCE(
+                    (SELECT to_down FROM clusters WHERE name=%s AND status!=%s)
+                , 0
+                ),
                 COALESCE((SELECT metadata FROM clusters WHERE name=%s), '{}'),
                 COALESCE((SELECT owner FROM clusters WHERE name=%s), null),
                 %s,
-                COALESCE((SELECT storage_mounts_metadata FROM clusters WHERE name=%s), null)
+                COALESCE(
+                (SELECT storage_mounts_metadata FROM clusters WHERE name=%s),
+                  null)
                 )
                 ON CONFLICT (name)
                 DO UPDATE SET

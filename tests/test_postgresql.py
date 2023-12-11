@@ -108,7 +108,7 @@ class Test(NamedTuple):
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = 15 * 60
-    
+
     def start_postgres(self):
         # Generate a random container name
         container_name = f"postgres-test-{uuid.uuid4()}"
@@ -120,11 +120,13 @@ class Test(NamedTuple):
         return container_name
 
     def stop_postgres(self, container_name):
-        command = f"docker kill {container_name}" 
+        command = f"docker kill {container_name}"
         # No need to check if the container was killed successfully
-        # It may have been removed before. 
-        subprocess.run(shlex.split(command), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False) 
-
+        # It may have been removed before.
+        subprocess.run(shlex.split(command),
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=False)
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -134,10 +136,12 @@ class Test(NamedTuple):
         message = message.replace('\n', f'\n{prefix} ')
         print(message, file=sys.stderr, flush=True)
 
+
 def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0))  # Binding to port 0 lets the OS pick an available port
         return s.getsockname()[1]
+
 
 def _get_cluster_name() -> str:
     """Returns a user-unique cluster name for each test_<name>().
@@ -190,7 +194,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
         if proc.returncode:
             break
-    
+
     style = colorama.Style
     fore = colorama.Fore
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
@@ -257,7 +261,6 @@ def test_example_app():
     test = Test(
         'example_app',
         ['python examples/example_app.py'],
-        
     )
     run_one_test(test)
 
@@ -278,7 +281,6 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -296,7 +298,6 @@ def test_aws_region():
             f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -313,7 +314,6 @@ def test_gcp_region():
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -331,7 +331,6 @@ def test_ibm_region():
             f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -348,7 +347,6 @@ def test_azure_region():
             f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -366,7 +364,6 @@ def test_aws_zone():
             f'sky status --all | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -384,7 +381,6 @@ def test_ibm_zone():
             f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
         ],
         f'sky down -y {name} {name}-2 {name}-3',
-        
     )
     run_one_test(test)
 
@@ -401,7 +397,6 @@ def test_gcp_zone():
             f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -421,7 +416,6 @@ def test_aws_images():
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -440,7 +434,6 @@ def test_gcp_images():
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -460,7 +453,6 @@ def test_aws_image_id_dict():
             f'sky logs {name} 3 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -480,7 +472,6 @@ def test_gcp_image_id_dict():
             f'sky logs {name} 3 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -518,7 +509,6 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -552,7 +542,6 @@ def test_gcp_image_id_dict_region():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -591,7 +580,6 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -626,7 +614,6 @@ def test_gcp_image_id_dict_zone():
             f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -667,7 +654,6 @@ def test_clone_disk_gcp():
             f'sky logs {name}-clone-2 1 --status',
         ],
         f'sky down -y {name} {name}-clone {name}-clone-2',
-        
     )
     run_one_test(test)
 
@@ -687,7 +673,6 @@ def test_image_no_conda():
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -709,7 +694,6 @@ def test_stale_job(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -741,7 +725,6 @@ def test_aws_stale_job_manual_restart():
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -773,7 +756,6 @@ def test_gcp_stale_job_manual_restart():
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1034,7 +1016,6 @@ def test_cli_logs(generic_cloud: str):
             f'sky logs {name} | grep "{timestamp} 4"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1057,7 +1038,6 @@ def test_scp_logs():
             f'sky logs {name} | grep "{timestamp} 4"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1089,7 +1069,6 @@ def test_job_queue(generic_cloud: str):
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1122,7 +1101,6 @@ def test_job_queue_with_docker(generic_cloud: str):
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1146,7 +1124,6 @@ def test_lambda_job_queue():
             f'sky cancel -y {name} 3',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1170,7 +1147,6 @@ def test_ibm_job_queue():
             f'sky cancel -y {name} 3',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1196,7 +1172,6 @@ def test_scp_job_queue():
             f'sky cancel -y {name} 3',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1340,7 +1315,6 @@ def test_ibm_job_queue_multinode():
         ],
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins,
-        
     )
     run_one_test(test)
 
@@ -1360,7 +1334,6 @@ def test_docker_preinstalled_package(generic_cloud: str):
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1404,7 +1377,6 @@ def test_huggingface(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1421,7 +1393,6 @@ def test_lambda_huggingface(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1439,7 +1410,6 @@ def test_scp_huggingface(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1537,7 +1507,6 @@ def test_gcp_http_server_with_custom_ports():
             '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1555,7 +1524,6 @@ def test_aws_http_server_with_custom_ports():
             '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1573,7 +1541,6 @@ def test_azure_http_server_with_custom_ports():
             '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1622,7 +1589,6 @@ def test_gcp_start_stop():
             f'sky status -r {name} | grep "INIT\|STOPPED"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1888,7 +1854,6 @@ def test_cancel_ibm():
             f'sky queue {name} | grep {name}-1 | grep CANCELLED',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -1911,7 +1876,6 @@ def test_use_spot(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -2522,7 +2486,6 @@ def test_inline_env(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -2540,7 +2503,6 @@ def test_inline_env_file(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -2687,7 +2649,6 @@ def test_aws_zero_quota_failover():
             f'sky launch -y -c {name} --cloud aws --region {region} --gpus V100:8 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -2711,7 +2672,6 @@ def test_gcp_zero_quota_failover():
             f'sky launch -y -c {name} --cloud gcp --region {region} --gpus A100-80GB:1 --use-spot | grep "Found no quota"',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -3047,7 +3007,6 @@ def test_user_ray_cluster(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -3898,7 +3857,6 @@ def test_multiple_accelerators_ordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -3912,7 +3870,6 @@ def test_multiple_accelerators_unordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
 
@@ -3926,6 +3883,5 @@ def test_multiple_resources():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        
     )
     run_one_test(test)
