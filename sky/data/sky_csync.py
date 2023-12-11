@@ -367,8 +367,8 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
 
 def _clean_write_path(read_path, write_path):
     # get a list of files/directories that exists in both paths.
-    
     # remove those from write path.
+    return
 
 
 def run_sync(source: str, read_path: str, storetype: str, destination: str, num_threads: int,
