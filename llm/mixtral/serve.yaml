@@ -3,8 +3,7 @@ envs:
 
 resources: 
   accelerators: {A10:8, A10G:8, L4:8, A100:8, A100-80GB:8}
-  ports: 
-    - 8000
+  ports: 8000
 
 setup: |
   conda activate mixtral
