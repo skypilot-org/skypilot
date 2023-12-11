@@ -112,6 +112,13 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: SkyServe: Model Serving
+
+   serving/sky-serve
+   serving/service-yaml-spec
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cutting Cloud Costs
 
    examples/spot-jobs
