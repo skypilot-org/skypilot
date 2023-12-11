@@ -12,6 +12,7 @@ Install SkyPilot using pip:
 .. tab-set::
 
     .. tab-item:: Nightly (recommended)
+        :sync: nightly-tab
 
         .. code-block:: shell
 
@@ -34,6 +35,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[all]"
 
     .. tab-item:: Latest Release
+        :sync: latest-release-tab
 
         .. code-block:: shell
 
@@ -55,24 +57,33 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[all]"
 
-To use a subset of the clouds, you can combine some of the pip extras above to
+To use a subset of the clouds, combine some of the pip extras above to
 reduce the dependencies installed:
 
-.. code-block:: shell
+.. tab-set::
 
-  # Nightly:
-  pip install -U "skypilot-nightly[aws,gcp]"
-  # Latest release:
-  pip install -U "skypilot[aws,gcp]"
+    .. tab-item:: Nightly (recommended)
+        :sync: nightly-tab
+
+        .. code-block:: shell
+
+          pip install -U "skypilot-nightly[aws,gcp]"
+
+    .. tab-item:: Latest Release
+        :sync: latest-release-tab
+
+        .. code-block:: shell
+
+          pip install -U "skypilot[aws,gcp]"
 
 To get the latest features, either use a nightly build (the **Nightly**
 tab above), or install from source:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ git clone https://github.com/skypilot-org/skypilot.git
-  $ cd skypilot
-  $ pip install ".[all]"
+  git clone https://github.com/skypilot-org/skypilot.git
+  cd skypilot
+  pip install ".[all]"
 
 As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
 
@@ -83,9 +94,9 @@ Verifying cloud access
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ sky check
+  sky check
 
 This will produce a summary like:
 
@@ -132,13 +143,13 @@ Amazon Web Services (AWS)
 
 To get the **AWS access key** required by :code:`aws configure`, please go to the `AWS IAM Management Console <https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials>`_ and click on the "Access keys" dropdown (detailed instructions `here <https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html#Using_CreateAccessKey>`__). The **Default region name [None]:** and **Default output format [None]:** fields are optional and can be left blank to choose defaults.
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Install boto
-  $ pip install boto3
+  # Install boto
+  pip install boto3
 
-  $ # Configure your AWS credentials
-  $ aws configure
+  # Configure your AWS credentials
+  aws configure
 
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
@@ -149,15 +160,15 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 Google Cloud Platform (GCP)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ conda install -c conda-forge google-cloud-sdk
+  conda install -c conda-forge google-cloud-sdk
 
-  $ gcloud init
+  gcloud init
 
-  $ # Run this if you don't have a credentials file.
-  $ # This will generate ~/.config/gcloud/application_default_credentials.json.
-  $ gcloud auth application-default login
+  # Run this if you don't have a credentials file.
+  # This will generate ~/.config/gcloud/application_default_credentials.json.
+  gcloud auth application-default login
 
 .. tip::
 
@@ -177,12 +188,12 @@ Google Cloud Platform (GCP)
 Azure
 ~~~~~~~~~
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Login
-  $ az login
-  $ # Set the subscription to use
-  $ az account set -s <subscription_id>
+  # Login
+  az login
+  # Set the subscription to use
+  az account set -s <subscription_id>
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
@@ -191,10 +202,10 @@ Lambda Cloud
 
 `Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ mkdir -p ~/.lambda_cloud
-  $ echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+  mkdir -p ~/.lambda_cloud
+  echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
 IBM
 ~~~~~~~~~
@@ -258,12 +269,12 @@ Cloudflare R2
 Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
 SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support, run:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Install boto
-  $ pip install boto3
-  $ # Configure your R2 credentials
-  $ AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/r2.credentials aws configure --profile r2
+  # Install boto
+  pip install boto3
+  # Configure your R2 credentials
+  AWS_SHARED_CREDENTIALS_FILE=~/.cloudflare/r2.credentials aws configure --profile r2
 
 In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructions to generate R2 credentials <https://developers.cloudflare.com/r2/data-access/s3-api/tokens/>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
 
@@ -276,10 +287,10 @@ In the prompt, enter your R2 Access Key ID and Secret Access Key (see `instructi
 
 Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-started/basic-tasks/find-account-and-zone-ids/>`_ from your R2 dashboard and store it in :code:`~/.cloudflare/accountid` with:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ mkdir -p ~/.cloudflare
-  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
+  mkdir -p ~/.cloudflare
+  echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid
 
 .. note::
 
@@ -293,14 +304,14 @@ Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise cus
 
 To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Create directory if required
-  $ mkdir -p ~/.scp
-  $ # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
-  $ echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
-  $ echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
-  $ echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
+  # Create directory if required
+  mkdir -p ~/.scp
+  # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
+  echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
+  echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
+  echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
 
 .. note::
 
@@ -311,11 +322,11 @@ Kubernetes
 
 SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Place your kubeconfig at ~/.kube/config
-  $ mkdir -p ~/.kube
-  $ cp /path/to/kubeconfig ~/.kube/config
+  # Place your kubeconfig at ~/.kube/config
+  mkdir -p ~/.kube
+  cp /path/to/kubeconfig ~/.kube/config
 
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
@@ -339,21 +350,17 @@ As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.
 You can simply run:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # NOTE: '--platform linux/amd64' is needed for Apple silicon Macs
-  $ docker run --platform linux/amd64 \
-    -td --rm --name sky -e SKYPILOT_DEBUG=0 \
+  # NOTE: '--platform linux/amd64' is needed for Apple silicon Macs
+  docker run --platform linux/amd64 \
+    -td --rm --name sky \
     -v "$HOME/.sky:/root/.sky:rw" \
     -v "$HOME/.aws:/root/.aws:rw" \
     -v "$HOME/.config/gcloud:/root/.config/gcloud:rw" \
-    berkeleyskypilot/skypilot-debug
-  $ docker exec -it sky /bin/bash
+    berkeleyskypilot/skypilot-nightly
 
-  $ # Run inside the container:
-
-  $ cd /sky_repo/skypilot
-  $ pip install -e .
+  docker exec -it sky /bin/bash
 
 If your cloud CLIs are already setup, your credentials (AWS and GCP) will be
 mounted to the container and you can proceed to :ref:`Quickstart <quickstart>`.
@@ -364,21 +371,20 @@ Once you are done with experimenting with SkyPilot, remember to delete any
 clusters and storage resources you may have created using the following
 commands:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ # Run inside the container:
-
-  $ sky down -a -y
-  $ sky storage delete -a -y
+  # Run inside the container:
+  sky down -a -y
+  sky storage delete -a -y
 
 Finally, you can stop the container with:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ docker stop sky
+  docker stop sky
 
 See more details about the dev container image
-``berkeleyskypilot/skypilot-debug`` `here
+``berkeleyskypilot/skypilot-nightly`` `here
 <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md#testing-in-a-container>`_.
 
 .. _shell-completion:
@@ -391,19 +397,19 @@ SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. 
 To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
 SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ sky --install-shell-completion auto
-  $ # sky --install-shell-completion zsh
-  $ # sky --install-shell-completion bash
-  $ # sky --install-shell-completion fish
+  sky --install-shell-completion auto
+  # sky --install-shell-completion zsh
+  # sky --install-shell-completion bash
+  # sky --install-shell-completion fish
 
 Shell completion may perform poorly on certain shells and machines.
 If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
 
-.. code-block:: console
+.. code-block:: shell
 
-  $ sky --uninstall-shell-completion auto
-  $ # sky --uninstall-shell-completion zsh
-  $ # sky --uninstall-shell-completion bash
-  $ # sky --uninstall-shell-completion fish
+  sky --uninstall-shell-completion auto
+  # sky --uninstall-shell-completion zsh
+  # sky --uninstall-shell-completion bash
+  # sky --uninstall-shell-completion fish
