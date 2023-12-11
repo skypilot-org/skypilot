@@ -201,7 +201,7 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        if resources.image_id:
+        if resources.image_id is not None:
             # Use custom image specified in resources
             image_id_with_region = resources.image_id['kubernetes']
             image_id = image_id_with_region[len('docker:'):]
