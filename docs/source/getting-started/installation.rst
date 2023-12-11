@@ -57,8 +57,33 @@ Install SkyPilot using pip:
           pip install "skypilot[oci]"
           pip install "skypilot[all]"
 
+    .. tab-item:: From Source
+        :sync: from-source-tab
+
+        .. code-block:: shell
+
+          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Recommended: use a new conda env to avoid package conflicts.
+          conda create -y -n sky python=3.8
+          conda activate sky
+
+          git clone https://github.com/skypilot-org/skypilot.git
+          cd skypilot
+          pip install -e .
+
+          # Or, choose an extra (defaults to [aws]):
+          pip install -e ".[aws]"
+          pip install -e ".[gcp]"
+          pip install -e ".[azure]"
+          pip install -e ".[kubernetes]"
+          pip install -e ".[lambda]"
+          pip install -e ".[ibm]"
+          pip install -e ".[scp]"
+          pip install -e ".[oci]"
+          pip install -e ".[all]"
+
 To use a subset of the clouds, combine some of the pip extras above to
-reduce the dependencies installed:
+reduce the dependencies:
 
 .. tab-set::
 
@@ -76,14 +101,12 @@ reduce the dependencies installed:
 
           pip install -U "skypilot[aws,gcp]"
 
-To get the latest features, either use a nightly build (the **Nightly**
-tab above), or install from source:
+    .. tab-item:: From Source
+        :sync: from-source-tab
 
-.. code-block:: shell
+        .. code-block:: shell
 
-  git clone https://github.com/skypilot-org/skypilot.git
-  cd skypilot
-  pip install ".[all]"
+          pip install -e ".[aws,gcp]"
 
 As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
 
@@ -120,7 +143,7 @@ section :ref:`below <cloud-account-setup>`.
 
 .. tip::
 
-  If your clouds show ``enabled``: |:tada:| |:tada:| Congratulations! |:tada:| |:tada:| You can now head over to
+  If your clouds show ``enabled`` --- |:tada:| |:tada:| **Congratulations!** |:tada:| |:tada:| You can now head over to
   :ref:`Quickstart <quickstart>` to get started with SkyPilot.
 
 .. _cloud-account-setup:
