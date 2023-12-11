@@ -321,6 +321,28 @@ class AbstractStore:
         # original Store object is returned
         return self
 
+    def _validate_existing_bucket(self):
+        """Validates the storage fields for existing buckets."""
+        # Check if 'source' is None, indicating Storage is in MOUNT mode.
+        # Note: In COPY mode, a 'source' being None is already handled
+        # as an error in _validate_storage_spec.
+        if self.source is None:
+            # Retrieve a handle associated with the storage name.
+            # This handle links to sky managed storage if it exists.
+            handle = global_user_state.get_handle_from_storage_name(self.name)
+            # If handle is None, it implies the bucket is created
+            # externally and not managed by Skypilot. For mounting such
+            # externally created buckets, users must provide the
+            # bucket's URL as 'source'.
+            if handle is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSpecError(
+                        'Attempted to mount a non-sky managed bucket '
+                        f'{self.name!r} from S3 without specifying a '
+                        'storage source. To mount an externally created '
+                        'bucket, please specify the bucket URL as '
+                        'the storage source.')
+
 
 class Storage(object):
     """Storage objects handle persistent and large volume storage in the sky.
@@ -1254,26 +1276,7 @@ class S3Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            # Check if 'source' is None, indicating Storage is in MOUNT mode.
-            # Note: In COPY mode, a 'source' being None is already handled
-            # as an error in _validate_storage_spec.
-            if self.source is None:
-                # Retrieve a handle associated with the storage name.
-                # This handle links to sky managed storage if it exists.
-                handle = global_user_state.get_handle_from_storage_name(
-                    self.name)
-                # If handle is None, it implies the bucket is created
-                # externally and not managed by Skypilot. For mounting such
-                # externally created buckets, users must provide the
-                # bucket's URL as 'source'.
-                if handle is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageSpecError(
-                            'Attempted to mount a non-sky managed bucket '
-                            f'{self.name!r} from S3 without specifying a '
-                            'storage source. To mount an externally created '
-                            'bucket, please specify the bucket URL as '
-                            'the storage source.')
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -1714,26 +1717,7 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(self.name)
-            # Check if 'source' is None, indicating Storage is in MOUNT mode.
-            # Note: In COPY mode, a 'source' being None is already handled
-            # as an error in _validate_storage_spec.
-            if self.source is None:
-                # Retrieve a handle associated with the storage name.
-                # This handle links to sky managed storage if it exists.
-                handle = global_user_state.get_handle_from_storage_name(
-                    self.name)
-                # If handle is None, it implies the bucket is created
-                # externally and not managed by Skypilot. For mounting such
-                # externally created buckets, users must provide the
-                # bucket's URL as 'source'.
-                if handle is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageSpecError(
-                            'Attempted to mount a non-sky managed bucket '
-                            f'{self.name!r} from GCS without specifying a '
-                            'storage source. To mount an externally created '
-                            'bucket, please specify the bucket URL as '
-                            'the storage source.')
+            self._validate_existing_bucket()
             return bucket, False
         except gcp.not_found_exception() as e:
             if isinstance(self.source, str) and self.source.startswith('gs://'):
@@ -2096,26 +2080,7 @@ class R2Store(AbstractStore):
             # bucket or if it is a user's bucket that is publicly
             # accessible.
             self.client.head_bucket(Bucket=self.name)
-            # Check if 'source' is None, indicating Storage is in MOUNT mode.
-            # Note: In COPY mode, a 'source' being None is already handled
-            # as an error in _validate_storage_spec.
-            if self.source is None:
-                # Retrieve a handle associated with the storage name.
-                # This handle links to sky managed storage if it exists.
-                handle = global_user_state.get_handle_from_storage_name(
-                    self.name)
-                # If handle is None, it implies the bucket is created
-                # externally and not managed by Skypilot. For mounting such
-                # externally created buckets, users must provide the
-                # bucket's URL as 'source'.
-                if handle is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageSpecError(
-                            'Attempted to mount a non-sky managed bucket '
-                            f'{self.name!r} from R2 without specifying a '
-                            'storage source. To mount an externally created '
-                            'bucket, please specify the bucket URL as '
-                            'the storage source.')
+            self._validate_existing_bucket()
             return bucket, False
         except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
@@ -2578,26 +2543,7 @@ class IBMCosStore(AbstractStore):
         else:
             # bucket exists
             bucket = self.s3_resource.Bucket(self.name)
-            # Check if 'source' is None, indicating Storage is in MOUNT mode.
-            # Note: In COPY mode, a 'source' being None is already handled
-            # as an error in _validate_storage_spec.
-            if self.source is None:
-                # Retrieve a handle associated with the storage name.
-                # This handle links to sky managed storage if it exists.
-                handle = global_user_state.get_handle_from_storage_name(
-                    self.name)
-                # If handle is None, it implies the bucket is created
-                # externally and not managed by Skypilot. For mounting such
-                # externally created buckets, users must provide the
-                # bucket's URL as 'source'.
-                if handle is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageSpecError(
-                            'Attempted to mount a non-sky managed bucket '
-                            f'{self.name!r} from IBM COS without specifying a '
-                            'storage source. To mount an externally created '
-                            'bucket, please specify the bucket URL as '
-                            'the storage source.')
+            self._validate_existing_bucket()
             return bucket, False
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
