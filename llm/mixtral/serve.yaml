@@ -1,0 +1,10 @@
+resources: 
+  accelerators: {A10:8, A10G:8, L4:8}
+  ports: 
+    - 8000
+
+run: |
+  docker run --gpus all -p 8000:8000 ghcr.io/mistralai/mistral-src/vllm:latest \
+                   --host 0.0.0.0 \
+                   --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
+                   --tensor-parallel-size 1
