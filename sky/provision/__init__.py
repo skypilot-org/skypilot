@@ -131,6 +131,7 @@ def open_ports(
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
+    # TODO: make ports argument optional and add the ability to cleanup only specified ports.
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -142,7 +143,6 @@ def cleanup_ports(
 def query_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
-    ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:

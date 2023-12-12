@@ -1,6 +1,6 @@
-import os
 from typing import Any, Dict, List, Optional
 
+from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.utils import kubernetes_enums
@@ -140,29 +140,33 @@ def _cleanup_ports_for_ingress(
 
 def query_ports(
     cluster_name_on_cloud: str,
-    ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
-    del ip  # Unused.
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
-    if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
-        return _query_ports_for_loadbalancer(
-            cluster_name_on_cloud=cluster_name_on_cloud,
-            ports=ports,
-            provider_config=provider_config,
-        )
-    elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
-        return _query_ports_for_ingress(
-            cluster_name_on_cloud=cluster_name_on_cloud,
-            ports=ports,
-        )
-    else:
-        return {}
+
+    try:
+        if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
+            return _query_ports_for_loadbalancer(
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                ports=ports,
+                provider_config=provider_config,
+            )
+        elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
+            return _query_ports_for_ingress(
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                ports=ports,
+            )
+        else:
+            return {}
+    except kubernetes.get_kubernetes().client.ApiException as e:
+        if e.status == 404:
+            return {}
+        raise e
 
 
 def _query_ports_for_loadbalancer(
@@ -189,20 +193,25 @@ def _query_ports_for_ingress(
     cluster_name_on_cloud: str,
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
-    url_details = network_utils.get_base_url("ingress-nginx")
-    if url_details is None:
+    external_ip, external_ports = network_utils.get_external_ip_and_ports(
+        "ingress-nginx")
+    if external_ip is None:
         return {}
 
-    http_url, https_url = url_details
     result: Dict[int, List[common.Endpoint]] = {}
     for port in ports:
         path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
+
+        http_port, https_port = external_ports if external_ports is not None else (
+            None, None)
         result[port] = [
-            common.HTTPEndpoint(
-                url=os.path.join(http_url, path_prefix.lstrip('/'))),
-            common.HTTPSEndpoint(
-                url=os.path.join(https_url, path_prefix.lstrip('/'))),
+            common.HTTPEndpoint(host=external_ip,
+                                port=http_port,
+                                path=path_prefix.lstrip('/')),
+            common.HTTPSEndpoint(host=external_ip,
+                                 port=https_port,
+                                 path=path_prefix.lstrip('/')),
         ]
 
     return result

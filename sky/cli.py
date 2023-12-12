@@ -1855,27 +1855,31 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 port_details = provision_lib.query_ports(
-                    repr(cloud), handle.cluster_name_on_cloud, head_ip,
+                    repr(cloud), handle.cluster_name_on_cloud,
                     handle.launched_resources.ports, config['provider'])
 
                 if endpoint is not None:
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
-                                f'Port {endpoint} not exposed yet. If the cluster was recently started, please retry.'
+                                f'Port {endpoint} not exposed yet.\n'
+                                'If the cluster was recently started, please retry after a while.\n'
+                                'If you believe this is an error, please file an issue.'
                             )
-                    click.echo(port_details[endpoint][0])
+                    click.echo(port_details[endpoint][0].url(ip=head_ip))
                     return
 
                 if not port_details:
                     click.echo(
-                        'No endpoints exposed yet. If the cluster was recently started, please retry.'
+                        'No endpoints exposed yet.\n'
+                        'If the cluster was recently started, please retry after a while.\n'
+                        'If you believe this is an error, please file an issue.'
                     )
 
                 for port, urls in port_details.items():
                     click.echo(
                         f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}{colorama.Style.RESET_ALL}: '
-                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0]}{colorama.Style.RESET_ALL}'
+                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}'
                     )
                 return
 

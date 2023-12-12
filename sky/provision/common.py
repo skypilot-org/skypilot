@@ -1,5 +1,7 @@
 """Common data structures for provisioning"""
+import abc
 import dataclasses
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky.utils.resources_utils import port_ranges_to_set
@@ -151,46 +153,55 @@ class Endpoint:
     """Base class for endpoints."""
     pass
 
+    @abc.abstractmethod
+    def url(self, ip: str):
+        raise NotImplementedError
+
 
 @dataclasses.dataclass
 class SocketEndpoint(Endpoint):
     """Socket endpoint accesible via a host and a port."""
-    host: str
-    port: int
+    port: Optional[int]
+    host: str = ''
 
-    def __str__(self):
-        return f'{self.host}:{self.port}'
+    def url(self, ip: str):
+        if not self.host:
+            self.host = ip
+        return f'{self.host}{":" + str(self.port) if self.port else ""}'
 
 
 @dataclasses.dataclass
-class HTTPEndpoint(Endpoint):
+class HTTPEndpoint(SocketEndpoint):
     """HTTP endpoint accesible via a url."""
-    url: str
+    path: str = ''
 
-    def __str__(self):
-        return self.url
+    def url(self, ip: str):
+        del ip  # Unused.
+        return f'http://{os.path.join(super().url(self.host), self.path)}'
 
 
 @dataclasses.dataclass
-class HTTPSEndpoint(Endpoint):
+class HTTPSEndpoint(SocketEndpoint):
     """HTTPS endpoint accesible via a url."""
-    url: str
+    path: str = ''
 
-    def __str__(self):
-        return self.url
+    def url(self, ip: str):
+        del ip  # Unused.
+        return f'https://{os.path.join(super().url(self.host), self.path)}'
 
 
-def query_ports_with_ip(
+def query_ports_passthrough(
     cluster_name_on_cloud: str,
-    ip: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[Endpoint]]:
-    """Common function to query ports for AWS, GCP and Azure."""
+    """Common function to query ports for AWS, GCP and Azure.
+
+    Returns a list of socket endpoint with empty host and the input ports."""
     del cluster_name_on_cloud, provider_config  # Unused.
     ports = list(port_ranges_to_set(ports))
     result: Dict[int, List[Endpoint]] = {}
     for port in ports:
-        result[port] = [SocketEndpoint(host=ip, port=port)]
+        result[port] = [SocketEndpoint(port=port)]
 
     return result
