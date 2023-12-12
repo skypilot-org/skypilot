@@ -148,7 +148,7 @@ def query_ports(
 ) -> Dict[int, List[common.Endpoint]]:
     """Query details about ports on a cluster.
 
-    Returns a dict with port as the key and the value as a list of endpoints for the port.
+    Returns a dict with port as the key and the value as an instance of common.Endpoint.
     """
     raise NotImplementedError
 
