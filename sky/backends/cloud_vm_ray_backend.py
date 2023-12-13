@@ -1180,6 +1180,7 @@ class RetryingVmProvisioner(object):
             clouds.Local: self._update_blocklist_on_local_error,
             clouds.Kubernetes: self._update_blocklist_on_kubernetes_error,
             clouds.OCI: self._update_blocklist_on_oci_error,
+            clouds.Fluidstack: self._update_blocklist_on_fluidstack_error,
         }
         cloud = launchable_resources.cloud
         cloud_type = type(cloud)
@@ -3518,7 +3519,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stderr = ''
 
         # Use the new provisioner for AWS.
-        if isinstance(cloud, (clouds.AWS, clouds.GCP)):
+        if isinstance(cloud, (clouds.AWS, clouds.GCP,clouds.Fluidstack)):
             # Stop the ray autoscaler first to avoid the head node trying to
             # re-launch the worker nodes, during the termination of the
             # cluster.

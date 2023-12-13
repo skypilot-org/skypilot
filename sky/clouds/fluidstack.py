@@ -246,7 +246,7 @@ class Fluidstack(clouds.Cloud):
                 'Failed to access FluidStack Cloud'
                 ' with credentials. '
                 'To configure credentials, go to:\n    '
-                '  https://console2.fluidstack.io \n    '
+                '  https://console.fluidstack.io \n    '
                 'to obtain an API key and API Token, '
                 'then add save the contents '
                 'to ~/.fluidstack/api_key and ~/.fluidstack/api_token \n')
@@ -300,19 +300,14 @@ class Fluidstack(clouds.Cloud):
         **kwargs,
     ) -> List[status_lib.ClusterStatus]:
         status_map = {
-            'Provisioning': status_lib.ClusterStatus.INIT,
-            'Starting Up': status_lib.ClusterStatus.INIT,
-            'Running': status_lib.ClusterStatus.UP,
-            'Error Creating': status_lib.ClusterStatus.INIT,  #should be error
+            'provisioning': status_lib.ClusterStatus.INIT,
+            'requesting': status_lib.ClusterStatus.INIT,
+            'create': status_lib.ClusterStatus.INIT,
+            'customizing': status_lib.ClusterStatus.INIT,
+            'running': status_lib.ClusterStatus.UP,
         }
         status_list = []
-        vms = FluidstackClient().list_instances()
-        filtered = []
-        for node in vms:
-            for key, value in tag_filters.items():
-                tag = node['tags'].get(key, None)
-                if tag and tag == value:
-                    filtered.append(node)
+        filtered = FluidstackClient().list_instances(tag_filters)
         for node in filtered:
             node_status = status_map.get(node['status'], None)
             if node_status is not None:

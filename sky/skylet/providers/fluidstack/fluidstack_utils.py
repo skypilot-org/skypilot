@@ -1,8 +1,8 @@
 import requests
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import json
 import os
-from functools import lru_cache
+import functools
 import uuid
 
 
@@ -10,7 +10,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace('-', '')[:8]
 
 
-ENDPOINT = 'https://console.fluidstack.io/'
+ENDPOINT = 'https://api.fluidstack.io/v1/'
 FLUIDSTACK_API_KEY_PATH = '~/.fluidstack/api_key'
 FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
@@ -24,7 +24,10 @@ def read_contents(path: str) -> str:
 
 
 class FluidstackAPIError(Exception):
-    pass
+
+    def __init__(self, message: str, code: int = 400):
+        self.code = code
+        super().__init__(message)
 
 
 def raise_fluidstack_error(response: requests.Response) -> None:
@@ -37,8 +40,9 @@ def raise_fluidstack_error(response: requests.Response) -> None:
         message = resp_json.get('error', response.text)
     except (KeyError, json.decoder.JSONDecodeError):
         raise FluidstackAPIError(
-            f'Unexpected error. Status code: {status_code}')
-    raise FluidstackAPIError(f'{message}')
+            f'Unexpected error. Status code: {status_code} \n {response.text}',
+            code=status_code)
+    raise FluidstackAPIError(f'{message}', status_code)
 
 
 class FluidstackClient:
@@ -49,25 +53,35 @@ class FluidstackClient:
         self.api_token = read_contents(
             os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
 
-    def list_instances(self) -> List[Dict[str, Any]]:
+    def list_instances(
+            self, tag_filters: Optional[Dict[str,
+                                             str]]) -> List[Dict[str, Any]]:
         response = requests.get(
-            ENDPOINT + 'api2/list',
+            ENDPOINT + '/servers',
             auth=(self.api_key, self.api_token),
         )
         raise_fluidstack_error(response)
         instances = response.json()
+        filtered_instances = []
         for instance in instances:
             if type(instance['tags']) == str:
                 instance['tags'] = json.loads(instance['tags'])
             if not instance['tags']:
                 instance['tags'] = {}
-        return instances
+            if tag_filters:
+                for key in tag_filters:
+                    if instance['tags'].get(key, None) != tag_filters[key]:
+                        break
+                else:
+                    filtered_instances.append(instance)
+        return filtered_instances
 
     def create_instance(
         self,
         instance_type: str = '',
         region: str = '',
         ssh_pub_key: str = '',
+        count: int = 1,
     ) -> List[str]:
         """Launch new instances."""
         regions = self.list_regions()
@@ -78,43 +92,44 @@ class FluidstackClient:
             region=regions[region],
             os='Ubuntu 20.04 LTS',
             ssh_keys=[ssh_key['id']],
+            multiplicity=count,
         )
 
-        response = requests.post(ENDPOINT + 'api2/deploy',
+        response = requests.post(ENDPOINT + '/server',
                                  auth=(self.api_key, self.api_token),
                                  json=body)
         raise_fluidstack_error(response)
-        return response.json().get('server', {}).get('id')
+        return response.json().get('multiple')
 
     def list_ssh_keys(self):
-        response = requests.get(ENDPOINT + 'api/ssh_key',
+        response = requests.get(ENDPOINT + '/ssh',
                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
-        return response.json()['ssh_keys']
+        return response.json()
 
     def get_or_add_ssh_key(self, ssh_pub_key: str = '') -> Dict[str, str]:
         """Add ssh key if not already added."""
         ssh_keys = self.list_ssh_keys()
         for key in ssh_keys:
-            if key['Public_Key'].strip() == ssh_pub_key.strip():
+            if key['public_key'].strip() == ssh_pub_key.strip():
                 return {
                     'id': key['id'],
-                    'name': key['Name'],
+                    'name': key['name'],
                     'ssh_key': ssh_pub_key
                 }
         ssh_key_name = 'skypilot-' + get_key_suffix()
         response = requests.post(
-            ENDPOINT + 'api/ssh_key',
+            ENDPOINT + '/ssh',
             auth=(self.api_key, self.api_token),
-            json=dict(Name=ssh_key_name, Public_Key=ssh_pub_key),
+            json=dict(name=ssh_key_name, public_key=ssh_pub_key),
         )
         raise_fluidstack_error(response)
-        key_id = response.json()['key_id']
+        key_id = response.json()['id']
         return {'id': key_id, 'name': ssh_key_name, 'ssh_key': ssh_pub_key}
 
-    @lru_cache()
+    @functools.lru_cache()
     def list_regions(self):
-        response = requests.get(ENDPOINT + 'api/plans')
+        response = requests.get(ENDPOINT + '/plans')
         raise_fluidstack_error(response)
         plans = response.json()
         plans = [
@@ -127,59 +142,46 @@ class FluidstackClient:
             regions = {}
             for plan in plans:
                 for region in plan.get('regions', []):
-                    regions[region['slug']] = region['id']
+                    regions[region['id']] = region['id']
             return regions
 
         regions = get_regions(plans)
         return regions
 
     def delete(self, instance_id: str):
-        response = requests.delete(
-            ENDPOINT + 'api2/delete',
-            auth=(self.api_key, self.api_token),
-            json=dict(server=instance_id),
-        )
+        response = requests.delete(ENDPOINT + '/server/' + instance_id,
+                                   auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def stop(self, instance_id: str):
-        response = requests.post(
-            ENDPOINT + 'api2/stop',
-            auth=(self.api_key, self.api_token),
-            json=dict(server=instance_id),
-        )
+        response = requests.put(ENDPOINT + '/server/' + instance_id + '/stop',
+                                auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def restart(self, instance_id: str):
-        response = requests.post(
-            ENDPOINT + 'api2/restart',
-            auth=(self.api_key, self.api_token),
-            json=dict(server=instance_id),
-        )
+        response = requests.post(ENDPOINT + '/server/' + instance_id +
+                                 '/reboot',
+                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def info(self, instance_id: str):
-        response = requests.get(ENDPOINT + f'api2/list/{instance_id}',
+        response = requests.get(ENDPOINT + f'/server/{instance_id}',
                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def status(self, instance_id: str):
-        response = requests.get(
-            ENDPOINT + f'api2/status/{instance_id}',
-            auth=(self.api_key, self.api_token),
-            json=dict(server=instance_id),
-        )
-        raise_fluidstack_error(response)
-        return response.json()['status']
+        response = self.info(instance_id)
+        return response['status']
 
     def add_tags(self, instance_id: str, tags: Dict[str, str]):
-        response = requests.post(
-            ENDPOINT + 'api2/tag',
+        response = requests.patch(
+            ENDPOINT + f'server/{instance_id}/tag',
             auth=(self.api_key, self.api_token),
-            json=dict(instance_id=instance_id, tags=json.dumps(tags)),
+            json=dict(tags=json.dumps(tags)),
         )
         raise_fluidstack_error(response)
         return response.json()

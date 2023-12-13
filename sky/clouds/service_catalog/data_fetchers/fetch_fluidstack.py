@@ -15,34 +15,35 @@ import requests
 from typing import List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = 'http://console.fluidstack.io/api/plans'
+ENDPOINT = 'http://api.fluidstack.io/v1/plans'
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser(
     '~/.fluidstack/fluidstack_api_key')
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
     '~/.fluidstack/fluidstack_api_token')
 
 GPU_MAP = {
-    'A100_PCIE_40GB': 'A100',
-    'T4': 'T4',
-    'Tesla_V100_PCIE': 'V100',
-    'A10': 'A10',
-    'A100_PCIE_80GB': 'A100-80GB',
-    'Quadro_RTX_6000_16GB': 'RTX6000',
-    'RTX_A4500_16GB': 'A4500',
-    'RTX_3060_Ti': 'RTX3060Ti',
-    'Quadro_RTX_4000_12GB': 'RTX4000',
-    'Quadro_P5000_12GB': 'P5000',
-    'RTX_A4000': 'A4000',
-    'Quadro_RTX_5000_16GB': 'RTX5000',
-    'A30': 'A30',
-    'A40': 'A40',
-    'RTX_3090': 'RTX3090',
-    'RTX_A6000': 'A6000',
-    'RTX_3080': 'RTX3080',
-    'RTX_A5000': 'A5000',
+    'H100_PCIE_80GB': 'H100',
     'A100_SXM4_80GB': 'A100-80GB',
-    'A100_NVLINK_80GB': 'A100-80GB-NVLink',
-    'A100_NVLINK': 'A100_NVLINK'
+    'A100_PCIE_80GB': 'A100-80GB',
+    'A100_SXM4_40GB': 'A100',
+    'A100_PCIE_40GB': 'A100',
+    'Tesla_V100_SXM2_16GB': 'V100',
+    'Tesla_V100_PCIE_16GB': 'V100',
+    'A10_PCIE_24GB': 'A10',
+    'A30_24GB': 'A30',
+    'A40_48GB': 'A40',
+    'RTX_A6000_48GB': 'A6000',
+    'RTX_A5000_24GB': 'A5000',
+    'RTX_A4000_16GB': 'A4000',
+    'Quadro_RTX_5000_16GB': 'RTX5000',
+    'Quadro_RTX_4000_8GB': 'RTX4000',
+    'L40_48GB': 'L40',
+    'Quadro_RTX_6000_16GB': 'RTX6000',
+    'T4_16GB': 'T4',
+    'RTX_3090_24GB': 'RTX3090',
+    'RTX_3080_10GB': 'RTX3080',
+
+
 }
 
 
@@ -51,7 +52,7 @@ def get_regions(plans: List) -> dict:
     regions = {}
     for plan in plans:
         for region in plan.get('regions', []):
-            regions[region['slug']] = region['id']
+            regions[region['id']] = region['id']
     return regions
 
 
@@ -110,7 +111,7 @@ def create_catalog(output_dir: str) -> None:
                     vcpus,
                     mem,
                     price,
-                    r['slug'],
+                    r['id'],
                     gpuinfo,
                     '',
                 ])
