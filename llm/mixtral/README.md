@@ -37,7 +37,7 @@ curl -L http://$IP:8000/v1/completions \
 
 ## 2. Serve with multiple instances
 
-When scaling up is required, SkyServe is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
+When scaling up is required, [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
 
 ```bash
 sky serve up -n mixtral ./serve.yaml
