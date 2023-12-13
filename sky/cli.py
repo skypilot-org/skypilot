@@ -4278,13 +4278,12 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    for requested_resources in task.resources:
+        if requested_resources.ports is None or len(requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)

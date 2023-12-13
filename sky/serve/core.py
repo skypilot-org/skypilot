@@ -56,13 +56,16 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    assert len(task.resources) == 1, task
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    requested_cloud = None
+    for requested_resources in task.resources:
+        if requested_resources.ports is None or len(requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        if requested_cloud is None:
+            requested_cloud = requested_resources.cloud
+
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -102,8 +105,10 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
+        
+
         controller_cloud = (
-            requested_resources.cloud if not controller_exist and
+            requested_cloud if not controller_exist and
             controller_resources.cloud is None else controller_resources.cloud)
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
