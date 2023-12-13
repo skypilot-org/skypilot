@@ -92,11 +92,12 @@ def up(
             # TODO(tian): Check if ngrok is installed; don't install if it is.
             # TODO(tian): Better way to install ngrok.
             controller_setup_commands.extend([
-                'sudo apt install unzip',
-                'wget -q https://bin.equinox.io/c/4VmDzA7iaHb/'
-                'ngrok-stable-linux-amd64.zip',
-                'unzip ngrok-stable-linux-amd64.zip',
-                'sudo mv ngrok /usr/local/bin',
+                # 'sudo apt install unzip',
+                # 'wget -q https://bin.equinox.io/c/4VmDzA7iaHb/'
+                # 'ngrok-stable-linux-amd64.zip',
+                # 'unzip ngrok-stable-linux-amd64.zip',
+                # 'sudo mv ngrok /usr/local/bin',
+                'sudo snap install ngrok > /dev/null 2>&1',
             ])
 
         vars_to_fill = {
@@ -105,6 +106,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
+            'controller_setup_commands': controller_setup_commands,
             **controller_utils.shared_controller_vars_to_fill('serve'),
         }
         backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
@@ -207,6 +209,7 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
+            # TODO(tian): Print ngrok url here
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
             endpoint = f'{controller_handle.head_ip}:{lb_port}'

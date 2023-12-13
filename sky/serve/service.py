@@ -216,24 +216,38 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 # TODO(tian): Redirect to ngrok log file.
                 # pylint: disable=consider-using-with
                 ngrok_process = subprocess.Popen(
-                    [
-                        'ngrok', 'http',
-                        str(load_balancer_port), '--authtoken',
-                        service_spec.ngrok_token
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    f'ngrok http {load_balancer_port} --authtoken '
+                    f'{service_spec.ngrok_token} > /dev/null 2>&1',
+                    shell=True,
+                    # stdout=subprocess.PIPE,
+                    # stderr=subprocess.PIPE,
                 )
-                # TODO(tian): Add constant for this URL.
-                # TODO(tian): Better error handling.
-                resp = requests.get('http://127.0.0.1:4040/api/tunnels')
-                ngrok_url = None
-                for tunnel in resp.json()['tunnels']:
-                    if tunnel['config'][
-                            'addr'] == f'http://localhost:{load_balancer_port}':
-                        ngrok_url = tunnel['public_url']
-                        break
-                assert ngrok_url is not None, resp.json()
+
+                def _get_ngrok_url():
+                    # Wait for ngrok to start.
+                    backoff = common_utils.Backoff()
+                    for _ in range(5):
+                        # TODO(tian): Add constant for this URL.
+                        # TODO(tian): Better error handling.
+                        try:
+                            resp = requests.get(
+                                'http://127.0.0.1:4040/api/tunnels')
+                        except:  # pylint: disable=bare-except
+                            logger.info(
+                                'Failed to connect to ngrok. Retrying ...')
+                            time.sleep(backoff.current_backoff())
+                        else:
+                            for tunnel in resp.json()['tunnels']:
+                                if (tunnel['config']['addr'] ==
+                                        f'http://localhost:{load_balancer_port}'
+                                   ):
+                                    return tunnel['public_url']
+                            assert False, ('Failed to get ngrok url. '
+                                           f'Response: {resp.json()}')
+                    return None
+
+                ngrok_url = _get_ngrok_url()
+                logger.info(f'ngrok url: {ngrok_url}')
                 serve_state.set_service_ngrok_url(service_name, ngrok_url)
 
         while True:
