@@ -4,9 +4,7 @@ name: {{dag_name}}
 
 file_mounts:
   {{remote_user_yaml_path}}: {{user_yaml_path}}
-{% if user_config_path is not none %}
-  {{remote_user_config_path}}: {{user_config_path}}
-{% endif %}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
 
 setup: |
   {%- for cmd in cloud_dependencies_installation_commands %}
@@ -23,6 +21,7 @@ setup: |
   ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
 
 run: |
+  # Start the controller for the current spot job.
   python -u -m sky.spot.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 

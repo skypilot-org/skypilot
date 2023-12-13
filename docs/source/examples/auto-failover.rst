@@ -23,6 +23,31 @@ searching for regions (or clouds) that can provide the requested resources.
   If specific :code:`cloud`, ``region``, or ``zone`` are requested for a
   task, auto-failover retries only within the specified location.
 
+Provisioning GPUs
+----------------------
+
+To provision GPUs or other accelerators, use the ``resources.accelerators``
+field if you are using a :ref:`task YAML <yaml-spec>`:
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100
+    # accelerators: A100:1
+    # accelerators: A100:8
+    # accelerators: A100-80GB:8
+
+Equivalently, you can use the :ref:`CLI argument <sky-launch>` ``--gpus`` in ``sky launch`` to specify the accelerators:
+
+.. code-block:: console
+
+  sky launch --gpus A100
+  sky launch --gpus A100:1
+  sky launch --gpus A100:8
+  sky launch --gpus A100-80GB:8
+
+Use ``sky show-gpus`` to see the names of all supported accelerators.
+
 Cross-region failover
 ---------------------
 
@@ -101,11 +126,11 @@ A10, L4, and A10g GPUs, using :code:`sky launch task.yaml`.
   $ sky launch task.yaml
   ...
   I 11-19 08:07:45 optimizer.py:910] -----------------------------------------------------------------------------------------------------
-  I 11-19 08:07:45 optimizer.py:910]  CLOUD   INSTANCE                 vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
+  I 11-19 08:07:45 optimizer.py:910]  CLOUD   INSTANCE                 vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN
   I 11-19 08:07:45 optimizer.py:910] -----------------------------------------------------------------------------------------------------
-  I 11-19 08:07:45 optimizer.py:910]  Azure   Standard_NV6ads_A10_v5   6       55        A10:1          eastus        0.45          ✔     
-  I 11-19 08:07:45 optimizer.py:910]  GCP     g2-standard-4            4       16        L4:1           us-east4-a    0.70                
-  I 11-19 08:07:45 optimizer.py:910]  AWS     g5.xlarge                4       16        A10G:1         us-east-1     1.01                
+  I 11-19 08:07:45 optimizer.py:910]  Azure   Standard_NV6ads_A10_v5   6       55        A10:1          eastus        0.45          ✔
+  I 11-19 08:07:45 optimizer.py:910]  GCP     g2-standard-4            4       16        L4:1           us-east4-a    0.70
+  I 11-19 08:07:45 optimizer.py:910]  AWS     g5.xlarge                4       16        A10G:1         us-east-1     1.01
   I 11-19 08:07:45 optimizer.py:910] -----------------------------------------------------------------------------------------------------
 
 
@@ -119,6 +144,7 @@ To specify a preference order, use a list of candidate GPUs in the task yaml:
 
 In the above example, SkyPilot will first try to provision an A10 GPU, then an A10g GPU, and finally an L4 GPU.
 
+.. _multiple-resources:
 
 (**Advanced**) Multiple Candidate Resources
 --------------------------------------------
@@ -149,7 +175,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
         - cloud: azure
           region: eastus
           accelerator: A100
-          
+
 .. tip::
 
   The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
@@ -175,10 +201,10 @@ This will genereate the following output:
   $ sky launch -c mycluster task.yaml
   ...
   I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-20 14:06:24 optimizer.py:910]  CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+  I 11-20 14:06:24 optimizer.py:910]  CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
   I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-20 14:06:24 optimizer.py:910]  GCP     a2-highgpu-8g   96      680       A100:8         us-central1-a   29.39         ✔     
-  I 11-20 14:06:24 optimizer.py:910]  AWS     p4d.24xlarge    96      1152      A100:8         us-east-2       32.77               
+  I 11-20 14:06:24 optimizer.py:910]  GCP     a2-highgpu-8g   96      680       A100:8         us-central1-a   29.39         ✔
+  I 11-20 14:06:24 optimizer.py:910]  AWS     p4d.24xlarge    96      1152      A100:8         us-east-2       32.77
   I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
   I 11-20 14:06:24 optimizer.py:910]
-  Launching a new cluster 'mycluster'. Proceed? [Y/n]: 
+  Launching a new cluster 'mycluster'. Proceed? [Y/n]:

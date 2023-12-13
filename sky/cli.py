@@ -709,7 +709,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
+    return f'sky-{node_type}-{common_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -4755,13 +4755,13 @@ def benchmark_launch(
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]
-        if '' in gpus:
+        if ' ' in gpus:
             raise click.BadParameter('Remove blanks in --gpus.')
 
         if len(gpu_list) == 1:
             override_gpu = gpu_list[0]
         else:
-            # If len(gpus) > 1, gpus is intrepreted
+            # If len(gpu_list) > 1, gpus is interpreted
             # as a list of benchmark candidates.
             if candidates is None:
                 candidates = [{'accelerators': gpu} for gpu in gpu_list]

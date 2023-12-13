@@ -36,9 +36,9 @@ provider:
   security_group:
     # AWS config file must include security group name
     GroupName: {{security_group}}
-{% if aws_vpc_name is not none %}
+{% if vpc_name is not none %}
   # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
-  vpc_name: {{aws_vpc_name}}
+  vpc_name: {{vpc_name}}
 {% endif %}
 {%- if docker_login_config is not none %}
   # We put docker login config in provider section because ray's schema disabled

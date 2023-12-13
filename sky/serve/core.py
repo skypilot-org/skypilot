@@ -83,28 +83,17 @@ def up(
             serve_utils.generate_remote_config_yaml_file_name(service_name))
         controller_log_file = (
             serve_utils.generate_remote_controller_log_file_name(service_name))
-        extra_vars, controller_resources_config = (
-            controller_utils.skypilot_config_setup(
-                controller_type='serve',
-                controller_resources_config=serve_constants.
-                CONTROLLER_RESOURCES,
-                remote_user_config_path=remote_config_yaml_path))
-        try:
-            controller_resources = sky.Resources.from_yaml_config(
-                controller_resources_config)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    controller_utils.CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.
-                    format(controller_type='serve',
-                           err=common_utils.format_exception(
-                               e, use_bracket=True))) from e
+        controller_resources = (controller_utils.get_controller_resources(
+            controller_type='serve',
+            controller_resources_config=serve_constants.CONTROLLER_RESOURCES))
+
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,
             'service_name': service_name,
             'controller_log_file': controller_log_file,
-            **extra_vars,
+            'remote_user_config_path': remote_config_yaml_path,
+            **controller_utils.shared_controller_vars_to_fill('serve'),
         }
         backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                     vars_to_fill,

@@ -487,6 +487,40 @@ def get_cluster_schema():
     }
 
 
+_NETWORK_CONFIG_SCHEMA = {
+    'vpc_name': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }],
+    },
+    'use_internal_ips': {
+        'type': 'boolean',
+    },
+    'ssh_proxy_command': {
+        'oneOf': [{
+            'type': 'string',
+        }, {
+            'type': 'null',
+        }, {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'anyOf': [
+                    {
+                        'type': 'string'
+                    },
+                    {
+                        'type': 'null'
+                    },
+                ]
+            }
+        }]
+    },
+}
+
+
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
     from sky.utils import kubernetes_enums
@@ -534,36 +568,7 @@ def get_config_schema():
                             'type': 'string',
                         },
                     },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
-                    'use_internal_ips': {
-                        'type': 'boolean',
-                    },
-                    'ssh_proxy_command': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }, {
-                            'type': 'object',
-                            'required': [],
-                            'additionalProperties': {
-                                'anyOf': [
-                                    {
-                                        'type': 'string'
-                                    },
-                                    {
-                                        'type': 'null'
-                                    },
-                                ]
-                            }
-                        }]
-                    },
+                    **_NETWORK_CONFIG_SCHEMA,
                 }
             },
             'gcp': {
@@ -579,13 +584,7 @@ def get_config_schema():
                         'minItems': 1,
                         'maxItems': 1,
                     },
-                    'vpc_name': {
-                        'oneOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'null',
-                        }],
-                    },
+                    **_NETWORK_CONFIG_SCHEMA,
                 }
             },
             'kubernetes': {

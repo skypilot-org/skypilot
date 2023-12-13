@@ -6,11 +6,12 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import colorama
 
 from sky import exceptions
+from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import gcp
@@ -24,6 +25,7 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -36,6 +38,9 @@ CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
+
+# The placeholder for the local skypilot config path in file mounts.
+LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
 
 
 @dataclasses.dataclass
@@ -220,7 +225,11 @@ def download_and_stream_latest_job_log(
     return log_file
 
 
-def _shared_controller_env_vars() -> Dict[str, str]:
+def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
+    vars_to_fill: Dict[str, Any] = {
+        'cloud_dependencies_installation_commands':
+            _get_cloud_dependencies_installation_commands(controller_type)
+    }
     env_vars: Dict[str, str] = {
         env.value: '1' for env in env_options.Options if env.get()
     }
@@ -232,14 +241,14 @@ def _shared_controller_env_vars() -> Dict[str, str]:
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
-    return env_vars
+    vars_to_fill['controller_envs'] = env_vars
+    return vars_to_fill
 
 
-def skypilot_config_setup(
+def get_controller_resources(
     controller_type: str,
     controller_resources_config: Dict[str, Any],
-    remote_user_config_path: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> resources.Resources:
     """Read the skypilot config and setup the controller resources.
 
     Returns:
@@ -248,67 +257,9 @@ def skypilot_config_setup(
         The controller_resources_config is the resources config that will be
         used to launch the controller.
     """
-    vars_to_fill: Dict[str, Any] = {
-        'cloud_dependencies_installation_commands':
-            _get_cloud_dependencies_installation_commands(controller_type)
-    }
-    controller_envs = _shared_controller_env_vars()
     controller_resources_config_copied: Dict[str, Any] = copy.copy(
         controller_resources_config)
     if skypilot_config.loaded():
-        # Look up the contents of the already loaded configs via the
-        # 'skypilot_config' module. Don't simply read the on-disk file as
-        # it may have changed since this process started.
-        #
-        # Set any proxy command to None, because the controller would've
-        # been launched behind the proxy, and in general any nodes we
-        # launch may not have or need the proxy setup. (If the controller
-        # needs to launch mew clusters in another region/VPC, the user
-        # should properly set up VPC peering, which will allow the
-        # cross-region/VPC communication. The proxy command is orthogonal
-        # to this scenario.)
-        #
-        # This file will be uploaded to the controller node and will be
-        # used throughout the spot job's / service's recovery attempts
-        # (i.e., if it relaunches due to preemption, we make sure the
-        # same config is used).
-        #
-        # NOTE: suppose that we have a controller in old VPC, then user
-        # changes 'vpc_name' in the config and does a 'spot launch' /
-        # 'serve up'. In general, the old controller may not successfully
-        # launch the job in the new VPC. This happens if the two VPCs don’t
-        # have peering set up. Like other places in the code, we assume
-        # properly setting up networking is user's responsibilities.
-        # TODO(zongheng): consider adding a basic check that checks
-        # controller VPC (or name) == the spot job's / service's VPC
-        # (or name). It may not be a sufficient check (as it's always
-        # possible that peering is not set up), but it may catch some
-        # obvious errors.
-        # TODO(zhwu): hacky. We should only set the proxy command of the
-        # cloud where the controller is launched (currently, only aws user
-        # uses proxy_command).
-        proxy_command_key = ('aws', 'ssh_proxy_command')
-        ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
-        config_dict = skypilot_config.to_dict()
-        if isinstance(ssh_proxy_command, str):
-            config_dict = skypilot_config.set_nested(proxy_command_key, None)
-        elif isinstance(ssh_proxy_command, dict):
-            # Instead of removing the key, we set the value to empty string
-            # so that the controller will only try the regions specified by
-            # the keys.
-            ssh_proxy_command = {k: None for k in ssh_proxy_command}
-            config_dict = skypilot_config.set_nested(proxy_command_key,
-                                                     ssh_proxy_command)
-
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
-            common_utils.dump_yaml(tmpfile.name, config_dict)
-            controller_envs[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = (
-                remote_user_config_path)
-            vars_to_fill.update({
-                'user_config_path': tmpfile.name,
-                'remote_user_config_path': remote_user_config_path,
-            })
-
         # Override the controller resources with the ones specified in the
         # config.
         custom_controller_resources_config = skypilot_config.get_nested(
@@ -316,13 +267,95 @@ def skypilot_config_setup(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-    else:
-        # If the user config is not loaded, manually set this to None
-        # so that the template won't render this.
-        vars_to_fill['user_config_path'] = None
 
-    vars_to_fill['controller_envs'] = controller_envs
-    return vars_to_fill, controller_resources_config_copied
+    try:
+        controller_resources = resources.Resources.from_yaml_config(
+            controller_resources_config_copied)
+    except ValueError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=common_utils.format_exception(e,
+                                                      use_bracket=True))) from e
+
+    return controller_resources
+
+
+def _setup_proxy_command_on_controller(
+        controller_launched_cloud: 'clouds.Cloud') -> Dict[str, Any]:
+    """Sets up proxy command on the controller.
+
+    This function should be called on the controller (remote cluster), which
+    has the `~/.sky/sky_ray.yaml` file.
+    """
+    # Look up the contents of the already loaded configs via the
+    # 'skypilot_config' module. Don't simply read the on-disk file as
+    # it may have changed since this process started.
+    #
+    # Set any proxy command to None, because the controller would've
+    # been launched behind the proxy, and in general any nodes we
+    # launch may not have or need the proxy setup. (If the controller
+    # needs to launch mew clusters in another region/VPC, the user
+    # should properly set up VPC peering, which will allow the
+    # cross-region/VPC communication. The proxy command is orthogonal
+    # to this scenario.)
+    #
+    # This file will be uploaded to the controller node and will be
+    # used throughout the spot job's / service's recovery attempts
+    # (i.e., if it relaunches due to preemption, we make sure the
+    # same config is used).
+    #
+    # NOTE: suppose that we have a controller in old VPC, then user
+    # changes 'vpc_name' in the config and does a 'spot launch' /
+    # 'serve up'. In general, the old controller may not successfully
+    # launch the job in the new VPC. This happens if the two VPCs don’t
+    # have peering set up. Like other places in the code, we assume
+    # properly setting up networking is user's responsibilities.
+    # TODO(zongheng): consider adding a basic check that checks
+    # controller VPC (or name) == the spot job's / service's VPC
+    # (or name). It may not be a sufficient check (as it's always
+    # possible that peering is not set up), but it may catch some
+    # obvious errors.
+    proxy_command_key = (str(controller_launched_cloud).lower(),
+                         'ssh_proxy_command')
+    ssh_proxy_command = skypilot_config.get_nested(proxy_command_key, None)
+    config_dict = skypilot_config.to_dict()
+    if isinstance(ssh_proxy_command, str):
+        config_dict = skypilot_config.set_nested(proxy_command_key, None)
+    elif isinstance(ssh_proxy_command, dict):
+        # Instead of removing the key, we set the value to empty string
+        # so that the controller will only try the regions specified by
+        # the keys.
+        ssh_proxy_command = {k: None for k in ssh_proxy_command}
+        config_dict = skypilot_config.set_nested(proxy_command_key,
+                                                 ssh_proxy_command)
+
+    return config_dict
+
+
+def replace_skypilot_config_path_in_file_mounts(
+        cloud: 'clouds.Cloud', file_mounts: Optional[Dict[str, str]]):
+    """Replaces the SkyPilot config path in file mounts with the real path."""
+    # TODO(zhwu): This function can be moved to `backend_utils` once we have
+    # more predefined file mounts that needs to be replaced after the cluster
+    # is provisioned, e.g., we may need to decide which cloud to create a bucket
+    # to be mounted to the cluster based on the cloud the cluster is actually
+    # launched on (after failover).
+    if file_mounts is None or not skypilot_config.loaded():
+        return
+    replaced = False
+    with tempfile.NamedTemporaryFile('w', delete=False) as f:
+        new_skypilot_config = _setup_proxy_command_on_controller(cloud)
+        if new_skypilot_config is not None:
+            common_utils.dump_yaml(f.name, new_skypilot_config)
+            for remote_path, local_path in file_mounts.items():
+                if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+                    file_mounts[remote_path] = f.name
+                    replaced = True
+    if replaced:
+        logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
+                     f'the real path in file mounts: {file_mounts}')
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
@@ -365,7 +398,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     new_storage_mounts = {}
     if task.workdir is not None:
         bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=getpass.getuser(), id=run_id)
+            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -399,7 +432,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             copy_mounts_with_file_in_src[dst] = src
             continue
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=getpass.getuser(),
+            username=common_utils.get_cleaned_username(),
             id=f'{run_id}-{i}',
         )
         new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
@@ -419,7 +452,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
     file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=getpass.getuser(), id=run_id)
+        username=common_utils.get_cleaned_username(), id=run_id)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
         path)
     if copy_mounts_with_file_in_src:
