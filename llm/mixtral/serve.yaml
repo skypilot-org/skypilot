@@ -8,7 +8,7 @@ service:
           content: Hello! What is your name?
     initial_delay_seconds: 1200
   replica_policy:
-    min_replicas: 1
+    min_replicas: 2
     auto_restart: true
 
 resources: 
