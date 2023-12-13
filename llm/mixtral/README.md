@@ -59,7 +59,7 @@ service:
     auto_restart: true
 ```
 
-To further save the cost by 3-4x, we can use the spot instances as the replicas, and SkyServe will automatically manage the spot instances, monitor the prices and preemptions, and restart the replica when needed.
+Optional: To further save the cost by 3-4x, we can use the spot instances as the replicas, and SkyServe will automatically manage the spot instances, monitor the prices and preemptions, and restart the replica when needed.
 To do so, we can add `use_spot: true` to the `resources` field, i.e.:
 ```yaml
 resources:
