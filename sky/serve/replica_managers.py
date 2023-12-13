@@ -560,8 +560,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
-        self.active_history: List[str] = []
-        self.preemption_history: List[str] = []
+        # self.active_history: List[str] = []
+        # self.preemption_history: List[str] = []
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -730,11 +730,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         # TODO(MaoZiming): Support spot recovery policies
-        if info.zone is None:
-            logger.error(f'Cannot find zone for replica {info.replica_id}. '
-                         'Skipping adding to preemption list.')
-        else:
-            self.preemption_history.append(info.zone)
+        # if info.zone is None:
+        #     logger.error(f'Cannot find zone for replica {info.replica_id}. '
+        #                  'Skipping adding to preemption list.')
+        # else:
+        #     self.preemption_history.append(info.zone)
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
@@ -786,20 +786,20 @@ class SkyPilotReplicaManager(ReplicaManager):
                         info.status_property.sky_launch_status = (
                             ProcessStatus.FAILED)
                         error_in_sky_launch = True
-                    if info.is_spot:
-                        if info.zone is None:
-                            logger.error(f'Cannot find zone for replica '
-                                         f'{replica_id}. Skipping adding '
-                                         'active or preemption history.')
-                        else:
-                            if p.exitcode != 0:
-                                self.preemption_history.append(info.zone)
-                            else:
-                                self.active_history.append(info.zone)
-                    else:
-                        logger.info(f'replica {replica_id} is on-demand. '
-                                    'Skipping adding active or preemption '
-                                    'history.')
+                    # if info.is_spot:
+                    #     if info.zone is None:
+                    #         logger.error(f'Cannot find zone for replica '
+                    #                      f'{replica_id}. Skipping adding '
+                    #                      'active or preemption history.')
+                    #     # else:
+                    #     #     if p.exitcode != 0:
+                    #     #         self.preemption_history.append(info.zone)
+                    #     #     else:
+                    #     #         self.active_history.append(info.zone)
+                    # else:
+                    #     logger.info(f'replica {replica_id} is on-demand. '
+                    #                 'Skipping adding active or preemption '
+                    #                 'history.')
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:

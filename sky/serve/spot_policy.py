@@ -142,9 +142,14 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
             if not info.is_spot:
                 # filter on demand fallbacks
                 continue
-            handle = info.handle()
-            if handle is not None and handle.launched_resources is not None:
-                existing_zones.add(handle.launched_resources.zone)
+            # handle = info.handle()
+            # if handle is not None and handle.launched_resources is not None:
+            if info.zone is not None:
+                existing_zones.add(info.zone)
+            else:
+                logger.error(f'Cannot find zone for replica '
+                             f'{info.replica_id}. Skipping adding '
+                             'to existing_zones.')
         return [
             zone for zone in self.active_zones() if zone not in existing_zones
         ]
