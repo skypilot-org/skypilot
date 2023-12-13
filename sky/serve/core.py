@@ -87,6 +87,18 @@ def up(
             controller_type='serve',
             controller_resources_config=serve_constants.CONTROLLER_RESOURCES))
 
+        controller_setup_commands = []
+        if task.service.ngrok_token is not None:
+            # TODO(tian): Check if ngrok is installed; don't install if it is.
+            # TODO(tian): Better way to install ngrok.
+            controller_setup_commands.extend([
+                'sudo apt install unzip',
+                'wget -q https://bin.equinox.io/c/4VmDzA7iaHb/'
+                'ngrok-stable-linux-amd64.zip',
+                'unzip ngrok-stable-linux-amd64.zip',
+                'sudo mv ngrok /usr/local/bin',
+            ])
+
         vars_to_fill = {
             'remote_task_yaml_path': remote_tmp_task_yaml_path,
             'local_task_yaml_path': service_file.name,

@@ -7,11 +7,13 @@ import multiprocessing
 import os
 import pathlib
 import shutil
+import subprocess
 import time
 import traceback
 from typing import Dict, List
 
 import filelock
+import requests
 import yaml
 
 from sky import authentication
@@ -174,6 +176,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
     controller_process = None
     load_balancer_process = None
+    ngrok_process = None
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
@@ -189,8 +192,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://localhost:{controller_port}'
-            load_balancer_port = common_utils.find_free_port(
-                constants.LOAD_BALANCER_PORT_START)
+            if service_spec.ngrok_token is not None:
+                port_start = constants.UNEXPOSED_LOAD_BALANCER_PORT_START
+            else:
+                port_start = constants.LOAD_BALANCER_PORT_START
+            load_balancer_port = common_utils.find_free_port(port_start)
 
             # Start the load balancer.
             # TODO(tian): Probably we could enable multiple ports specified in
@@ -205,6 +211,31 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
 
+            if service_spec.ngrok_token is not None:
+                # Start ngrok.
+                # TODO(tian): Redirect to ngrok log file.
+                # pylint: disable=consider-using-with
+                ngrok_process = subprocess.Popen(
+                    [
+                        'ngrok', 'http',
+                        str(load_balancer_port), '--authtoken',
+                        service_spec.ngrok_token
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                # TODO(tian): Add constant for this URL.
+                # TODO(tian): Better error handling.
+                resp = requests.get('http://127.0.0.1:4040/api/tunnels')
+                ngrok_url = None
+                for tunnel in resp.json()['tunnels']:
+                    if tunnel['config'][
+                            'addr'] == f'http://localhost:{load_balancer_port}':
+                        ngrok_url = tunnel['public_url']
+                        break
+                assert ngrok_url is not None, resp.json()
+                serve_state.set_service_ngrok_url(service_name, ngrok_url)
+
         while True:
             _handle_signal(service_name)
             time.sleep(1)
@@ -217,6 +248,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             process_to_kill.append(load_balancer_process)
         if controller_process is not None:
             process_to_kill.append(controller_process)
+        if ngrok_process is not None:
+            ngrok_process.terminate()
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
         subprocess_utils.kill_children_processes(
