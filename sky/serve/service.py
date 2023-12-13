@@ -128,7 +128,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
     # Initialize database record for the service.
     task = task_lib.Task.from_yaml(tmp_task_yaml)
-    assert task.service is not None
+    # Already checked before submit to controller.
+    assert task.service is not None, task
     service_spec = task.service
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
         _cleanup_storage(tmp_task_yaml)

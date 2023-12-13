@@ -83,6 +83,10 @@ def up(
                 'in different resources. Please specify single port instead.')
         if requested_cloud is None:
             requested_cloud = requested_resources.cloud
+        if requested_cloud != requested_resources.cloud:
+            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
+                             f'{requested_resources.cloud} in different '
+                             'resources. Please specify single cloud instead.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')

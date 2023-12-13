@@ -192,11 +192,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
         _DB.cursor.execute(
             """\
             INSERT INTO services
-            (name, controller_job_id, status, policy, auto_restart,
-            requested_resources, requested_resources_str)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, status, policy,
+            auto_restart, requested_resources_str)
+            VALUES (?, ?, ?, ?, ?, ?)""",
             (name, controller_job_id, status.value, policy, int(auto_restart),
-             None, requested_resources_str))
+             requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -264,6 +264,8 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'uptime': uptime,
         'policy': policy,
         'auto_restart': bool(auto_restart),
+        # TODO(tian): Backward compatibility.
+        # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
                                if requested_resources is not None else None,
         'requested_resources_str': requested_resources_str,
