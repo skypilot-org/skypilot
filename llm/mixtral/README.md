@@ -22,7 +22,7 @@ resources:
 When scaling up is required, SkyServe is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
 
 ```bash
-sky serve up -c mixtral ./serve.yaml
+sky serve up -n mixtral ./serve.yaml
 ```
 
 The additional arguments for serving specifies the way to check the healthiness of the service and manage the auto-restart of the service when unexpected failure happens:
