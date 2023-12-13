@@ -1,6 +1,6 @@
 # Serving Mixtral from Mistral.ai
 
-Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Licensed under Apache 2.0. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. This folder contains the code to serve Mixtral on any cloud with SkyPilot. There three ways to serve the model:
+Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Licensed under Apache 2.0. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. This folder contains the code to serve Mixtral on any cloud with SkyPilot. There two ways to serve the model:
 
 ## 1. Serve with a single instance
 
