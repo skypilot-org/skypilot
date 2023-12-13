@@ -1,6 +1,6 @@
 # Serving Mixtral from Mistral.ai
 
-Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Licensed under Apache 2.0. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. This folder contains the code to serve Mixtral on any cloud with SkyPilot. There two ways to serve the model:
+Mistral AI released Mixtral 8x7B, a high-quality sparse mixture of experts model (SMoE) with open weights. Mixtral outperforms Llama 2 70B on most benchmarks with 6x faster inference. Mistral.ai uses SkyPilot as [the default way](https://docs.mistral.ai/self-deployment/skypilot) to distribute their new model. This folder contains the code to serve Mixtral on any cloud with SkyPilot. There three ways to serve the model:
 
 ## 1. Serve with a single instance
 
@@ -40,3 +40,9 @@ service:
     min_replicas: 1
     auto_restart: true
 ```
+
+## 3. Official guide from Mistral AI
+
+Mistral.ai also includes a guide for launching the Mixtral 8x7B model with SkyPilot in their official doc. Please refer to [this link](https://docs.mistral.ai/self-deployment/skypilot) for more details.
+
+> Note: the docker image of the official doc may not be updated yet, which can cause a failure where vLLM is complaining about the missing support for the model. Please feel free to create a new docker image with the setup commands in our [serve.yaml](./serve.yaml) file instead.
