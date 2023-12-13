@@ -47,6 +47,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
+                             'requested_resources_str', 'TEXT')
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -178,7 +180,7 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                auto_restart: bool, requested_resources: 'sky.Resources',
+                auto_restart: bool, requested_resources_str: str,
                 status: ServiceStatus) -> bool:
     """Add a service in the database.
 
@@ -190,11 +192,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
         _DB.cursor.execute(
             """\
             INSERT INTO services
-            (name, controller_job_id, status, policy,
-            auto_restart, requested_resources)
+            (name, controller_job_id, status, policy, auto_restart,
+            requested_resources, requested_resources_str)
             VALUES (?, ?, ?, ?, ?, ?)""",
             (name, controller_job_id, status.value, policy, int(auto_restart),
-             pickle.dumps(requested_resources)))
+             None, requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -251,7 +253,8 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, auto_restart, requested_resources) = row[:9]
+     uptime, policy, auto_restart, requested_resources,
+     requested_resources_str) = row[:10]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -263,6 +266,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'auto_restart': bool(auto_restart),
         'requested_resources': pickle.loads(requested_resources)
                                if requested_resources is not None else None,
+        'requested_resources_str': requested_resources_str,
     }
 
 
