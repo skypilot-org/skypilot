@@ -59,6 +59,14 @@ service:
     auto_restart: true
 ```
 
+To further save the cost by 3-4x, we can use the spot instances as the replicas, and SkyServe will automatically manage the spot instances, monitor the prices and preemptions, and restart the replica when needed.
+To do so, we can add `use_spot: true` to the `resources` field, i.e.:
+```yaml
+resources:
+  use_spot: true
+  accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+```
+
 ### Accessing the model
 
 After the `sky serve up` command, there will be a single endpoint for the service. We can access the model through the OpenAI API with the IP and port:
