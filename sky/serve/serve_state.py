@@ -194,7 +194,7 @@ def add_service(name: str, controller_job_id: int, policy: str,
             INSERT INTO services
             (name, controller_job_id, status, policy, auto_restart,
             requested_resources, requested_resources_str)
-            VALUES (?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (name, controller_job_id, status.value, policy, int(auto_restart),
              None, requested_resources_str))
         _DB.conn.commit()
