@@ -19,6 +19,22 @@ resources:
   accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 ```
 
+### Accessing the model
+
+We can now access the model through the OpenAI API with the IP and port:
+
+```bash
+IP=$(sky status --ip mixtral)
+
+curl -L http://$IP:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "mistralai/Mistral-7B-v0.1",
+      "prompt": "My favourite condiment is",
+      "max_tokens": 25
+  }'
+```
+
 ## 2. Serve with multiple instances
 
 When scaling up is required, SkyServe is the library built on top of SkyPilot, which can help you scale up the serving with multiple instances, while still providing a single endpoint. To serve Mixtral with multiple instances, run the following command:
@@ -41,6 +57,22 @@ service:
   replica_policy:
     min_replicas: 1
     auto_restart: true
+```
+
+### Accessing the model
+
+After the `sky serve up` command, there will be a single endpoint for the service. We can access the model through the OpenAI API with the IP and port:
+
+```bash
+ENDPOINT=$(sky serve status --endpoint mixtral)
+
+curl -L http://$ENDPOINT/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+      "model": "mistralai/Mistral-7B-v0.1",
+      "prompt": "My favourite condiment is",
+      "max_tokens": 25
+  }'
 ```
 
 ## 3. Official guide from Mistral AI
