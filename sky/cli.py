@@ -4291,8 +4291,9 @@ def serve_up(
             raise ValueError(f'Port {service_port_str!r} is not a valid port '
                              'number. Please specify a single port instead. '
                              f'Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it should be
-        # fine to allow different repilcas to use different ports in the future.
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
         resource_port = int(service_port_str)
         if service_port is None:
             service_port = resource_port
