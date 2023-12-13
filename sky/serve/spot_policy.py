@@ -156,7 +156,8 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
 
     def select(self,
                existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
-        if len(self.active_zones()) == 0:
+        # Prevent the case with only one active zones.
+        if (len(self.active_zones()) <= 1 and len(self.preempted_zones()) > 0):
             self.clear_preempted_zones()
         unvisited_active_zones = self._filter_unvisited_active_zones(
             existing_replicas)

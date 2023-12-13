@@ -491,8 +491,6 @@ class ReplicaInfo:
 
     def __setstate__(self, state):
         """Set state from pickled state, for backward compatibility."""
-        self._version = self._VERSION
-
         version = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
@@ -501,6 +499,8 @@ class ReplicaInfo:
         if version < 2:
             self.is_spot = False
             self.zone = None
+
+        self.__dict__.update(state)
 
 
 class ReplicaManager:
