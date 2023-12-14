@@ -106,7 +106,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
         self.cooldown: int = cooldown
         self.rps_window_size: int = rps_window_size
-        self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
