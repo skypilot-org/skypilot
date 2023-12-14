@@ -1,6 +1,6 @@
 .. _sky-serve:
 
-Quickstart: Serving Models
+Serving Models
 ==========================
 
 SkyServe is SkyPilot's model serving library. SkyServe (short for SkyPilot Serving) takes an existing serving
