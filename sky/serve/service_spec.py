@@ -56,10 +56,7 @@ class SkyServiceSpec:
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
         self._auto_restart = auto_restart
-        spot_args = [
-            spot_placer, spot_mixer, spot_zones, target_qps_per_replica,
-            num_extra
-        ]
+        spot_args = [spot_placer, spot_mixer, target_qps_per_replica, num_extra]
         on_demand_args = [target_qps_per_replica, on_demand_type]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         on_demand_args_num = sum(
@@ -79,8 +76,9 @@ class SkyServiceSpec:
                     raise ValueError(
                         'spot_placer, spot_mixer, '
                         'target_qps_per_replica, num_extra '
-                        'and spot_zones must be all '
+                        'must be all '
                         'specified or all not specified in the service YAML.')
+
         # TODO(tian): Check vanilla autoscaler argument not exist if spot
         # TODO(tian): Warning user that the use_spot in resources is ignored
         # if spot policy is specified.
@@ -260,6 +258,9 @@ class SkyServiceSpec:
             Replica auto restart:             {self.auto_restart}
             Spot Policy:                      {self.spot_policy_str()}\
         """)
+
+    def set_spot_zones(self, zones: List[str]) -> None:
+        self._spot_zones = zones
 
     @property
     def readiness_path(self) -> str:

@@ -53,7 +53,7 @@ class SkyServeController:
         overprovision = False
         static_spot_provision = False
 
-        if service_spec.spot_zones is not None:
+        if service_spec.spot_mixer is not None:
             if service_spec.spot_mixer == 'StaticSpotProvision':
                 static_spot_provision = True
             elif service_spec.spot_mixer == 'OnDemandFallback':

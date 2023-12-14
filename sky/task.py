@@ -14,6 +14,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 import sky.dag
@@ -689,8 +690,42 @@ class Task:
         Returns:
           self: The current task, with service set.
         """
-        # TODO(tian): Check region/zone is not set when spot policy is enabled
         self._service = service
+        if service is None:
+            return self
+
+        if service.spot_placer is not None:
+            for res in list(self.resources):
+                if res.zone is not None or res.region is not None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Cannot specify zone when spot placer is enabled.')
+
+                if res.use_spot is not None and not res.use_spot:
+                    logger.info('Task use_spot will be override to True, '
+                                'because spot placer is enabled.')
+
+        if service.spot_zones is not None:
+
+            launchable_resources, _, _ = (
+                optimizer.fill_in_launchable_resources(
+                    task=self,
+                    blocked_resources=None,
+                    try_fix_with_sky_check=True,
+                    quiet=True))
+
+            launchable_zones = set()
+            for res in launchable_resources[list(self.resources)[0]]:
+                # print(res, res.cloud, res._instance_type)
+                regions = res.get_valid_regions_for_launchable()
+                for region in regions:
+                    if region.zones is not None:
+                        for zone in region.zones:
+                            launchable_zones.add(zone.name)
+            logger.info('service.spot_zones is not specified, '
+                        'use all available zones')
+            service.set_spot_zones(list(launchable_zones))
+
         return self
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],

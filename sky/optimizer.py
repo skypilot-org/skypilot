@@ -1148,6 +1148,18 @@ def _filter_out_blocked_launchable_resources(
     return available_resources
 
 
+def fill_in_launchable_resources(
+    task: task_lib.Task,
+    blocked_resources: Optional[Iterable[resources_lib.Resources]],
+    try_fix_with_sky_check: bool = True,
+    quiet: bool = False
+) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
+           _PerCloudCandidates, List[str]]:
+
+    return _fill_in_launchable_resources(task, blocked_resources,
+                                         try_fix_with_sky_check, quiet)
+
+
 def _fill_in_launchable_resources(
     task: task_lib.Task,
     blocked_resources: Optional[Iterable[resources_lib.Resources]],
