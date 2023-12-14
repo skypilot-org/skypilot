@@ -645,6 +645,9 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
     # Don't use backend_utils.is_controller_up since it is too slow.
+    ngrok_url = service_record.get('ngrok_url', None)
+    if ngrok_url is not None:
+        return ngrok_url
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
     assert isinstance(handle, backends.CloudVmRayResourceHandle)

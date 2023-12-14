@@ -14,6 +14,11 @@ setup: |
   pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
   pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
 
+  # Special setup commands.
+  {%- for cmd in controller_setup_commands %}
+  {{cmd}}
+  {%- endfor %}
+
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
   {{remote_user_config_path}}: skypilot:local_skypilot_config_path

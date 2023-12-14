@@ -25,6 +25,7 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
+        ngrok_token: Optional[str] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -47,6 +48,7 @@ class SkyServiceSpec:
         self._qps_lower_threshold = qps_lower_threshold
         self._post_data = post_data
         self._auto_restart = auto_restart
+        self._ngrok_token = ngrok_token
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -107,6 +109,11 @@ class SkyServiceSpec:
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
 
+        ingress_section = config.get('ingress', None)
+        if ingress_section is not None:
+            ngrok_token = ingress_section.get('ngrok_token', None)
+            service_config['ngrok_token'] = ngrok_token
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -154,6 +161,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'qps_lower_threshold',
                         self.qps_lower_threshold)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
+        add_if_not_none('ingress', 'ngrok_token', self.ngrok_token)
 
         return config
 
@@ -171,8 +179,14 @@ class SkyServiceSpec:
         return (f'Autoscaling from {self.min_replicas} to '
                 f'{self.max_replicas} replica{max_plural}')
 
+    def ingress_str(self) -> str:
+        if self.ngrok_token is None:
+            return 'Public IP + Port'
+        return f'Ngrok with token {self.ngrok_token}'
+
     def __repr__(self) -> str:
         return textwrap.dedent(f"""\
+            Ingress:                          {self.ingress_str()}
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
@@ -211,3 +225,7 @@ class SkyServiceSpec:
     @property
     def auto_restart(self) -> bool:
         return self._auto_restart
+
+    @property
+    def ngrok_token(self) -> Optional[str]:
+        return self._ngrok_token

@@ -47,6 +47,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'ngrok_url',
+                             'TEXT')
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -249,9 +251,18 @@ def set_service_load_balancer_port(service_name: str,
     _DB.conn.commit()
 
 
+def set_service_ngrok_url(service_name: str, ngrok_url: str) -> None:
+    """Sets the ngrok URL of a service."""
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        ngrok_url=(?) WHERE name=(?)""", (ngrok_url, service_name))
+    _DB.conn.commit()
+
+
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, auto_restart, requested_resources) = row[:9]
+     uptime, policy, auto_restart, requested_resources, ngrok_url) = row[:10]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -263,6 +274,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'auto_restart': bool(auto_restart),
         'requested_resources': pickle.loads(requested_resources)
                                if requested_resources is not None else None,
+        'ngrok_url': ngrok_url,
     }
 
 

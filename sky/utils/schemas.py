@@ -342,6 +342,14 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'ingress': {
+                'type': 'object',
+                'properties': {
+                    'ngrok_token': {
+                        'type': 'string',
+                    },
+                }
+            },
         }
     }
 
