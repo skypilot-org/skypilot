@@ -164,7 +164,13 @@ class RequestRateAutoscaler(Autoscaler):
                                   min(self.max_replicas, target_num_replicas))
 
         num_replicas_delta = 0
-        if target_num_replicas > num_replicas:
+        if num_replicas < self.min_replicas:
+            num_replicas_delta = self.min_replicas - num_replicas
+            self.upscale_counter = 0
+        elif num_replicas > self.max_replicas:
+            num_replicas_delta = self.max_replicas - num_replicas
+            self.downscale_counter = 0
+        elif target_num_replicas > num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
