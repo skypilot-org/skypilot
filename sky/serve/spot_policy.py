@@ -29,8 +29,8 @@ class SpotPlacer:
         assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
         cls.REGISTRY[cls.NAME] = cls
 
-    def select(self,
-               existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
+    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
+               current_considered_zones: List[str]) -> str:
         """Select next zone to place spot instance."""
         raise NotImplementedError
 
@@ -59,8 +59,8 @@ class EvenSpreadSpotPlacer(SpotPlacer):
         super().__init__(spec)
         self.current_zone_idx: int = 0
 
-    def select(self,
-               existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
+    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
+               current_considered_zones: List[str]) -> str:
         del existing_replicas  # Unused.
         zone = self.zones[self.current_zone_idx % len(self.zones)]
         logger.info(f'EvenSpreadSpotPlacer: {self.current_zone_idx}, {zone},'
@@ -120,8 +120,8 @@ class EagerFailoverSpotPlacer(HistoricalSpotPlacer):
     """Eagerly failover to a different zone when preempted."""
     NAME: Optional[str] = 'EagerFailover'
 
-    def select(self,
-               existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
+    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
+               current_considered_zones: List[str]) -> str:
         del existing_replicas  # Unused.
         zone = random.choice(self.zones)
         while zone in self.preempted_zones():
@@ -138,6 +138,7 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
             self, existing_replicas: List['replica_managers.ReplicaInfo']
     ) -> List[str]:
         existing_zones = set()
+        info = None
         for info in existing_replicas:
             if not info.is_spot:
                 # filter on demand fallbacks
@@ -146,21 +147,34 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
             # if handle is not None and handle.launched_resources is not None:
             if info.zone is not None:
                 existing_zones.add(info.zone)
+        else:
+            if info is not None:
+                logger.info(f'Cannot find zone for replica '
+                            f'{info.replica_id}. Skipping adding '
+                            'to existing_zones.')
             else:
-                logger.error(f'Cannot find zone for replica '
-                             f'{info.replica_id}. Skipping adding '
-                             'to existing_zones.')
-        return [
+                logger.info('existing_replicas is empty. '
+                            f'{existing_replicas}')
+
+        unvisited_active_zones = [
             zone for zone in self.active_zones() if zone not in existing_zones
         ]
 
-    def select(self,
-               existing_replicas: List['replica_managers.ReplicaInfo']) -> str:
+        logger.info(f'existing_zones: {existing_zones}')
+        logger.info(f'unvisited_active_zones: {unvisited_active_zones}')
+        return unvisited_active_zones
+
+    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
+               current_considered_zones: List[str]) -> str:
         # Prevent the case with only one active zones.
         if (len(self.active_zones()) <= 1 and len(self.preempted_zones()) > 0):
             self.clear_preempted_zones()
         unvisited_active_zones = self._filter_unvisited_active_zones(
             existing_replicas)
+        unvisited_active_zones = [
+            zone for zone in unvisited_active_zones
+            if zone not in current_considered_zones
+        ]
         if unvisited_active_zones:
             return random.choice(unvisited_active_zones)
         return random.choice(self.active_zones())

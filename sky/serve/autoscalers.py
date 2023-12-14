@@ -505,12 +505,15 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         num_to_provision = (self.target_num_replicas + num_extra)
 
         # Scale spot instances.
+        current_considered_zones: List[str] = []
         if num_alive_spot < num_to_provision:
             # Not enough spot instances, scale up.
             num_spot_to_scale_up = num_to_provision - num_alive_spot
             for _ in range(num_spot_to_scale_up):
                 spot_override = self._get_spot_resources_override_dict()
-                zone = self.spot_placer.select(alive_replica_infos)
+                zone = self.spot_placer.select(alive_replica_infos,
+                                               current_considered_zones)
+                current_considered_zones.append(zone)
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
