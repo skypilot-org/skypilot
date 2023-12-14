@@ -1631,7 +1631,7 @@ class RetryingVmProvisioner(object):
                     log_dir=self.log_dir)
                 # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                 # in 'provision_utils.post_provision_runtime_setup()' in the caller.
-                if provision_record is not None:
+                if not isinstance(provision_record, Exception):
                     resources_vars = (
                         to_provision.cloud.make_deploy_resources_variables(
                             to_provision, handle.cluster_name_on_cloud, region,
@@ -1653,6 +1653,9 @@ class RetryingVmProvisioner(object):
                     success = self._try_provision_tpu(to_provision, config_dict)
                     if success:
                         return config_dict
+                    else:
+                        provision_record = RuntimeError(
+                            'Failed to provision TPU node.')
 
                 # NOTE: We try to cleanup the cluster even if the previous
                 # cluster does not exist. Also we are fast at

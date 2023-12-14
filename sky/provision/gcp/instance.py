@@ -241,8 +241,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             config.node_config, labels, to_start_count,
             head_instance_id is None)
         if errors:
-            # TODO: expose errors to outside?
-            raise RuntimeError('Failed to launch instances.')
+            error = common.ProvisionError('Failed to launch instances.')
+            error.errors = errors
+            raise error
         if head_instance_id is None:
             head_instance_id = created_instance_ids[0]
 

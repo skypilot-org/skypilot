@@ -16,13 +16,20 @@ if typing.TYPE_CHECKING:
     import google
 
 
-def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
+def _skypilot_log_error_and_exit_for_failover(error_code: str,
+                                              error_msg: str) -> None:
     """Logs an message then raises a specific RuntimeError to trigger failover.
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
     prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-    raise RuntimeError(prefix + error)
+    error = common.ProvisionError(prefix + error_msg)
+    error.errors = [{
+        'code': error_code,
+        'domain': 'bootstrap_instance',
+        'message': error_msg,
+    }]
+    raise error
 
 
 def wait_for_crm_operation(operation, crm):
@@ -555,6 +562,7 @@ def get_usable_vpc_and_subnet(
                                     filter=f'(name="{specific_vpc_to_use}")')
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
+                    'NO_SUBNET_FOUND_FOR_VPC',
                     f'No subnet for region {region} found for specified VPC '
                     f'{specific_vpc_to_use!r}. '
                     f'Check the subnets of VPC {specific_vpc_to_use!r} at '
@@ -563,6 +571,7 @@ def get_usable_vpc_and_subnet(
         else:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
+                'NO_VPC_FOUND',
                 f'No VPC with name {specific_vpc_to_use!r} is found. '
                 'To fix: specify a correct VPC name.')
             # Should not reach here.
@@ -607,6 +616,7 @@ def get_usable_vpc_and_subnet(
                             filter=f'(name="{usable_vpc_name}")')
     if not subnets:
         _skypilot_log_error_and_exit_for_failover(
+            'NO_SUBNET_FOUND_FOR_VPC',
             f'No subnet for region {region} found for generated VPC '
             f'{usable_vpc_name!r}. This is probably due to the region being '
             'disabled in the account/project_id.')

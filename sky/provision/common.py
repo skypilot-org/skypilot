@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Optional, Tuple
 InstanceId = str
 
 
+class ProvisionError(RuntimeError):
+    """Exception for provisioning."""
+    errors: List[Dict[str, str]]
+
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""
