@@ -89,22 +89,23 @@ class RequestRateAutoscaler(Autoscaler):
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+                 rps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
             upper_threshold: Upper threshold for scale up. If None, no scale up.
             lower_threshold: Lower threshold for scale down. If None, no scale
                 down.
-            cooldown: Cooldown between two scaling operations in seconds.
             rps_window_size: Window size for rps calculating.
-            last_scale_operation: Time of last scale operation.
             request_timestamps: All request timestamps within the window.
+            upscale_counter: counter for upscale number of replicas.
+            downscale_counter: counter for downscale number of replicas.
+            scale_up_consecutive_periods: period for scaling up.
+            scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec, frequency)
         self.upper_threshold: Optional[float] = spec.qps_upper_threshold
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
-        self.cooldown: int = cooldown
         self.rps_window_size: int = rps_window_size
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
@@ -184,8 +185,10 @@ class RequestRateAutoscaler(Autoscaler):
                 num_replicas_delta = target_num_replicas - num_replicas
         else:
             self.upscale_counter = self.downscale_counter = 0
-        logger.info(f'Upscale counter: {self.upscale_counter}. '
-                    f'Downscale counter: {self.downscale_counter}')
+        logger.info(f'Upscale counter: {self.upscale_counter}/'
+                    f'{self.scale_up_consecutive_periods}. '
+                    f'Downscale counter: {self.downscale_counter}/'
+                    f'{self.scale_down_consecutive_periods}')
 
         if num_replicas_delta == 0:
             logger.info('No scaling needed.')
