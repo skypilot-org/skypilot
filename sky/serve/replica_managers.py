@@ -370,7 +370,6 @@ class ReplicaInfo:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
-        # TODO(tian): Use setstate for backward compatibility
         self.is_spot: bool = is_spot
         self.zone: Optional[str] = zone
         self.first_not_ready_time: Optional[float] = None

@@ -141,76 +141,8 @@ class RequestRateAutoscaler(Autoscaler):
         num_extra: int,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
-        current_time = time.time()
-        num_replicas = len(replica_infos)
-
-        # Check if cooldown period has passed since the last scaling operation.
-        # Only cooldown if bootstrapping is done.
-        if num_replicas >= self.min_replicas:
-            if current_time - self.last_scale_operation < self.cooldown:
-                logger.info(
-                    f'Current time: {current_time}, '
-                    f'last scale operation: {self.last_scale_operation}, '
-                    f'cooldown: {self.cooldown}')
-                logger.info('Cooldown period has not passed since last scaling '
-                            'operation. Skipping scaling.')
-                return []
-
-        # Convert to requests per second.
-        num_requests_per_second = len(
-            self.request_timestamps) / self.rps_window_size
-        # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second / num_replicas
-                                if num_replicas else num_requests_per_second)
-
-        logger.info(f'Requests per replica: {requests_per_replica}')
-
-        logger.info(f'Number of replicas: {num_replicas}')
-        target_num_replicas = num_replicas
-        if num_replicas < self.min_replicas:
-            target_num_replicas = self.min_replicas
-        elif (self.upper_threshold is not None and
-              requests_per_replica > self.upper_threshold):
-            scale_target = requests_per_replica / self.upper_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-        elif (self.lower_threshold is not None and
-              requests_per_replica < self.lower_threshold):
-            scale_target = requests_per_replica / self.lower_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-
-        target_num_replicas = max(self.min_replicas,
-                                  min(self.max_replicas, target_num_replicas))
-        num_replicas_delta = target_num_replicas - num_replicas
-        if num_replicas_delta == 0:
-            logger.info('No scaling needed.')
-            return []
-        elif num_replicas_delta > 0:
-            logger.info(f'Scaling up by {num_replicas_delta} replicas.')
-            return [
-                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                   target={}) for _ in range(num_replicas_delta)
-            ]
-        else:
-            num_replicas_to_remove = -num_replicas_delta
-            # Remove FAILED replicas first.
-            replica_ids_to_remove: List[int] = []
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                if info.status == serve_state.ReplicaStatus.FAILED:
-                    replica_ids_to_remove.append(info.replica_id)
-            # Then rest of them.
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                replica_ids_to_remove.append(info.replica_id)
-            logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
-                        f'(id: {replica_ids_to_remove}).')
-            return [
-                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_id)
-                for replica_id in replica_ids_to_remove
-            ]
+        # Deprecated
+        raise NotImplementedError
 
 
 class OnDemandRateAutoscaler(RequestRateAutoscaler):
