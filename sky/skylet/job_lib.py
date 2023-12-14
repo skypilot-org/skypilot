@@ -8,14 +8,16 @@ import json
 import os
 import pathlib
 import shlex
+import sqlite3
 import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 import filelock
 import psutil
+import psycopg2
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -50,20 +52,41 @@ class JobInfoLoc(enum.IntEnum):
     RESOURCES = 8
 
 
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+# Retrieve environment variables to build the DB path
+pgusername = os.getenv('DB_USERNAME', 'postgres')
+pgpassword = os.getenv('DB_PASSWORD', 'postgres')
+pghost = os.getenv('DB_HOST', 'localhost')
+pgport = os.getenv('DB_PORT', '5432')
+pgdatabase = os.getenv('DB_NAME', 'jobs')
+_DB_PATH = f'postgres://{pgusername}:{pgpassword}@\
+    {pghost}:{pgport}/{pgdatabase}'
+
+#PG connection:
+pg = '?'
 
 
-def create_table(cursor, conn):
-    cursor.execute("""\
-        CREATE TABLE IF NOT EXISTS jobs (
-        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_name TEXT,
-        username TEXT,
-        submitted_at FLOAT,
-        status TEXT,
-        run_timestamp TEXT CANDIDATE KEY,
-        start_at FLOAT DEFAULT -1)""")
+def create_table(cursor, conn, pgs='?'):
+    if pgs == '?':
+        cursor.execute("""\
+            CREATE TABLE IF NOT EXISTS jobs (
+            job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT,
+            username TEXT,
+            submitted_at FLOAT,
+            status TEXT,
+            run_timestamp TEXT CANDIDATE KEY,
+            start_at FLOAT DEFAULT -1)""")
+    else:
+        cursor.execute("""\
+            CREATE TABLE IF NOT EXISTS jobs (
+            job_id SERIAL PRIMARY KEY,
+            job_name TEXT,
+            username TEXT,
+            submitted_at DOUBLE PRECISION,
+            status TEXT,
+            run_timestamp TEXT UNIQUE,
+            start_at DOUBLE PRECISION DEFAULT -1)
+        """)
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
@@ -72,15 +95,24 @@ def create_table(cursor, conn):
         created_time INTEGER
     )""")
 
-    db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
+    db_utils.add_column_to_table(
+        cursor, conn, 'jobs', 'end_at',
+        f'{"FLOAT" if pgs == "?" else "DOUBLE PRECISION"} DEFAULT -1')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
 
     conn.commit()
 
 
-_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
-_CURSOR = _DB.cursor
-_CONN = _DB.conn
+try:
+    _DB = db_utils.DBConn(_DB_PATH, create_table)
+    _DB.conn.autocommit = True  # type: ignore[union-attr]
+    pg = '%s'
+except psycopg2.Error as e:
+    _DB_PATH = os.path.expanduser('~/.sky/jobs.db')
+    os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+    _DB = db_utils.DBConn(_DB_PATH, create_table)
+_CURSOR: Union[sqlite3.Cursor, psycopg2.extensions.cursor] = _DB.cursor
+_CONN: Union[sqlite3.Connection, psycopg2.extensions.connection] = _DB.conn
 
 
 class JobStatus(enum.Enum):
@@ -149,8 +181,9 @@ class JobScheduler:
     """Base class for job scheduler"""
 
     def queue(self, job_id: int, cmd: str) -> None:
-        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
-                        (job_id, cmd, 0, int(time.time())))
+        _CURSOR.execute(
+            f'INSERT INTO pending_jobs VALUES ({pg},{pg},{pg},{pg})',
+            (job_id, cmd, 0, int(time.time())))
         _CONN.commit()
         set_status(job_id, JobStatus.PENDING)
         self.schedule_step()
@@ -276,12 +309,14 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     """Atomically reserve the next available job id for the user."""
     job_submitted_at = time.time()
     # job_id will autoincrement with the null value
-    _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
-                    (job_name, username, job_submitted_at, JobStatus.INIT.value,
-                     run_timestamp, None, resources_str))
+    _CURSOR.execute(
+        f'INSERT INTO jobs VALUES (null,\
+              {pg}, {pg}, {pg}, {pg}, {pg}, {pg}, null, {pg})',
+        (job_name, username, job_submitted_at, JobStatus.INIT.value,
+         run_timestamp, None, resources_str))
     _CONN.commit()
-    rows = _CURSOR.execute('SELECT job_id FROM jobs WHERE run_timestamp=(?)',
-                           (run_timestamp,))
+    rows = _CURSOR.execute(
+        f'SELECT job_id FROM jobs WHERE run_timestamp=({pg})', (run_timestamp,))
     for row in rows:
         job_id = row[0]
     assert job_id is not None
@@ -302,13 +337,13 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
         if status != JobStatus.FAILED_SETUP:
             check_end_at_str = ''
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?), end_at=(?) '
-            f'WHERE job_id=(?) {check_end_at_str}',
+            f'UPDATE jobs SET status=({pg}), end_at=({pg}) '
+            f'WHERE job_id=({pg}) {check_end_at_str}',
             (status.value, end_at, job_id))
     else:
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?), end_at=NULL '
-            'WHERE job_id=(?)', (status.value, job_id))
+            f'UPDATE jobs SET status=({pg}), end_at=NULL '
+            f'WHERE job_id=({pg})', (status.value, job_id))
     _CONN.commit()
 
 
@@ -324,8 +359,9 @@ def set_job_started(job_id: int) -> None:
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_get_lock_path(job_id)):
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-            'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
+            f'UPDATE jobs SET status=({pg}), start_at=({pg}), end_at=NULL '
+            f'WHERE job_id=({pg})',
+            (JobStatus.RUNNING.value, time.time(), job_id))
         _CONN.commit()
 
 
@@ -337,7 +373,7 @@ def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     the status in a while loop as in `log_lib._follow_job_logs`. Otherwise, use
     `get_status`.
     """
-    rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
+    rows = _CURSOR.execute(f'SELECT status FROM jobs WHERE job_id=({pg})',
                            (job_id,))
     for (status,) in rows:
         if status is None:
@@ -356,7 +392,7 @@ def get_status(job_id: int) -> Optional[JobStatus]:
 def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
-    query_str = ','.join(['?'] * len(job_ids))
+    query_str = ','.join([f'{pg}'] * len(job_ids))
     rows = _CURSOR.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
@@ -404,7 +440,7 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     may stay in PENDING if the cluster is busy.
     """
     field = 'end_at' if get_ended_time else 'submitted_at'
-    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
+    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=({pg})',
                            (job_id,))
     for (timestamp,) in rows:
         return common_utils.encode_payload(timestamp)
@@ -468,7 +504,7 @@ def _get_jobs(
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
+            WHERE status IN ({','.join([f'{pg}'] * len(status_list))})
             ORDER BY job_id DESC""",
             (*status_str_list,),
         )
@@ -476,8 +512,8 @@ def _get_jobs(
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?)
+            WHERE status IN ({','.join([f'{pg}'] * len(status_list))})
+            AND username=({pg})
             ORDER BY job_id DESC""",
             (*status_str_list, username),
         )
@@ -490,7 +526,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     rows = _CURSOR.execute(
         f"""\
         SELECT * FROM jobs
-        WHERE job_id IN ({','.join(['?'] * len(job_ids))})
+        WHERE job_id IN ({','.join([f'{pg}'] * len(job_ids))})
         ORDER BY job_id DESC""",
         (*job_ids,),
     )
@@ -614,8 +650,8 @@ def fail_all_jobs_in_progress() -> None:
     ]
     _CURSOR.execute(
         f"""\
-        UPDATE jobs SET status=(?)
-        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        UPDATE jobs SET status=({pg})
+        WHERE status IN ({','.join([f'{pg}'] * len(in_progress_status))})
         """, (JobStatus.FAILED.value, *in_progress_status))
     _CONN.commit()
 
@@ -642,7 +678,7 @@ def is_cluster_idle() -> bool:
     rows = _CURSOR.execute(
         f"""\
         SELECT COUNT(*) FROM jobs
-        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        WHERE status IN ({','.join([f'{pg}'] * len(in_progress_status))})
         """, in_progress_status)
     for (count,) in rows:
         return count == 0
@@ -771,9 +807,9 @@ def cancel_jobs_encoded_results(job_owner: str,
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
     _CURSOR.execute(
-        """\
+        f"""\
             SELECT * FROM jobs
-            WHERE job_id=(?)""", (job_id,))
+            WHERE job_id=({pg})""", (job_id,))
     row = _CURSOR.fetchone()
     if row is None:
         return None
@@ -783,17 +819,23 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
 
 def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
     """Returns the relative paths to the log files for job with globbing."""
-    query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
+    if pg == '?':
+        query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
+    else:
+        query_str = ' OR '.join(['job_id ILIKE %s'] * len(job_ids))
     _CURSOR.execute(
         f"""\
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _CURSOR.fetchall()
+
+    # Process the results
     run_timestamps = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
+
     return common_utils.encode_payload(run_timestamps)
 
 
