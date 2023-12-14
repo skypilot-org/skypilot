@@ -378,8 +378,6 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         assert (spec.spot_placer is not None and spec.spot_mixer is not None and
                 spec.spot_zones is not None and spec.num_extra is not None and
                 spec.target_qps_per_replica is not None)
-        # TODO(tian): Change spot_mixer to boolean and implement algorithm
-        # without fallback.
         self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
         self.target_qps_per_replica = spec.target_qps_per_replica
         self.target_num_replicas = spec.min_replicas
