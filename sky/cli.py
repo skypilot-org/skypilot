@@ -4289,9 +4289,10 @@ def serve_up(
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
-            raise ValueError(f'Port {service_port_str!r} is not a valid port '
-                             'number. Please specify a single port instead. '
-                             f'Got: {service_port_str!r}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
         # We request all the replicas using the same port for now, but it
         # should be fine to allow different replicas to use different ports
         # in the future.
@@ -4299,9 +4300,10 @@ def serve_up(
         if service_port is None:
             service_port = resource_port
         if service_port != resource_port:
-            raise ValueError(
-                f'Got multiple ports: {service_port} and {resource_port} '
-                'in different resources. Please specify single port instead.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
