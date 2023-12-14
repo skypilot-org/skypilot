@@ -1,7 +1,6 @@
 import logging
 from threading import RLock
 from sky import authentication as auth
-from sky import authentication as auth
 import os
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
@@ -26,7 +25,7 @@ def synchronized(f):
 
 
 class FluidstackNodeProvider(NodeProvider):
-    """Node Provider for FluffyCloud."""
+    """Node Provider for FluidStack."""
 
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
@@ -36,6 +35,7 @@ class FluidstackNodeProvider(NodeProvider):
 
     def _get_filtered_nodes(self, tag_filters):
         running_instances = self.fluidstack_client.list_instances(tag_filters)
+        print(running_instances, tag_filters)    
         self.cached_nodes = {}
 
         for instance in running_instances:
@@ -54,7 +54,11 @@ class FluidstackNodeProvider(NodeProvider):
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
         return [
             k for k, instance in nodes.items() if instance['status'] not in
-            ['terminated', 'timeout_error', 'failed_to_create', 'out_of_stock']
+            ['terminated', 
+             'terminating',
+             'timeout_error', 
+             'failed_to_create', 
+             'out_of_stock']
         ]
 
     def is_running(self, node_id):
@@ -92,7 +96,7 @@ class FluidstackNodeProvider(NodeProvider):
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
-
+       
         # Create node
         ttype = node_config['InstanceType']
         region = self.provider_config['region']
@@ -133,7 +137,7 @@ class FluidstackNodeProvider(NodeProvider):
         self.fluidstack_client.delete(node_id)
 
     def _get_node(self, node_id):
-        self.fluidstack_client.info(node_id)
+        return self.fluidstack_client.info(node_id)
 
     def _get_cached_node(self, node_id):
         if node_id in self.cached_nodes:

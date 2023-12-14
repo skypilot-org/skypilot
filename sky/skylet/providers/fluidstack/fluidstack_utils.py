@@ -10,7 +10,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace('-', '')[:8]
 
 
-ENDPOINT = 'https://api.fluidstack.io/v1/'
+ENDPOINT = 'http://127.0.0.1:5001/v1/'
 FLUIDSTACK_API_KEY_PATH = '~/.fluidstack/api_key'
 FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
@@ -55,9 +55,9 @@ class FluidstackClient:
 
     def list_instances(
             self, tag_filters: Optional[Dict[str,
-                                             str]]) -> List[Dict[str, Any]]:
+                                             str]] = {}) -> List[Dict[str, Any]]:
         response = requests.get(
-            ENDPOINT + '/servers',
+            ENDPOINT + 'servers',
             auth=(self.api_key, self.api_token),
         )
         raise_fluidstack_error(response)
@@ -68,12 +68,12 @@ class FluidstackClient:
                 instance['tags'] = json.loads(instance['tags'])
             if not instance['tags']:
                 instance['tags'] = {}
-            if tag_filters:
-                for key in tag_filters:
-                    if instance['tags'].get(key, None) != tag_filters[key]:
-                        break
-                else:
-                    filtered_instances.append(instance)
+            
+            for key in tag_filters:
+                if instance['tags'].get(key, None) != tag_filters[key]:
+                    break
+            else:
+                filtered_instances.append(instance)
         return filtered_instances
 
     def create_instance(
@@ -95,14 +95,14 @@ class FluidstackClient:
             multiplicity=count,
         )
 
-        response = requests.post(ENDPOINT + '/server',
+        response = requests.post(ENDPOINT + 'server',
                                  auth=(self.api_key, self.api_token),
                                  json=body)
         raise_fluidstack_error(response)
         return response.json().get('multiple')
 
     def list_ssh_keys(self):
-        response = requests.get(ENDPOINT + '/ssh',
+        response = requests.get(ENDPOINT + 'ssh',
                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
@@ -119,7 +119,7 @@ class FluidstackClient:
                 }
         ssh_key_name = 'skypilot-' + get_key_suffix()
         response = requests.post(
-            ENDPOINT + '/ssh',
+            ENDPOINT + 'ssh',
             auth=(self.api_key, self.api_token),
             json=dict(name=ssh_key_name, public_key=ssh_pub_key),
         )
@@ -129,7 +129,7 @@ class FluidstackClient:
 
     @functools.lru_cache()
     def list_regions(self):
-        response = requests.get(ENDPOINT + '/plans')
+        response = requests.get(ENDPOINT + 'plans')
         raise_fluidstack_error(response)
         plans = response.json()
         plans = [
@@ -149,26 +149,26 @@ class FluidstackClient:
         return regions
 
     def delete(self, instance_id: str):
-        response = requests.delete(ENDPOINT + '/server/' + instance_id,
+        response = requests.delete(ENDPOINT + 'server/' + instance_id,
                                    auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def stop(self, instance_id: str):
-        response = requests.put(ENDPOINT + '/server/' + instance_id + '/stop',
+        response = requests.put(ENDPOINT + 'server/' + instance_id + '/stop',
                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def restart(self, instance_id: str):
-        response = requests.post(ENDPOINT + '/server/' + instance_id +
+        response = requests.post(ENDPOINT + 'server/' + instance_id +
                                  '/reboot',
                                  auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()
 
     def info(self, instance_id: str):
-        response = requests.get(ENDPOINT + f'/server/{instance_id}',
+        response = requests.get(ENDPOINT + f'server/{instance_id}',
                                 auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()

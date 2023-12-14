@@ -65,7 +65,7 @@ _smoke_test_hash = hashlib.md5(
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A10'
-
+FLUIDSTACK_TYPE = '--cloud lambda --gpus A4000'
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
 
@@ -987,6 +987,7 @@ def test_scp_logs():
 
 
 # ---------- Job Queue. ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not have K80 gpus
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have K80 gpus. Run test_scp_job_queue instead
