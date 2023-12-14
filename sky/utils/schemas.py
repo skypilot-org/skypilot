@@ -365,6 +365,9 @@ def get_service_schema():
                     },
                     'num_extra': {
                         'type': 'integer',
+                    },
+                    'num_init_replicas': {
+                        'type': 'integer',
                     }
                 }
             },

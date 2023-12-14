@@ -382,9 +382,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # without fallback.
         self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
         self.target_qps_per_replica = spec.target_qps_per_replica
-        # TODO(tian): Maybe add init_replicas?
         self.target_num_replicas = spec.min_replicas
-
+        self.num_init_replicas = spec.num_init_replicas
+        self.has_init = False
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
 
@@ -447,7 +447,11 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         # TODO(tian): Consider non-alive replicas.
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         # Don't count over-provision here.
-        self.target_num_replicas = self._get_desired_num_replicas()
+        if not self.has_init and self.num_init_replicas is not None:
+            self.target_num_replicas = self.num_init_replicas
+            self.has_init = True
+        else:
+            self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
             f'({self.target_num_replicas + num_extra} with '

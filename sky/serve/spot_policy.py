@@ -143,8 +143,6 @@ class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
             if not info.is_spot:
                 # filter on demand fallbacks
                 continue
-            # handle = info.handle()
-            # if handle is not None and handle.launched_resources is not None:
             if info.zone is not None:
                 existing_zones.add(info.zone)
         else:

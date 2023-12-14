@@ -32,6 +32,7 @@ class SkyServiceSpec:
         on_demand_zones: Optional[List[str]] = None,
         on_demand_type: Optional[str] = None,
         num_extra: Optional[int] = None,
+        num_init_replicas: Optional[int] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -86,6 +87,7 @@ class SkyServiceSpec:
         self._spot_placer = spot_placer
         self._spot_mixer = spot_mixer
         self._num_extra = num_extra
+        self._num_init_replicas = num_init_replicas
         # TODO(tian): If no zone specified, default to all enabled zones
         self._spot_zones = spot_zones
         self._on_demand_zones = on_demand_zones
@@ -162,7 +164,8 @@ class SkyServiceSpec:
             service_config['on_demand_type'] = policy_section.get(
                 'on_demand_type', None)
             service_config['num_extra'] = policy_section.get('num_extra', None)
-
+            service_config['num_init_replicas'] = policy_section.get(
+                'num_init_replicas', None)
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -220,6 +223,8 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'on_demand_type',
                         self._on_demand_type)
         add_if_not_none('replica_policy', 'num_extra', self._num_extra)
+        add_if_not_none('replica_policy', 'num_init_replicas',
+                        self._num_init_replicas)
         return config
 
     def probe_str(self):
@@ -316,3 +321,7 @@ class SkyServiceSpec:
     @property
     def num_extra(self) -> Optional[int]:
         return self._num_extra
+
+    @property
+    def num_init_replicas(self) -> Optional[int]:
+        return self._num_init_replicas
