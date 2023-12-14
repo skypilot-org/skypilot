@@ -694,18 +694,7 @@ class Task:
         if service is None:
             return self
 
-        if service.spot_placer is not None:
-            for res in list(self.resources):
-                if res.zone is not None or res.region is not None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'Cannot specify zone when spot placer is enabled.')
-
-                if res.use_spot is not None and not res.use_spot:
-                    logger.info('Task use_spot will be override to True, '
-                                'because spot placer is enabled.')
-
-        if service.spot_zones is not None:
+        if service.spot_zones is None:
 
             launchable_resources, _, _ = (
                 optimizer.fill_in_launchable_resources(

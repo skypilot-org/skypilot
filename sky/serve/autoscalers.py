@@ -118,6 +118,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps: List[float] = []
         self.overprovision = overprovision
         self.static_spot_provision = static_spot_provision
+        self.auto_restart = spec.auto_restart
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -174,6 +175,7 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
                                                        self.frequency)
         self.overprovision = overprovision
         self.static_spot_provision = static_spot_provision
+        self.auto_restart = spec.auto_restart
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
@@ -212,6 +214,7 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
+        assert self.auto_restart
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
 
         # Don't count over-provision here.
@@ -327,6 +330,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.use_safety_net = use_safety_net
         self.meet_safety_net_count = 0
         self.miss_safety_net_count = 0
+        self.auto_restart = spec.auto_restart
 
     def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': True, 'spot_recovery': None}
@@ -375,6 +379,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         # TODO(tian): Consider non-alive replicas.
+
+        assert self.auto_restart
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         # Don't count over-provision here.
         if not self.has_init and self.num_init_replicas is not None:

@@ -1,0 +1,22 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 1
+    num_extra: 0
+    num_init_replicas: 1
+    target_qps_per_replica: 1
+    spot_placer: DynamicFailover
+    spot_mixer: OnDemandFallback
+
+resources:
+  ports: 8081
+  cloud: aws
+  cpus: 2+
+  use_spot: True
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

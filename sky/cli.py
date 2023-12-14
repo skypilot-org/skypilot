@@ -4293,6 +4293,27 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+
+    service_spec = serve_lib.SkyServiceSpec.from_yaml(''.join(service_yaml))
+    if service_spec.spot_placer is not None:
+        if (requested_resources.zone is not None or
+                requested_resources.region is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify zone or region when spot placer is enabled.'
+                )
+
+        if (requested_resources.use_spot is not None and
+                not requested_resources.use_spot):
+            logger.info('Task use_spot will be override to True, '
+                        'because spot placer is enabled.')
+
+    if (not service_spec.auto_restart and service_spec.spot_placer is not None):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Cannot specify auto_restart=False when spot placer is enabled.'
+            )
+
     # TODO(tian): Limit zones to optimize if spot-zone is specified.
     sky.optimize(dag)
 
