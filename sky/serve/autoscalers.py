@@ -375,8 +375,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                  static_spot_provision: bool = False,
                  use_safety_net: bool = False) -> None:
         super().__init__(spec, frequency, cooldown, rps_window_size)
-        assert (spec.spot_placer is not None and spec.spot_mixer is not None and
-                spec.spot_zones is not None and spec.num_extra is not None and
+        assert (spec.spot_placer is not None and spec.spot_zones is not None and
+                spec.num_extra is not None and
                 spec.target_qps_per_replica is not None)
         self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
         self.target_qps_per_replica = spec.target_qps_per_replica
