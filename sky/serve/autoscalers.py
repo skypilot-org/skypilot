@@ -178,6 +178,8 @@ class RequestRateAutoscaler(Autoscaler):
                 num_replicas_delta = target_num_replicas - num_replicas
         else:
             self.upscale_counter = self.downscale_counter = 0
+        logger.info(f'Upscale counter: {self.upscale_counter}. '
+                    f'Downscale counter: {self.downscale_counter}')
 
         if num_replicas_delta == 0:
             logger.info('No scaling needed.')
