@@ -71,6 +71,7 @@ def up(
                     'will use the port specified as application ingress port.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
             raise ValueError(f'Port {service_port_str!r} is not a valid port '
                              'number. Please specify a single port instead. '
                              f'Got: {service_port_str!r}')
