@@ -207,7 +207,12 @@ def _get_main_route_tables(ec2) -> List[Any]:
 
 
 def _is_subnet_public(ec2, subnet_id) -> bool:
-    """Checks if a subnet is public by existence of a route to an IGW."""
+    """Checks if a subnet is public by existence of a route to an IGW.
+
+    Conventionally, public subnets connect to a IGW, and private subnets to a
+    NAT. See ref:
+    https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html
+    """
     # Get the route table associated with the subnet
     route_tables = ec2.meta.client.describe_route_tables(Filters=[{
         'Name': 'association.subnet-id',
