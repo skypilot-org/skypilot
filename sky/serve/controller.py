@@ -78,7 +78,6 @@ class SkyServeController:
         self._autoscaler: autoscalers.Autoscaler = autoscaler_class(
             service_spec,
             frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
-            cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
             rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS,
             overprovision=overprovision,
             static_spot_provision=static_spot_provision)

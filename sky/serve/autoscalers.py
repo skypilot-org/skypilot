@@ -94,7 +94,6 @@ class RequestRateAutoscaler(Autoscaler):
     def __init__(self,
                  spec: 'service_spec.SkyServiceSpec',
                  frequency: int,
-                 cooldown: int,
                  rps_window_size: int,
                  overprovision: bool = False,
                  static_spot_provision: bool = False) -> None:
@@ -104,7 +103,6 @@ class RequestRateAutoscaler(Autoscaler):
             upper_threshold: Upper threshold for scale up. If None, no scale up.
             lower_threshold: Lower threshold for scale down. If None, no scale
                 down.
-            cooldown: Cooldown between two scaling operations in seconds.
             rps_window_size: Window size for rps calculating.
             last_scale_operation: Time of last scale operation.
             request_timestamps: All request timestamps within the window.
@@ -112,7 +110,6 @@ class RequestRateAutoscaler(Autoscaler):
         super().__init__(spec, frequency)
         self.upper_threshold: Optional[float] = spec.qps_upper_threshold
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
-        self.cooldown: int = cooldown
         self.rps_window_size: int = rps_window_size
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
@@ -156,11 +153,10 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
     def __init__(self,
                  spec: 'service_spec.SkyServiceSpec',
                  frequency: int,
-                 cooldown: int,
                  rps_window_size: int,
                  overprovision: bool = False,
                  static_spot_provision: bool = False) -> None:
-        super().__init__(spec, frequency, cooldown, rps_window_size)
+        super().__init__(spec, frequency, rps_window_size)
 
         self.target_qps_per_replica = spec.target_qps_per_replica
         assert self.target_qps_per_replica is not None
@@ -304,12 +300,11 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     def __init__(self,
                  spec: 'service_spec.SkyServiceSpec',
                  frequency: int,
-                 cooldown: int,
                  rps_window_size: int,
                  overprovision: bool = False,
                  static_spot_provision: bool = False,
                  use_safety_net: bool = False) -> None:
-        super().__init__(spec, frequency, cooldown, rps_window_size)
+        super().__init__(spec, frequency, rps_window_size)
         assert (spec.spot_placer is not None and spec.spot_zones is not None and
                 spec.num_extra is not None and
                 spec.target_qps_per_replica is not None)
