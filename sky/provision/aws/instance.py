@@ -173,6 +173,7 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
     max_tries = max(num_subnets * (BOTO_CREATE_MAX_RETRIES // num_subnets),
                     len(subnet_ids))
     per_subnet_tries = max_tries // num_subnets
+    assert 'NetworkInterfaces' not in conf, conf
     for i in range(max_tries):
         try:
             # Try each subnet for per_subnet_tries times.
