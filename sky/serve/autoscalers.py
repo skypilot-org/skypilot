@@ -275,7 +275,9 @@ class HeteroGPUAutoscaler(Autoscaler):
                             'operation. Skipping scaling.')
                 return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
                                           target=None)
-    
+
+        # return a list of tuples [(AutoscalerDecisionOperator.SCALE_UP, GPU type, # of GPU type needed),
+        # (AutoscalerDecisionOperator.SCALE_DOWN, GPU type, list of GPU type replica IDs to be terminated)] 
         if num_replicas == 0:
             return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                       target=1)
