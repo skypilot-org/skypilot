@@ -218,6 +218,7 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
         rt for rt in all_route_tables
         if rt['Associations'][0]['SubnetId'] == subnet_id
     ]
+
     # Check each route table for an internet gateway route
     def _has_igw_route(route_tables):
         for route_table in route_tables:
