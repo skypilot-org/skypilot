@@ -138,7 +138,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 Runnable examples:
 - LLMs on SkyPilot
   - [Mixtral 8x7B](./llm/mixtral/)
-  - [Mistral 7B](https://docs.mistral.ai/cloud-deployment/skypilot/) (from official Mistral team)
+  - [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
   - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)
