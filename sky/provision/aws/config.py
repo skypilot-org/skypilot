@@ -8,6 +8,7 @@ _default_ec2_resource() to avoid version mismatch issues.
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
+import functools
 import json
 import logging
 import time
@@ -195,6 +196,16 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
+@functools.lru_cache(maxsize=1)
+def _get_main_route_tables(ec2) -> List[Any]:
+    main_route_tables = ec2.meta.client.describe_route_tables(Filters=[{
+        'Name': 'association.main',
+        'Values': ['true']
+    }]).get('RouteTables', [])
+    logger.debug(f'Main route tables: {main_route_tables}')
+    return main_route_tables
+
+
 def _is_subnet_public(ec2, subnet_id) -> bool:
     """Checks if a subnet is public by existence of a route to an IGW."""
     # Get the route table associated with the subnet
@@ -204,12 +215,25 @@ def _is_subnet_public(ec2, subnet_id) -> bool:
     }]).get('RouteTables', [])
 
     # Check each route table for an internet gateway route
-    for route_table in route_tables:
-        for route in route_table.get('Routes', []):
-            if route.get('GatewayId', '').startswith('igw-'):
-                return True
+    def _has_igw_route(route_tables):
+        for route_table in route_tables:
+            for route in route_table.get('Routes', []):
+                if route.get('GatewayId', '').startswith('igw-'):
+                    return True
+        return False
 
-    return False
+    logger.debug(f'subnet {subnet_id} route tables: {route_tables}')
+    if _has_igw_route(route_tables):
+        return True
+    if len(route_tables) > 0:
+        return False
+
+    # Handle the case that a "main" route table is implicitly associated with
+    # subnets. Since the associations are implicit, the filter above won't find
+    # any. Check there exists a main route table with routes pointing to an IGW.
+    logger.debug('Checking main route table')
+    main_route_tables = _get_main_route_tables(ec2)
+    return _has_igw_route(main_route_tables)
 
 
 def _usable_subnets(
@@ -296,6 +320,8 @@ def _usable_subnets(
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
         )
+        logger.debug(f'use_internal_ips: {use_internal_ips}')
+        logger.debug(f'subnets: {subnets}')
     except aws.botocore_exceptions().ClientError as exc:
         utils.handle_boto_error(exc,
                                 'Failed to fetch available subnets from AWS.')
