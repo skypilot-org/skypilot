@@ -196,29 +196,28 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
-@functools.lru_cache(maxsize=1)
-def _get_main_route_tables(ec2) -> List[Any]:
-    main_route_tables = ec2.meta.client.describe_route_tables(Filters=[{
-        'Name': 'association.main',
-        'Values': ['true']
-    }]).get('RouteTables', [])
-    logger.debug(f'Main route tables: {main_route_tables}')
-    return main_route_tables
+@functools.lru_cache(maxsize=128)
+def _get_route_tables(ec2, vpc_id: Optional[str], main: bool) -> List[Any]:
+    filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
+    if vpc_id is not None:
+        filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
+    return ec2.meta.client.describe_route_tables(Filters=filters).get(
+        'RouteTables', [])
 
 
-def _is_subnet_public(ec2, subnet_id) -> bool:
+def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     """Checks if a subnet is public by existence of a route to an IGW.
 
     Conventionally, public subnets connect to a IGW, and private subnets to a
     NAT. See ref:
     https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html
     """
-    # Get the route table associated with the subnet
-    route_tables = ec2.meta.client.describe_route_tables(Filters=[{
-        'Name': 'association.subnet-id',
-        'Values': [subnet_id]
-    }]).get('RouteTables', [])
-
+    # Get the route tables associated with the subnet
+    all_route_tables = _get_route_tables(ec2, vpc_id, main=False)
+    route_tables = [
+        rt for rt in all_route_tables
+        if rt['Associations'][0]['SubnetId'] == subnet_id
+    ]
     # Check each route table for an internet gateway route
     def _has_igw_route(route_tables):
         for route_table in route_tables:
@@ -237,7 +236,7 @@ def _is_subnet_public(ec2, subnet_id) -> bool:
     # subnets. Since the associations are implicit, the filter above won't find
     # any. Check there exists a main route table with routes pointing to an IGW.
     logger.debug('Checking main route table')
-    main_route_tables = _get_main_route_tables(ec2)
+    main_route_tables = _get_route_tables(ec2, vpc_id, main=True)
     return _has_igw_route(main_route_tables)
 
 
@@ -301,7 +300,7 @@ def _usable_subnets(
             # public IPs by default (not map_public_ip_on_launch).
             subnets = [
                 s for s in available_subnets
-                if not _is_subnet_public(ec2, s.subnet_id) and
+                if not _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg) and
                 not s.map_public_ip_on_launch
             ]
         else:
@@ -317,7 +316,7 @@ def _usable_subnets(
             # True appropriately).
             subnets = [
                 s for s in available_subnets
-                if _is_subnet_public(ec2, s.subnet_id)
+                if _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg)
             ]
 
         subnets = sorted(
