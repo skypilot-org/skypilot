@@ -146,7 +146,9 @@ class RequestRateAutoscaler(Autoscaler):
         requests_per_replica = (num_requests_per_second / num_replicas
                                 if num_replicas else num_requests_per_second)
 
-        logger.info(f'Requests per replica: {requests_per_replica}')
+        logger.info(f'Requests per replica: {requests_per_replica}, '
+                    f'upper_threshold: {self.upper_threshold}, '
+                    f'lower_threshold: {self.lower_threshold}')
         logger.info(f'Number of replicas: {num_replicas}')
 
         target_num_replicas = num_replicas
@@ -163,6 +165,10 @@ class RequestRateAutoscaler(Autoscaler):
 
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
+
+        logger.info(f'Target number of replicas: {target_num_replicas}, '
+                    f'min_replicas: {self.min_replicas}, '
+                    f'max_replicas: {self.max_replicas}')
 
         num_replicas_delta = 0
         if num_replicas < self.min_replicas:
