@@ -44,6 +44,7 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
+_DEFAULT_DRAIN_SECONDS = 60
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
@@ -130,8 +131,11 @@ def launch_cluster(task_yaml_path: str,
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
-def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+def terminate_cluster(cluster_name: str,
+                      max_retry: int = 3,
+                      delay_in_s: int = 0) -> None:
     """Terminate the sky serve replica cluster."""
+    time.sleep(delay_in_s)
     retry_cnt = 0
     backoff = common_utils.Backoff()
     while True:
@@ -619,7 +623,10 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
 
-    def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
+    def _terminate_replica(self,
+                           replica_id: int,
+                           sync_down_logs: bool,
+                           delay_in_s: int = 0) -> None:
         if replica_id in self._down_process_pool:
             logger.warning(f'Terminate process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -680,12 +687,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                     f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self._service_name, replica_id)
+        max_retry = 3
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 terminate_cluster,
                 log_file_name,
             ).run,
-            args=(info.cluster_name,),
+            args=(info.cluster_name, max_retry, delay_in_s),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
@@ -693,7 +701,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_process_pool[replica_id] = p
 
     def scale_down(self, replica_id: int) -> None:
-        self._terminate_replica(replica_id, sync_down_logs=False)
+        self._terminate_replica(replica_id,
+                                sync_down_logs=False,
+                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
@@ -729,7 +739,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                               f' (status: {cluster_status.value})')
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
-        # TODO(MaoZiming): Support spot recovery policies
         if info.zone is None:
             logger.error(f'Cannot find zone for replica {info.replica_id}. '
                          'Skipping adding to preemption list.')
@@ -738,7 +747,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
-        self._terminate_replica(info.replica_id, sync_down_logs=False)
+        self._terminate_replica(info.replica_id,
+                                sync_down_logs=False,
+                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
         return True
 
     #################################
