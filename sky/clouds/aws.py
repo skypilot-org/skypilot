@@ -793,7 +793,7 @@ class AWS(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(suquark): deprecate this method
-        assert False, 'This could path should not be used.'
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
