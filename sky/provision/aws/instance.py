@@ -164,16 +164,20 @@ def _create_instances(ec2_fail_fast, cluster_name: str,
         'MaxCount': count,
         'TagSpecifications': tag_specs
     })
+
     # We are adding 'NetworkInterfaces' in the inner loop and having both keys
     # is considered invalid by the create_instances API.
     security_group_ids = conf.pop('SecurityGroupIds', None)
+    # Guaranteed by config.py (the bootstrapping phase):
+    assert 'NetworkInterfaces' not in conf, conf
+    assert security_group_ids is not None, conf
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
     max_tries = max(num_subnets * (BOTO_CREATE_MAX_RETRIES // num_subnets),
                     len(subnet_ids))
     per_subnet_tries = max_tries // num_subnets
-    assert 'NetworkInterfaces' not in conf, conf
     for i in range(max_tries):
         try:
             # Try each subnet for per_subnet_tries times.
