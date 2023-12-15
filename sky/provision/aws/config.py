@@ -196,7 +196,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
-@functools.lru_cache(maxsize=128)
+@functools.lru_cache(maxsize=128)  # Keep bounded.
 def _get_route_tables(ec2, vpc_id: Optional[str], main: bool) -> List[Any]:
     filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
     if vpc_id is not None:
