@@ -405,7 +405,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     new_storage_mounts = {}
     if task.workdir is not None:
         bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=getpass.getuser(), id=run_id)
+            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -439,7 +439,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             copy_mounts_with_file_in_src[dst] = src
             continue
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=getpass.getuser(),
+            username=common_utils.get_cleaned_username(),
             id=f'{run_id}-{i}',
         )
         new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
@@ -459,7 +459,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
     file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=getpass.getuser(), id=run_id)
+        username=common_utils.get_cleaned_username(), id=run_id)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
         path)
     if copy_mounts_with_file_in_src:

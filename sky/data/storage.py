@@ -2,6 +2,7 @@
 import enum
 import os
 import re
+import shlex
 import subprocess
 import time
 import typing
@@ -1178,8 +1179,11 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
@@ -1190,8 +1194,11 @@ class S3Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
@@ -1626,6 +1633,7 @@ class GcsStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
@@ -1638,6 +1646,7 @@ class GcsStore(AbstractStore):
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
@@ -1965,9 +1974,12 @@ class R2Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             endpoint_url = cloudflare.create_endpoint()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -1982,10 +1994,12 @@ class R2Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
             endpoint_url = cloudflare.create_endpoint()
-
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -2388,9 +2402,10 @@ class IBMCosStore(AbstractStore):
 
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (
                 'rclone copy --exclude ".git/*" '
-                f'"{src_dir_path}" '
+                f'{src_dir_path} '
                 f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -2412,10 +2427,13 @@ class IBMCosStore(AbstractStore):
             """
 
             # wrapping file_name with "" to support spaces
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('rclone copy '
-                            f'{includes} "{base_dir_path}" '
+                            f'{includes} {base_dir_path} '
                             f'{self.bucket_rclone_profile}:{self.name}')
             return sync_command
 
