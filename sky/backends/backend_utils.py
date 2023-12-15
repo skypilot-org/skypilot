@@ -481,7 +481,6 @@ class SSHConfigHelper(object):
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
-        fix_stale_config = False
         ip = ips[0]
         if docker_user is not None:
             ip = 'localhost'
@@ -490,28 +489,11 @@ class SSHConfigHelper(object):
 
         # For backward compatibility: before #2706, we wrote the config of SkyPilot clusters
         # directly in ~/.ssh/config. For these clusters, we remove the config in ~/.ssh/config
-        # and write the config in ~/.sky/ssh/<cluster_name> instead.
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                config = f.readlines()
+        # and write/overwrite the config in ~/.sky/ssh/<cluster_name> instead.
+        cls._remove_stale_cluster_config_for_backward_compatibility(
+            cluster_name, ip, auth_config, docker_user)
 
-            # If an existing config with `cluster_name` exists, raise a warning.
-            for i, line in enumerate(config):
-                if line.strip() == f'Host {cluster_name}':
-                    prev_line = config[i - 1] if i - 1 >= 0 else ''
-                    if prev_line.strip().startswith(sky_autogen_comment):
-                        fix_stale_config = True
-                    else:
-                        logger.warning(f'{cls.ssh_conf_path} contains '
-                                       f'host named {cluster_name}.')
-                        host_name = ip
-                        logger.warning(f'Using {ip} to identify host instead.')
-
-                if line.strip() == f'Host {ip}':
-                    prev_line = config[i - 1] if i - 1 >= 0 else ''
-                    if prev_line.strip().startswith(sky_autogen_comment):
-                        fix_stale_config = True
-        else:
+        if not os.path.exists(config_path):
             config = ['\n']
             with open(config_path, 'w') as f:
                 f.writelines(config)
@@ -549,15 +531,15 @@ class SSHConfigHelper(object):
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
             head_port = constants.DEFAULT_DOCKER_PORT
 
-        #Start generating the config with the head node
+        # Start generating the config with the head node
         codegen = cls._get_generated_config(
             sky_autogen_comment, host_name, ip, username, key_path,
             proxy_command, head_port, docker_proxy_command) + '\n'
 
-        #add the worker nodes if any exist
+        # Add the worker nodes if any exist
         for i, ip in enumerate(ips[1:]):
             worker_name = cluster_name + f'-worker{i+1}'
-            #TODO update port numbers for workers in edge cases
+            # TODO: update port numbers for workers in edge cases
             codegen += cls._get_generated_config(
                 sky_autogen_comment,
                 worker_name,
@@ -565,14 +547,8 @@ class SSHConfigHelper(object):
                 username,
                 key_path,
                 proxy_command,
-                ports[i],  #updated port numbers
+                ports[i + 1],  #updated port numbers
                 docker_proxy_command) + '\n'
-
-        # Remove the cluster from the old config if it exists.
-        # We will add the config in ~/.sky/ssh/<cluster_name> instead.
-        if fix_stale_config:
-            SSHConfigHelper.remove_cluster(cluster_name, ip, auth_config,
-                                           docker_user)
 
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
@@ -581,8 +557,7 @@ class SSHConfigHelper(object):
             f.write(codegen)
 
     @classmethod
-    @timeline.FileLockEvent(ssh_conf_lock_path)
-    def _remove_cluster_backward(
+    def _remove_stale_cluster_config_for_backward_compatibility(
         cls,
         cluster_name: str,
         ip: str,
@@ -662,7 +637,7 @@ class SSHConfigHelper(object):
                 f.write(''.join(config).strip())
                 f.write('\n' * 2)
 
-        # Delete include statement
+        # Delete include statement if it exists in the config.
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         with open(config_path) as f:
@@ -693,8 +668,9 @@ class SSHConfigHelper(object):
         auth_config: Dict[str, str],
         docker_user: Optional[str] = None,
     ):
-        """Remove authentication information for cluster from local SSH config file
-        and ~/.sky/ssh/<cluster_name>.
+        """Remove authentication information for cluster from ~/.sky/ssh/<cluster_name>.
+
+        For backward compatibility also remove the config from ~/.ssh/config if it exists.
 
         If no existing host matching the provided specification is found, then
         nothing is removed.
@@ -710,7 +686,8 @@ class SSHConfigHelper(object):
 
         # Ensures backward compatibility: before #2706, we wrote the config of SkyPilot clusters
         # directly in ~/.ssh/config. For these clusters, we should clean up the config.
-        cls._remove_cluster_backward(cluster_name, ip, auth_config, docker_user)
+        cls._remove_stale_cluster_config_for_backward_compatibility(
+            cluster_name, ip, auth_config, docker_user)
 
 
 def _replace_yaml_dicts(
