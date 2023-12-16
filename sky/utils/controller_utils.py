@@ -342,17 +342,25 @@ def replace_skypilot_config_path_in_file_mounts(
     # is provisioned, e.g., we may need to decide which cloud to create a bucket
     # to be mounted to the cluster based on the cloud the cluster is actually
     # launched on (after failover).
-    if file_mounts is None or not skypilot_config.loaded():
+    if file_mounts is None:
         return
     replaced = False
+    to_replace = True
     with tempfile.NamedTemporaryFile('w', delete=False) as f:
-        new_skypilot_config = _setup_proxy_command_on_controller(cloud)
-        if new_skypilot_config is not None:
+        if skypilot_config.loaded():
+            new_skypilot_config = _setup_proxy_command_on_controller(cloud)
             common_utils.dump_yaml(f.name, new_skypilot_config)
-            for remote_path, local_path in file_mounts.items():
-                if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+            to_replace = True
+        else:
+            # Empty config. Remove the placeholder below.
+            to_replace = False
+        for remote_path, local_path in file_mounts.items():
+            if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+                if to_replace:
                     file_mounts[remote_path] = f.name
                     replaced = True
+                else:
+                    del file_mounts[remote_path]
     if replaced:
         logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
                      f'the real path in file mounts: {file_mounts}')
