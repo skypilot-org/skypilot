@@ -293,7 +293,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
     the instances will stop, while the disks will still be charged.  Those
     disks will be reattached when restarting the cluster.
 
-    Currently, spot instance clusters cannot be stopped.
+    Currently, spot instance clusters cannot be stopped (except for GCP, which
+    does allow disk contents to be preserved when stopping spot VMs).
 
     Args:
         cluster_name: name of the cluster to stop.
@@ -327,9 +328,11 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         cloud = handle.launched_resources.cloud
         cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.STOP})
-        if handle.launched_resources.use_spot:
+        # Allow GCP spot to be stopped since it preserves disk:
+        #   https://cloud.google.com/compute/docs/instances/preemptible#preemption-process  # pylint: disable=line-too-long
+        if handle.launched_resources.use_spot and not cloud.is_same_cloud(
+                clouds.GCP()):
             # Disable spot instances to be stopped.
-            # TODO(suquark): enable GCP+spot to be stopped in the future.
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}Stopping cluster '
                 f'{cluster_name!r}... skipped.{colorama.Style.RESET_ALL}\n'
@@ -437,18 +440,6 @@ def autostop(
         operation=operation,
     )
     backend = backend_utils.get_backend_from_handle(handle)
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise exceptions.NotSupportedError(
-            f'{operation} cluster {cluster_name!r} with backend '
-            f'{backend.__class__.__name__!r} is not supported.')
-    elif handle.launched_resources.use_spot and not down and not is_cancel:
-        # Disable spot instances to be autostopped.
-        # TODO(ewzeng): allow autostop for spot when stopping is supported.
-        raise exceptions.NotSupportedError(
-            f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
-            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-            '  Stopping spot instances is not supported as the attached '
-            'disks will be lost.')
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -457,6 +448,21 @@ def autostop(
             f'{operation} cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
 
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise exceptions.NotSupportedError(
+            f'{operation} cluster {cluster_name!r} with backend '
+            f'{backend.__class__.__name__!r} is not supported.')
+    elif (handle.launched_resources.use_spot and not down and not is_cancel and
+          not handle.launched_resources.cloud.is_same_cloud(clouds.GCP())):
+        # Disable spot instances to be autostopped.
+        #
+        # Exception: Allow GCP spot to be stopped since it preserves disk:
+        #   https://cloud.google.com/compute/docs/instances/preemptible#preemption-process  # pylint: disable=line-too-long
+        raise exceptions.NotSupportedError(
+            f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
+            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
+            '  Stopping spot instances is not supported as the attached '
+            'disks will be lost.')
     # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
     if not down and idle_minutes >= 0:

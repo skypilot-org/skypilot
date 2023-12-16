@@ -1866,6 +1866,30 @@ def test_use_spot(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.gcp
+def test_stop_gcp_spot():
+    """Test GCP spot can be stopped, autostopped, restarted."""
+    name = _get_cluster_name()
+    test = Test(
+        'stop_gcp_spot',
+        [
+            f'sky launch -c {name} --cloud gcp --use-spot --cpus 2+ -y -- touch myfile',
+            f'sky stop {name} -y',
+            f'sky start {name} -y',
+            f'sky exec {name} -- ls myfile',
+            f'sky logs {name} 2 --status',
+            f'sky autostop {name} -i0 -y',
+            'sleep 90',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            f'sky start {name} -y',
+            f'sky exec {name} -- ls myfile',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing managed spot ----------
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
