@@ -1123,8 +1123,9 @@ class Resources:
         if config is None:
             return {Resources()}
 
-        def _override_resources(base_resource_config,
-                                override_configs) -> List[Resources]:
+        def _override_resources(
+                base_resource_config: Dict[str, Any],
+                override_configs: List[Dict[str, Any]]) -> List[Resources]:
             resources_list = []
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
@@ -1136,7 +1137,7 @@ class Resources:
         config = config.copy()
         any_of_configs = config.pop('any_of', None)
         ordered_configs = config.pop('ordered', None)
-        if any_of_configs and ordered_configs:
+        if (any_of_configs is not None and ordered_configs is not None):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify both "any_of" and "ordered" in resources.')
