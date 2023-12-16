@@ -328,12 +328,6 @@ def get_service_schema():
                     'max_replicas': {
                         'type': 'integer',
                     },
-                    'qps_upper_threshold': {
-                        'type': 'number',
-                    },
-                    'qps_lower_threshold': {
-                        'type': 'number',
-                    },
                     'target_qps_per_replica': {
                         'type': 'number',
                     },

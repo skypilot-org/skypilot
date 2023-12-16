@@ -1,6 +1,7 @@
 import boto3
 import json
 
+
 def create_eventbridge_rule():
     # Specify your AWS region
     region = 'us-east-1'
@@ -20,16 +21,14 @@ def create_eventbridge_rule():
 
     # Create the EventBridge rule
     response = eventbridge_client.put_rule(
-        Name=rule_name,
-        EventPattern=json.dumps(event_pattern),
-        State='ENABLED'
-    )
+        Name=rule_name, EventPattern=json.dumps(event_pattern), State='ENABLED')
 
     # Print the rule ARN
     print(f"EventBridge rule created with ARN: {response['RuleArn']}")
     rule_arn = response['RuleArn']
     print(response)
     return rule_arn
+
 
 if __name__ == "__main__":
 

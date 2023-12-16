@@ -21,8 +21,6 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
-        qps_upper_threshold: Optional[float] = None,
-        qps_lower_threshold: Optional[float] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
@@ -51,8 +49,6 @@ class SkyServiceSpec:
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas
         self._max_replicas = max_replicas
-        self._qps_upper_threshold = qps_upper_threshold
-        self._qps_lower_threshold = qps_lower_threshold
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
         self._auto_restart = auto_restart
@@ -136,17 +132,12 @@ class SkyServiceSpec:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
-            service_config['qps_upper_threshold'] = None
-            service_config['qps_lower_threshold'] = None
+            service_config['target_qps_per_replica'] = None
             service_config['auto_restart'] = True
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
-            service_config['qps_upper_threshold'] = policy_section.get(
-                'qps_upper_threshold', None)
-            service_config['qps_lower_threshold'] = policy_section.get(
-                'qps_lower_threshold', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
@@ -206,10 +197,6 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'post_data', self.post_data)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
-        add_if_not_none('replica_policy', 'qps_upper_threshold',
-                        self.qps_upper_threshold)
-        add_if_not_none('replica_policy', 'qps_lower_threshold',
-                        self.qps_lower_threshold)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
@@ -278,14 +265,6 @@ class SkyServiceSpec:
     def max_replicas(self) -> Optional[int]:
         # If None, treated as having the same value of min_replicas.
         return self._max_replicas
-
-    @property
-    def qps_upper_threshold(self) -> Optional[float]:
-        return self._qps_upper_threshold
-
-    @property
-    def qps_lower_threshold(self) -> Optional[float]:
-        return self._qps_lower_threshold
 
     @property
     def target_qps_per_replica(self) -> Optional[float]:

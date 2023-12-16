@@ -1822,33 +1822,6 @@ def tag_filter_for_cluster(cluster_name: str) -> Dict[str, str]:
         'ray-cluster-name': cluster_name,
     }
 
-def query_preemption_warning(cluster_name: str) -> List[str]:
-    
-    record = global_user_state.get_cluster_from_name(cluster_name)
-    if record is None:
-        return list()
-    handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayResourceHandle):
-        raise NotImplementedError(
-            f'Preemption warning is not implemented for {handle}.')
-    
-    return _query_preemption_warning_via_cloud_api(handle)
-
-
-def _query_preemption_warning_via_cloud_api(
-    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
-) -> List[str]:
-    
-    ray_config = common_utils.read_yaml(handle.cluster_yaml)
-    provider_config = ray_config['provider']
-    region = provider_config.get('region') or provider_config.get('location')
-    
-    if isinstance(handle.launched_resources.cloud, clouds.AWS):
-        return provision_lib.get_spot_instance_warnings(
-                region)
-    else:
-        raise NotImplementedError(
-            f'Preemption warning is not implemented for {handle.launched_resources.cloud}.')
 
 def _query_cluster_status_via_cloud_api(
     handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'

@@ -69,6 +69,7 @@ class Autoscaler:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
+        self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -100,22 +101,28 @@ class RequestRateAutoscaler(Autoscaler):
         """Initialize the request rate autoscaler.
 
         Variables:
-            upper_threshold: Upper threshold for scale up. If None, no scale up.
-            lower_threshold: Lower threshold for scale down. If None, no scale
-                down.
+            target_qps_per_replica: Target qps per replica for autoscaling
             rps_window_size: Window size for rps calculating.
-            last_scale_operation: Time of last scale operation.
             request_timestamps: All request timestamps within the window.
+            upscale_counter: counter for upscale number of replicas.
+            downscale_counter: counter for downscale number of replicas.
+            scale_up_consecutive_periods: period for scaling up.
+            scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec, frequency)
-        self.upper_threshold: Optional[float] = spec.qps_upper_threshold
-        self.lower_threshold: Optional[float] = spec.qps_lower_threshold
+        self.target_qps_per_replica = spec.target_qps_per_replica
         self.rps_window_size: int = rps_window_size
-        self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
         self.overprovision = overprovision
         self.static_spot_provision = static_spot_provision
         self.auto_restart = spec.auto_restart
+        self.upscale_counter: int = 0
+        self.downscale_counter: int = 0
+        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+                                                     self.frequency)
+        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+                                                       self.frequency)
+        self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -309,7 +316,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                 spec.num_extra is not None and
                 spec.target_qps_per_replica is not None)
         self.spot_placer = spot_policy.SpotPlacer.from_spec(spec)
-        self.target_qps_per_replica = spec.target_qps_per_replica
+        self.target_qps_per_replica: float = spec.target_qps_per_replica
         self.target_num_replicas = spec.min_replicas
         self.num_init_replicas = spec.num_init_replicas
         self.has_init = False
