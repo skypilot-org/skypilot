@@ -225,7 +225,8 @@ def download_and_stream_latest_job_log(
     return log_file
 
 
-def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
+def shared_controller_vars_to_fill(
+        controller_type: str, remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(controller_type)
@@ -241,6 +242,10 @@ def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
+    if skypilot_config.loaded():
+        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
+        env_vars[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 
