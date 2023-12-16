@@ -1,6 +1,16 @@
-# This script is used to test backward compatibility of skypilot.
+# Script for testing backward compatibility of skypilot.
+#
 # To run this script, you need to uninstall the skypilot and ray in the base
 # conda environment, and run it in the base conda environment.
+#
+# It's recommended to use a smoke-test VM to run this.
+#
+# Usage:
+#
+#   cd skypilot-repo
+#   git checkout <feature branch>
+#   pip uninstall -y skypilot ray
+#   bash tests/backward_compatibility_tests.sh
 
 #!/bin/bash
 set -ev
@@ -8,7 +18,7 @@ set -ev
 need_launch=${1:-0}
 start_from=${2:-0}
 
-source ~/.bashrc 
+source ~/.bashrc
 CLUSTER_NAME="test-back-compat-$USER"
 source $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
 CLOUD="aws"
