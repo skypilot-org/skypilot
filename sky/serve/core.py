@@ -118,8 +118,10 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
-            **controller_utils.shared_controller_vars_to_fill('serve',
-                                                              remote_user_config_path=remote_config_yaml_path),
+            **controller_utils.shared_controller_vars_to_fill(
+                'serve',
+                remote_user_config_path=remote_config_yaml_path,
+            ),
         }
         backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
