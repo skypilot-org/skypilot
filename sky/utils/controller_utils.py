@@ -143,6 +143,10 @@ def _get_cloud_dependencies_installation_commands(
         'pip install google-api-python-client>=2.69.0 google-cloud-storage '
         '> /dev/null 2>&1',
         f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}',
+        # azure
+        'pip list | grep azure-cli > /dev/null 2>&1 || '
+        'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
+        'azure-mgmt-network > /dev/null 2>&1',
     ]
     # k8s and ibm doesn't support open port and spot instance yet, so we don't
     # install them for either controller.
@@ -151,13 +155,6 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    else:
-        # We do not install azure dependencies for spot controller since our
-        # subscription does not support spot instances.
-        commands.append(
-            'pip list | grep azure-cli > /dev/null 2>&1 || '
-            'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
-            'azure-mgmt-network > /dev/null 2>&1')
     return commands
 
 
