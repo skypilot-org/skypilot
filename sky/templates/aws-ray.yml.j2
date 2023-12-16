@@ -122,8 +122,6 @@ available_node_types:
           Tags:
             - Key: skypilot-user
               Value: {{ user }}
-            - Key: skypilot-project
-              Value: spot_policy
 {%- for tag_key, tag_value in instance_tags.items() %}
             - Key: {{ tag_key }}
               Value: {{ tag_value }}
