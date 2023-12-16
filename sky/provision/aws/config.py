@@ -216,7 +216,9 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     all_route_tables = _get_route_tables(ec2, vpc_id, main=False)
     route_tables = [
         rt for rt in all_route_tables
-        if rt['Associations'][0]['SubnetId'] == subnet_id
+        # An RT can be associated with multiple subnets, i.e.,
+        # rt['Associations'] is a list of associations.
+        if any(assoc['SubnetId']  == subnet_id for assoc in rt['Associations'])
     ]
 
     # Check each route table for an internet gateway route
