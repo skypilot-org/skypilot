@@ -362,7 +362,16 @@ def get_service_schema():
                     },
                     'num_init_replicas': {
                         'type': 'integer',
-                    }
+                    },
+                    'upscale_delay_s': {
+                        'type': 'integer',
+                    },
+                    'downscale_delay_s': {
+                        'type': 'integer',
+                    },
+                    'slo_threshold': {
+                        'type': 'float',
+                    },
                 }
             },
             'replicas': {

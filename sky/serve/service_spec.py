@@ -31,6 +31,9 @@ class SkyServiceSpec:
         on_demand_type: Optional[str] = None,
         num_extra: Optional[int] = None,
         num_init_replicas: Optional[int] = None,
+        upscale_delay_s: int = 300,
+        downscale_delay_s: int = 300,
+        default_slo_theshold: float = 0.99,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -75,17 +78,18 @@ class SkyServiceSpec:
                         'must be all '
                         'specified or all not specified in the service YAML.')
 
-        # TODO(tian): Check vanilla autoscaler argument not exist if spot
-        # TODO(tian): Warning user that the use_spot in resources is ignored
-        # if spot policy is specified.
         self._spot_placer = spot_placer
         self._spot_mixer = spot_mixer
         self._num_extra = num_extra
         self._num_init_replicas = num_init_replicas
-        # TODO(tian): If no zone specified, default to all enabled zones
+
         self._spot_zones = spot_zones
         self._on_demand_zones = on_demand_zones
         self._on_demand_type = on_demand_type
+
+        self._upscale_delay_s = upscale_delay_s
+        self._downscale_delay_s = downscale_delay_s
+        self._default_slo_threshold = default_slo_theshold
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -155,6 +159,13 @@ class SkyServiceSpec:
             service_config['num_extra'] = policy_section.get('num_extra', None)
             service_config['num_init_replicas'] = policy_section.get(
                 'num_init_replicas', None)
+            service_config['upscale_delay_s'] = policy_section.get(
+                'upscale_delay_s', 300)
+            service_config['downscale_delay_s'] = policy_section.get(
+                'downscale_delay_s', 1200)
+            service_config['default_slo_theshold'] = policy_section.get(
+                'default_slo_theshold', 0.99)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -210,6 +221,13 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'num_extra', self._num_extra)
         add_if_not_none('replica_policy', 'num_init_replicas',
                         self._num_init_replicas)
+
+        add_if_not_none('replica_policy', 'upscale_delay_s',
+                        self._upscale_delay_s)
+        add_if_not_none('replica_policy', 'downscale_delay_s',
+                        self._downscale_delay_s)
+        add_if_not_none('replica_policy', 'default_slo_theshold',
+                        self._default_slo_threshold)
         return config
 
     def probe_str(self):
@@ -305,3 +323,15 @@ class SkyServiceSpec:
     @property
     def num_init_replicas(self) -> Optional[int]:
         return self._num_init_replicas
+
+    @property
+    def upscale_delay_s(self) -> int:
+        return self._upscale_delay_s
+
+    @property
+    def downscale_delay_s(self) -> int:
+        return self._downscale_delay_s
+
+    @property
+    def default_slo_threshold(self) -> float:
+        return self._default_slo_threshold

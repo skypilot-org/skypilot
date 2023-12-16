@@ -18,12 +18,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# TODO(tian): Expose this to config.
-_UPSCALE_DELAY_S = 300
-_DOWNSCALE_DELAY_S = 1200
-_DEFAULT_SLO_THRESHOLD = 0.99
-_DEFAULT_SLO_COUNT_START = 100
-
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -118,11 +112,12 @@ class RequestRateAutoscaler(Autoscaler):
         self.auto_restart = spec.auto_restart
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
-        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+        self.scale_up_consecutive_periods: int = int(spec.upscale_delay_s /
                                                      self.frequency)
-        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+        self.scale_down_consecutive_periods: int = int(spec.downscale_delay_s /
                                                        self.frequency)
         self.target_num_replicas = spec.min_replicas
+        self.default_slo_threshold = spec.default_slo_threshold
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -172,9 +167,9 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
 
-        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+        self.scale_up_consecutive_periods: int = int(spec.upscale_delay_s /
                                                      self.frequency)
-        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+        self.scale_down_consecutive_periods: int = int(spec.downscale_delay_s /
                                                        self.frequency)
         self.overprovision = overprovision
         self.static_spot_provision = static_spot_provision
@@ -323,9 +318,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
 
-        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+        self.scale_up_consecutive_periods: int = int(spec.upscale_delay_s /
                                                      self.frequency)
-        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+        self.scale_down_consecutive_periods: int = int(spec.downscale_delay_s /
                                                        self.frequency)
         self.static_spot_provision = static_spot_provision
         self.overprovision = overprovision
@@ -484,9 +479,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
             if (self.use_safety_net and self.meet_safety_net_count /
                 (self.meet_safety_net_count + self.miss_safety_net_count) <
-                    _DEFAULT_SLO_THRESHOLD and
+                    self.default_slo_threshold and
                     self.meet_safety_net_count + self.miss_safety_net_count >
-                    _DEFAULT_SLO_COUNT_START):
+                    constants.DEFAULT_SLO_COUNT_START):
                 # Enable OnDemand fallback.
                 num_demand_to_scale_up = (self.target_num_replicas -
                                           num_alive_on_demand)
