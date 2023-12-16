@@ -474,6 +474,20 @@ def query_instances(
         statuses[inst.id] = status
     return statuses
 
+def get_spot_instance_warnings(region: str) -> List[str]:
+    
+    client = aws.client('ec2', region_name=region)
+    response = client.describe_spot_instance_requests()
+
+    preemption_warning_ids_list =  []
+    # Check for preemption warnings in each Spot Instance request
+    for request in response['SpotInstanceRequests']:
+        if 'Status' in request and 'Message' in request['Status']:
+            status_message = request['Status']['Message']
+            if 'instance-terminated' in status_message.lower():
+                print(f"Preemption warning for Spot Instance {request['SpotInstanceRequestId']}: {status_message}")
+                preemption_warning_ids_list.append(request['SpotInstanceRequestId'])
+    return preemption_warning_ids_list
 
 def stop_instances(
     cluster_name_on_cloud: str,

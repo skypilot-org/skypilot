@@ -924,6 +924,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                     f'Service job for replica {info.replica_id} FAILED. '
                     'Terminating...')
                 self._terminate_replica(info.replica_id, sync_down_logs=True)
+                
+                
+            preemption_warning_ids_list = backend_utils.query_preemption_warning(info.cluster_name)
+            
 
     def _job_status_fetcher(self) -> None:
         """Periodically fetch the service job status of all replicas."""
