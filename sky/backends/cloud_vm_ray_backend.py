@@ -1282,7 +1282,7 @@ class RetryingVmProvisioner(object):
                              f'{message}')
                 self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
-            elif code == 'QUOTA_EXCEEDED':
+            elif code in ('QUOTA_EXCEEDED', 'quotaExceeded'):
                 if '\'GPUS_ALL_REGIONS\' exceeded' in message:
                     # Global quota.  All regions in GCP will fail.  Ex:
                     # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
