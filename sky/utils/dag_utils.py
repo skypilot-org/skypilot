@@ -14,6 +14,7 @@ logger = sky_logging.init_logger(__name__)
 
 def load_chain_dag_from_yaml(
     path: str,
+    services_overrides: Optional[Dict[str, Any]] = None,
     env_overrides: Optional[List[Tuple[str, str]]] = None,
 ) -> dag_lib.Dag:
     """Loads a chain DAG from a YAML file.
@@ -24,6 +25,10 @@ def load_chain_dag_from_yaml(
     'env_overrides' is in effect only when there's exactly one task. It is a
     list of (key, value) pairs that will be used to update the task's 'envs'
     section.
+
+    'services_overrides' is in effect only when there's exactly one task. It is
+    a dict of service specification that will be used to update the task's
+    'services' section.
 
     Returns:
       A chain Dag with 1 or more tasks (an empty entrypoint would create a
@@ -46,13 +51,17 @@ def load_chain_dag_from_yaml(
         # decision to not apply overrides. Here we maintain this behavior. We
         # can listen to user feedback to change this.
         env_overrides = None
+        services_overrides = None
+    print(1, services_overrides)
 
     current_task = None
     with dag_lib.Dag() as dag:
         for task_config in configs:
             if task_config is None:
                 continue
-            task = task_lib.Task.from_yaml_config(task_config, env_overrides)
+            task = task_lib.Task.from_yaml_config(task_config,
+                                                  services_overrides,
+                                                  env_overrides)
             if current_task is not None:
                 current_task >> task  # pylint: disable=pointless-statement
             current_task = task

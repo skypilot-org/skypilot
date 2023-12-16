@@ -26,6 +26,7 @@ each other.
 import copy
 import datetime
 import functools
+import json
 import multiprocessing
 import os
 import shlex
@@ -637,70 +638,118 @@ def _add_click_options(options: List[click.Option]):
     return _add_options
 
 
-def _parse_override_params(
-        cloud: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None,
-        gpus: Optional[str] = None,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        instance_type: Optional[str] = None,
-        use_spot: Optional[bool] = None,
-        image_id: Optional[str] = None,
-        disk_size: Optional[int] = None,
-        disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
-    """Parses the override parameters into a dictionary."""
-    override_params: Dict[str, Any] = {}
+def _parse_resources_override_params(
+    cloud: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    gpus: Optional[str] = None,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    use_spot: Optional[bool] = None,
+    image_id: Optional[str] = None,
+    disk_size: Optional[int] = None,
+    disk_tier: Optional[str] = None,
+    ports: Optional[Tuple[str]] = None,
+) -> Dict[str, Any]:
+    """Parses the resources override parameters into a dictionary."""
+    resources_override_params: Dict[str, Any] = {}
     if cloud is not None:
         if cloud.lower() == 'none':
-            override_params['cloud'] = None
+            resources_override_params['cloud'] = None
         else:
-            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+            resources_override_params['cloud'] = (
+                clouds.CLOUD_REGISTRY.from_str(cloud))
     if region is not None:
         if region.lower() == 'none':
-            override_params['region'] = None
+            resources_override_params['region'] = None
         else:
-            override_params['region'] = region
+            resources_override_params['region'] = region
     if zone is not None:
         if zone.lower() == 'none':
-            override_params['zone'] = None
+            resources_override_params['zone'] = None
         else:
-            override_params['zone'] = zone
+            resources_override_params['zone'] = zone
     if gpus is not None:
         if gpus.lower() == 'none':
-            override_params['accelerators'] = None
+            resources_override_params['accelerators'] = None
         else:
-            override_params['accelerators'] = gpus
+            resources_override_params['accelerators'] = gpus
     if cpus is not None:
         if cpus.lower() == 'none':
-            override_params['cpus'] = None
+            resources_override_params['cpus'] = None
         else:
-            override_params['cpus'] = cpus
+            resources_override_params['cpus'] = cpus
     if memory is not None:
         if memory.lower() == 'none':
-            override_params['memory'] = None
+            resources_override_params['memory'] = None
         else:
-            override_params['memory'] = memory
+            resources_override_params['memory'] = memory
     if instance_type is not None:
         if instance_type.lower() == 'none':
-            override_params['instance_type'] = None
+            resources_override_params['instance_type'] = None
         else:
-            override_params['instance_type'] = instance_type
+            resources_override_params['instance_type'] = instance_type
     if use_spot is not None:
-        override_params['use_spot'] = use_spot
+        resources_override_params['use_spot'] = use_spot
     if image_id is not None:
         if image_id.lower() == 'none':
-            override_params['image_id'] = None
+            resources_override_params['image_id'] = None
         else:
-            override_params['image_id'] = image_id
+            resources_override_params['image_id'] = image_id
     if disk_size is not None:
-        override_params['disk_size'] = disk_size
+        resources_override_params['disk_size'] = disk_size
     if disk_tier is not None:
-        override_params['disk_tier'] = disk_tier
+        resources_override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
-    return override_params
+        resources_override_params['ports'] = ports
+    return resources_override_params
+
+
+def _parse_services_override_params(
+    readiness_path: Optional[str] = None,
+    initial_delay_seconds: Optional[int] = None,
+    post_data: Optional[str] = None,
+    auto_restart: Optional[bool] = None,
+    min_replicas: Optional[int] = None,
+    max_replicas: Optional[int] = None,
+    qps_upper_threshold: Optional[int] = None,
+    qps_lower_threshold: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Parses the services override parameters into a dictionary."""
+    services_override_params: Dict[str, Any] = {}
+    if readiness_path is not None:
+        if readiness_path.lower() == 'none':
+            services_override_params['readiness_path'] = None
+        else:
+            services_override_params['readiness_path'] = readiness_path
+    if initial_delay_seconds is not None:
+        services_override_params[
+            'initial_delay_seconds'] = initial_delay_seconds
+    if post_data is not None:
+        if post_data.lower() == 'none':
+            services_override_params['post_data'] = None
+        else:
+            try:
+                post_data = json.loads(post_data)
+            except json.JSONDecodeError as e:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Invalid JSON string for `post_data` in the '
+                        '`readiness_probe` section of your service YAML.'
+                    ) from e
+            services_override_params['post_data'] = post_data
+    if auto_restart is not None:
+        services_override_params['auto_restart'] = auto_restart
+    if min_replicas is not None:
+        services_override_params['min_replicas'] = min_replicas
+    if max_replicas is not None:
+        services_override_params['max_replicas'] = max_replicas
+    if qps_upper_threshold is not None:
+        services_override_params['qps_upper_threshold'] = qps_upper_threshold
+    if qps_lower_threshold is not None:
+        services_override_params['qps_lower_threshold'] = qps_lower_threshold
+    return services_override_params
 
 
 def _default_interactive_node_name(node_type: str):
@@ -1062,6 +1111,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     ports: Optional[Tuple[str]] = None,
+    readiness_path: Optional[str] = None,
+    initial_delay_seconds: Optional[int] = None,
+    post_data: Optional[str] = None,
+    auto_restart: Optional[bool] = None,
+    min_replicas: Optional[int] = None,
+    max_replicas: Optional[int] = None,
+    qps_upper_threshold: Optional[int] = None,
+    qps_lower_threshold: Optional[int] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1094,30 +1151,53 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
-    override_params = _parse_override_params(cloud=cloud,
-                                             region=region,
-                                             zone=zone,
-                                             gpus=gpus,
-                                             cpus=cpus,
-                                             memory=memory,
-                                             instance_type=instance_type,
-                                             use_spot=use_spot,
-                                             image_id=image_id,
-                                             disk_size=disk_size,
-                                             disk_tier=disk_tier,
-                                             ports=ports)
+    resources_override_params = _parse_resources_override_params(
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        use_spot=use_spot,
+        image_id=image_id,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+    )
+    # TODO(tian): Add replicas shortcut.
+    services_override_params = _parse_services_override_params(
+        readiness_path=readiness_path,
+        initial_delay_seconds=initial_delay_seconds,
+        post_data=post_data,
+        auto_restart=auto_restart,
+        min_replicas=min_replicas,
+        max_replicas=max_replicas,
+        qps_upper_threshold=qps_upper_threshold,
+        qps_lower_threshold=qps_lower_threshold,
+    )
 
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-        dag = dag_utils.load_chain_dag_from_yaml(entrypoint, env_overrides=env)
+        dag = dag_utils.load_chain_dag_from_yaml(
+            entrypoint,
+            services_overrides=services_override_params,
+            env_overrides=env)
         if len(dag.tasks) > 1:
             # When the dag has more than 1 task. It is unclear how to
             # override the params for the dag. So we just ignore the
             # override params.
-            if override_params:
+            if resources_override_params:
                 click.secho(
-                    f'WARNING: override params {override_params} are ignored, '
+                    'WARNING: Resources override params '
+                    f'{resources_override_params} are ignored, '
+                    'since the yaml file contains multiple tasks.',
+                    fg='yellow')
+            if services_override_params:
+                click.secho(
+                    'WARNING: Services override params '
+                    f'{services_override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
             return dag
@@ -1127,6 +1207,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     else:
         task = sky.Task(name='sky-cmd', run=entrypoint)
         task.set_resources({sky.Resources()})
+        task.set_service(serve_lib.SkyServiceSpec(**services_override_params))
 
     # Override.
     if workdir is not None:
@@ -1134,9 +1215,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     # Spot launch specific.
     if spot_recovery is not None:
-        override_params['spot_recovery'] = spot_recovery
+        resources_override_params['spot_recovery'] = spot_recovery
 
-    task.set_resources_override(override_params)
+    task.set_resources_override(resources_override_params)
 
     if num_nodes is not None:
         task.num_nodes = num_nodes
@@ -4206,22 +4287,125 @@ def serve():
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
+# Task options.
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cpus',
+              default=None,
+              type=str,
+              required=False,
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpus=4`` (exactly 4) or ``--cpus=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
+@click.option(
+    '--memory',
+    default=None,
+    type=str,
+    required=False,
+    help=('Amount of memory each instance must have in GB (e.g., '
+          '``--memory=16`` (exactly 16GB), ``--memory=16+`` (at least 16GB))'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
+@click.option(
+    '--disk-tier',
+    default=None,
+    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    required=False,
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+    ))
+# Service options.
 @click.option('--service-name',
               '-n',
               default=None,
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
+@click.option('--readiness-path',
+              default=None,
+              type=str,
+              required=False,
+              help='Path for the readiness probe.')
+@click.option('--initial-delay-seconds',
+              default=None,
+              type=int,
+              required=False,
+              help=('Initial delay in seconds. Any readiness probe failures '
+                    'during this period will be ignored.'))
+@click.option('--post-data',
+              default=None,
+              type=str,
+              required=False,
+              help=('Post data for the readiness probe.'))
+@click.option('--auto-restart',
+              default=None,
+              type=bool,
+              required=False,
+              help=('Whether to restart the service replica if it fails.'))
+@click.option('--min-replicas',
+              default=None,
+              type=int,
+              required=False,
+              help='Minimum number of replicas.')
+@click.option('--max-replicas',
+              default=None,
+              type=int,
+              required=False,
+              help=('Maximum number of replicas. If not specified, SkyServe '
+                    'will use fixed number of replicas same as min_replicas '
+                    'and ignore any specified QPS threshold.'))
+@click.option('--qps-upper-threshold',
+              default=None,
+              type=int,
+              required=False,
+              help=('QPS threshold for scaling up. If the QPS of your service'
+                    'exceeds this threshold, SkyServe will scale up your '
+                    'service.'))
+@click.option('--qps-lower-threshold',
+              default=None,
+              type=int,
+              required=False,
+              help=('QPS threshold for scaling down. If the QPS of your '
+                    'service is lower than this threshold, SkyServe will '
+                    'scale down your service.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(tian): Support the task_option overrides for the service.
+@timeline.event
+@usage_lib.entrypoint
 def serve_up(
     service_yaml: List[str],
     service_name: Optional[str],
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    gpus: Optional[str],
+    instance_type: Optional[str],
+    ports: Tuple[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    readiness_path: Optional[str],
+    initial_delay_seconds: Optional[int],
+    post_data: Optional[str],
+    auto_restart: Optional[bool],
+    min_replicas: Optional[int],
+    max_replicas: Optional[int],
+    qps_upper_threshold: Optional[int],
+    qps_lower_threshold: Optional[int],
     yes: bool,
 ):
     """Launch a SkyServe service.
@@ -4255,12 +4439,35 @@ def serve_up(
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
-    is_yaml, _ = _check_yaml(''.join(service_yaml))
-    if not is_yaml:
-        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
-    # We keep nargs=-1 in service_yaml argument to reuse this function.
+    env = _merge_env_vars(env_file, env)
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml, entrypoint_name='Service')
+        service_yaml,
+        name=name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        readiness_path=readiness_path,
+        initial_delay_seconds=initial_delay_seconds,
+        post_data=post_data,
+        auto_restart=auto_restart,
+        min_replicas=min_replicas,
+        max_replicas=max_replicas,
+        qps_upper_threshold=qps_upper_threshold,
+        qps_lower_threshold=qps_lower_threshold,
+        entrypoint_name='Service',
+    )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
@@ -4268,7 +4475,8 @@ def serve_up(
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
-                             'To fix, add a valid `service` field.')
+                             'To fix, add a valid `service` field or pass '
+                             'service-related arguments in the CLI.')
     service_port: Optional[int] = None
     for requested_resources in list(task.resources):
         if requested_resources.ports is None or len(
@@ -4792,16 +5000,17 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    override_params = _parse_override_params(cloud=cloud,
-                                             region=region,
-                                             zone=zone,
-                                             gpus=override_gpu,
-                                             use_spot=use_spot,
-                                             image_id=image_id,
-                                             disk_size=disk_size,
-                                             disk_tier=disk_tier,
-                                             ports=ports)
-    resources_config.update(override_params)
+    resources_override_params = _parse_resources_override_params(
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=override_gpu,
+        use_spot=use_spot,
+        image_id=image_id,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports)
+    resources_config.update(resources_override_params)
     if 'cloud' in resources_config:
         cloud = resources_config.pop('cloud')
         if cloud is not None:
