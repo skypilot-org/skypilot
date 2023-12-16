@@ -66,6 +66,7 @@ class Autoscaler:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
+        self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -110,6 +111,7 @@ class RequestRateAutoscaler(Autoscaler):
                                                      self.frequency)
         self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
                                                        self.frequency)
+        self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -155,9 +157,6 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
-
-    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': False, 'spot_recovery': None}
 
     def evaluate_scaling(
         self,
@@ -206,9 +205,8 @@ class RequestRateAutoscaler(Autoscaler):
 
             for _ in range(num_demand_to_scale_up):
                 scaling_options.append(
-                    AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=self._get_on_demand_resources_override_dict()))
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                       target=num_demand_to_scale_up))
 
         elif num_alive_on_demand > self.target_num_replicas:
 
