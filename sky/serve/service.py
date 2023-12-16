@@ -263,6 +263,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         if controller_process is not None:
             process_to_kill.append(controller_process)
         if ngrok_process is not None:
+            # TODO(tian): Investigate why ngrok_process.terminate() doesn't
+            # terminate ngrok process and left the process running.
             ngrok_process.terminate()
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
