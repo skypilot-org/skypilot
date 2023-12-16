@@ -359,7 +359,7 @@ def replace_skypilot_config_path_in_file_mounts(
         else:
             # Empty config. Remove the placeholder below.
             to_replace = False
-        for remote_path, local_path in file_mounts.items():
+        for remote_path, local_path in list(file_mounts.items()):
             if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
                 if to_replace:
                     file_mounts[remote_path] = f.name
