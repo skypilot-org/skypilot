@@ -343,6 +343,10 @@ class ReplicaInfo:
         return handle
 
     @property
+    def is_alive(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.alive_statuses()
+
+    @property
     def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:

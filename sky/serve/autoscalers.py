@@ -2,6 +2,7 @@
 import bisect
 import dataclasses
 import enum
+import math
 import time
 import typing
 from typing import Any, Dict, List, Optional, Union
@@ -30,18 +31,16 @@ class AutoscalerDecisionOperator(enum.Enum):
 class AutoscalerDecision:
     """Autoscaling decisions.
 
-    |---------------------------------------------------------|
-    | Operator   | TargetType | Meaning                       |
-    |------------|------------|-------------------------------|
-    | SCALE_UP   | int        | Number of replicas to add     |
-    |------------|------------|-------------------------------|
-    | SCALE_DOWN | List[int]  | List of replica ids to remove |
-    |------------|------------|-------------------------------|
-    | NO_OP      | None       | No scaling needed             |
-    |---------------------------------------------------------|
+    |---------------------------------------------------------------|
+    | Operator   | TargetType       | Meaning                       |
+    |------------|------------------|-------------------------------|
+    | SCALE_UP   | Dict[str, Any]   | Resource override to add      |
+    |------------|------------------|-------------------------------|
+    | SCALE_DOWN | int              | Replica id to remove          |
+    |---------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    target: Optional[Union[int, List[int]]]
+    target: Union[Optional[Dict[str, Any]], int]
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -76,7 +75,7 @@ class Autoscaler:
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> AutoscalerDecision:
+    ) -> List[AutoscalerDecision]:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
@@ -93,9 +92,7 @@ class RequestRateAutoscaler(Autoscaler):
         """Initialize the request rate autoscaler.
 
         Variables:
-            upper_threshold: Upper threshold for scale up. If None, no scale up.
-            lower_threshold: Lower threshold for scale down. If None, no scale
-                down.
+            target_qps_per_replica: Target qps per replica for autoscaling
             rps_window_size: Window size for rps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
@@ -104,8 +101,7 @@ class RequestRateAutoscaler(Autoscaler):
             scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec, frequency)
-        self.upper_threshold: Optional[float] = spec.qps_upper_threshold
-        self.lower_threshold: Optional[float] = spec.qps_lower_threshold
+        self.target_qps_per_replica = spec.target_qps_per_replica
         self.rps_window_size: int = rps_window_size
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
@@ -132,93 +128,104 @@ class RequestRateAutoscaler(Autoscaler):
                                    current_time - self.rps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
-    def evaluate_scaling(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> AutoscalerDecision:
-
-        num_replicas = len(replica_infos)
-
+    def _get_desired_num_replicas(self) -> int:
+        assert self.target_qps_per_replica is not None
         # Convert to requests per second.
         num_requests_per_second = len(
             self.request_timestamps) / self.rps_window_size
-        # Edge case: num_replicas is zero.
-        requests_per_replica = (num_requests_per_second / num_replicas
-                                if num_replicas else num_requests_per_second)
-
-        logger.info(f'Requests per replica: {requests_per_replica}, '
-                    f'upper_threshold: {self.upper_threshold}, '
-                    f'lower_threshold: {self.lower_threshold}')
-        logger.info(f'Number of replicas: {num_replicas}')
-
-        target_num_replicas = num_replicas
-        if num_replicas < self.min_replicas:
-            target_num_replicas = self.min_replicas
-        elif (self.upper_threshold is not None and
-              requests_per_replica > self.upper_threshold):
-            scale_target = requests_per_replica / self.upper_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-        elif (self.lower_threshold is not None and
-              requests_per_replica < self.lower_threshold):
-            scale_target = requests_per_replica / self.lower_threshold
-            target_num_replicas = int(scale_target * num_replicas)
-
+        target_num_replicas = math.ceil(num_requests_per_second /
+                                        self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
+        logger.info(f'Requests per second: {num_requests_per_second}, '
+                    f'Current target number of replicas: {target_num_replicas}')
 
-        logger.info(f'Target number of replicas: {target_num_replicas}, '
-                    f'min_replicas: {self.min_replicas}, '
-                    f'max_replicas: {self.max_replicas}')
-
-        num_replicas_delta = 0
-        if num_replicas < self.min_replicas:
-            num_replicas_delta = self.min_replicas - num_replicas
-            self.upscale_counter = 0
-        elif num_replicas > self.max_replicas:
-            num_replicas_delta = self.max_replicas - num_replicas
-            self.downscale_counter = 0
-        elif target_num_replicas > num_replicas:
+        if target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
                 self.upscale_counter = 0
-                num_replicas_delta = target_num_replicas - num_replicas
-        elif target_num_replicas < num_replicas:
+                return target_num_replicas
+        elif target_num_replicas < self.target_num_replicas:
             self.downscale_counter += 1
             self.upscale_counter = 0
             if self.downscale_counter >= self.scale_down_consecutive_periods:
                 self.downscale_counter = 0
-                num_replicas_delta = target_num_replicas - num_replicas
+                return target_num_replicas
         else:
             self.upscale_counter = self.downscale_counter = 0
-        logger.info(f'Upscale counter: {self.upscale_counter}/'
-                    f'{self.scale_up_consecutive_periods}. '
-                    f'Downscale counter: {self.downscale_counter}/'
-                    f'{self.scale_down_consecutive_periods}')
+        return self.target_num_replicas
 
-        if num_replicas_delta == 0:
+    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': False, 'spot_recovery': None}
+
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+
+        # Don't count over-provision here.
+        self.target_num_replicas = self._get_desired_num_replicas()
+        logger.info(
+            f'Final target number of replicas: {self.target_num_replicas} '
+            f'({self.target_num_replicas} with '
+            f'over-provision), Upscale counter: {self.upscale_counter}/'
+            f'{self.scale_up_consecutive_periods}, '
+            f'Downscale counter: {self.downscale_counter}/'
+            f'{self.scale_down_consecutive_periods}')
+
+        alive_replica_infos = [info for info in replica_infos if info.is_alive]
+        num_alive_on_demand = len(alive_replica_infos)
+        logger.info(
+            f'Number of alive on-demand instances: {num_alive_on_demand}')
+
+        scaling_options = []
+        all_replica_ids_to_scale_down: List[int] = []
+
+        def _get_replica_ids_to_scale_down(
+            status_order: List['serve_state.ReplicaStatus'],
+            num_limit: int,
+        ) -> List[int]:
+            replica_ids_to_scale_down: List[int] = []
+            for target_status in status_order:
+                for info in alive_replica_infos:
+                    if info.status == target_status:
+                        if len(replica_ids_to_scale_down) >= num_limit:
+                            return replica_ids_to_scale_down
+                        replica_ids_to_scale_down.append(info.replica_id)
+            for info in alive_replica_infos:
+                if info.status not in status_order:
+                    if len(replica_ids_to_scale_down) >= num_limit:
+                        return replica_ids_to_scale_down
+                    replica_ids_to_scale_down.append(info.replica_id)
+            return replica_ids_to_scale_down
+
+        if num_alive_on_demand < self.target_num_replicas:
+            num_demand_to_scale_up = (self.target_num_replicas -
+                                      num_alive_on_demand)
+
+            for _ in range(num_demand_to_scale_up):
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=self._get_on_demand_resources_override_dict()))
+
+        elif num_alive_on_demand > self.target_num_replicas:
+
+            num_demand_to_scale_down = (num_alive_on_demand -
+                                        self.target_num_replicas)
+            all_replica_ids_to_scale_down.extend(
+                _get_replica_ids_to_scale_down(
+                    status_order=serve_state.ReplicaStatus.
+                    scale_down_decision_order(),
+                    num_limit=num_demand_to_scale_down,
+                ))
+
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
+
+        if not scaling_options:
             logger.info('No scaling needed.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                      target=None)
-        elif num_replicas_delta > 0:
-            logger.info(f'Scaling up by {num_replicas_delta} replicas.')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=num_replicas_delta)
-        else:
-            num_replicas_to_remove = -num_replicas_delta
-            # Remove FAILED replicas first.
-            replica_ids_to_remove: List[int] = []
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                if info.status == serve_state.ReplicaStatus.FAILED:
-                    replica_ids_to_remove.append(info.replica_id)
-            # Then rest of them.
-            for info in replica_infos:
-                if len(replica_ids_to_remove) >= num_replicas_to_remove:
-                    break
-                replica_ids_to_remove.append(info.replica_id)
-            logger.info(f'Scaling down by {num_replicas_to_remove} replicas '
-                        f'(id: {replica_ids_to_remove}).')
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                      target=replica_ids_to_remove)
+        return scaling_options
