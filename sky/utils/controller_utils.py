@@ -345,16 +345,22 @@ def replace_skypilot_config_path_in_file_mounts(
     if file_mounts is None:
         return
     replaced = False
+    to_replace = True
     with tempfile.NamedTemporaryFile('w', delete=False) as f:
         if skypilot_config.loaded():
             new_skypilot_config = _setup_proxy_command_on_controller(cloud)
+            common_utils.dump_yaml(f.name, new_skypilot_config)
+            to_replace = True
         else:
-            new_skypilot_config = {}
-        common_utils.dump_yaml(f.name, new_skypilot_config)
+            # Empty config. Remove the placeholder below.
+            to_replace = False
         for remote_path, local_path in file_mounts.items():
             if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
-                file_mounts[remote_path] = f.name
-                replaced = True
+                if to_replace:
+                    file_mounts[remote_path] = f.name
+                    replaced = True
+                else:
+                    del file_mounts[remote_path]
     if replaced:
         logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
                      f'the real path in file mounts: {file_mounts}')
