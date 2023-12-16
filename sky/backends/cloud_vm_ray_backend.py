@@ -1240,6 +1240,137 @@ class RetryingVmProvisioner(object):
 
         return definitely_no_nodes_launched
 
+    def _update_blocklist_on_gcp_error_new_provisioner(self,
+                                                       launchable_resources,
+                                                       region, zones, err):
+        # TODO: Handle TPU VMs when we have TPU VM integrated.
+        style = colorama.Style
+        assert zones and len(zones) == 1, zones
+        zone = zones[0]
+
+        errors = []
+        if hasattr(err, 'error_details'):
+            # HttpError.
+            for e in err.error_details:
+                # To be consistent with error messages
+                # returned by operation wait.
+                errors.append({
+                    'code': e.get('reason'),
+                    'domain': e.get('domain'),
+                    'message': e.get('message'),
+                })
+        elif isinstance(err, provision_common.ProvisionError):
+            errors = err.errors
+        else:
+            self._blocked_resources.add(
+                launchable_resources.copy(zone=zone.name))
+            return
+
+        for e in errors:
+            code = e['code']
+            message = e['message']
+            logger.warning(f'Got return code {code} in {zone.name} '
+                           f'{style.DIM}(message: {message})'
+                           f'{style.RESET_ALL}')
+
+            if 'wait_ready timeout exceeded' in message:
+                # This error seems to occur when the provisioning process
+                # went through partially (e.g., for spot, initial
+                # provisioning succeeded, but while waiting for ssh/setting
+                # up it got preempted).
+                logger.error('Got the following exception, continuing: '
+                             f'{message}')
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif code == 'QUOTA_EXCEEDED':
+                if '\'GPUS_ALL_REGIONS\' exceeded' in message:
+                    # Global quota.  All regions in GCP will fail.  Ex:
+                    # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
+                    # globally.
+                    # This skip is only correct if we implement "first
+                    # retry the region/zone of an existing cluster with the
+                    # same name" correctly.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(region=None, zone=None))
+                else:
+                    # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
+                    # in region us-west1.
+                    self._blocked_resources.add(
+                        launchable_resources.copy(zone=None))
+            elif code in [
+                    'ZONE_RESOURCE_POOL_EXHAUSTED',
+                    'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
+                    'UNSUPPORTED_OPERATION'
+            ]:  # Per zone.
+                # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
+                # However, UNSUPPORTED_OPERATION is observed empirically
+                # when VM is preempted during creation.  This seems to be
+                # not documented by GCP.
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif code in ['RESOURCE_NOT_READY']:
+                # This code is returned when the VM is still STOPPING.
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif code in [3, 8, 9]:
+                # Error code 3 means TPU is preempted during creation.
+                # Example:
+                # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # pylint: disable=line-too-long
+                # Error code 8 means TPU resources is out of
+                # capacity. Example:
+                # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
+                # Error code 9 means TPU resources is insufficient reserved
+                # capacity. Example:
+                # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif code == 'RESOURCE_NOT_FOUND':
+                # https://github.com/skypilot-org/skypilot/issues/1797
+                # In the inner provision loop we have used retries to
+                # recover but failed. This indicates this zone is most
+                # likely out of capacity. The provision loop will terminate
+                # any potentially live VMs before moving onto the next
+                # zone.
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+            elif code == 'VPC_NOT_FOUND':
+                # User has specified a VPC that does not exist. On GCP, VPC is
+                # global. So we skip the entire cloud.
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+            elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
+                if (any(acc.lower().startswith('tpu-v4')
+                        for acc in launchable_resources.accelerators.keys()) and
+                        region.name == 'us-central2'):
+                    # us-central2 is a TPU v4 only region. The subnet for
+                    # this region may not exist when the user does not have
+                    # the TPU v4 quota. We should skip this region.
+                    logger.warning('Please check if you have TPU v4 quotas '
+                                   f'in {region.name}.')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=region.name, zone=None))
+            elif 'Requested disk size cannot be smaller than the image size' in message:
+                logger.info('Skipping all regions due to disk size issue.')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+            elif 'Policy update access denied.' in message or code == 'IAM_PERMISSION_DENIED':
+                logger.info(
+                    'Skipping all regions due to service account not '
+                    'having the required permissions and the user '
+                    'account does not have enough permission to '
+                    'update it. Please contact your administrator and '
+                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
+                    f'Details: {message}')
+                self._blocked_resources.add(
+                    launchable_resources.copy(region=None, zone=None))
+            else:
+                # Parse HttpError for unauthorized regions. Example:
+                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+                # Details: "Location us-east1-d is not found or access is
+                # unauthorized.">
+                self._blocked_resources.add(
+                    launchable_resources.copy(zone=zone.name))
+
     def _yield_zones(
         self, to_provision: resources_lib.Resources, num_nodes: int,
         cluster_name: str,
@@ -1659,143 +1790,6 @@ class RetryingVmProvisioner(object):
                         provision_record = RuntimeError(
                             'Failed to provision TPU node.')
 
-                def _update_blocklist_on_gcp_error(err):
-                    nonlocal zones
-
-                    assert zones and len(zones) == 1, zones
-                    zone = zones[0]
-
-                    errors = []
-                    if hasattr(err, 'error_details'):
-                        # HttpError.
-                        for e in err.error_details:
-                            # To be consistent with error messages returned by operation wait.
-                            errors.append({
-                                'code': e.get('reason'),
-                                'domain': e.get('domain'),
-                                'message': e.get('message'),
-                            })
-                    elif isinstance(err, provision_common.ProvisionError):
-                        errors = err.errors
-                    else:
-                        self._blocked_resources.add(
-                            to_provision.copy(zone=zone.name))
-                        return
-
-                    for e in errors:
-                        code = e['code']
-                        message = e['message']
-                        logger.warning(f'Got return code {code} in {zone.name} '
-                                       f'{style.DIM}(message: {message})'
-                                       f'{style.RESET_ALL}')
-
-                        if 'wait_ready timeout exceeded' in message:
-                            # This error seems to occur when the provisioning process
-                            # went through partially (e.g., for spot, initial
-                            # provisioning succeeded, but while waiting for ssh/setting
-                            # up it got preempted).
-                            logger.error(
-                                'Got the following exception, continuing: '
-                                f'{message}')
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-                        elif code == 'QUOTA_EXCEEDED':
-                            if '\'GPUS_ALL_REGIONS\' exceeded' in message:
-                                # Global quota.  All regions in GCP will fail.  Ex:
-                                # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
-                                # globally.
-                                # This skip is only correct if we implement "first
-                                # retry the region/zone of an existing cluster with the
-                                # same name" correctly.
-                                self._blocked_resources.add(
-                                    to_provision.copy(region=None, zone=None))
-                            else:
-                                # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
-                                # in region us-west1.
-                                self._blocked_resources.add(
-                                    to_provision.copy(zone=None))
-                        elif code in [
-                                'ZONE_RESOURCE_POOL_EXHAUSTED',
-                                'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
-                                'UNSUPPORTED_OPERATION'
-                        ]:  # Per zone.
-                            # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
-                            # However, UNSUPPORTED_OPERATION is observed empirically
-                            # when VM is preempted during creation.  This seems to be
-                            # not documented by GCP.
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-                        elif code in ['RESOURCE_NOT_READY']:
-                            # This code is returned when the VM is still STOPPING.
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-                        elif code in [3, 8, 9]:
-                            # Error code 3 means TPU is preempted during creation.
-                            # Example:
-                            # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # pylint: disable=line-too-long
-                            # Error code 8 means TPU resources is out of
-                            # capacity. Example:
-                            # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
-                            # Error code 9 means TPU resources is insufficient reserved
-                            # capacity. Example:
-                            # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-                        elif code == 'RESOURCE_NOT_FOUND':
-                            # https://github.com/skypilot-org/skypilot/issues/1797
-                            # In the inner provision loop we have used retries to
-                            # recover but failed. This indicates this zone is most
-                            # likely out of capacity. The provision loop will terminate
-                            # any potentially live VMs before moving onto the next
-                            # zone.
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-                        elif code == 'VPC_NOT_FOUND':
-                            # User has specified a VPC that does not exist. On GCP, VPC is
-                            # global. So we skip the entire cloud.
-                            self._blocked_resources.add(
-                                to_provision.copy(region=None, zone=None))
-                        elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
-                            if (any(acc.lower().startswith('tpu-v4')
-                                    for acc in to_provision.accelerators.keys())
-                                    and region.name == 'us-central2'):
-                                # us-central2 is a TPU v4 only region. The subnet for
-                                # this region may not exist when the user does not have
-                                # the TPU v4 quota. We should skip this region.
-                                logger.warning(
-                                    'Please check if you have TPU v4 quotas '
-                                    f'in {region.name}.')
-                            self._blocked_resources.add(
-                                to_provision.copy(region=region.name,
-                                                  zone=None))
-                        elif 'Requested disk size cannot be smaller than the image size' in message:
-                            logger.info(
-                                'Skipping all regions due to disk size issue.')
-                            self._blocked_resources.add(
-                                to_provision.copy(region=None, zone=None))
-                        elif 'Policy update access denied.' in message or code == 'IAM_PERMISSION_DENIED':
-                            logger.info(
-                                'Skipping all regions due to service account not '
-                                'having the required permissions and the user '
-                                'account does not have enough permission to '
-                                'update it. Please contact your administrator and '
-                                'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
-                                f'Details: {message}')
-                            self._blocked_resources.add(
-                                to_provision.copy(region=None, zone=None))
-                        else:
-                            # Parse HttpError for unauthorized regions. Example:
-                            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
-                            # Details: "Location us-east1-d is not found or access is
-                            # unauthorized.">
-                            self._blocked_resources.add(
-                                to_provision.copy(zone=zone.name))
-
-                    # TODO: Handle TPU VMs when we have TPU VM integrated.
-
-                if isinstance(to_provision.cloud, clouds.GCP):
-                    _update_blocklist_on_gcp_error(provision_record)
-
                 # NOTE: We try to cleanup the cluster even if the previous
                 # cluster does not exist. Also we are fast at
                 # cleaning up clusters now if there is no existing node..
@@ -1804,12 +1798,15 @@ class RetryingVmProvisioner(object):
                 # TODO(suquark): other clouds may have different zone
                 #  blocking strategy. See '_update_blocklist_on_error'
                 #  for details.
-                if zones is None:
+                if isinstance(to_provision.cloud, clouds.GCP):
+                    self._update_blocklist_on_gcp_error_new_provisioner(
+                        to_provision, region, zones, provision_record)
+                elif zones is None:
                     self._blocked_resources.add(to_provision.copy(zone=None))
-                    continue
-                for zone in zones:
-                    self._blocked_resources.add(
-                        to_provision.copy(zone=zone.name))
+                else:
+                    for zone in zones:
+                        self._blocked_resources.add(
+                            to_provision.copy(zone=zone.name))
                 continue
                 # NOTE: The code below in the loop should not be reachable
                 # with the new provisioner.
