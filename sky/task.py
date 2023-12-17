@@ -498,10 +498,10 @@ class Task:
         service_config = config.pop('service', {})
         if services_overrides is not None:
             service_config.update(services_overrides)
-        service = None
         if service_config:
-            service = service_spec.SkyServiceSpec.from_yaml_config(service_config)
-        task.set_service(service)
+            service = service_spec.SkyServiceSpec.from_yaml_config(
+                service_config)
+            task.set_service(service)
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task

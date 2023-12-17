@@ -37,6 +37,8 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Missing required fields: {", ".join(missing_fields)}')
+        assert (readiness_path is not None and
+                initial_delay_seconds is not None and min_replicas is not None)
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
