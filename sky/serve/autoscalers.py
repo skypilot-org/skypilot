@@ -165,10 +165,8 @@ class RequestRateAutoscaler(Autoscaler):
         return {'use_spot': False, 'spot_recovery': None}
 
     def _get_resources_override_dict(self, use_spot: bool) -> Dict[str, Any]:
-        if use_spot:
-            return self._get_spot_resources_override_dict()
-        else:
-            return self._get_on_demand_resources_override_dict()
+        return (self._get_spot_resources_override_dict()
+                if use_spot else self._get_on_demand_resources_override_dict())
 
     def evaluate_scaling(
         self,
