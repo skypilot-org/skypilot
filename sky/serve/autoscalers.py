@@ -164,6 +164,12 @@ class RequestRateAutoscaler(Autoscaler):
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
 
+    def _get_resources_override_dict(self, use_spot: bool) -> Dict[str, Any]:
+        if use_spot:
+            return self._get_spot_resources_override_dict()
+        else:
+            return self._get_on_demand_resources_override_dict()
+
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
@@ -217,17 +223,10 @@ class RequestRateAutoscaler(Autoscaler):
                                         num_alive_replicas)
 
             for _ in range(num_replicas_to_scale_up):
-                if use_spot:
-                    scaling_options.append(
-                        AutoscalerDecision(
-                            AutoscalerDecisionOperator.SCALE_UP,
-                            target=self._get_spot_resources_override_dict()))
-                else:
-                    scaling_options.append(
-                        AutoscalerDecision(
-                            AutoscalerDecisionOperator.SCALE_UP,
-                            target=self._get_on_demand_resources_override_dict(
-                            )))
+                scaling_options.append(
+                    AutoscalerDecision(
+                        AutoscalerDecisionOperator.SCALE_UP,
+                        target=self._get_resources_override_dict(use_spot)))
 
         elif num_alive_replicas > self.target_num_replicas:
 
