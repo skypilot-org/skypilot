@@ -111,6 +111,7 @@ class RequestRateAutoscaler(Autoscaler):
                                                      self.frequency)
         self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
                                                        self.frequency)
+        # Target number of replicas is initialized to min replicas.
         self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
@@ -173,6 +174,7 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
+        # TODO(MaoZiming): Consider non-alive replicas when auto_restart = False
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_alive_replicas = len(alive_replica_infos)
         use_spot_list = [
@@ -187,12 +189,10 @@ class RequestRateAutoscaler(Autoscaler):
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
-            f'({self.target_num_replicas} with '
-            f'over-provision), Upscale counter: {self.upscale_counter}/'
+            f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
-
         logger.info(f'Number of alive replicas: {num_alive_replicas}')
 
         scaling_options = []
@@ -227,7 +227,6 @@ class RequestRateAutoscaler(Autoscaler):
                         target=self._get_resources_override_dict(use_spot)))
 
         elif num_alive_replicas > self.target_num_replicas:
-
             num_replicas_to_scale_down = (num_alive_replicas -
                                           self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
