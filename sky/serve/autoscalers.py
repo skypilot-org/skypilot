@@ -102,7 +102,8 @@ class RequestRateAutoscaler(Autoscaler):
             scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec, frequency)
-        self.target_qps_per_replica = spec.target_qps_per_replica
+        self.target_qps_per_replica: Optional[
+            float] = spec.target_qps_per_replica
         self.rps_window_size: int = rps_window_size
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0

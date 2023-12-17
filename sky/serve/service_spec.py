@@ -21,6 +21,8 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
+        qps_upper_threshold: Optional[float] = None,
+        qps_lower_threshold: Optional[float] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
@@ -38,6 +40,12 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
+
+        if qps_upper_threshold is not None or qps_lower_threshold is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'qps_upper_threshold and qps_lower_threshold are '
+                    'deprecated. Please use target_qps_per_replica instead.')
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas

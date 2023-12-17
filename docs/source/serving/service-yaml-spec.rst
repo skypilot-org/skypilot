@@ -46,9 +46,9 @@ Available fields:
         max_replicas: 3
         # Following thresholds describe when to scale up or down.
         # Target QPS per replica (optional). If the QPS of your service
-        # exceeds this threshold, SkyServe will scale up your service by one
-        # replica. If the QPS of your service
-        # is below this threshold, SkyServe will scale down your service by one. 
+        # exceeds this threshold, SkyServe will scale up your service to meet
+        # the target QPS. If the QPS of your service
+        # is below this threshold, SkyServe will scale down your service. 
         target_qps_per_replica: 5
 
       # Also, for convenience, we have a simplified version of replica policy that
