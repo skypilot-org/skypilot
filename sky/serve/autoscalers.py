@@ -24,7 +24,6 @@ _DOWNSCALE_DELAY_S = 1200
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
     SCALE_DOWN = 'scale_down'
-    NO_OP = 'no_op'
 
 
 @dataclasses.dataclass
@@ -159,12 +158,28 @@ class RequestRateAutoscaler(Autoscaler):
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
 
+    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': True, 'spot_recovery': None}
+
+    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': False, 'spot_recovery': None}
+
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        # Don't count over-provision here.
+        alive_replica_infos = [info for info in replica_infos if info.is_alive]
+        num_alive_replicas = len(alive_replica_infos)
+        use_spot_list = [
+            1 if info.is_spot else 0 for info in alive_replica_infos
+        ]
+        # TODO(MaoZiming): Support mix of on-demand and spot on master.
+        assert len(use_spot_list) in [
+            0, num_alive_replicas
+        ], 'replicas should be either all spot or all on-demand'
+        use_spot = sum(use_spot_list) == num_alive_replicas
+
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
             f'Final target number of replicas: {self.target_num_replicas} '
@@ -174,10 +189,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
 
-        alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_alive_on_demand = len(alive_replica_infos)
-        logger.info(
-            f'Number of alive on-demand instances: {num_alive_on_demand}')
+        logger.info(f'Number of alive replicas: {num_alive_replicas}')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -200,24 +212,32 @@ class RequestRateAutoscaler(Autoscaler):
                     replica_ids_to_scale_down.append(info.replica_id)
             return replica_ids_to_scale_down
 
-        if num_alive_on_demand < self.target_num_replicas:
-            num_demand_to_scale_up = (self.target_num_replicas -
-                                      num_alive_on_demand)
+        if num_alive_replicas < self.target_num_replicas:
+            num_replicas_to_scale_up = (self.target_num_replicas -
+                                        num_alive_replicas)
 
-            for _ in range(num_demand_to_scale_up):
-                scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                       target=num_demand_to_scale_up))
+            for _ in range(num_replicas_to_scale_up):
+                if use_spot:
+                    scaling_options.append(
+                        AutoscalerDecision(
+                            AutoscalerDecisionOperator.SCALE_UP,
+                            target=self._get_spot_resources_override_dict()))
+                else:
+                    scaling_options.append(
+                        AutoscalerDecision(
+                            AutoscalerDecisionOperator.SCALE_UP,
+                            target=self._get_on_demand_resources_override_dict(
+                            )))
 
-        elif num_alive_on_demand > self.target_num_replicas:
+        elif num_alive_replicas > self.target_num_replicas:
 
-            num_demand_to_scale_down = (num_alive_on_demand -
-                                        self.target_num_replicas)
+            num_replicas_to_scale_down = (num_alive_replicas -
+                                          self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(
                     status_order=serve_state.ReplicaStatus.
                     scale_down_decision_order(),
-                    num_limit=num_demand_to_scale_down,
+                    num_limit=num_replicas_to_scale_down,
                 ))
 
         for replica_id in all_replica_ids_to_scale_down:

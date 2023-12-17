@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 import requests
+import yaml
 
 import sky
 from sky import backends
@@ -51,6 +52,7 @@ _MAX_NUM_LAUNCH = psutil.cpu_count()
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
+                   resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -63,7 +65,14 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
-        task = sky.Task.from_yaml(task_yaml_path)
+        with open(os.path.expanduser(task_yaml_path), 'r',
+                  encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        if resources_override is not None:
+            resource_config = config.get('resources', {})
+            resource_config.update(resources_override)
+            config['resources'] = resource_config
+        task = sky.Task.from_yaml_config(config)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -155,6 +164,20 @@ def _get_resources_ports(task_yaml: str) -> str:
     # Already checked the resources have and only have one port
     # before upload the task yaml.
     return task_resources.ports[0]
+
+
+def _get_use_spot_override(task_yaml: str,
+                           override: Optional[Dict[str, Any]]) -> bool:
+    """Get the resources ports used by the task."""
+    if override is not None:
+        use_spot_override = override.get('use_spot')
+        if use_spot_override is not None:
+            assert isinstance(use_spot_override, bool)
+            return use_spot_override
+    task = sky.Task.from_yaml(task_yaml)
+    assert len(task.resources) == 1, task
+    task_resources = list(task.resources)[0]
+    return task_resources.use_spot
 
 
 def with_lock(func):
@@ -313,11 +336,15 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str,
-                 replica_port: str) -> None:
+    _VERSION = 2
+
+    def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
+                 is_spot: bool, zone: Optional[str]) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
+        self.is_spot: bool = is_spot
+        self.zone: Optional[str] = zone
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -367,6 +394,8 @@ class ReplicaInfo:
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
+            'is_spot': self.is_spot,
+            'zone': self.zone,
             'status': self.status,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -420,6 +449,19 @@ class ReplicaInfo:
                         f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
 
+    def __setstate__(self, state):
+        """Set state from pickled state, for backward compatibility."""
+        version = state.pop('_version', None)
+        # Handle old version(s) here.
+        if version is None:
+            version = -1
+
+        if version < 2:
+            self.is_spot = False
+            self.zone = None
+
+        self.__dict__.update(state)
+
 
 class ReplicaManager:
     """Each replica manager monitors one service."""
@@ -442,12 +484,13 @@ class ReplicaManager:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
 
-    def scale_up(self, n: int) -> None:
-        """Scale up the service by n replicas."""
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        """Scale up the service by 1 replica with resources_override."""
         raise NotImplementedError
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        """Scale down all replicas in replica_ids."""
+    def scale_down(self, replica_id: int) -> None:
+        """Scale down replica with replica_id."""
         raise NotImplementedError
 
 
@@ -495,7 +538,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
 
-    def _launch_replica(self, replica_id: int) -> None:
+    def _launch_replica(
+        self,
+        replica_id: int,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> None:
+
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -510,19 +558,25 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name),
+            args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port)
+        use_spot = _get_use_spot_override(self._task_yaml_path,
+                                          resources_override)
+        zone = None
+        if resources_override is not None:
+            zone = resources_override.get('zone')
+        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
+                           zone)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
-    def scale_up(self, n: int) -> None:
-        for _ in range(n):
-            self._launch_replica(self._next_replica_id)
-            self._next_replica_id += 1
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        self._launch_replica(self._next_replica_id, resources_override)
+        self._next_replica_id += 1
 
     def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
         if replica_id in self._down_process_pool:
@@ -586,9 +640,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        for replica_id in replica_ids:
-            self._terminate_replica(replica_id, sync_down_logs=False)
+    def scale_down(self, replica_id: int) -> None:
+        self._terminate_replica(replica_id, sync_down_logs=False)
 
     def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning handle for preempted replica {replica_id}.')
@@ -596,6 +649,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self._service_name,
                                                     replica_id)
         assert info is not None
+        assert info.is_spot
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         self._terminate_replica(replica_id, sync_down_logs=False)
