@@ -4437,7 +4437,18 @@ def serve_up(
         sky serve up service.yaml
     """
     if service_name is None:
-        service_name = serve_lib.generate_service_name()
+        if name is None:
+            name = service_name = serve_lib.generate_service_name()
+        else:
+            service_name = name
+    else:
+        if name is None:
+            name = service_name
+        else:
+            raise click.UsageError(
+                'Cannot specify both --name and --service-name. '
+                'Both of them are used to specify the name of the service. '
+                f'Got: {name!r} and {service_name!r}.')
 
     env = _merge_env_vars(env_file, env)
     task = _make_task_or_dag_from_entrypoint_with_overrides(
