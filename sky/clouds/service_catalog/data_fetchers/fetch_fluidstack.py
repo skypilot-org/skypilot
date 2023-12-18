@@ -1,4 +1,4 @@
-"""A script that generates the Lambda Cloud catalog.
+"""A script that generates the Fluidstack catalog.
 
 Usage:
     python fetch_lambda_cloud.py [-h] [--api-key API_KEY]
