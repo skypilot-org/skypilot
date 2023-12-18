@@ -32,10 +32,10 @@ class FluidstackNodeProvider(NodeProvider):
         self.lock = RLock()
         self.cached_nodes = {}
         self.fluidstack_client = fluidstack_utils.FluidstackClient()
+        self._cluster_name = cluster_name
 
     def _get_filtered_nodes(self, tag_filters):
         running_instances = self.fluidstack_client.list_instances(tag_filters)
-        print(running_instances, tag_filters)    
         self.cached_nodes = {}
 
         for instance in running_instances:
@@ -51,39 +51,38 @@ class FluidstackNodeProvider(NodeProvider):
         (e.g. is_running(node_id)). This means that non_terminated_nodes()
         must be called again to refresh results.
         """
+        tag_filters[TAG_RAY_CLUSTER_NAME] = self._cluster_name
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
         return [
-            k for k, instance in nodes.items() if instance['status'] not in
-            ['terminated', 
-             'terminating',
-             'timeout_error', 
-             'failed_to_create', 
-             'out_of_stock']
+            k for k, instance in nodes.items() if instance['status'] not in [
+                'terminated', 'terminating', 'timeout_error',
+                'failed_to_create', 'out_of_stock'
+            ]
         ]
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
-        return (self._get_cached_node(node_id=node_id) is not None and
-                self._get_cached_node(node_id=node_id)['status'] == 'running')
+        return (self._get_node(node_id=node_id) is not None and
+                self._get_node(node_id=node_id)['status'] == 'running')
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
-        return self._get_cached_node(node_id=node_id) is None
+        return self._get_node(node_id=node_id) is None
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
-        return self._get_cached_node(node_id=node_id)['tags']
+        return self._get_node(node_id=node_id)['tags']
 
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        ip = self._get_cached_node(node_id=node_id)['ip_address']
+        ip = self._get_node(node_id=node_id)['ip_address']
         if not ip or ip.lower() in ['pending', 'provisioning']:
             return None
         return ip
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        ip = self._get_cached_node(node_id=node_id)['ip_address']
+        ip = self._get_node(node_id=node_id)['ip_address']
         if ip.lower() in ['pending', 'provisioning'] or not ip:
             return None
         return ip
@@ -96,7 +95,7 @@ class FluidstackNodeProvider(NodeProvider):
         config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
-       
+
         # Create node
         ttype = node_config['InstanceType']
         region = self.provider_config['region']

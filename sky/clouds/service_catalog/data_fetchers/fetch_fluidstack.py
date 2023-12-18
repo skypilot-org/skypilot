@@ -15,7 +15,7 @@ import requests
 from typing import List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = 'http://api.fluidstack.io/v1/plans'
+ENDPOINT = 'https://infinity-skypilot-fbc55e9eacf1.herokuapp.com/v1/plans'
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser(
     '~/.fluidstack/fluidstack_api_key')
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
@@ -42,8 +42,6 @@ GPU_MAP = {
     'T4_16GB': 'T4',
     'RTX_3090_24GB': 'RTX3090',
     'RTX_3080_10GB': 'RTX3080',
-
-
 }
 
 

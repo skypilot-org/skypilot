@@ -10,7 +10,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace('-', '')[:8]
 
 
-ENDPOINT = 'http://127.0.0.1:5001/v1/'
+ENDPOINT = 'https://infinity-skypilot-fbc55e9eacf1.herokuapp.com/v1'
 FLUIDSTACK_API_KEY_PATH = '~/.fluidstack/api_key'
 FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
@@ -54,8 +54,8 @@ class FluidstackClient:
             os.path.expanduser(FLUIDSTACK_API_TOKEN_PATH))
 
     def list_instances(
-            self, tag_filters: Optional[Dict[str,
-                                             str]] = {}) -> List[Dict[str, Any]]:
+            self,
+            tag_filters: Optional[Dict[str, str]] = {}) -> List[Dict[str, Any]]:
         response = requests.get(
             ENDPOINT + 'servers',
             auth=(self.api_key, self.api_token),
@@ -63,17 +63,21 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         instances = response.json()
         filtered_instances = []
+
         for instance in instances:
             if type(instance['tags']) == str:
                 instance['tags'] = json.loads(instance['tags'])
             if not instance['tags']:
                 instance['tags'] = {}
-            
-            for key in tag_filters:
-                if instance['tags'].get(key, None) != tag_filters[key]:
-                    break
+            if tag_filters:
+                for key in tag_filters:
+                    if instance['tags'].get(key, None) != tag_filters[key]:
+                        break
+                else:
+                    filtered_instances.append(instance)
             else:
                 filtered_instances.append(instance)
+
         return filtered_instances
 
     def create_instance(
@@ -161,8 +165,7 @@ class FluidstackClient:
         return response.json()
 
     def restart(self, instance_id: str):
-        response = requests.post(ENDPOINT + 'server/' + instance_id +
-                                 '/reboot',
+        response = requests.post(ENDPOINT + 'server/' + instance_id + '/reboot',
                                  auth=(self.api_key, self.api_token))
         raise_fluidstack_error(response)
         return response.json()

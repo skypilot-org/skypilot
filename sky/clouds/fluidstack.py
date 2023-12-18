@@ -304,6 +304,9 @@ class Fluidstack(clouds.Cloud):
             'requesting': status_lib.ClusterStatus.INIT,
             'create': status_lib.ClusterStatus.INIT,
             'customizing': status_lib.ClusterStatus.INIT,
+            'stopping': status_lib.ClusterStatus.STOPPED,
+            'stopped': status_lib.ClusterStatus.STOPPED,
+            'starting': status_lib.ClusterStatus.INIT,
             'running': status_lib.ClusterStatus.UP,
         }
         status_list = []

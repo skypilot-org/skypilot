@@ -22,7 +22,7 @@ import pandas as pd
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes','fluidstack'
+    'kubernetes', 'fluidstack'
 ]
 default_clouds_to_run = ['gcp', 'azure']
 
@@ -40,7 +40,6 @@ cloud_to_pytest_keyword = {
     'oci': 'oci',
     'kubernetes': 'kubernetes',
     'fluidstack': 'fluidstack'
-
 }
 
 

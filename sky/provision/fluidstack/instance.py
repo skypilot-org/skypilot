@@ -6,16 +6,14 @@ providers supported by SkyPilot need to follow.
 import time
 from typing import Any, Dict, List, Optional
 
-
 from sky import status_lib
-from sky.skylet.providers.fluidstack.fluidstack_utils import (
-    FluidstackClient,
-    FluidstackAPIError
-)
-
+from sky.skylet.providers.fluidstack.fluidstack_utils import (FluidstackClient,
+                                                              FluidstackAPIError
+                                                             )
 
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
+
 
 def query_instances(
     cluster_name_on_cloud: str,
@@ -36,15 +34,15 @@ def query_instances(
     }
     if non_terminated_only:
         pass
-    statuses : Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
     for instance in instances:
         status = status_map.get(instance['status'],
                                 status_lib.ClusterStatus.INIT)
         statuses[instance['id']] = status
     return statuses
 
-def wait_for_instances(instance_ids : List[str],
-                       timeout: int = 300) -> None:
+
+def wait_for_instances(instance_ids: List[str], timeout: int = 300) -> None:
     """Wait for instances to be terminated."""
     start = time.time()
     client = FluidstackClient()
@@ -64,6 +62,8 @@ def wait_for_instances(instance_ids : List[str],
         if time.time() - start > timeout:
             return
         time.sleep(5)
+
+
 def terminate_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
