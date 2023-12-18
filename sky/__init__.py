@@ -82,6 +82,7 @@ SCP = clouds.SCP
 Local = clouds.Local
 Kubernetes = clouds.Kubernetes
 OCI = clouds.OCI
+Scaleway = clouds.Scaleway
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -101,6 +102,7 @@ __all__ = [
     'benchmark',
     'list_accelerators',
     '__root_dir__',
+    'Scaleway',
     'Storage',
     'StorageMode',
     'StoreType',

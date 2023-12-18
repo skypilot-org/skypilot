@@ -15,6 +15,7 @@ if typing.TYPE_CHECKING:
 
 CloudFilter = Optional[Union[List[str], str]]
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
+              'scaleway',
               'kubernetes')
 
 

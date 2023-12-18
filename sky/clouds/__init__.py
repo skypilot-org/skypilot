@@ -18,6 +18,7 @@ from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
 from sky.clouds.scp import SCP
+from sky.clouds.scaleway import Scaleway
 
 __all__ = [
     'IBM',
@@ -33,6 +34,7 @@ __all__ = [
     'CloudImplementationFeatures',
     'Region',
     'Zone',
+    'Scaleway',
     'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
