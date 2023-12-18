@@ -46,6 +46,11 @@ class SkyServiceSpec:
                 raise ValueError(
                     'qps_upper_threshold and qps_lower_threshold are '
                     'deprecated. Please use target_qps_per_replica instead.')
+
+        if not auto_restart:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('auto_restart=False is deprecated.')
+
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas
