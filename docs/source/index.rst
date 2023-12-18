@@ -158,3 +158,10 @@ Documentation
    reference/cli
    reference/api
    reference/config
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Developer Guides
+
+   ../../contributing
+   developers/new-cloud
