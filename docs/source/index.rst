@@ -163,4 +163,5 @@ Documentation
    :maxdepth: 1
    :caption: Developer Guides
 
+   developers/CONTRIBUTING
    developers/new-cloud
