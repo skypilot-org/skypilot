@@ -10,7 +10,7 @@ def get_key_suffix():
     return str(uuid.uuid4()).replace('-', '')[:8]
 
 
-ENDPOINT = 'https://infinity-skypilot-fbc55e9eacf1.herokuapp.com/v1'
+ENDPOINT = 'https://infinity-skypilot-fbc55e9eacf1.herokuapp.com/v1/'
 FLUIDSTACK_API_KEY_PATH = '~/.fluidstack/api_key'
 FLUIDSTACK_API_TOKEN_PATH = '~/.fluidstack/api_token'
 
