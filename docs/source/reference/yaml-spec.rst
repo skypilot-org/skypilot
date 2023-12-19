@@ -202,7 +202,8 @@ Available fields:
       # Candidate resources (optional). If specified, SkyPilot will only use
       # these candidate resources to launch the cluster. The fields specified
       # outside of `any_of`, `ordered` will be used as the default values for
-      # all candidate resources.
+      # all candidate resources, and any duplicate fields specified inside
+      # `any_of`, `ordered` will override the default values.
       # `any_of:` means that SkyPilot will try to find a resource that matches
       # any of the candidate resources, i.e. the failover order will be decided
       # by the optimizer.

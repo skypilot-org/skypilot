@@ -202,6 +202,10 @@ The following is an example for limiting the cluster to be launched in only in U
       - region: us-west3
       - region: us-west4
 
+.. hint::
+
+  The regions specified that does not have the accelerator will be ignored automatically.
+
 This will genereate the following output:
 
 .. code-block:: console

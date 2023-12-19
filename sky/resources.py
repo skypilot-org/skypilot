@@ -1137,7 +1137,7 @@ class Resources:
         config = config.copy()
         any_of_configs = config.pop('any_of', None)
         ordered_configs = config.pop('ordered', None)
-        if (any_of_configs is not None and ordered_configs is not None):
+        if any_of_configs is not None and ordered_configs is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify both "any_of" and "ordered" in resources.')
@@ -1145,7 +1145,6 @@ class Resources:
         # Parse resources.accelerators field.
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
-            accelerators = config.get('accelerators')
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
             elif isinstance(accelerators, dict):
@@ -1181,7 +1180,8 @@ class Resources:
             if isinstance(accelerators, (list, set)):
                 return type(accelerators)(tmp_resources_list)
             else:
-                raise RuntimeError('Accelerators must be a list or a set.')
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Accelerators must be a list or a set.')
 
         return {Resources._from_yaml_config_single(config)}
 
