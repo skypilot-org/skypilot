@@ -37,7 +37,7 @@ run: |
 ```
 
 In the above example, we're asking SkyPilot to provision an AWS instance with 1 Nvidia A10G GPU and at least 32GB of RAM. Once the node is provisioned,
-SkyPilot will launch the LoRAX server using our latest pre-built [Docker image](./docker.md).
+SkyPilot will launch the LoRAX server using our latest pre-built [Docker image](https://github.com/predibase/lorax/pkgs/container/lorax).
 
 Let's launch our LoRAX job:
 
