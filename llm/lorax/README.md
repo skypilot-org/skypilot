@@ -75,7 +75,7 @@ To improve the quality of the response, we can add a single parameter `adapter_i
 In this example, we'll use the adapter `vineetsharma/qlora-adapter-Mistral-7B-Instruct-v0.1-gsm8k` that fine-tuned the base model to improve its math reasoning:
 
 ```shell
-curl 127.0.0.1:8080/generate \
+curl http://$IP:8080/generate \
     -X POST \
     -d '{"inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]", "parameters": {"max_new_tokens": 64, "adapter_id": "vineetsharma/qlora-adapter-Mistral-7B-Instruct-v0.1-gsm8k"}}' \
     -H 'Content-Type: application/json'
