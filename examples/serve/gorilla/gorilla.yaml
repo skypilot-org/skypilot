@@ -1,0 +1,49 @@
+# SkyServe YAML to run gorilla LLM.
+#
+# Usage:
+#   sky serve up -n gorilla examples/serve/gorilla/gorilla.yaml
+# Then go to the examples/serve/gorilla/use_gorilla.ipynb
+# and follow the instructions there.
+# The endpoint will be printed in the console. You
+# could also check the endpoint by running:
+#   sky serve status --endpoint gorilla
+
+service:
+  readiness_probe:
+    path: /v1/models
+    initial_delay_seconds: 1800
+  replicas: 2
+
+resources:
+  ports: 8087
+  accelerators: A100:1
+  disk_size: 1024
+  disk_tier: high
+
+setup: |
+  conda activate chatbot
+  if [ $? -ne 0 ]; then
+    conda create -n chatbot python=3.9 -y
+    conda activate chatbot
+  fi
+
+  # Install dependencies
+  pip install fschat[model_worker,webui]==0.2.24
+  pip install protobuf einops
+
+run: |
+  conda activate chatbot
+  
+  echo 'Starting controller...'
+  python -u -m fastchat.serve.controller > ~/controller.log 2>&1 &
+  sleep 10
+  echo 'Starting model worker...'
+  python -u -m fastchat.serve.model_worker \
+            --model-path gorilla-llm/gorilla-falcon-7b-hf-v0 2>&1 \
+            | tee model_worker.log &
+
+  echo 'Waiting for model worker to start...'
+  while ! `cat model_worker.log | grep -q 'Uvicorn running on'`; do sleep 1; done
+
+  echo 'Starting openai api server...'
+  python -u -m fastchat.serve.openai_api_server --host 0.0.0.0 --port 8087 | tee ~/openai_api_server.log

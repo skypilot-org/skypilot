@@ -219,9 +219,10 @@ extras_require: Dict[str, List[str]] = {
         'azure-cli>=2.31.0', 'azure-core', 'azure-identity>=1.13.0',
         'azure-mgmt-network'
     ] + local_ray,
-    # We need google-api-python-client>=2.19.1 to enable 'reason' attribute
-    # of googleapiclient.errors.HttpError, which is widely used in our system.
-    'gcp': ['google-api-python-client>=2.19.1', 'google-cloud-storage'] +
+    # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
+    # parameter for stopping instances.
+    # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
            local_ray,
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
@@ -229,7 +230,7 @@ extras_require: Dict[str, List[str]] = {
     'docker': ['docker'] + local_ray,
     'lambda': local_ray,
     'cloudflare': aws_dependencies,
-    'scp': [] + local_ray,
+    'scp': local_ray,
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
     'remote': remote,

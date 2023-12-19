@@ -120,8 +120,9 @@ def _bulk_provision(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
 
-    logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
-                 f'seconds.')
+    logger.debug(
+        f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
+        f'seconds.')
 
     return provision_record
 
@@ -241,12 +242,18 @@ def _wait_ssh_connection_direct(
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
-    del ssh_control_name
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
         with socket.create_connection((ip, 22), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
-                return True
+                # Wait for SSH being actually ready, otherwise we may get the
+                # following error:
+                # "System is booting up. Unprivileged users are not permitted to
+                # log in yet".
+                return _wait_ssh_connection_indirect(ip, ssh_user,
+                                                     ssh_private_key,
+                                                     ssh_control_name,
+                                                     ssh_proxy_command)
     except socket.timeout:  # this is the most expected exception
         pass
     except Exception:  # pylint: disable=broad-except

@@ -62,7 +62,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
-  * `Mistral 7B <https://docs.mistral.ai/cloud-deployment/skypilot/>`_ (from official Mistral team)
+  * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
@@ -112,6 +112,13 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: SkyServe: Model Serving
+
+   serving/sky-serve
+   serving/service-yaml-spec
+
+.. toctree::
+   :maxdepth: 1
    :caption: Cutting Cloud Costs
 
    examples/spot-jobs
@@ -132,7 +139,6 @@ Documentation
    examples/docker-containers
    examples/ports
    reference/tpu
-   reference/interactive-nodes
    reference/logging
    reference/faq
 

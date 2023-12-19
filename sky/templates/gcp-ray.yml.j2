@@ -18,7 +18,7 @@ docker:
 {%- endif %}
 
 provider:
-  # We use a custom node provider for GCP to support instance stop and reuse.
+  # We use a custom node provider for GCP to create, stop and reuse instances.
   type: external  # type: gcp
   module: sky.skylet.providers.gcp.GCPNodeProvider
   region: {{region}}
@@ -28,6 +28,10 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
+{% if vpc_name is not none %}
+  # NOTE: This is a new field added by SkyPilot to force use a specific VPC.
+  vpc_name: {{vpc_name}}
+{% endif %}
   # The firewall rule name for customized firewall rules. Only enabled
   # if we have ports requirement.
 {% if firewall_rule is not none %}
@@ -42,6 +46,7 @@ provider:
     password: {{docker_login_config.password}}
     server: {{docker_login_config.server}}
 {%- endif %}
+  use_internal_ips: {{use_internal_ips}}
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
@@ -55,6 +60,9 @@ provider:
 auth:
   ssh_user: gcpuser
   ssh_private_key: {{ssh_private_key}}
+{% if ssh_proxy_command is not none %}
+  ssh_proxy_command: {{ssh_proxy_command}}
+{% endif %}
 
 available_node_types:
   ray_head_default:

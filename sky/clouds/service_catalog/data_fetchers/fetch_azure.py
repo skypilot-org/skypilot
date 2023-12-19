@@ -36,6 +36,34 @@ EXCLUDED_REGIONS = {
 
 SINGLE_THREADED = False
 
+# Family name to SkyPilot GPU name mapping.
+#
+# When adding a new accelerator:
+# - The instance type is typically already fetched, but we need to find the
+#   family name and add it to this mapping.
+# - To inspect family names returned by Azure API, check the dataframes in
+#   get_all_regions_instance_types_df().
+FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
+    'standardNCFamily': 'K80',
+    'standardNCSv2Family': 'P100',
+    'standardNCSv3Family': 'V100',
+    'standardNCPromoFamily': 'K80',
+    'StandardNCASv3_T4Family': 'T4',
+    'standardNDSv2Family': 'V100-32GB',
+    'StandardNCADSA100v4Family': 'A100-80GB',
+    'standardNDAMSv4_A100Family': 'A100-80GB',
+    'StandardNDASv4_A100Family': 'A100',
+    'standardNVFamily': 'M60',
+    'standardNVSv2Family': 'M60',
+    'standardNVSv3Family': 'M60',
+    'standardNVPromoFamily': 'M60',
+    'standardNVSv4Family': 'Radeon MI25',
+    'standardNDSFamily': 'P40',
+    'StandardNVADSA10v5Family': 'A10',
+    'StandardNCadsH100v5Family': 'H100',
+    'standardNDSH100v5Family': 'H100',
+}
+
 
 def get_regions() -> List[str]:
     """Get all available regions."""
@@ -78,7 +106,7 @@ def get_pricing_url(region: Optional[str] = None) -> str:
 def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
     all_items = []
     url = get_pricing_url(region)
-    print(f'Getting pricing for {region}')
+    print(f'Getting pricing for {region}, url: {url}')
     page = 0
     while url is not None:
         page += 1
@@ -125,29 +153,11 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
 
 
 def get_gpu_name(family: str) -> Optional[str]:
-    gpu_data = {
-        'standardNCFamily': 'K80',
-        'standardNCSv2Family': 'P100',
-        'standardNCSv3Family': 'V100',
-        'standardNCPromoFamily': 'K80',
-        'StandardNCASv3_T4Family': 'T4',
-        'standardNDSv2Family': 'V100-32GB',
-        'StandardNCADSA100v4Family': 'A100-80GB',
-        'standardNDAMSv4_A100Family': 'A100-80GB',
-        'StandardNDASv4_A100Family': 'A100',
-        'standardNVFamily': 'M60',
-        'standardNVSv2Family': 'M60',
-        'standardNVSv3Family': 'M60',
-        'standardNVPromoFamily': 'M60',
-        'standardNVSv4Family': 'Radeon MI25',
-        'standardNDSFamily': 'P40',
-        'StandardNVADSA10v5Family': 'A10',
-    }
     # NP-series offer Xilinx U250 FPGAs which are not GPUs,
     # so we do not include them here.
     # https://docs.microsoft.com/en-us/azure/virtual-machines/np-series
     family = family.replace(' ', '')
-    return gpu_data.get(family)
+    return FAMILY_NAME_TO_SKYPILOT_GPU_NAME.get(family)
 
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
@@ -243,6 +253,26 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         [df, df.apply(get_additional_columns, axis='columns')],
         axis='columns',
     )
+
+    # As of Dec 2023, a few H100 instance types fetched from Azure APIs do not
+    # have pricing:
+    #
+    # df[df['InstanceType'].str.contains('H100')][['InstanceType', 'Price',
+    # 'SpotPrice']]
+    #                 InstanceType    Price  SpotPrice
+    # 5830   Standard_NC40ads_H100_v5      NaN        NaN
+    # 5831   Standard_NC40ads_H100_v5      NaN        NaN
+    # 5875  Standard_NC80adis_H100_v5      NaN        NaN
+    # 5876  Standard_NC80adis_H100_v5      NaN        NaN
+    # 5901     Standard_ND48s_H100_v5      NaN        NaN
+    # 5910   Standard_ND96isr_H100_v5  117.984    29.4960
+    # 5911    Standard_ND96is_H100_v5  106.186    26.5465
+    #
+    # But these instance types are still launchable. We fill in $0 to enable
+    # launching.
+    h100_row_idx = df_ret['InstanceType'].str.contains('H100')
+    df_ret.loc[h100_row_idx, ['Price', 'SpotPrice']] = df_ret.loc[
+        h100_row_idx, ['Price', 'SpotPrice']].fillna(0)
 
     before_drop_len = len(df_ret)
     df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
