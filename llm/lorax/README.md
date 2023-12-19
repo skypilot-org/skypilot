@@ -47,9 +47,7 @@ sky launch -c lorax-cluster lorax.yaml
 
 By default, this config will deploy `Mistral-7B-Instruct`, but this can be overridden by running `sky launch` with the argument `--env MODEL_ID=<my_model>`.
 
-!!! warn
-    
-    This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://skypilot.readthedocs.io/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
+**NOTE:** This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://skypilot.readthedocs.io/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
 
 ## Prompt LoRAX w/ base model
 
