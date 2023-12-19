@@ -65,7 +65,10 @@ class Azure(clouds.Cloud):
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is not supported in {cls._REPR}.'),
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
+                ('Stopping spot instances is currently not supported on'
+                 f' {cls._REPR}.'),
         }
 
     @classmethod

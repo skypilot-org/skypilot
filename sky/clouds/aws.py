@@ -116,7 +116,11 @@ class AWS(clouds.Cloud):
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+        return {
+            clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
+                ('Stopping spot instances is currently not supported on'
+                 f' {cls._REPR}.'),
+        }
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

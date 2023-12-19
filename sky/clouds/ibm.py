@@ -38,15 +38,19 @@ class IBM(clouds.Cloud):
             cls) -> Dict[clouds.CloudImplementationFeatures, str]:
         return {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is not supported in {cls._REPR}.'),
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-                (f'Docker image is not supported in {cls._REPR}. '
+                (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-                (f'Custom disk tier is not supported in {cls._REPR}.'),
+                (f'Custom disk tier is currently not supported on {cls._REPR}.'
+                ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is not supported in {cls._REPR}.'),
+                (f'Opening ports is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
+                ('Stopping spot instances is currently not supported on'
+                 f' {cls._REPR}.'),
         }
 
     @classmethod

@@ -30,7 +30,7 @@ class CloudImplementationFeatures(enum.Enum):
 
     Used by Cloud.check_features_are_supported().
 
-    Note: If any new feature is added, please check and update
+    NOTE: If any new feature is added, please check and update
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
@@ -40,6 +40,7 @@ class CloudImplementationFeatures(enum.Enum):
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     DOCKER_IMAGE = 'docker_image'
     SPOT_INSTANCE = 'spot_instance'
+    STOP_SPOT_INSTANCE = 'stop_spot_instance'
     CUSTOM_DISK_TIER = 'custom_disk_tier'
     OPEN_PORTS = 'open_ports'
 
@@ -476,9 +477,9 @@ class Cloud:
             (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
-                    f'Docker image is not supported in {cls._REPR} when proxy '
-                    'command is set. Please remove proxy command in the config.'
-                ),
+                    f'Docker image is currently not supported on {cls._REPR} '
+                    'when proxy command is set. Please remove proxy command in '
+                    'the config.'),
             })
 
         unsupported_features = set(unsupported_features2reason.keys())
