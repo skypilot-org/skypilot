@@ -326,12 +326,19 @@ def stop(cluster_name: str, purge: bool = False) -> None:
                 'is not supported.')
         # Check cloud supports stopping instances
         cloud = handle.launched_resources.cloud
+        assert cloud is not None, handle
         cloud.check_features_are_supported(
             {clouds.CloudImplementationFeatures.STOP})
+        # Check cloud supports stopping spot instances
+        supports_stop_spot = True
+        try:
+            cloud.check_features_are_supported(
+                {clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE})
+        except exceptions.NotSupportedError:
+            supports_stop_spot = False
         # Allow GCP spot to be stopped since it preserves disk:
         #   https://cloud.google.com/compute/docs/instances/preemptible#preemption-process  # pylint: disable=line-too-long
-        if handle.launched_resources.use_spot and not cloud.is_same_cloud(
-                clouds.GCP()):
+        if handle.launched_resources.use_spot and not supports_stop_spot:
             # Disable spot instances to be stopped.
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}Stopping cluster '
@@ -448,12 +455,22 @@ def autostop(
             f'{operation} cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
 
+    # Check cloud supports stopping spot instances
+    cloud = handle.launched_resources.cloud
+    assert cloud is not None, handle
+    supports_stop_spot = True
+    try:
+        cloud.check_features_are_supported(
+            {clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE})
+    except exceptions.NotSupportedError:
+        supports_stop_spot = False
+
     if not isinstance(backend, backends.CloudVmRayBackend):
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
     elif (handle.launched_resources.use_spot and not down and not is_cancel and
-          not handle.launched_resources.cloud.is_same_cloud(clouds.GCP())):
+          not supports_stop_spot):
         # Disable spot instances to be autostopped.
         #
         # Exception: Allow GCP spot to be stopped since it preserves disk:
