@@ -7,7 +7,7 @@ _default_ec2_resource() to avoid version mismatch issues.
 import copy
 import re
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from sky import sky_logging
 from sky import status_lib

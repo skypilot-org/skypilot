@@ -1,3 +1,4 @@
+"""Kubernetes network provisioning utils."""
 import os
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -25,8 +26,9 @@ def get_port_mode(
         port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e) + ' Cluster was setup with invalid port mode.'
-                              + 'Please check the port_mode in provider config.') \
+            raise ValueError(str(e)
+                + ' Cluster was setup with invalid port mode.'
+                + 'Please check the port_mode in provider config.') \
                 from None
 
     return port_mode
@@ -155,7 +157,7 @@ def delete_namespaced_service(namespace: str, service_name: str) -> None:
         raise e
 
 
-def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
+def ingress_controller_exists(ingress_class_name: str = 'nginx') -> bool:
     """Checks if an ingress controller exists in the cluster."""
     networking_api = kubernetes.networking_api()
     ingress_classes = networking_api.list_ingress_class(
@@ -167,12 +169,12 @@ def ingress_controller_exists(ingress_class_name: str = "nginx") -> bool:
 
 def get_external_ip_and_ports(
         namespace: str) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
-    """Returns the HTTP and HTTPS base url of the ingress controller for the cluster."""
+    """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api()
     ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.spec.type == "LoadBalancer"
+        if item.spec.type == 'LoadBalancer'
     ]
     if len(ingress_services) == 0:
         return (None, None)
@@ -180,8 +182,8 @@ def get_external_ip_and_ports(
     ingress_service = ingress_services[0]
     if ingress_service.status.load_balancer.ingress is None:
         ports = ingress_service.spec.ports
-        http_port = [port for port in ports if port.name == "http"][0].node_port
-        https_port = [port for port in ports if port.name == "https"
+        http_port = [port for port in ports if port.name == 'http'][0].node_port
+        https_port = [port for port in ports if port.name == 'https'
                      ][0].node_port
         return 'localhost', (int(http_port), int(https_port))
 

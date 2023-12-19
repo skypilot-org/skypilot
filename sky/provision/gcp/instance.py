@@ -2,13 +2,12 @@
 import collections
 import re
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision.gcp import instance_utils
-from sky.utils.resources_utils import port_ranges_to_set
 
 logger = sky_logging.init_logger(__name__)
 

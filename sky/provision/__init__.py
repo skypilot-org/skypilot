@@ -131,7 +131,7 @@ def open_ports(
 def cleanup_ports(
     provider_name: str,
     cluster_name_on_cloud: str,
-    # TODO: make ports argument optional and add the ability to cleanup only specified ports.
+    # TODO: make ports optional and allow cleaning up only specified ports.
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -148,7 +148,7 @@ def query_ports(
 ) -> Dict[int, List[common.Endpoint]]:
     """Query details about ports on a cluster.
 
-    Returns a dict with port as the key and the value as an instance of common.Endpoint.
+    Returns a dict with port as the key and a list of common.Endpoint.
     """
     raise NotImplementedError
 

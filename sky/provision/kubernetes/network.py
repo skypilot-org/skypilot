@@ -1,3 +1,4 @@
+"""Kubernetes network provisioning."""
 from typing import Any, Dict, List, Optional
 
 from sky.adaptors import kubernetes
@@ -58,13 +59,14 @@ def _open_ports_using_ingress(
 ) -> None:
     if not network_utils.ingress_controller_exists():
         raise Exception(
-            'Ingress controller not found. Please install ingress controller first.'
+            'Ingress controller not found.'
+            'Please install ingress controller first.'
             'See https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md for more details.'
         )
 
     for port in ports:
-        service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
-        ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
+        service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
+        ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress--{port}'
         path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
 
@@ -78,7 +80,7 @@ def _open_ports_using_ingress(
             selector_value=cluster_name_on_cloud,
         )
         network_utils.create_or_replace_namespaced_service(
-            namespace=provider_config["namespace"],
+            namespace=provider_config['namespace'],
             service_name=service_name,
             service_spec=content['service_spec'],
         )
@@ -116,7 +118,7 @@ def _cleanup_ports_for_loadbalancer(
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     network_utils.delete_namespaced_service(
-        namespace=provider_config["namespace"],
+        namespace=provider_config['namespace'],
         service_name=service_name,
     )
 
@@ -127,10 +129,10 @@ def _cleanup_ports_for_ingress(
     provider_config: Dict[str, Any],
 ) -> None:
     for port in ports:
-        service_name = f"{cluster_name_on_cloud}-skypilot-service--{port}"
-        ingress_name = f"{cluster_name_on_cloud}-skypilot-ingress--{port}"
+        service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
+        ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress--{port}'
         network_utils.delete_namespaced_service(
-            namespace=provider_config["namespace"],
+            namespace=provider_config['namespace'],
             service_name=service_name,
         )
         network_utils.delete_namespaced_ingress(
@@ -195,7 +197,7 @@ def _query_ports_for_ingress(
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
     external_ip, external_ports = network_utils.get_external_ip_and_ports(
-        "ingress-nginx")
+        'ingress-nginx')
     if external_ip is None:
         return {}
 
@@ -204,8 +206,8 @@ def _query_ports_for_ingress(
         path_prefix = _PATH_PREFIX.format(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
 
-        http_port, https_port = external_ports if external_ports is not None else (
-            None, None)
+        http_port, https_port = external_ports \
+            if external_ports is not None else (None, None)
         result[port] = [
             common.HTTPEndpoint(host=external_ip,
                                 port=http_port,
