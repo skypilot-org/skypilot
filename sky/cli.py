@@ -1793,7 +1793,8 @@ def _get_services(service_names: Optional[List[str]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
-           endpoint: Optional[int], show_spot_jobs: bool, show_services: bool, clusters: List[str]):
+           endpoint: Optional[int], show_spot_jobs: bool, show_services: bool,
+           clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1966,8 +1967,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'Port {endpoint} not exposed yet.\n'
-                                'If the cluster was recently started, please retry after a while.\n'
-                                'If you believe this is an error, please file an issue.'
+                                'If the cluster was recently started, please retry after a while.'
                             )
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
                     return
@@ -1975,8 +1975,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 if not port_details:
                     click.echo(
                         'No endpoints exposed yet.\n'
-                        'If the cluster was recently started, please retry after a while.\n'
-                        'If you believe this is an error, please file an issue.'
+                        'If the cluster was recently started, please retry after a while.'
                     )
 
                 for port, urls in port_details.items():
