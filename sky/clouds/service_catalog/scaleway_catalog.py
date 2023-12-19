@@ -103,6 +103,10 @@ def list_accelerators(
         case_sensitive: bool = True
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Scaleway offering GPUs."""
-    return common.list_accelerators_impl('scaleway', _df, gpus_only, name_filter,
-                                         region_filter, quantity_filter,
+    return common.list_accelerators_impl('scaleway',
+                                         _df,
+                                         gpus_only,
+                                         name_filter,
+                                         region_filter,
+                                         quantity_filter,
                                          case_sensitive)

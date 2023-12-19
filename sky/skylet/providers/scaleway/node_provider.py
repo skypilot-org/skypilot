@@ -33,7 +33,8 @@ class ScalewayNodeProvider:
         self._internal_ip_cache: Dict[str, str] = {}
         self._external_ip_cache: Dict[str, str] = {}
 
-    def is_readonly(self) -> bool:
+    @staticmethod
+    def is_readonly() -> bool:
         """Returns whether this provider is readonly.
 
         Readonly node providers do not allow nodes to be created or terminated.
@@ -62,15 +63,18 @@ class ScalewayNodeProvider:
 
     def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
-        raise NotImplementedError
+        return self._get_cached_node(node_id=node_id) is not None
 
     def is_terminated(self, node_id: str) -> bool:
         """Return whether the specified node is terminated."""
-        raise NotImplementedError
+        return self._get_cached_node(node_id=node_id) is None
 
     def node_tags(self, node_id: str) -> Dict[str, str]:
         """Returns the tags of the given node (string dict)."""
-        raise NotImplementedError
+        node = self._get_cached_node(node_id=node_id)
+        if node is None:
+            return {}
+        return node['tags']
 
     def external_ip(self, node_id: str) -> str:
         """Returns the external ip of the given node."""
@@ -155,13 +159,14 @@ class ScalewayNodeProvider:
         """Sets the tag values (string dict) for the specified node."""
         raise NotImplementedError
 
-    def terminate_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node.
 
         Optionally return a mapping from deleted node ids to node
         metadata.
         """
-        raise NotImplementedError
+        self.scaleway_client.remove_instances(node_id)
+        self.metadata.set(node_id, None)
 
     def terminate_nodes(self, node_ids: List[str]) -> Optional[Dict[str, Any]]:
         """Terminates a set of nodes.
@@ -261,3 +266,10 @@ class ScalewayNodeProvider:
         StandardAutoscaler._update().
         """
         pass
+
+    def _get_cached_node(self, node_id):
+        """Return node info from cache if possible, otherwise fetches it."""
+        if node_id in self.cached_nodes:
+            return self.cached_nodes[node_id]
+
+        return self._get_node(node_id)
