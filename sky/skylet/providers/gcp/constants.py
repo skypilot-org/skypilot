@@ -30,8 +30,9 @@ FIREWALL_RULES_REQUIRED = [
                 "ports": ["22"],
             }
         ],
-        # TODO(skypilot): some users reported that this should be relaxed (e.g.,
-        # allowlisting only certain IPs to have ssh access).
+        # Some users have reported that this conflicts with their network
+        # security policy. A custom VPC can be specified in ~/.sky/config.yaml
+        # allowing for restriction of source ranges bypassing this requirement.
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
