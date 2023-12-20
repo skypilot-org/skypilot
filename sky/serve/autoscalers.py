@@ -60,12 +60,12 @@ class Autoscaler:
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.frequency = frequency
+        self.frequency: int = frequency
         if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:
             logger.warning('Autoscaler frequency is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
-        self.target_num_replicas = spec.min_replicas
+        self.target_num_replicas: int = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -112,7 +112,7 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
                                                        self.frequency)
         # Target number of replicas is initialized to min replicas.
-        self.target_num_replicas = spec.min_replicas
+        self.target_num_replicas: int = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -132,7 +132,12 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps = self.request_timestamps[index:]
 
     def _get_desired_num_replicas(self) -> int:
-        assert self.target_qps_per_replica is not None
+
+        # If target_qps_per_replica is not set
+        # Return default target_num_replicas.
+        if self.target_qps_per_replica is None:
+            return self.target_num_replicas
+
         # Convert to requests per second.
         num_requests_per_second = len(
             self.request_timestamps) / self.rps_window_size
