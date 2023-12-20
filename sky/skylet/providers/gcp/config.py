@@ -456,6 +456,10 @@ def _configure_iam_role(config, crm, iam):
     if config["provider"].get(HAS_TPU_PROVIDER_FIELD, False):
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
         permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
+    # If specifying custom VPC, permissions to modify network are not necessary
+    if config["provider"].get("vpc_name", None):
+        remove = ("compute.firewalls.create", "compute.firewalls.delete")
+        permissions = [p for p in permissions if p not in remove]
 
     satisfied, policy = _is_permission_satisfied(
         service_account, crm, iam, permissions, roles
