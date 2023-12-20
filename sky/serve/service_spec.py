@@ -110,7 +110,7 @@ class SkyServiceSpec:
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
             service_config['target_qps_per_replica'] = None
-            service_config['auto_restart'] = True
+            service_config['auto_restart'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -118,7 +118,7 @@ class SkyServiceSpec:
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
-                'auto_restart', True)
+                'auto_restart', None)
             service_config[
                 'autoscaling_decision_interval'] = policy_section.get(
                     'autoscaling_decision_interval', 20)
