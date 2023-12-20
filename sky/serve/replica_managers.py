@@ -166,20 +166,6 @@ def _get_resources_ports(task_yaml: str) -> str:
     return task_resources.ports[0]
 
 
-def _get_use_spot_override(task_yaml: str,
-                           override: Optional[Dict[str, Any]]) -> bool:
-    """Get the resources ports used by the task."""
-    if override is not None:
-        use_spot_override = override.get('use_spot')
-        if use_spot_override is not None:
-            assert isinstance(use_spot_override, bool)
-            return use_spot_override
-    task = sky.Task.from_yaml(task_yaml)
-    assert len(task.resources) == 1, task
-    task_resources = list(task.resources)[0]
-    return task_resources.use_spot
-
-
 def with_lock(func):
 
     @functools.wraps(func)
@@ -336,14 +322,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 2
-
-    def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool) -> None:
+    def __init__(self, replica_id: int, cluster_name: str,
+                 replica_port: str) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
-        self.is_spot: bool = is_spot
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -393,7 +376,6 @@ class ReplicaInfo:
         info_dict = {
             'replica_id': self.replica_id,
             'name': self.cluster_name,
-            'is_spot': self.is_spot,
             'status': self.status,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -446,18 +428,6 @@ class ReplicaInfo:
             logger.info(f'Error when probing {replica_identity}: '
                         f'{common_utils.format_exception(e)}.')
         return self, False, probe_time
-
-    def __setstate__(self, state):
-        """Set state from pickled state, for backward compatibility."""
-        version = state.pop('_version', None)
-        # Handle old version(s) here.
-        if version is None:
-            version = -1
-
-        if version < 2:
-            self.is_spot = False
-
-        self.__dict__.update(state)
 
 
 class ReplicaManager:
@@ -558,10 +528,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _get_use_spot_override(self._task_yaml_path,
-                                          resources_override)
 
-        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -643,7 +611,6 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self._service_name,
                                                     replica_id)
         assert info is not None
-        assert info.is_spot
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         self._terminate_replica(replica_id, sync_down_logs=False)

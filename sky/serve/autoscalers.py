@@ -36,7 +36,17 @@ class AutoscalerDecision:
     |---------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    target: Union[Dict[str, Any], int]
+    target: Optional[Union[Dict[str, Any], int]]
+
+    def __init__(self,
+                 operator: AutoscalerDecisionOperator,
+                 target: Optional[Union[Dict[str, Any], int]] = None):
+
+        # Scale down requires replica ids to remove.
+        assert not (operator == AutoscalerDecisionOperator.SCALE_DOWN and
+                    target is None)
+        self.operator = operator
+        self.target = target
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -165,16 +175,6 @@ class RequestRateAutoscaler(Autoscaler):
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
 
-    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': True, 'spot_recovery': None}
-
-    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': False, 'spot_recovery': None}
-
-    def _get_resources_override_dict(self, use_spot: bool) -> Dict[str, Any]:
-        return (self._get_spot_resources_override_dict()
-                if use_spot else self._get_on_demand_resources_override_dict())
-
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
@@ -182,14 +182,6 @@ class RequestRateAutoscaler(Autoscaler):
 
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_alive_replicas = len(alive_replica_infos)
-        use_spot_list = [
-            1 if info.is_spot else 0 for info in alive_replica_infos
-        ]
-        # TODO(MaoZiming): Support mix of on-demand and spot on master.
-        assert len(use_spot_list) in [
-            0, num_alive_replicas
-        ], 'replicas should be either all spot or all on-demand'
-        use_spot = sum(use_spot_list) == num_alive_replicas
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -227,9 +219,7 @@ class RequestRateAutoscaler(Autoscaler):
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
-                    AutoscalerDecision(
-                        AutoscalerDecisionOperator.SCALE_UP,
-                        target=self._get_resources_override_dict(use_spot)))
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP))
 
         elif num_alive_replicas > self.target_num_replicas:
             num_replicas_to_scale_down = (num_alive_replicas -
