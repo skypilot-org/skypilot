@@ -1120,6 +1120,8 @@ class Resources:
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
+        common_utils.validate_schema(config, schemas.get_resources_schema(),
+                                     'Invalid resources YAML: ')
         if config is None:
             return {Resources()}
 
@@ -1130,8 +1132,15 @@ class Resources:
             for override_config in override_configs:
                 new_resource_config = base_resource_config.copy()
                 new_resource_config.update(override_config)
-                resources_list.append(
-                    Resources._from_yaml_config_single(new_resource_config))
+                # Call from_yaml_config again instead of
+                # _from_yaml_config_single to handle the case, where both
+                # multiple accelerators and `any_of` is specified.
+                # This will not cause infinite recursion because we have made
+                # sure that `any_of` and `ordered` cannot be specified in the
+                # resource candidates in `any_of` or `ordered`, by the schema
+                # validation above.
+                resources_list.extend(
+                    list(Resources.from_yaml_config(new_resource_config)))
             return resources_list
 
         config = config.copy()
@@ -1153,11 +1162,18 @@ class Resources:
                     for k, v in accelerators.items()
                 ]
                 accelerators = set(accelerators)
-            if len(accelerators) > 1 and (any_of_configs or ordered_configs):
+            if len(accelerators) > 1 and ordered_configs:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify multiple "accelerators" with "any_of" '
-                        'or "ordered" in resources.')
+                        'Cannot specify multiple "accelerators" with "ordered" '
+                        'in resources.')
+            if (len(accelerators) > 1 and any_of_configs and
+                    not isinstance(accelerators, set)):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify multiple "accelerators" with prefered '
+                        'order (i.e., list of accelerators) with "any_of" '
+                        'in resources.')
 
         if any_of_configs:
             resources_list = _override_resources(config, any_of_configs)
@@ -1187,8 +1203,6 @@ class Resources:
 
     @classmethod
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
-        common_utils.validate_schema(config, schemas.get_resources_schema(),
-                                     'Invalid resources YAML: ')
 
         resources_fields = {}
         resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
