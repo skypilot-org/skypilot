@@ -25,7 +25,10 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        auto_restart: bool = True,
+        auto_restart: Optional[bool] = True,
+        autoscaling_decision_interval: int = 20,
+        upscale_delay_seconds: int = 300,
+        downscale_delay_seconds: int = 1200,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -47,9 +50,9 @@ class SkyServiceSpec:
                     'qps_upper_threshold and qps_lower_threshold are '
                     'deprecated. Please use target_qps_per_replica instead.')
 
-        if not auto_restart:
+        if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('auto_restart=False is deprecated.')
+                raise ValueError('auto_restart is deprecated.')
 
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
@@ -57,7 +60,9 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-        self._auto_restart = auto_restart
+        self._autoscaling_decision_interval = autoscaling_decision_interval
+        self._upscale_delay_seconds = upscale_delay_seconds
+        self._downscale_delay_seconds = downscale_delay_seconds
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -114,6 +119,13 @@ class SkyServiceSpec:
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', True)
+            service_config[
+                'autoscaling_decision_interval'] = policy_section.get(
+                    'autoscaling_decision_interval', 20)
+            service_config['upscale_delay_seconds'] = policy_section.get(
+                'upscale_delay_seconds', 300)
+            service_config['downscale_delay_seconds'] = policy_section.get(
+                'downscale_delay_seconds', 1200)
 
         return SkyServiceSpec(**service_config)
 
@@ -159,7 +171,12 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
-        add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
+        add_if_not_none('replica_policy', 'autoscaling_decision_interval',
+                        self.autoscaling_decision_interval)
+        add_if_not_none('replica_policy', 'upscale_delay_seconds',
+                        self.upscale_delay_seconds)
+        add_if_not_none('replica_policy', 'downscale_delay_seconds',
+                        self.downscale_delay_seconds)
 
         return config
 
@@ -182,7 +199,6 @@ class SkyServiceSpec:
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}\
         """)
 
     @property
@@ -212,4 +228,17 @@ class SkyServiceSpec:
 
     @property
     def auto_restart(self) -> bool:
-        return self._auto_restart
+        # Deprecate auto_restart = False
+        return True
+
+    @property
+    def autoscaling_decision_interval(self) -> int:
+        return self._autoscaling_decision_interval
+
+    @property
+    def upscale_delay_seconds(self) -> int:
+        return self._upscale_delay_seconds
+
+    @property
+    def downscale_delay_seconds(self) -> int:
+        return self._downscale_delay_seconds

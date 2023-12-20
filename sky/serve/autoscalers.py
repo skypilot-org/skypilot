@@ -17,9 +17,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_UPSCALE_DELAY_S = 300
-_DOWNSCALE_DELAY_S = 1200
-
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -39,7 +36,7 @@ class AutoscalerDecision:
     |---------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    target: Union[Optional[Dict[str, Any]], int]
+    target: Union[Dict[str, Any], int]
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -107,12 +104,13 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
-        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
-                                                     self.frequency)
-        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
-                                                       self.frequency)
+        self.scale_up_consecutive_periods: int = int(
+            spec.upscale_delay_seconds / self.frequency)
+        self.scale_down_consecutive_periods: int = int(
+            spec.downscale_delay_seconds / self.frequency)
         # Target number of replicas is initialized to min replicas.
         self.target_num_replicas: int = spec.min_replicas
+        self.boostrap_done: bool = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -148,7 +146,10 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
-        if target_num_replicas > self.target_num_replicas:
+        if not self.boostrap_done:
+            self.boostrap_done = True
+            return target_num_replicas
+        elif target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
@@ -179,7 +180,6 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        # TODO(MaoZiming): Consider non-alive replicas when auto_restart = False
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_alive_replicas = len(alive_replica_infos)
         use_spot_list = [

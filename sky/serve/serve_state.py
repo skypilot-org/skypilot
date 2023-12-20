@@ -105,7 +105,7 @@ class ReplicaStatus(enum.Enum):
 
     @classmethod
     def scale_down_decision_order(cls) -> List['ReplicaStatus']:
-        # TODO(tian): Add non-alive and non-not_ready statuses.
+        # Scale down replicas in the order of replica initialization
         return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
 
     def colored_str(self) -> str:

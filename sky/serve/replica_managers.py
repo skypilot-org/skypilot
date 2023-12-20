@@ -339,12 +339,11 @@ class ReplicaInfo:
     _VERSION = 2
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, zone: Optional[str]) -> None:
+                 is_spot: bool) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
         self.is_spot: bool = is_spot
-        self.zone: Optional[str] = zone
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
@@ -395,7 +394,6 @@ class ReplicaInfo:
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'is_spot': self.is_spot,
-            'zone': self.zone,
             'status': self.status,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
@@ -458,7 +456,6 @@ class ReplicaInfo:
 
         if version < 2:
             self.is_spot = False
-            self.zone = None
 
         self.__dict__.update(state)
 
@@ -563,11 +560,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _get_use_spot_override(self._task_yaml_path,
                                           resources_override)
-        zone = None
-        if resources_override is not None:
-            zone = resources_override.get('zone')
-        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           zone)
+
+        info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.

@@ -44,12 +44,28 @@ Available fields:
         # use fixed number of replicas same as min_replicas and ignore any QPS
         # threshold specified below.
         max_replicas: 3
-        # Following thresholds describe when to scale up or down.
-        # Target QPS per replica (optional). If the QPS of your service
-        # exceeds this threshold, SkyServe will scale up your service to meet
-        # the target QPS. If the QPS of your service
-        # is below this threshold, SkyServe will scale down your service. 
+        # Following specs describe the autoscaling policy.
+        # Target request per second per replica (optional). SkyServe will scale your
+        # service so that, ultimately, each replica manages approximately
+        # target_rps_per_replica queries per second. **Autoscaling will only be
+        # enabled if this value is specified.**
         target_qps_per_replica: 5
+        # Autoscaling decision interval in seconds (optional). Defaults to 20 seconds.
+        # Every autoscaling_decision_interval seconds, SkyServe will check the QPS
+        # of your service and make autoscaling decisions. Target number of replicas
+        # will be calculated by:
+        #   target_replicas = ceil(current_qps / target_rps_per_replica)
+        # This value will also be capped by min_replicas and max_replicas.
+        autoscaling_decision_interval: 20
+        # Upscale and downscale delay in seconds (optional). Defaults to 300 seconds
+        # (5 minutes) and 1200 seconds (20 minutes) respectively. To avoid aggressive
+        # autoscaling, SkyServe will only upscale or downscale your service if the
+        # QPS of your service is higher or lower than the target QPS for a period
+        # of time. This period of time is controlled by upscale_delay_seconds and
+        # downscale_delay_seconds. If you want to scale your service more aggressively,
+        # you can set these values to a smaller number.
+        upscale_delay_seconds: 300
+        downscale_delay_seconds: 1200
 
       # Also, for convenience, we have a simplified version of replica policy that
       # use fixed number of replicas. Just use the following syntax:
