@@ -209,7 +209,7 @@ Available fields:
       # by the optimizer.
       # `ordered:` means that SkyPilot will failover through the candidate
       # resources with the specified order.
-      # to go through 
+      # Note: accelerators under `any_of` and `ordered` cannot be a list or set.
       any_of:
         - cloud: aws
           region: us-west-2
