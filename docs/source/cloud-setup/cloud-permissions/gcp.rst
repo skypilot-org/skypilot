@@ -102,6 +102,7 @@ User
     storage.buckets.get
     storage.buckets.delete
     storage.objects.create
+    storage.objects.update
     storage.objects.delete
     storage.objects.get
     storage.objects.list
