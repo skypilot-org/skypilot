@@ -149,8 +149,6 @@ class Passthrough(Operations):
             full_path = self._full_write_path(partial)
         elif read:
             full_path = self._full_read_path(partial)
-        elif self.is_in_read_dir(partial):
-            full_path = self._full_read_path(partial)
         elif self.is_in_write_dir(partial):
             full_path = self._full_write_path(partial)
         else:
