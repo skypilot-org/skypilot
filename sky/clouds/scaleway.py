@@ -1,13 +1,18 @@
 """Scaleway
 """
 import typing
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
-from sky import clouds
+import requests
+
+from sky import clouds, sky_logging
+from sky.adaptors.scaleway import instance
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     pass
+
+logger = sky_logging.init_logger(__name__)
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -49,3 +54,18 @@ class Scaleway(clouds.Cloud):
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
         return isinstance(other, Scaleway)
+
+    @classmethod
+    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        try:
+            instance().list_servers()
+        except Exception:
+            return False, ('Failed to access Scaleway with credentials. '
+                           'To configure credentials, go to:\n    '
+                           '  https://console.scaleway.com/iam/api-keys\n    '
+                           'to generate API key and install it in your Scaleway Configuration file')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify Scaleway credentials. '
+                           'Check your network connection '
+                           'and try again.')
+        return True, None
