@@ -5198,9 +5198,14 @@ def local():
     pass
 
 
+@click.option('--gpus',
+              default=False,
+              is_flag=True,
+              help='Launch cluster with GPU support.',
+              hidden=True)
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up():
+def local_up(gpus: bool):
     """Creates a local cluster."""
     cluster_created = False
     # Check if ~/.kube/config exists:
@@ -5218,9 +5223,10 @@ def local_up():
                                       'create_cluster.sh')
         # Get directory of script and run it from there
         cwd = os.path.dirname(os.path.abspath(up_script_path))
+        run_command = up_script_path + ' --gpus' if gpus else up_script_path
         # Run script and don't print output
         try:
-            subprocess_utils.run(up_script_path, cwd=cwd, capture_output=True)
+            subprocess_utils.run(run_command, cwd=cwd, capture_output=True)
             cluster_created = True
         except subprocess.CalledProcessError as e:
             # Check if return code is 100
