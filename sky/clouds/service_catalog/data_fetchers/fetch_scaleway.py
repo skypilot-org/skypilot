@@ -13,9 +13,8 @@ def fetch_pricing():
     res = []
     client = scaleway.Client.from_config_file_and_env()
     for zone in scaleway.ALL_ZONES:
-        servers = (InstanceV1API(client)
-                   .list_servers_types(zone=zone, per_page=100)
-                   .servers)
+        servers = (InstanceV1API(client).list_servers_types(
+            zone=zone, per_page=100).servers)
         for key, server_type in servers.items():
             # We are not interested in nodes that do not have a GPU
             if not server_type.gpu:
@@ -23,16 +22,14 @@ def fetch_pricing():
 
             name_to_gpu_info = {
                 'RENDER-S': {
-                    'Gpus': [
-                        {
-                            'Name': 'Tesla P100-PCIE-16GB',
-                            'Manufacturer': 'NVIDIA',
-                            'Count': 1,
-                            'MemoryInfo': {
-                                'SizeInMiB': 16384
-                            }
+                    'Gpus': [{
+                        'Name': 'Tesla P100-PCIE-16GB',
+                        'Manufacturer': 'NVIDIA',
+                        'Count': 1,
+                        'MemoryInfo': {
+                            'SizeInMiB': 16384
                         }
-                    ],
+                    }],
                     'TotalGpuMemoryInMiB': 16384
                 },
                 'GPU-3070-S': {
@@ -43,8 +40,7 @@ def fetch_pricing():
                         'MemoryInfo': {
                             'SizeInMiB': 8192,
                         }
-                    }
-                    ],
+                    }],
                     'TotalGpuMemoryInMiB': 8192,
                 },
                 'H100-1-80G': {
@@ -59,16 +55,14 @@ def fetch_pricing():
                     'TotalGpuMemoryInMiB': 81559,
                 },
                 'H100-2-80G': {
-                    'Gpus': [
-                        {
-                            'Name': 'NVIDIA H100 PCIe',
-                            'Manufacturer': 'NVIDIA',
-                            'Count': 2,
-                            'MemoryInfo': {
-                                'SizeInMiB': 81559
-                            }
-                        },
-                    ],
+                    'Gpus': [{
+                        'Name': 'NVIDIA H100 PCIe',
+                        'Manufacturer': 'NVIDIA',
+                        'Count': 2,
+                        'MemoryInfo': {
+                            'SizeInMiB': 81559
+                        }
+                    },],
                     'TotalGpuMemoryInMiB': 163118,
                 },
             }
@@ -80,10 +74,7 @@ def fetch_pricing():
                 'H100-2-80G': 'H100',
             }
 
-            zone_to_region = {
-                'fr-par-1': 'fr-par',
-                'fr-par-2': 'fr-par'
-            }
+            zone_to_region = {'fr-par-1': 'fr-par', 'fr-par-2': 'fr-par'}
 
             res.append({
                 'AvailabilityZone': zone,

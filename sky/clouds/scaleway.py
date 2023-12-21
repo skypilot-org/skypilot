@@ -1,18 +1,24 @@
 """Scaleway
 """
 import typing
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
-from sky import clouds, sky_logging
-from sky.adaptors.scaleway import instance
+from sky import clouds
+from sky import sky_logging
+from sky.adaptors.scaleway import get_client
+from sky.adaptors.scaleway import get_instance
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     pass
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ScalewayError(Exception):
+    pass
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -58,12 +64,15 @@ class Scaleway(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
-            instance().list_servers()
-        except Exception:
-            return False, ('Failed to access Scaleway with credentials. '
-                           'To configure credentials, go to:\n    '
-                           '  https://console.scaleway.com/iam/api-keys\n    '
-                           'to generate API key and install it in your Scaleway Configuration file')
+            instance = get_instance()
+            instance(client=get_client()).list_servers()
+        except ScalewayError:
+            return False, (
+                'Failed to access Scaleway with credentials. '
+                'To configure credentials, go to:\n    '
+                '  https://console.scaleway.com/iam/api-keys\n    '
+                'to generate API key and install it in your Scaleway Configuration file'
+            )
         except requests.exceptions.ConnectionError:
             return False, ('Failed to verify Scaleway credentials. '
                            'Check your network connection '

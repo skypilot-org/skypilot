@@ -1,12 +1,40 @@
 import logging
+from threading import RLock
+import time
 from types import ModuleType
 from typing import Any, Dict, List, Optional
 
-from ray.autoscaler._private.command_runner import DockerCommandRunner, SSHCommandRunner
+from ray.autoscaler._private.command_runner import DockerCommandRunner
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler.command_runner import CommandRunnerInterface
+from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from ray.util.annotations import DeveloperAPI
+import scaleway
+from scaleway.instance.v1 import CreateServerResponse
+from scaleway.instance.v1 import InstanceV1API
 
 logger = logging.getLogger(__name__)
+
+
+class ScalewayError(Exception):
+    pass
+
+
+def synchronized(f):
+
+    def wrapper(self, *args, **kwargs):
+        self.lock.acquire()
+        try:
+            return f(self, *args, **kwargs)
+        finally:
+            self.lock.release()
+
+    return wrapper
+
+
+def get_node_id_from_node(node: CreateServerResponse):
+    return "{zone}/{instance_id}".format(zone=node.server.zone,
+                                         instance_id=node.server.id)
 
 
 @DeveloperAPI
@@ -27,11 +55,18 @@ class ScalewayNodeProvider:
     immediately to terminated when `terminate_node` is called.
     """
 
-    def __init__(self, provider_config: Dict[str, Any], cluster_name: str) -> None:
+    def __init__(self, provider_config: Dict[str, Any],
+                 cluster_name: str) -> None:
+        self.lock = RLock()
         self.provider_config = provider_config
         self.cluster_name = cluster_name
         self._internal_ip_cache: Dict[str, str] = {}
         self._external_ip_cache: Dict[str, str] = {}
+        self.client = scaleway.Client.from_config_file_and_env()
+        self.instance = InstanceV1API(client=self.client)
+        self.commercial_type = "GPU-3070-S"
+        self.zone = "fr-par-2"
+        self.image = "ubuntu_jammy_gpu_os_12"
 
     @staticmethod
     def is_readonly() -> bool:
@@ -41,25 +76,16 @@ class ScalewayNodeProvider:
         """
         return False
 
-    def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
+    def non_terminated_nodes(self, tag_filters):
         """Return a list of node ids filtered by the specified tags dict.
-
         This list must not include terminated nodes. For performance reasons,
         providers are allowed to cache the result of a call to
         non_terminated_nodes() to serve single-node queries
-        (e.g. is_running(node_id)). This means that non_terminate_nodes() must
-        be called again to refresh results.
-
-        Examples:
-            >>> from ray.autoscaler.node_provider import NodeProvider
-            >>> from ray.autoscaler.tags import TAG_RAY_NODE_KIND
-            >>> provider = NodeProvider(...) # doctest: +SKIP
-            >>> provider.non_terminated_nodes( # doctest: +SKIP
-            ...     {TAG_RAY_NODE_KIND: "worker"})
-            ["node-1", "node-2"]
-
+        (e.g. is_running(node_id)). This means that non_terminated_nodes()
+        must be called again to refresh results.
         """
-        raise NotImplementedError
+        nodes = self.get_filtered_nodes(tag_filters=tag_filters)
+        return [node_id for node_id in nodes.keys()]
 
     def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
@@ -76,15 +102,22 @@ class ScalewayNodeProvider:
             return {}
         return node['tags']
 
-    def external_ip(self, node_id: str) -> str:
+    def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        raise NotImplementedError
+        # print(f"Node if {node_id}")
+        # print(self._get_cached_node(node_id=node_id))
+        node_status_data = self._get_cached_node(node_id=node_id)
+        print(f"Public IP returned is {node_status_data.public_ips[0]}")
+        return node_status_data.public_ips[0]
 
-    def internal_ip(self, node_id: str) -> str:
+    def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        raise NotImplementedError
+        return self.instance.get_server(server_id=node_id,
+                                        zone=self.zone).server.private_ip
 
-    def get_node_id(self, ip_address: str, use_internal_ip: bool = False) -> str:
+    def get_node_id(self,
+                    ip_address: str,
+                    use_internal_ip: bool = False) -> str:
         """Returns the node_id given an IP address.
 
         Assumes ip-address is unique per node.
@@ -107,9 +140,8 @@ class ScalewayNodeProvider:
         if not find_node_id():
             all_nodes = self.non_terminated_nodes({})
             ip_func = self.internal_ip if use_internal_ip else self.external_ip
-            ip_cache = (
-                self._internal_ip_cache if use_internal_ip else self._external_ip_cache
-            )
+            ip_cache = (self._internal_ip_cache
+                        if use_internal_ip else self._external_ip_cache)
             for node_id in all_nodes:
                 ip_cache[ip_func(node_id)] = node_id
 
@@ -122,9 +154,8 @@ class ScalewayNodeProvider:
 
         return find_node_id()
 
-    def create_node(
-        self, node_config: Dict[str, Any], tags: Dict[str, str], count: int
-    ) -> Optional[Dict[str, Any]]:
+    def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
+                    count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace.
 
         Optionally returns a mapping from created node ids to node metadata.
@@ -135,7 +166,34 @@ class ScalewayNodeProvider:
         observability.
 
         """
-        raise NotImplementedError
+        nodes = {}
+        for _ in range(count):
+            node = self.instance._create_server(
+                name=f"{self.cluster_name}-{tags['ray-node-type']}",
+                commercial_type=self.commercial_type,
+                image=self.image,
+                tags=[
+                    "{key}:{value}".format(key=key, value=value)
+                    for key, value in tags.items()
+                ],
+                enable_ipv6=True)
+            node_id = get_node_id_from_node(node)
+            nodes[node_id] = node
+        for node in nodes:
+            while node.server.state not in ['running', 'error']:
+                node = self.instance.get_server(zone=node.server.zone,
+                                                server_id=node.server.id)
+                time.sleep(2)
+            if node.server.state == 'error':
+                raise RuntimeError("Unable to launch instance")
+            config_tags = node_config.get('tags', {}).copy()
+            config_tags.update(tags)
+            config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
+
+            if node is None:
+                raise ScalewayError('Failed to launch instance.')
+
+        return nodes
 
     def create_node_with_resources_and_labels(
         self,
@@ -155,9 +213,11 @@ class ScalewayNodeProvider:
         """
         return self.create_node(node_config, tags, count)
 
-    def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
+    @synchronized
+    def set_node_tags(self, node_id, tags):
         """Sets the tag values (string dict) for the specified node."""
-        raise NotImplementedError
+        zone, server_id = node_id.split("/")
+        self.instance._update_server(zone=zone, server_id=server_id, tags=tags)
 
     def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node.
@@ -165,8 +225,8 @@ class ScalewayNodeProvider:
         Optionally return a mapping from deleted node ids to node
         metadata.
         """
-        self.scaleway_client.remove_instances(node_id)
-        self.metadata.set(node_id, None)
+        zone, server_id = node_id.split("/")
+        self.instance.delete_server(server_id=server_id, zone=zone)
 
     def terminate_nodes(self, node_ids: List[str]) -> Optional[Dict[str, Any]]:
         """Terminates a set of nodes.
@@ -240,14 +300,14 @@ class ScalewayNodeProvider:
         else:
             return SSHCommandRunner(**common_args)
 
-    def prepare_for_head_node(self, cluster_config: Dict[str, Any]) -> Dict[str, Any]:
+    def prepare_for_head_node(self,
+                              cluster_config: Dict[str, Any]) -> Dict[str, Any]:
         """Returns a new cluster config with custom configs for head node."""
         return cluster_config
 
     @staticmethod
     def fillout_available_node_types_resources(
-        cluster_config: Dict[str, Any]
-    ) -> Dict[str, Any]:
+            cluster_config: Dict[str, Any]) -> Dict[str, Any]:
         """Fills out missing "resources" field for available_node_types."""
         return cluster_config
 
