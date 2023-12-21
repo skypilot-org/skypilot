@@ -1120,10 +1120,10 @@ class Resources:
     def from_yaml_config(
         cls, config: Optional[Dict[str, Any]]
     ) -> Union[Set['Resources'], List['Resources']]:
-        common_utils.validate_schema(config, schemas.get_resources_schema(),
-                                     'Invalid resources YAML: ')
         if config is None:
             return {Resources()}
+        common_utils.validate_schema(config, schemas.get_resources_schema(),
+                                     'Invalid resources YAML: ')
 
         def _override_resources(
                 base_resource_config: Dict[str, Any],
