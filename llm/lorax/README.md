@@ -90,6 +90,8 @@ Here are some other interesting LoRAs to explore with LoRAX:
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
 - [medalpaca/medalpaca-lora-30b-8bit](https://huggingface.co/medalpaca/medalpaca-lora-30b-8bit): Llama-30b fine-tuned on the MedAlpaca dataset.
 
+You can find more examples [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora).
+
 ## Stop the deployment
 
 Stopping the deployment will shut down the instance, but keep the storage volume:
