@@ -812,7 +812,8 @@ class GCPComputeInstance(GCPInstance):
         if errors:
             logger.warning(f'Failed to create instances. Reason: {errors}')
             return errors, names
-        assert success, 'Failed to create instances, but there is no error.'
+        assert success, ('Failed to create instances, but there is no error. '
+                         f'Instance status: {result}')
         # assign labels for head node
         with pool.ThreadPool() as p:
             p.starmap(
