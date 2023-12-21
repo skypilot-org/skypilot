@@ -82,18 +82,13 @@ curl http://$IP:8080/generate \
     -H 'Content-Type: application/json'
 ```
 
-Here is another interesting Mistral fine-tuned model to test out:
+Here are some other interesting Mistral-7B fine-tuned models to test out:
 
 - [alignment-handbook/zephyr-7b-dpo-lora](https://huggingface.co/alignment-handbook/zephyr-7b-dpo-lora): Mistral-7b fine-tuned on Zephyr-7B dataset with DPO.
-
-And here are a few other LoRAs for other base models to explore:
-
-- [timdettmers/guanaco-33b](https://huggingface.co/timdettmers/guanaco-33b): fine-tuned Llama-33b from the QLoRA paper.
-- [tloen/alpaca-lora-7b](https://huggingface.co/tloen/alpaca-lora-7b): Instruction-tuned Llama-7b model using the Alpaca dataset.
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
-- [medalpaca/medalpaca-lora-30b-8bit](https://huggingface.co/medalpaca/medalpaca-lora-30b-8bit): Llama-30b fine-tuned on the MedAlpaca dataset.
+- [Undi95/Mistral-7B-roleplay_alpaca-lora](https://huggingface.co/Undi95/Mistral-7B-roleplay_alpaca-lora): Fine-tuned using role-play prompts.
 
-You can find more examples [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora).
+You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
 
 ## Stop the deployment
 
