@@ -1193,11 +1193,8 @@ class Resources:
                 tmp_resources_list.append(
                     Resources._from_yaml_config_single(tmp_resource))
 
-            if isinstance(accelerators, (list, set)):
-                return type(accelerators)(tmp_resources_list)
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Accelerators must be a list or a set.')
+            assert isinstance(accelerators, (list, set)), accelerators
+            return type(accelerators)(tmp_resources_list)
 
         return {Resources._from_yaml_config_single(config)}
 
