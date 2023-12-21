@@ -15,6 +15,7 @@ from azure.mgmt.resource.resources.models import DeploymentMode
 from sky.utils import common_utils
 
 UNIQUE_ID_LEN = 4
+_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS = 600
 
 logger = logging.getLogger(__name__)
 
@@ -135,10 +136,16 @@ def _configure_resource_group(config):
     nsg_name = nsg_id.split("/")[-1]
     network_client = NetworkManagementClient(credentials, subscription_id)
     backoff = common_utils.Backoff()
+    start_time = time.time()
     while True:
         nsg = network_client.network_security_groups.get(resource_group, nsg_name)
         if nsg.provisioning_state == "Succeeded":
             break
+        if time.time() - start_time > _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS:
+            raise RuntimeError(
+                f"Fails to create NSG {nsg_name} in {resource_group} within "
+                f"{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds."
+            )
         time.sleep(backoff.current_backoff())
 
     # append output resource ids to be used with vm creation
