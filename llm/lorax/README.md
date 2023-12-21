@@ -82,9 +82,12 @@ curl http://$IP:8080/generate \
     -H 'Content-Type: application/json'
 ```
 
-Here are some other interesting LoRAs to explore with LoRAX:
+Here is another interesting Mistral fine-tuned model to test out:
 
 - [alignment-handbook/zephyr-7b-dpo-lora](https://huggingface.co/alignment-handbook/zephyr-7b-dpo-lora): Mistral-7b fine-tuned on Zephyr-7B dataset with DPO.
+
+And here are a few other LoRAs for other base models to explore:
+
 - [timdettmers/guanaco-33b](https://huggingface.co/timdettmers/guanaco-33b): fine-tuned Llama-33b from the QLoRA paper.
 - [tloen/alpaca-lora-7b](https://huggingface.co/tloen/alpaca-lora-7b): Instruction-tuned Llama-7b model using the Alpaca dataset.
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
