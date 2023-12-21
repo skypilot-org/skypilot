@@ -108,6 +108,12 @@ AWS, where it succeeded after two regions:
 Multiple Candidate GPUs
 -------------------------
 
+.. tip::
+
+  Support for multiple resources via ``any_of`` or ``ordered`` was added after v0.4.1.
+
+  To use this feature, :ref:`install the nightly release <installation>`: ``pip install -U skypilot-nightly``
+
 If a task can be run on different GPUs, the user can specify multiple candidate GPUs,
 and SkyPilot will automatically find the cheapest available GPU.
 
@@ -146,8 +152,14 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 
 .. _multiple-resources:
 
-(**Advanced**) Multiple Candidate Resources
+Multiple Candidate Resources
 --------------------------------------------
+
+.. tip::
+
+  Support for multiple resources via ``any_of`` or ``ordered`` was added after v0.4.1.
+
+  To use this feature, :ref:`install the nightly release <installation>`: ``pip install -U skypilot-nightly``
 
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:
 
@@ -181,7 +193,7 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
   The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
   includes the field for a candidate resource. :code:`ordered` and :code:`any_of` indicate the preference for the candidate resources.
 
-The following is an example for limiting the cluster to be launched in only in US with any of the following GPUs: A10g:8, A10:8, L4:8, and A100:8:
+**Example**: only allowing a set of regions/clouds for launching with any of the following GPUs: A10g:8, A10:8, L4:8, and A100:8:
 
 .. code-block:: yaml
 
