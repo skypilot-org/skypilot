@@ -82,6 +82,14 @@ curl http://$IP:8080/generate \
     -H 'Content-Type: application/json'
 ```
 
+Here are some other interesting LoRAs to explore with LoRAX:
+
+- [alignment-handbook/zephyr-7b-dpo-lora](https://huggingface.co/alignment-handbook/zephyr-7b-dpo-lora): Mistral-7b fine-tuned on Zephyr-7B dataset with DPO.
+- [timdettmers/guanaco-33b](https://huggingface.co/timdettmers/guanaco-33b): fine-tuned Llama-33b from the QLoRA paper.
+- [tloen/alpaca-lora-7b](https://huggingface.co/tloen/alpaca-lora-7b): Instruction-tuned Llama-7b model using the Alpaca dataset.
+- [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
+- [medalpaca/medalpaca-lora-30b-8bit](https://huggingface.co/medalpaca/medalpaca-lora-30b-8bit): Llama-30b fine-tuned on the MedAlpaca dataset.
+
 ## Stop the deployment
 
 Stopping the deployment will shut down the instance, but keep the storage volume:
