@@ -29,7 +29,7 @@ IP=$(sky status --ip mixtral)
 curl -L http://$IP:8000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-      "model": "mistralai/Mistral-7B-v0.1",
+      "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
       "prompt": "My favourite condiment is",
       "max_tokens": 25
   }'
