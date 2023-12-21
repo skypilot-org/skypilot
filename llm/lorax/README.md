@@ -6,23 +6,13 @@
 
 [LoRAX](https://github.com/predibase/lorax) (LoRA eXchange) is a framework that allows users to serve thousands of fine-tuned LLMs on a single GPU, dramatically reducing the cost of serving without compromising on throughput or latency. It works by dynamically loading multiple fine-tuned "adapters" (LoRAs, etc.) on top of a single base model at runtime. Concurrent requests for different adapters can be processed together in a single batch, allowing LoRAX to maintain near linear throughput scaling as the number of adapters increases.
 
-## Setup
-
-First install SkyPilot and check that your cloud credentials are properly set:
-
-```shell
-pip install skypilot
-sky check
-```
-
 ## Launch a deployment
 
 Create a YAML configuration file called `lorax.yaml`:
 
 ```yaml
 resources:
-  cloud: aws
-  accelerators: A10G:1
+  accelerators: {A10G, A10, L4, A100, A100-80GB}
   memory: 32+
   ports: 
     - 8080
@@ -64,7 +54,12 @@ IP=$(sky status --ip lorax-cluster)
 
 curl http://$IP:8080/generate \
     -X POST \
-    -d '{"inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]", "parameters": {"max_new_tokens": 64}}' \
+    -d '{
+        "inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]",
+        "parameters": {
+            "max_new_tokens": 64
+        }
+    }' \
     -H 'Content-Type: application/json'
 ```
 
@@ -77,7 +72,13 @@ In this example, we'll use the adapter `vineetsharma/qlora-adapter-Mistral-7B-In
 ```shell
 curl http://$IP:8080/generate \
     -X POST \
-    -d '{"inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]", "parameters": {"max_new_tokens": 64, "adapter_id": "vineetsharma/qlora-adapter-Mistral-7B-Instruct-v0.1-gsm8k"}}' \
+    -d '{
+        "inputs": "[INST] Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? [/INST]",
+        "parameters": {
+            "max_new_tokens": 64,
+            "adapter_id": "vineetsharma/qlora-adapter-Mistral-7B-Instruct-v0.1-gsm8k"
+        }
+    }' \
     -H 'Content-Type: application/json'
 ```
 
