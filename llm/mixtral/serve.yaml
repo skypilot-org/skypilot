@@ -14,7 +14,6 @@ service:
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 2
-    auto_restart: true
 
 resources: 
   accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}

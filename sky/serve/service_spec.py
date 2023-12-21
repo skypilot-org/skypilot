@@ -25,7 +25,7 @@ class SkyServiceSpec:
         qps_lower_threshold: Optional[float] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        auto_restart: Optional[bool] = True,
+        auto_restart: Optional[bool] = None,
         autoscaling_decision_interval: int = 20,
         upscale_delay_seconds: int = 300,
         downscale_delay_seconds: int = 1200,
@@ -50,9 +50,9 @@ class SkyServiceSpec:
                     'qps_upper_threshold and qps_lower_threshold are '
                     'deprecated. Please use target_qps_per_replica instead.')
 
-        if auto_restart is not None and auto_restart is False:
+        if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('auto_restart = False is deprecated.')
+                raise ValueError('auto_restart is deprecated.')
 
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds

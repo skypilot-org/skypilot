@@ -56,7 +56,6 @@ service:
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 1
-    auto_restart: true
 ```
 
 Optional: To further save the cost by 3-4x, we can use the spot instances as the replicas, and SkyServe will automatically manage the spot instances, monitor the prices and preemptions, and restart the replica when needed.
