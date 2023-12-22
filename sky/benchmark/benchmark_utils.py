@@ -96,7 +96,7 @@ def _get_optimized_resources(
             resources = config.get('resources', None)
             resources = sky.Resources.from_yaml_config(resources)
             task = sky.Task()
-            task.set_resources({resources})
+            task.set_resources(resources)
 
         dag = sky.optimize(dag, quiet=True)
         task = dag.tasks[0]

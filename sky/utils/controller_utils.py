@@ -283,8 +283,15 @@ def get_controller_resources(
                     controller_type=controller_type,
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
-
-    return controller_resources
+    if len(controller_resources) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=f'Expected exactly one resource, got '
+                    f'{len(controller_resources)} resources: '
+                    f'{controller_resources}'))
+    return list(controller_resources)[0]
 
 
 def _setup_proxy_command_on_controller(

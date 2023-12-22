@@ -193,18 +193,30 @@ If a task would like to specify multiple candidate resources (not only GPUs), th
   The list items are specified with a leading prefix :code:`-`, and each item is a dictionary that
   includes the field for a candidate resource. :code:`ordered` and :code:`any_of` indicate the preference for the candidate resources.
 
-**Example**: only allowing a set of regions/clouds for launching:
+**Example**: only allowing a set of regions/clouds for launching with any of the following GPUs: A10g:8, A10:8, L4:8, and A100:8:
 
 .. code-block:: yaml
 
   resources:
+    accelerators: {A10g:8, A10:8, L4:8, A100:8}
     any_of:
-      - cloud: aws
-        region: us-east-2
-        accelerators: A100:8
-      - cloud: gcp
-        region: us-central1
-        accelerators: A100:8
+      # AWS:
+      - region: us-east-1
+      - region: us-east-2
+      - region: us-west-1
+      - region: us-west-2
+      # GCP
+      - region: us-central1
+      - region: us-east1
+      - region: us-east4
+      - region: us-west1
+      - region: us-west2
+      - region: us-west3
+      - region: us-west4
+
+.. hint::
+
+  The regions specified that does not have the accelerator will be ignored automatically.
 
 This will genereate the following output:
 
@@ -212,11 +224,15 @@ This will genereate the following output:
 
   $ sky launch -c mycluster task.yaml
   ...
-  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-20 14:06:24 optimizer.py:910]  CLOUD   INSTANCE        vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
-  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-20 14:06:24 optimizer.py:910]  GCP     a2-highgpu-8g   96      680       A100:8         us-central1-a   29.39         ✔
-  I 11-20 14:06:24 optimizer.py:910]  AWS     p4d.24xlarge    96      1152      A100:8         us-east-2       32.77
-  I 11-20 14:06:24 optimizer.py:910] ----------------------------------------------------------------------------------------------
-  I 11-20 14:06:24 optimizer.py:910]
+  I 12-20 23:55:56 optimizer.py:717] 
+  I 12-20 23:55:56 optimizer.py:840] Considered resources (1 node):
+  I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
+  I 12-20 23:55:56 optimizer.py:910]  CLOUD   INSTANCE         vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
+  I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
+  I 12-20 23:55:56 optimizer.py:910]  GCP     g2-standard-96   96      384       L4:8           us-east4-a    7.98          ✔     
+  I 12-20 23:55:56 optimizer.py:910]  AWS     g5.48xlarge      192     768       A10G:8         us-east-1     16.29               
+  I 12-20 23:55:56 optimizer.py:910]  GCP     a2-highgpu-8g    96      680       A100:8         us-east1-b    29.39               
+  I 12-20 23:55:56 optimizer.py:910]  AWS     p4d.24xlarge     96      1152      A100:8         us-east-1     32.77               
+  I 12-20 23:55:56 optimizer.py:910] ---------------------------------------------------------------------------------------------
+  I 12-20 23:55:56 optimizer.py:910] 
   Launching a new cluster 'mycluster'. Proceed? [Y/n]:
