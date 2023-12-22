@@ -3437,8 +3437,7 @@ def show_gpus(
 
     # validation for the --region flag
     if all_regions and accelerator_str is None:
-        raise click.UsageError(
-            'The --all-region flag is only valid when an \
+        raise click.UsageError('The --all-region flag is only valid when an \
             accelerator is specified.')
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
