@@ -23,7 +23,7 @@ Install SkyPilot using pip:
 
           pip install skypilot-nightly
 
-          # Or, choose an extra (defaults to [aws]):
+          # Or, choose an extra:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
@@ -46,7 +46,7 @@ Install SkyPilot using pip:
 
           pip install skypilot
 
-          # Or, choose an extra (defaults to [aws]):
+          # Or, choose an extra:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
@@ -71,7 +71,7 @@ Install SkyPilot using pip:
           cd skypilot
           pip install -e .
 
-          # Or, choose an extra (defaults to [aws]):
+          # Or, choose an extra:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
