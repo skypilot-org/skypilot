@@ -94,6 +94,62 @@ User
     resourcemanager.projects.get
     resourcemanager.projects.getIamPolicy
 
+.. note::
+    
+    For custom VPC users `compute.firewalls.create` and `compute.firewalls.delete` are not necessary unless opening ports via `resources.ports`.
+
+4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    storage.buckets.create
+    storage.buckets.get
+    storage.buckets.delete
+    storage.objects.create
+    storage.objects.update
+    storage.objects.delete
+    storage.objects.get
+    storage.objects.list
+
+5. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
+
+.. code-block:: text
+
+    tpu.nodes.create
+    tpu.nodes.delete
+    tpu.nodes.list
+    tpu.nodes.get
+    tpu.nodes.update
+    tpu.operations.get
+
+6. **Optional**:  
+
+4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
+
+.. code-block:: text
+
+    storage.buckets.create
+    storage.buckets.get
+    storage.buckets.delete
+    storage.objects.create
+    storage.objects.update
+    storage.objects.delete
+    storage.objects.get
+    storage.objects.list
+
+5. **Optional**: If the user needs to access TPU VMs, you can additionally add the following permissions (the following may not be exhaustive, please file an issue if you find any missing permissions):
+
+.. code-block:: text
+
+    tpu.nodes.create
+    tpu.nodes.delete
+    tpu.nodes.list
+    tpu.nodes.get
+    tpu.nodes.update
+    tpu.operations.get
+
+6. **Optional**:  
+
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
 .. code-block:: text

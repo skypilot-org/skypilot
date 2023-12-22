@@ -1,3 +1,4 @@
+from sky import skypilot_config
 SKYPILOT_VPC_NAME = "skypilot-vpc"
 
 # Below parameters are from the default VPC on GCP.
@@ -91,11 +92,6 @@ FIREWALL_RULES_TEMPLATE = [
 VM_MINIMAL_PERMISSIONS = [
     "compute.disks.create",
     "compute.disks.list",
-    # TODO(skypilot): some users reported that firewalls changes
-    # (create/delete/update) should be removed if VPC/firewalls are separately
-    # set up. It is undesirable for a normal account to have these permissions.
-    # Note that if these permissions are removed, opening ports (e.g., via
-    # `resources.ports`) would fail.
     "compute.firewalls.create",
     "compute.firewalls.delete",
     "compute.firewalls.get",
@@ -125,6 +121,11 @@ VM_MINIMAL_PERMISSIONS = [
     "resourcemanager.projects.get",
     "resourcemanager.projects.getIamPolicy",
 ]
+# If specifying custom VPC, permissions to modify network are not necessary
+# unless opening ports (e.g., via `resources.ports`).
+if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
+    remove = ("compute.firewalls.create", "compute.firewalls.delete")
+    VM_MINIMAL_PERMISSIONS = [p for p in VM_MINIMAL_PERMISSIONS if p not in remove]
 
 TPU_MINIMAL_PERMISSIONS = [
     "tpu.nodes.create",
