@@ -43,7 +43,7 @@ AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS = 300
 # Autoscaler default downscale delays in seconds.
 # We will downscale only if the target number of instances
 # is smaller than the current alive instances for delay amount of time.
-AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 300
+AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of
