@@ -256,8 +256,7 @@ def execute(
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
             if not down:
-                requested_features.add(
-                    clouds.CloudImplementationFeatures.STOP)
+                requested_features.add(clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
