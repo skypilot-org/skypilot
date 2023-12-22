@@ -143,6 +143,13 @@ Documentation
    reference/faq
 
 .. toctree::
+   :maxdepth: 0
+   :caption: Developer Guides
+
+   developers/CONTRIBUTING
+   Adding a New Cloud <https://docs.google.com/document/d/1oWox3qb3Kz3wXXSGg9ZJWwijoa99a3PIQUHBR8UgEGs/edit?usp=sharing>
+
+.. toctree::
    :maxdepth: 1
    :caption: Cloud Admin and Usage
 
@@ -158,10 +165,3 @@ Documentation
    reference/cli
    reference/api
    reference/config
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Developer Guides
-
-   developers/CONTRIBUTING
-   developers/new-cloud
