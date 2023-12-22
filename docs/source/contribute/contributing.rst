@@ -1,5 +1,0 @@
-.. _contributing:
-
-
-Contributing
-=============
