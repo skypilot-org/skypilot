@@ -89,8 +89,8 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def _run_instances(region: str, cluster_name_on_cloud: str,
+                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     # NOTE: although google cloud instances have IDs, but they are
     #  not used for indexing. Instead, we use the instance name.
@@ -281,6 +281,27 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
+
+
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """See sky/provision/__init__.py"""
+    try:
+        return _run_instances(region, cluster_name_on_cloud, config)
+    except gcp.http_error_exception() as e:
+        error_details = getattr(e, 'error_details')
+        errors = []
+        if error_details is None:
+            raise
+        for e in error_details:
+            errors.append({
+                'code': e.get('reason'),
+                'domain': e.get('domain'),
+                'message': e.get('message'),
+            })
+        error = common.ProvisionError('Failed to launch instances.')
+        error.errors = errors
+        raise error from e
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,

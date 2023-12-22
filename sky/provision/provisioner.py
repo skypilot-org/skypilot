@@ -8,7 +8,7 @@ import socket
 import subprocess
 import time
 import traceback
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import colorama
 
@@ -136,7 +136,7 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Union[provision_common.ProvisionRecord, Exception]:
+) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
     original_config = common_utils.read_yaml(cluster_yaml)
     head_node_type = original_config['head_node_type']
@@ -160,7 +160,7 @@ def bulk_provision(
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
-        except Exception as e:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
                 zone_str = ','.join(zone.name for zone in zones)
@@ -180,7 +180,7 @@ def bulk_provision(
                              cluster_name,
                              terminate=terminate,
                              provider_config=original_config['provider'])
-            return e
+            raise
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,

@@ -779,7 +779,7 @@ class GCPComputeInstance(GCPInstance):
             #   'reason': 'quotaExceeded'
             # }
             error_details = getattr(e, 'error_details', [])
-            logger.warning(f'googleapiclient.errors.HttpError: {e}')
+            logger.warning(f'create_instances: googleapiclient.errors.HttpError: {e}')
             errors = []
             for e in error_details:
                 # To be consistent with error messages returned by operation wait.
@@ -810,7 +810,7 @@ class GCPComputeInstance(GCPInstance):
         # }
         errors = result.get('error', {}).get('errors')
         if errors:
-            logger.warning(f'Failed to create instances. Reason: {errors}')
+            logger.warning(f'create_instances: Failed to create instances. Reason: {errors}')
             return errors, names
         assert success, ('Failed to create instances, but there is no error. '
                          f'Instance status: {result}')
