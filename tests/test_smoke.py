@@ -1874,6 +1874,7 @@ def test_stop_gcp_spot():
         'stop_gcp_spot',
         [
             f'sky launch -c {name} --cloud gcp --use-spot --cpus 2+ -y -- touch myfile',
+            # stop should go through:
             f'sky stop {name} -y',
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
@@ -1884,6 +1885,10 @@ def test_stop_gcp_spot():
             f'sky start {name} -y',
             f'sky exec {name} -- ls myfile',
             f'sky logs {name} 3 --status',
+            # -i option at launch should go through:
+            f'sky launch -c {name} -i0 -y',
+            'sleep 90',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
     )

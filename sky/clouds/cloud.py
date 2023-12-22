@@ -34,8 +34,7 @@ class CloudImplementationFeatures(enum.Enum):
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'
-    AUTOSTOP = 'autostop'
+    STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     DOCKER_IMAGE = 'docker_image'
@@ -461,9 +460,9 @@ class Cloud:
             cls, requested_features: Set[CloudImplementationFeatures]) -> None:
         """Errors out if the cloud does not support all requested features.
 
-        For instance, Lambda Cloud does not support autostop, so
+        For instance, Lambda Cloud does not support stop, so
         Lambda.check_features_are_supported({
-            CloudImplementationFeatures.AUTOSTOP
+            CloudImplementationFeatures.STOP
         }) raises the exception.
 
         Raises:

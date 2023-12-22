@@ -255,23 +255,19 @@ def execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
-
             if not down:
                 requested_features.add(
-                    clouds.CloudImplementationFeatures.AUTOSTOP)
-                # TODO(ewzeng): allow autostop for spot when stopping is
-                # supported.
-                if task.use_spot:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'Autostop is not supported for spot instances.')
+                    clouds.CloudImplementationFeatures.STOP)
+        # NOTE: in general we may not have sufficiently specified info
+        # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
+        # the backend.
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                f'Backend {backend.NAME} does not support autostop, please try '
-                f'{backends.CloudVmRayBackend.NAME}')
+                f'Backend {backend.NAME} does not support autostop, please try'
+                f' {backends.CloudVmRayBackend.NAME}')
 
     if Stage.CLONE_DISK in stages:
         task = _maybe_clone_disk_from_cluster(clone_disk_from, cluster_name,

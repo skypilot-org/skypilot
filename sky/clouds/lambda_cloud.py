@@ -36,7 +36,6 @@ class Lambda(clouds.Cloud):
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER: f'Migrating disk is currently not supported on {_REPR}.',
         clouds.CloudImplementationFeatures.DOCKER_IMAGE: (
             f'Docker image is currently not supported on {_REPR}. '

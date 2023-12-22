@@ -448,9 +448,11 @@ def autostop(
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-        # Reference:
-        # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
+    if tpu_utils.is_tpu_vm_pod(handle.launched_resources) and not down:
+        # Stopping TPU VM Pods is not supported. Example error:
+        #   "StopNode" is not supported on pod nodes: "v2-32"
+        # Autodown is supported.
+        # Reference: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
@@ -484,7 +486,7 @@ def autostop(
     cloud = handle.launched_resources.cloud
     if not down and idle_minutes >= 0:
         cloud.check_features_are_supported(
-            {clouds.CloudImplementationFeatures.AUTOSTOP})
+            {clouds.CloudImplementationFeatures.STOP})
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)

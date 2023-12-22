@@ -54,8 +54,6 @@ class Kubernetes(clouds.Cloud):
         #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
-                                                     'support stopping VMs.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
