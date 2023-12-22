@@ -12,7 +12,6 @@ import colorama
 
 from sky import clouds
 from sky import exceptions
-from sky import skypilot_config
 from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
@@ -703,17 +702,12 @@ class GCP(clouds.Cloud):
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = constants.VM_MINIMAL_PERMISSIONS
-        if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
-            remove = ("compute.firewalls.create", "compute.firewalls.delete")
-            permissions = [p for p in permissions if p not in remove]
-        request = service.projects().testIamPermissions(
-            resource=project,
-            body={"permissions": permissions}
-        )
+        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
+        request = service.projects().testIamPermissions(resource=project,
+                                                        body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(permissions).difference(
+        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
             set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
