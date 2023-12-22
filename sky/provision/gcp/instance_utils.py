@@ -792,18 +792,33 @@ class GCPComputeInstance(GCPInstance):
             return errors, names
         errors = operation.get('error', {}).get('errors')
         if errors:
-            logger.warning(f'Failed to create instances. Reason: {errors}')
+            logger.warning(
+                'create_instances: Failed to create instances. '
+                f'Reason: {errors}'
+            )
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
-        request = cls.load_resource().zoneOperations().wait(
-            project=project_id,
-            operation=operation['name'],
-            zone=zone,
-        )
-        request.http.timeout = GCP_TIMEOUT
-        result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-        success = result['status'] == 'DONE'
+        wait_start = time.time()
+        success = False
+        while time.time() - wait_start < GCP_TIMEOUT:
+            # Retry the wait() call until it succeeds or times out.
+            # This is because the wait() call is only best effort, and does not
+            # guarantee that the operation is done when it returns.
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait
+            request = cls.load_resource().zoneOperations().wait(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            )
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            success = result['status'] == 'DONE'
+            if success:
+                break
+            logger.debug(f'Retry waiting for operation {operation["name"]} to '
+                         'finish ...')
+
         # NOTE: Error example:
         # {
         #   'code': 'VM_MIN_COUNT_NOT_REACHED',
@@ -812,8 +827,8 @@ class GCPComputeInstance(GCPInstance):
         errors = result.get('error', {}).get('errors')
         if errors:
             logger.warning(
-                f'create_instances: Failed to create instances. Reason: {errors}'
-            )
+                'create_instances: Failed to create instances. Reason: '
+                f'{errors}')
             return errors, names
         assert success, ('Failed to create instances, but there is no error. '
                          f'Instance status: {result}')
