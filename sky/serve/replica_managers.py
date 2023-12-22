@@ -214,8 +214,7 @@ class ReplicaStatusProperty:
     # The replica's spot instance was preempted.
     preempted: bool = False
 
-    def is_scale_down_succeeded(self, initial_delay_seconds: int,
-                                auto_restart: bool) -> bool:
+    def is_scale_down_succeeded(self, initial_delay_seconds: int) -> bool:
         """Whether to remove the replica record from the replica table.
 
         If not, the replica will stay in the replica table permanently to
@@ -225,7 +224,7 @@ class ReplicaStatusProperty:
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
-        if (auto_restart and self.first_ready_time is not None and
+        if (self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
             # If the service is up for more than `initial_delay_seconds`,
             # we assume there is no bug in the user code and the scale down
@@ -441,7 +440,6 @@ class ReplicaManager:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
-        self._auto_restart = spec.auto_restart
         self._readiness_path: str = spec.readiness_path
         self._initial_delay_seconds: int = spec.initial_delay_seconds
         self._post_data: Optional[Dict[str, Any]] = spec.post_data
@@ -698,7 +696,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
                 if info.status_property.is_scale_down_succeeded(
-                        self._initial_delay_seconds, self._auto_restart):
+                        self._initial_delay_seconds):
                     # This means the cluster is deleted due to
                     # a scale down or the cluster is recovering
                     # from preemption. Delete the replica info

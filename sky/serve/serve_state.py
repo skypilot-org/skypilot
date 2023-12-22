@@ -34,7 +34,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         status TEXT,
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
-        auto_restart INTEGER DEFAULT NULL,
         requested_resources BLOB DEFAULT NULL)""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS replicas (
@@ -189,8 +188,7 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                auto_restart: bool, requested_resources_str: str,
-                status: ServiceStatus) -> bool:
+                requested_resources_str: str, status: ServiceStatus) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -202,9 +200,9 @@ def add_service(name: str, controller_job_id: int, policy: str,
             """\
             INSERT INTO services
             (name, controller_job_id, status, policy,
-            auto_restart, requested_resources_str)
+            requested_resources_str)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, status.value, policy, int(auto_restart),
+            (name, controller_job_id, status.value, policy,
              requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
@@ -262,8 +260,7 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, auto_restart, requested_resources,
-     requested_resources_str) = row[:10]
+     uptime, policy, requested_resources, requested_resources_str) = row[:9]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -272,7 +269,6 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
-        'auto_restart': bool(auto_restart),
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)

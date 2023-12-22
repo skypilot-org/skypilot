@@ -241,11 +241,6 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def auto_restart(self) -> bool:
-        # Deprecate auto_restart = False
-        return True
-
-    @property
     def autoscaling_decision_interval(self) -> int:
         return self._autoscaling_decision_interval
 
