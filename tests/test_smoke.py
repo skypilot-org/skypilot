@@ -3888,6 +3888,21 @@ def test_multiple_accelerators_ordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_ordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -3899,6 +3914,20 @@ def test_multiple_accelerators_unordered():
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
         ],
         f'sky down -y {name}',
     )

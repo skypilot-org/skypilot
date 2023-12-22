@@ -152,9 +152,12 @@ def get_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
-                    'maxProperties': 1,
                     'additionalProperties': {
-                        'type': 'number'
+                        'anyOf': [{
+                            'type': 'null',
+                        }, {
+                            'type': 'number',
+                        }]
                     }
                 }, {
                     'type': 'array',
