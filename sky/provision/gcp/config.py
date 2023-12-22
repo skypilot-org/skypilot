@@ -559,7 +559,7 @@ def get_usable_vpc_and_subnet(
             subnets = _list_subnets(project_id,
                                     region,
                                     compute,
-                                    filter=f'(name="{specific_vpc_to_use}")')
+                                    network=specific_vpc_to_use)
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
                     'SUBNET_NOT_FOUND_FOR_VPC',
@@ -613,7 +613,7 @@ def get_usable_vpc_and_subnet(
     subnets = _list_subnets(project_id,
                             region,
                             compute,
-                            filter=f'(name="{usable_vpc_name}")')
+                            network=usable_vpc_name)
     if not subnets:
         _skypilot_log_error_and_exit_for_failover(
             'SUBNET_NOT_FOUND_FOR_VPC',
@@ -701,19 +701,31 @@ def _list_vpcnets(project_id: str, compute, filter=None):  # pylint: disable=red
 
 
 def _list_subnets(
-    project_id: str,
-    region: str,
-    compute,
-    # pylint: disable=redefined-builtin
-    filter=None
+        project_id: str,
+        region: str,
+        compute,
+        network=None
 ) -> List['google.cloud.compute_v1.types.compute.Subnetwork']:
     response = (compute.subnetworks().list(
         project=project_id,
         region=region,
-        filter=filter,
     ).execute())
 
-    return response['items'] if 'items' in response else []
+    items = response['items'] if 'items' in response else []
+    if network is None:
+        return items
+
+    # Filter by network (VPC) name.
+    #
+    # Note we do not directly use the filter (network=<...>) arg of the list()
+    # call above, because it'd involve constructing a long URL of the following
+    # format and passing it as the filter value:
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
+    matched_items = []
+    for item in items:
+        if network == _network_interface_to_vpc_name(item):
+            matched_items.append(item)
+    return matched_items
 
 
 def _get_project(project_id: str, crm):
