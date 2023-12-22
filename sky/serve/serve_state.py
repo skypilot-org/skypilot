@@ -201,9 +201,8 @@ def add_service(name: str, controller_job_id: int, policy: str,
             INSERT INTO services
             (name, controller_job_id, status, policy,
             requested_resources_str)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, status.value, policy,
-             requested_resources_str))
+            VALUES (?, ?, ?, ?, ?)""", (name, controller_job_id, status.value,
+                                        policy, requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
