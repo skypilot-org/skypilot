@@ -792,10 +792,8 @@ class GCPComputeInstance(GCPInstance):
             return errors, names
         errors = operation.get('error', {}).get('errors')
         if errors:
-            logger.warning(
-                'create_instances: Failed to create instances. '
-                f'Reason: {errors}'
-            )
+            logger.warning('create_instances: Failed to create instances. '
+                           f'Reason: {errors}')
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
