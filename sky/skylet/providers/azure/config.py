@@ -135,7 +135,7 @@ def _configure_resource_group(config):
     nsg_id = outputs["nsg"]["value"]
     nsg_name = nsg_id.split("/")[-1]
     network_client = NetworkManagementClient(credentials, subscription_id)
-    backoff = common_utils.Backoff()
+    backoff = common_utils.Backoff(max_backoff_factor=1)
     start_time = time.time()
     while True:
         nsg = network_client.network_security_groups.get(resource_group, nsg_name)
@@ -146,7 +146,12 @@ def _configure_resource_group(config):
                 f"Fails to create NSG {nsg_name} in {resource_group} within "
                 f"{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds."
             )
-        time.sleep(backoff.current_backoff())
+        backoff_time = backoff.current_backoff()
+        logger.info(
+            f"NSG {nsg_name} is not created yet. Waiting for "
+            f"{backoff_time} seconds before checking again."
+        )
+        time.sleep(backoff_time)
 
     # append output resource ids to be used with vm creation
     config["provider"]["msi"] = outputs["msi"]["value"]
