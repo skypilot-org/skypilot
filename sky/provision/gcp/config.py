@@ -720,7 +720,7 @@ def _list_subnets(
     # Note we do not directly use the filter (network=<...>) arg of the list()
     # call above, because it'd involve constructing a long URL of the following
     # format and passing it as the filter value:
-    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>'
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>' # pylint: disable=line-too-long
     matched_items = []
     for item in items:
         if network == _network_interface_to_vpc_name(item):

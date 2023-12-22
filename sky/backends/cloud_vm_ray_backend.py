@@ -1143,7 +1143,6 @@ class FailoverCloudErrorHandlerV2:
         # TODO: Handle TPU VMs when we have TPU VM integrated.
         assert not tpu_utils.is_tpu_vm(
             launchable_resources), launchable_resources
-        style = colorama.Style
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
