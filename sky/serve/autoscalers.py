@@ -38,6 +38,7 @@ class AutoscalerDecision:
     operator: AutoscalerDecisionOperator
     target: Union[Optional[Dict[str, Any]], int]
 
+    # TODO(MaoZiming): Add a doc to elaborate on autoscaling policies.
     def __init__(self,
                  operator: AutoscalerDecisionOperator,
                  target: Union[Optional[Dict[str, Any]], int] = None):
