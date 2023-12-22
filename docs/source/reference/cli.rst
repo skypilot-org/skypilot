@@ -59,6 +59,24 @@ Job Queue CLI
    :prog: sky cancel
    :nested: full
 
+Sky Serve CLI
+-------------
+
+.. click:: sky.cli:serve_up
+   :prog: sky serve up
+   :nested: full
+
+.. click:: sky.cli:serve_down
+   :prog: sky serve down
+   :nested: full
+
+.. click:: sky.cli:serve_status
+   :prog: sky serve status
+   :nested: full
+
+.. click:: sky.cli:serve_logs
+   :prog: sky serve logs
+   :nested: full
 
 Managed Spot Jobs CLI
 ---------------------------

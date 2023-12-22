@@ -709,7 +709,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
+    return f'sky-{node_type}-{common_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -1412,15 +1412,6 @@ def launch(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
-
-    # A basic check. Programmatic calls will have a proper (but less
-    # informative) error from optimizer.
-    if (cloud is not None and cloud.lower() == 'azure' and
-            use_spot is not None and use_spot):
-        raise click.UsageError(
-            'SkyPilot currently has not implemented '
-            'support for spot instances on Azure. Please file '
-            'an issue if you need this feature.')
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -4278,13 +4269,32 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)

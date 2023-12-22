@@ -87,7 +87,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
-_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
+_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 30
 
 # The maximum retry count for fetching IP address.
 _FETCH_IP_MAX_ATTEMPTS = 3
@@ -772,9 +772,10 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(region=None, zone=None))
             elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
                   in stderr):
-                if (any(acc.lower().startswith('tpu-v4')
-                        for acc in launchable_resources.accelerators.keys()) and
-                        region.name == 'us-central2'):
+                if (region.name == 'us-central2' and
+                        launchable_resources.accelerators is not None and
+                        any(acc.lower().startswith('tpu-v4')
+                            for acc in launchable_resources.accelerators)):
                     # us-central2 is a TPU v4 only region. The subnet for
                     # this region may not exist when the user does not have
                     # the TPU v4 quota. We should skip this region.
@@ -2873,7 +2874,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-            backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
+                # The most frequent reason for the failure of a provision
+                # request is resource unavailability instead of rate
+                # limiting; to make users wait shorter, we do not make
+                # backoffs exponential.
+                backoff = common_utils.Backoff(
+                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
+                    max_backoff_factor=1)
             attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
@@ -2927,7 +2934,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{colorama.Style.BRIGHT}=== Retry until up ==='
                             f'{colorama.Style.RESET_ALL}\n'
                             f'Retrying provisioning after {gap_seconds:.0f}s '
-                            '(exponential backoff with random jittering). '
+                            '(backoff with random jittering). '
                             f'Already tried {attempt_cnt} attempt{plural}.')
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
