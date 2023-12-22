@@ -13,9 +13,9 @@ Available fields:
     # Additional section to turn your skypilot task.yaml to a service
     service:
 
-      # Readiness probe (required). This describe how SkyServe determine your
-      # service is ready for accepting traffic. If the readiness probe get a 200,
-      # SkyServe will start routing traffic to your service.
+      # Readiness probe (required). Used by SkyServe to check if your service
+      # replicas are ready for accepting traffic. If the readiness probe returns
+      # a 200, SkyServe will start routing traffic to that replica.
       readiness_probe:
         # Path to probe (required).
         path: /v1/models
@@ -28,9 +28,9 @@ Available fields:
         # based on your service's startup time.
         initial_delay_seconds: 1200
 
-      # We have a simplified version of readiness probe that only contains the
-      # readiness probe path. If you want to use GET method for readiness probe
-      # and the default initial delay, you can use the following syntax:
+      # Simplified version of readiness probe that only contains the readiness
+      # probe path. If you want to use GET method for readiness probe and the
+      # default initial delay, you can use the following syntax:
       readiness_probe: /v1/models
 
       # One of the two following fields (replica_policy or replicas) is required.
@@ -41,10 +41,10 @@ Available fields:
         # Minimum number of replicas (required).
         min_replicas: 1
         # Maximum number of replicas (optional). If not specified, SkyServe will
-        # use fixed number of replicas same as min_replicas and ignore any QPS
-        # threshold specified below.
+        # use a fixed number of replicas (the same as min_replicas) and ignore
+        # any QPS threshold specified below.
         max_replicas: 3
-        # Following thresholds describe when to scale up or down.
+        # Thresholds below describe when to scale up or down.
         # QPS threshold for scaling up (optional). If the QPS of your service
         # exceeds this threshold, SkyServe will scale up your service by one
         # replica. If not specified, SkyServe will **NOT** scale up your service.
@@ -54,23 +54,18 @@ Available fields:
         # replica. If not specified, SkyServe will **NOT** scale down your service.
         qps_lower_threshold: 2
 
-      # Also, for convenience, we have a simplified version of replica policy that
-      # use fixed number of replicas. Just use the following syntax:
+      # Simplified version of replica policy that uses a fixed number of
+      # replicas:
       replicas: 2
 
-      # Controller resources (optional). This describe the resources to use for
-      # the controller. Default to a 4+ vCPU instance with 100GB disk.
-      controller_resources:
-        cloud: aws
-        region: us-east-1
-        instance_type: p3.2xlarge
-        disk_size: 256
+    # Besides the `service` section, the rest is a regular SkyPilot task YAML,
+    # which describes each replica:
 
     resources:
-      # Port to run your service (required). This port will be automatically exposed
-      # by SkyServe. You can access your service at http://<endpoint-ip>:<port>.
+      # Port to run your service on each replica (required). This port will be
+      # automatically exposed by SkyServe.
       ports: 8080
       # Other resources config...
 
-    # Then comes your SkyPilot task YAML...
+    # The rest of your SkyPilot task YAML...
 
