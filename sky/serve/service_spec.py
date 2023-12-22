@@ -26,9 +26,9 @@ class SkyServiceSpec:
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: Optional[bool] = None,
-        autoscaling_decision_interval: int = 20,
-        upscale_delay_seconds: int = 300,
-        downscale_delay_seconds: int = 1200,
+        autoscaling_decision_interval: Optional[int] = None,
+        upscale_delay_seconds: Optional[int] = None,
+        downscale_delay_seconds: Optional[int] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():
@@ -52,7 +52,9 @@ class SkyServiceSpec:
 
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('auto_restart is deprecated.')
+                raise ValueError(
+                    'auto_restart is deprecated. '
+                    'SkyServe will auto-restart all failed replicas')
 
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
@@ -60,9 +62,16 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-        self._autoscaling_decision_interval = autoscaling_decision_interval
-        self._upscale_delay_seconds = upscale_delay_seconds
-        self._downscale_delay_seconds = downscale_delay_seconds
+
+        self._autoscaling_decision_interval = (
+            autoscaling_decision_interval if autoscaling_decision_interval
+            is not None else constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
+        self._upscale_delay_seconds = (
+            upscale_delay_seconds if upscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
+        self._downscale_delay_seconds = (
+            downscale_delay_seconds if downscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -109,23 +118,25 @@ class SkyServiceSpec:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
-            service_config['target_qps_per_replica'] = None
-            service_config['auto_restart'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
+            service_config['qps_upper_threshold'] = policy_section.get(
+                'qps_upper_threshold', None)
+            service_config['qps_lower_threshold'] = policy_section.get(
+                'qps_lower_threshold', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', None)
             service_config[
                 'autoscaling_decision_interval'] = policy_section.get(
-                    'autoscaling_decision_interval', 20)
+                    'autoscaling_decision_interval', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
-                'upscale_delay_seconds', 300)
+                'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
-                'downscale_delay_seconds', 1200)
+                'downscale_delay_seconds', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -186,6 +197,7 @@ class SkyServiceSpec:
         return f'POST {self.readiness_path} {json.dumps(self.post_data)}'
 
     def policy_str(self):
+        # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return f'Fixed {self.min_replicas} replica{min_plural}'

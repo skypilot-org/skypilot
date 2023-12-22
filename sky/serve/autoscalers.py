@@ -55,21 +55,22 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 frequency: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
         Variables:
             min_replicas: Minimum number of replicas.
             max_replicas: Maximum number of replicas. Default to fixed
                 number of replicas, i.e. min_replicas == max_replicas.
-            frequency: Frequency of autoscaling in seconds.
+            autoscaling_decision_interval: Interval of
+            autoscaling decisions in seconds.
+            target_num_replicas: Target number of replicas output by autoscaler.
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.frequency: int = frequency
-        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:
-            logger.warning('Autoscaler frequency is less than '
+        self.autoscaling_decision_interval: int = spec.autoscaling_decision_interval  # pylint: disable=line-too-long
+        if self.autoscaling_decision_interval < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:  # pylint: disable=line-too-long
+            logger.warning('Autoscaler decision interval is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
         self.target_num_replicas: int = spec.min_replicas
@@ -94,7 +95,7 @@ class RequestRateAutoscaler(Autoscaler):
     the threshold.
     """
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',
                  rps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
@@ -107,7 +108,7 @@ class RequestRateAutoscaler(Autoscaler):
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
         """
-        super().__init__(spec, frequency)
+        super().__init__(spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
         self.rps_window_size: int = rps_window_size
@@ -115,12 +116,13 @@ class RequestRateAutoscaler(Autoscaler):
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
         self.scale_up_consecutive_periods: int = int(
-            spec.upscale_delay_seconds / self.frequency)
+            spec.upscale_delay_seconds / self.autoscaling_decision_interval)
         self.scale_down_consecutive_periods: int = int(
-            spec.downscale_delay_seconds / self.frequency)
+            spec.downscale_delay_seconds / self.autoscaling_decision_interval)
         # Target number of replicas is initialized to min replicas.
+        # TODO(MaoZiming): add init replica numbers.
         self.target_num_replicas: int = spec.min_replicas
-        self.boostrap_done: bool = False
+        self.bootstrap_done: bool = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -140,9 +142,10 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps = self.request_timestamps[index:]
 
     def _get_desired_num_replicas(self) -> int:
-
-        # If target_qps_per_replica is not set
-        # Return default target_num_replicas.
+        # Always return self.target_num_replicas
+        # when autoscaling is not enabled,
+        # i.e. self.target_qps_per_replica is None.
+        # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
             return self.target_num_replicas
 
@@ -156,8 +159,8 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
-        if not self.boostrap_done:
-            self.boostrap_done = True
+        if not self.bootstrap_done:
+            self.bootstrap_done = True
             return target_num_replicas
         elif target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
@@ -189,8 +192,8 @@ class RequestRateAutoscaler(Autoscaler):
             f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
-            f'{self.scale_down_consecutive_periods}')
-        logger.info(f'Number of alive replicas: {num_alive_replicas}')
+            f'{self.scale_down_consecutive_periods} '
+            f'Number of alive replicas: {num_alive_replicas}')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -199,19 +202,19 @@ class RequestRateAutoscaler(Autoscaler):
             status_order: List['serve_state.ReplicaStatus'],
             num_limit: int,
         ) -> List[int]:
-            replica_ids_to_scale_down: List[int] = []
-            for target_status in status_order:
-                for info in alive_replica_infos:
-                    if info.status == target_status:
-                        if len(replica_ids_to_scale_down) >= num_limit:
-                            return replica_ids_to_scale_down
-                        replica_ids_to_scale_down.append(info.replica_id)
-            for info in alive_replica_infos:
-                if info.status not in status_order:
-                    if len(replica_ids_to_scale_down) >= num_limit:
-                        return replica_ids_to_scale_down
-                    replica_ids_to_scale_down.append(info.replica_id)
-            return replica_ids_to_scale_down
+
+            def get_status_order(status):
+                if status in status_order:
+                    return status_order.index(status)
+                else:
+                    return len(status_order)
+
+            alive_replica_infos_sorted = sorted(
+                alive_replica_infos,
+                key=lambda info: get_status_order(info.status))
+
+            return [info.replica_id for info in alive_replica_infos_sorted
+                   ][:num_limit]
 
         if num_alive_replicas < self.target_num_replicas:
             num_replicas_to_scale_up = (self.target_num_replicas -
@@ -219,7 +222,8 @@ class RequestRateAutoscaler(Autoscaler):
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
-                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP))
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                                       target=None))
 
         elif num_alive_replicas > self.target_num_replicas:
             num_replicas_to_scale_down = (num_alive_replicas -

@@ -328,6 +328,7 @@ def get_service_schema():
                     'max_replicas': {
                         'type': 'integer',
                     },
+                    # TODO(MaoZiming): Remove after 2 minor releases
                     'qps_upper_threshold': {
                         'type': 'number',
                     },
@@ -337,6 +338,7 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
+                    # TODO(MaoZiming): Remove after 2 minor releases
                     'auto_restart': {
                         'type': 'boolean',
                     },

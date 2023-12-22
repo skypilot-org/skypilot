@@ -48,7 +48,6 @@ class SkyServeController:
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
                 service_spec,
-                frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
                 rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS))
         self._port = port
         self._app = fastapi.FastAPI()
@@ -85,7 +84,7 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
-            time.sleep(self._autoscaler.frequency)
+            time.sleep(self._autoscaler.autoscaling_decision_interval)
 
     def run(self) -> None:
 

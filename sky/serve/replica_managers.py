@@ -65,6 +65,9 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
+        # TODO(zongheng): use
+        #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
+        # to raise errors on duplicate keys.
         with open(os.path.expanduser(task_yaml_path), 'r',
                   encoding='utf-8') as f:
             config = yaml.safe_load(f)
