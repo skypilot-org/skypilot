@@ -26,10 +26,9 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         auto_restart: bool = True,
     ) -> None:
-        if min_replicas < 0:
+        if min_replicas <= 0:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'min_replicas must be greater than or equal to 0')
+                raise ValueError('min_replicas must be greater than 0')
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
