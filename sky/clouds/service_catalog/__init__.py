@@ -27,7 +27,6 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         # kubernetes_catalog.py
         if method_name != 'list_accelerators':
             clouds.remove('kubernetes')
-
     single = isinstance(clouds, str)
     if single:
         clouds = [clouds]  # type: ignore
@@ -47,7 +46,11 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
             raise AttributeError(
                 f'Module "{cloud}_catalog" does not '
                 f'implement the "{method_name}" method') from None
-        results.append(method(*args, **kwargs))
+        if cloud == 'kubernetes':
+            #remove the last argument (all_regions) for kubernetes
+            results.append(method(*args[:-1]), **kwargs)
+        else:
+            results.append(method(*args, **kwargs))
     if single:
         return results[0]
     return results

@@ -795,7 +795,8 @@ def _launch_with_confirm(
 
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
-        # Show the optimize log before the prompt if the cluster does not exist.
+        # Show the optimize log before the prompt if the cluster does not
+        # exist.
         try:
             backend_utils.check_public_cloud_enabled()
         except exceptions.NoCloudAccessError as e:
@@ -3415,7 +3416,7 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
-    To show all regions for a specified accelerator, use 
+    To show all regions for a specified accelerator, use
     ``sky show-gpus <accelerator> --all-regions``.
 
     Definitions of certain fields:
@@ -4294,7 +4295,8 @@ def serve_up(
                     'will use the port specified as application ingress port.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
+            # For the case when the user specified a port range like
+            # 10000-10010
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {service_port_str!r} is not a valid '
                                  'port number. Please specify a single port '
