@@ -61,6 +61,7 @@ def list_accelerators(
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -72,7 +73,7 @@ def list_accelerators(
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
                                   name_filter, region_filter, quantity_filter,
-                                  case_sensitive)
+                                  case_sensitive, all_regions)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
