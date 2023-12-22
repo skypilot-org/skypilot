@@ -77,6 +77,10 @@ class SkyServeController:
                         assert isinstance(scaling_option.target,
                                           int), scaling_option
                         self._replica_manager.scale_down(scaling_option.target)
+                    else:
+                        with ux_utils.enable_traceback():
+                            logger.error('Error in scaling_option.operator: '
+                                         f'{scaling_option.operator}')
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.

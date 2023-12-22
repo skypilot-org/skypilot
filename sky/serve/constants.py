@@ -34,18 +34,15 @@ READINESS_PROBE_TIMEOUT_SECONDS = 15
 # divide the number of requests in last window size by this window size.
 AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale decision interval in seconds.
-# We will try to scale up/down every
-# `decision_interval`.
+# We will try to scale up/down every `decision_interval`.
 AUTOSCALER_DEFAULT_DECISION_INTERVAL = 20
 # Autoscaler default upscale delays in seconds.
-# We will upscale only if the target
-# number of instances is larger than
-# the current alive instances for delay amount of time.
+# We will upscale only if the target number of instances
+# is larger than the current alive instances for delay amount of time.
 AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS = 300
 # Autoscaler default downscale delays in seconds.
-# We will downscale only if the target
-# number of instances is smaller than the
-# current alive instances for delay amount of time.
+# We will downscale only if the target number of instances
+# is smaller than the current alive instances for delay amount of time.
 AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 300
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.

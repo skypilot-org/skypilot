@@ -27,20 +27,20 @@ class AutoscalerDecisionOperator(enum.Enum):
 class AutoscalerDecision:
     """Autoscaling decisions.
 
-    |---------------------------------------------------------------|
-    | Operator   | TargetType       | Meaning                       |
-    |------------|------------------|-------------------------------|
-    | SCALE_UP   | Dict[str, Any]   | Resource override to add      |
-    |------------|------------------|-------------------------------|
-    | SCALE_DOWN | int              | Replica id to remove          |
-    |---------------------------------------------------------------|
+    |------------------------------------------------------------------------|
+    | Operator   | TargetType                | Meaning                       |
+    |------------|---------------------------|-------------------------------|
+    | SCALE_UP   | Optional[Dict[str, Any]   | Resource override to add      |
+    |------------|---------------------------|-------------------------------|
+    | SCALE_DOWN | int                       | Replica id to remove          |
+    |------------------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    target: Optional[Union[Dict[str, Any], int]]
+    target: Union[Optional[Dict[str, Any]], int]
 
     def __init__(self,
                  operator: AutoscalerDecisionOperator,
-                 target: Optional[Union[Dict[str, Any], int]] = None):
+                 target: Union[Optional[Dict[str, Any]], int] = None):
 
         # Scale down requires replica ids to remove.
         assert not (operator == AutoscalerDecisionOperator.SCALE_DOWN and
@@ -68,8 +68,10 @@ class Autoscaler:
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.autoscaling_decision_interval: int = spec.autoscaling_decision_interval  # pylint: disable=line-too-long
-        if self.autoscaling_decision_interval < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:  # pylint: disable=line-too-long
+        self.autoscaling_decision_interval: int = (
+            spec.autoscaling_decision_interval)
+        if (self.autoscaling_decision_interval <
+                constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS):
             logger.warning('Autoscaler decision interval is less than '
                            'controller sync interval. It might '
                            'not always got the latest information.')
@@ -100,7 +102,7 @@ class RequestRateAutoscaler(Autoscaler):
         """Initialize the request rate autoscaler.
 
         Variables:
-            target_qps_per_replica: Target qps per replica for autoscaling
+            target_qps_per_replica: Target qps per replica for autoscaling.
             rps_window_size: Window size for rps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
@@ -142,9 +144,8 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps = self.request_timestamps[index:]
 
     def _get_desired_num_replicas(self) -> int:
-        # Always return self.target_num_replicas
-        # when autoscaling is not enabled,
-        # i.e. self.target_qps_per_replica is None.
+        # Always return self.target_num_replicas when autoscaling
+        # is not enabled, i.e. self.target_qps_per_replica is None.
         # In this case, self.target_num_replicas will be min_replicas.
         if self.target_qps_per_replica is None:
             return self.target_num_replicas
@@ -203,15 +204,10 @@ class RequestRateAutoscaler(Autoscaler):
             num_limit: int,
         ) -> List[int]:
 
-            def get_status_order(status):
-                if status in status_order:
-                    return status_order.index(status)
-                else:
-                    return len(status_order)
-
             alive_replica_infos_sorted = sorted(
                 alive_replica_infos,
-                key=lambda info: get_status_order(info.status))
+                key=lambda info: status_order.index(info.status)
+                if info.status in status_order else len(status_order))
 
             return [info.replica_id for info in alive_replica_infos_sorted
                    ][:num_limit]

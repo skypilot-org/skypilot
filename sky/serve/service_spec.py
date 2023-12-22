@@ -53,8 +53,9 @@ class SkyServiceSpec:
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'auto_restart is deprecated. '
-                    'SkyServe will auto-restart all failed replicas')
+                    'Field `auto_restart` under `replica_policy` is deprecated.'
+                    'Currently, SkyServe will cleanup failed replicas'
+                    'and auto restart it to keep the service running.')
 
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
@@ -118,6 +119,7 @@ class SkyServiceSpec:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
+            service_config['target_qps_per_replica'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
@@ -210,7 +212,7 @@ class SkyServiceSpec:
         return textwrap.dedent(f"""\
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
-            Replica autoscaling policy:       {self.policy_str()}
+            Replica autoscaling policy:       {self.policy_str()}\
         """)
 
     @property
