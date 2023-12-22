@@ -1,7 +1,6 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
-import getpass
 import json
 import os
 import pathlib
@@ -1009,7 +1008,7 @@ def write_cluster_config(
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see
                 # controller_utils.shared_controller_vars_to_fill().
-                'user': get_cleaned_username(
+                'user': common_utils.get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
                 # Networking configs
@@ -1483,30 +1482,7 @@ def check_local_gpus() -> bool:
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
-
-
-def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username to be used as part of a cluster name.
-
-    Clean up includes:
-     1. Making all characters lowercase
-     2. Removing any non-alphanumeric characters (excluding hyphens)
-     3. Removing any numbers and/or hyphens at the start of the username.
-     4. Removing any hyphens at the end of the username
-
-    e.g. 1SkY-PiLot2- becomes sky-pilot2.
-
-    Returns:
-      A cleaned username that will pass the regex in
-      check_cluster_name_is_valid().
-    """
-    username = username or getpass.getuser()
-    username = username.lower()
-    username = re.sub(r'[^a-z0-9-]', '', username)
-    username = re.sub(r'^[0-9-]+', '', username)
-    username = re.sub(r'-$', '', username)
-    return username
+    return f'sky-{uuid.uuid4().hex[:4]}-{common_utils.get_cleaned_username()}'
 
 
 def _query_head_ip_with_retries(cluster_yaml: str,

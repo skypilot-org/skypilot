@@ -121,8 +121,9 @@ def _bulk_provision(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
 
-    logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
-                 f'seconds.')
+    logger.debug(
+        f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
+        f'seconds.')
 
     return provision_record
 

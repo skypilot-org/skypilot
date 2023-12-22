@@ -677,7 +677,10 @@ def spot_launch(
             'dag_name': dag.name,
             'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
-            **controller_utils.shared_controller_vars_to_fill('spot'),
+            **controller_utils.shared_controller_vars_to_fill(
+                'spot',
+                remote_user_config_path=remote_user_config_path,
+            ),
         }
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
