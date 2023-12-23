@@ -1,4 +1,79 @@
 import math
+import pulp
+from pulp import LpVariable, LpProblem, LpMinimize, LpInteger
+
+# `request_distribution` is a list of length 7 where each element is
+# the request rate (in req/s) for its corresponding request size
+# histogram bucket. This is assuming the LLM bucket boundaries. 
+def IlpSolver(request_distribution):
+    problem = LpProblem("GpuAllocation", LpMinimize)
+
+    gpu_types = ['A10', 'A100']
+
+    # A10, A100 hourly prices
+    cost_vector = [1.01, 3.67]
+
+    # A10, A100 normalized capacity
+    capacity_vector = [1.32, 4.74]
+
+    # A10, A100 normalization coefficients
+    norm_coefficients = [
+        [0.3317, 0.4415, 0.6316, 1, 1.7143, 3.1429, 5.28],   # A10
+        [0.4566, 0.4852, 0.6253, 1, 1.5748, 2.7558, 4.514]  # A100
+    ]
+    assert len(cost_vector) == len(capacity_vector) == len(norm_coefficients)
+    assert len(request_rate_histogram) == len(norm_coefficients[0])
+
+    # Matrix value is 0/1 slice assignment
+    matrix_rows = len(norm_coefficients[0])  # Each row is for a single slice
+    matrix_cols = len(norm_coefficients)     # Each column is a GPU type
+
+    # Vector value is non-negative integer of how many of each GPU type are needed
+    vector_length = matrix_cols   # Each element in vector corresponds to GPU type's num GPUs 
+
+    decision_matrix = [[LpVariable(f"x_{i}_{j}", cat=LpInteger, lowBound=0, upBound=1) 
+                        for j in range(matrix_cols)] for i in range(matrix_rows)]
+
+    decision_vector = [LpVariable(f"y_{i}", cat=LpInteger, lowBound=0) 
+                    for i in range(vector_length)]
+
+
+    # Objective: minimize cost
+    problem += pulp.lpSum([decision_vector[i] * cost_vector[i] for i in range(len(decision_vector))])
+
+    # C1: Each row of decision matrix must sum to exactly 1 (ie, each slice assigned to one GPU)
+    for i in range(len(decision_matrix)):
+        problem += pulp.lpSum(decision_matrix[i]) == 1
+
+    # C2: Load of column of decision matrix must fit in decision vector capacity
+    for j in range(len(decision_matrix[0])):
+        # j is idx of GPU type, i is slice
+        problem += pulp.lpSum([decision_matrix[i][j] * norm_coefficients[j][i] * request_rate_histogram[i] for i in range(len(decision_matrix))]) / capacity_vector[j] <= decision_vector[j]
+
+
+    # C3: There must always be at least one allocated instance. 
+    problem += pulp.lpSum(decision_vector) >= 1
+
+    # Solve the problem
+    # problem.solve(pulp.COIN_CMD(path='/opt/homebrew/opt/cbc/bin/cbc', msg=0))
+    problem.solve(pulp.PULP_CBC_CMD(msg=0))
+
+    # Print the results
+    # print("Status:", pulp.LpStatus[problem.status])
+    # print(f'Decision Matrix:')
+    # for row in decision_matrix:
+    #     print([var.value() for var in row])
+    # print(f'Decision Vector:')
+    # print(f'{[var.value() for var in decision_vector]}')
+
+    if pulp.LpStatus[problem.status] == 'Optimal':
+        solution_dict = {}
+        for i in range(len(decision_vector)):
+            solution_dict[gpu_types[i]] = decision_vector[i].value()
+        return solution_dict
+    
+    return None
+
 
 
 # `request_distribution`: List[int], where integer r at index i corresponds to the
