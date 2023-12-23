@@ -528,7 +528,7 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             docker_proxy_command = ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
-                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips[0]}'])
+                ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips}'])
             head_port = constants.DEFAULT_DOCKER_PORT
 
         # Start generating the config with the head node
@@ -538,8 +538,11 @@ class SSHConfigHelper(object):
 
         # Add the worker nodes if any exist
         for i, ip in enumerate(ips[1:]):
+            if docker_user is not None:
+                docker_proxy_command = docker_proxy_command_generator(ip)
+                ip = 'localhost'
             worker_name = cluster_name + f'-worker{i+1}'
-            # TODO: update port numbers for workers in edge cases
+            # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
                 sky_autogen_comment,
                 worker_name,
@@ -660,6 +663,7 @@ class SSHConfigHelper(object):
                 break
 
     @classmethod
+    # TODO: We can remve this after 0.6.0 and have a lock only per cluster.
     @timeline.FileLockEvent(ssh_conf_lock_path)
     def remove_cluster(
         cls,
@@ -686,6 +690,7 @@ class SSHConfigHelper(object):
 
         # Ensures backward compatibility: before #2706, we wrote the config of SkyPilot clusters
         # directly in ~/.ssh/config. For these clusters, we should clean up the config.
+        # TODO: Remove this after 0.6.0
         cls._remove_stale_cluster_config_for_backward_compatibility(
             cluster_name, ip, auth_config, docker_user)
 
