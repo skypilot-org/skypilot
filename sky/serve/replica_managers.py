@@ -24,6 +24,7 @@ from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve.serve_utils import AcceleratorType
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -41,6 +42,7 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
+_DEFAULT_DRAIN_SECONDS = 60
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
@@ -119,8 +121,11 @@ def launch_cluster(task_yaml_path: str,
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
-def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+def terminate_cluster(cluster_name: str,
+                      max_retry: int = 3,
+                      delay_in_s: int = 0) -> None:
     """Terminate the sky serve replica cluster."""
+    time.sleep(delay_in_s)
     retry_cnt = 0
     backoff = common_utils.Backoff()
     logger.info("terminate_cluster(cluster_name): ", cluster_name)
@@ -156,6 +161,10 @@ def _get_resources_ports(task_yaml: str) -> str:
     # Already checked the resources have and only have one port
     # before upload the task yaml.
     return task_resources.ports[0]
+
+
+def _get_accelerator_override(task_yaml: str,
+                           override: Optional[Dict[str, Any]]) -> bool:
 
 
 def with_lock(func):
@@ -315,13 +324,15 @@ class ReplicaInfo:
     """Replica info for each replica."""
 
     def __init__(self, replica_id: int, cluster_name: str,
-                 replica_port: str) -> None:
+                 replica_port: str,
+                 accelerator: Optional[AcceleratorType] = None) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
+        self.accelerator = accelerator
 
     def handle(
         self,
@@ -439,12 +450,12 @@ class ReplicaManager:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
 
-    def scale_up(self, n: int) -> None:
-        """Scale up the service by n replicas."""
-        raise NotImplementedError
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        """Scale up the service by 1 replica with resources_override."""
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        """Scale down all replicas in replica_ids."""
+    def scale_down(self, replica_id: int) -> None:
+        """Scale down replica with replica_id."""
         raise NotImplementedError
 
 
@@ -492,7 +503,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
 
-    def _launch_replica(self, replica_id: int) -> None:
+    def _launch_replica(
+        self,
+        replica_id: int,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -507,21 +522,26 @@ class SkyPilotReplicaManager(ReplicaManager):
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name),
+            args=(self._task_yaml_path, cluster_name, resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port)
+        accelerator = _get_accelerator_override(self._task_yaml_path,
+                                                resources_override)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port, accelerator)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
-    def scale_up(self, n: int) -> None:
-        for _ in range(n):
-            self._launch_replica(self._next_replica_id)
-            self._next_replica_id += 1
+    def scale_up(self,
+                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+        self._launch_replica(self._next_replica_id, resources_override)
+        self._next_replica_id += 1
 
-    def _terminate_replica(self, replica_id: int, sync_down_logs: bool) -> None:
+    def _terminate_replica(self,
+                           replica_id: int,
+                           sync_down_logs: bool,
+                           delay_in_s: int = 0) -> None:
         if replica_id in self._down_process_pool:
             logger.warning(f'Terminate process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -563,29 +583,42 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self._service_name,
                                                     replica_id)
         assert info is not None
+        
+        is_launching = False
+        if replica_id in self._launch_process_pool:
+            is_launching = True
+            launch_process = self._launch_process_pool[replica_id]
+            if launch_process.is_alive():
+                logger.info(f'Terminating launch process for replica '
+                            f'{replica_id}...')
+                launch_process.terminate()
+                launch_process.join()
+            del self._launch_process_pool[replica_id]
 
-        if sync_down_logs:
+        if sync_down_logs and not is_launching:
             _download_and_stream_logs(info)
 
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self._service_name, replica_id)
+        max_retry = 3
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 terminate_cluster,
                 log_file_name,
             ).run,
-            args=(info.cluster_name,),
+            args=(info.cluster_name, max_retry, delay_in_s),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_ids: List[int]) -> None:
-        for replica_id in replica_ids:
-            self._terminate_replica(replica_id, sync_down_logs=False)
+    def scale_down(self, replica_id: int) -> None:
+        self._terminate_replica(replica_id,
+                                sync_down_logs=False,
+                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
 
     def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning handle for preempted replica {replica_id}.')
@@ -595,7 +628,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert info is not None
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        self._terminate_replica(replica_id, sync_down_logs=False)
+        self._terminate_replica(replica_id, sync_down_logs=False,
+                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
 
     #################################
     # ReplicaManager Daemon Threads #
@@ -902,52 +936,3 @@ class SkyPilotReplicaManager(ReplicaManager):
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
-
-class HeteroGPUReplicaManager(SkyPilotReplicaManager):
-    """Replica Manager for SkyPilot clusters.
-
-    It will run three daemon to monitor the status of the replicas:
-        (1) _process_pool_refresher: Refresh the launch/down process pool
-            to monitor the progress of the launch/down process.
-        (2) _job_status_fetcher: Fetch the job status of the service to
-            monitor the status of the service jobs.
-        (3) _replica_prober: Do readiness probe to the replicas to monitor
-            whether it is still responding to requests.
-    """
-
-    def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 task_yaml_path: str) -> None:
-        super().__init__(service_name, spec, task_yaml_path)
-
-    def _launch_replica(self, replica_id: int) -> None:
-        if replica_id in self._launch_process_pool:
-            logger.warning(f'Launch process for replica {replica_id} '
-                           'already exists. Skipping.')
-            return
-        logger.info(f'Launching replica {replica_id}...')
-        cluster_name = serve_utils.generate_replica_cluster_name(
-            self._service_name, replica_id)
-        log_file_name = serve_utils.generate_replica_launch_log_file_name(
-            self._service_name, replica_id)
-        p = multiprocessing.Process(
-            target=ux_utils.RedirectOutputForProcess(
-                launch_cluster,
-                log_file_name,
-            ).run,
-            args=(self._task_yaml_path, cluster_name),
-        )
-        replica_port = _get_resources_ports(self._task_yaml_path)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port)
-        serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        # Don't start right now; we will start it later in _refresh_process_pool
-        # to avoid too many sky.launch running at the same time.
-        self._launch_process_pool[replica_id] = p
-
-    def scale_up(self, n: int) -> None:
-        for _ in range(n):
-            self._launch_replica(self._next_replica_id)
-            self._next_replica_id += 1
-
-    def scale_down(self, replica_ids: List[int]) -> None:
-        for replica_id in replica_ids:
-            self._terminate_replica(replica_id, sync_down_logs=False)

@@ -4,11 +4,12 @@ import dataclasses
 import enum
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.serve.serve_utils import AcceleratorType
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -20,25 +21,23 @@ logger = sky_logging.init_logger(__name__)
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
     SCALE_DOWN = 'scale_down'
-    NO_OP = 'no_op'
 
 
 @dataclasses.dataclass
 class AutoscalerDecision:
     """Autoscaling decisions.
 
-    |---------------------------------------------------------|
-    | Operator   | TargetType | Meaning                       |
-    |------------|------------|-------------------------------|
-    | SCALE_UP   | int        | Number of replicas to add     |
-    |------------|------------|-------------------------------|
-    | SCALE_DOWN | List[int]  | List of replica ids to remove |
-    |------------|------------|-------------------------------|
-    | NO_OP      | None       | No scaling needed             |
-    |---------------------------------------------------------|
+    |---------------------------------------------------------------|
+    | Operator   | TargetType       | Meaning                       |
+    |------------|------------------|-------------------------------|
+    | SCALE_UP   | Dict[str, Any]   | Resource override to add      |
+    |------------|------------------|-------------------------------|
+    | SCALE_DOWN | int              | Replica id to remove          |
+    |---------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
-    target: Optional[Union[int, List[int]]]
+    #target: Optional[Union[int, List[int]]]
+    target: Union[Optional[Dict[str, Any]], int, str]
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -256,13 +255,21 @@ class HeteroGPUAutoscaler(Autoscaler):
         print(f'autoscaler.collect_request_information(self.total_request_in_window): {self.total_request_in_window}')
         print(f'autoscaler.collect_request_information(self.request_distribution): {self.request_distribution}')        
 
+    def solver(self):
+        pass
+
+    def _get_accelerator_override_dict(self,
+                                       instance_type: AcceleratorType) -> Dict[str, Any]:
+        return {'accelerators': f'{instance_type.value}:1'}
+
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> AutoscalerDecision:
+    ) -> List[AutoscalerDecision]:
         current_time = time.time()
+        # get replica infos and retrieve number of GPU types currently running
+        alive_replica_infos = [info for info in replica_infos if info.is_alive]
         num_replicas = len(replica_infos)
-
         # Check if cooldown period has passed since the last scaling operation.
         # Only cooldown if bootstrapping is done.
         if num_replicas >= self.min_replicas:
@@ -273,14 +280,65 @@ class HeteroGPUAutoscaler(Autoscaler):
                     f'cooldown: {self.cooldown}')
                 logger.info('Cooldown period has not passed since last scaling '
                             'operation. Skipping scaling.')
-                return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                          target=None)
+                return [AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
+                                          target=None)]
+        
+        all_replica_ids_to_scale_down: List[int] = []
+        scaling_decisions : List[AutoscalerDecision] = []
 
-        # return a list of tuples [(AutoscalerDecisionOperator.SCALE_UP, GPU type, # of GPU type needed),
-        # (AutoscalerDecisionOperator.SCALE_DOWN, GPU type, list of GPU type replica IDs to be terminated)] 
-        if num_replicas == 0:
-            return AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
-                                      target=1)
-        else:
-            return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                    target=None)
+        def _get_replica_ids_to_scale_down(
+            info_filter: Callable[['replica_managers.ReplicaInfo'], bool],
+            status_order: List['serve_state.ReplicaStatus'],
+            num_limit: int,
+        ) -> List[int]:
+            replica_ids_to_scale_down: List[int] = []
+            for target_status in status_order:
+                for info in alive_replica_infos:
+                    if info_filter(info) and info.status == target_status:
+                        if len(replica_ids_to_scale_down) >= num_limit:
+                            return replica_ids_to_scale_down
+                        replica_ids_to_scale_down.append(info.replica_id)
+            for info in alive_replica_infos:
+                if info_filter(info) and info.status not in status_order:
+                    if len(replica_ids_to_scale_down) >= num_limit:
+                        return replica_ids_to_scale_down
+                    replica_ids_to_scale_down.append(info.replica_id)
+            return replica_ids_to_scale_down
+
+        # Pass the histogram to solver and get the ideal GPU allocation. Assume
+        # the allocation to be a dictionary in a form of 
+        # {replica_manager.AcceleratorType.A100: # of A100s needed,
+        #  replica_manager.AcceleratorType.A10: # of A10s needed}
+        accel_allocation = self.solver(self.request_distribution)
+        # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
+        # return a list of AutoscalerDecisions
+        for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
+            num_alive_accel = len([info for info in alive_replica_infos
+                                   if info.accelerator == accelerator])
+            if accelerator in accel_allocation:
+                diff_accel_num = num_alive_accel - accel_allocation[accelerator]
+                # Need to scale up
+                if diff_accel_num < 0:
+                    for _ in range(abs(diff_accel_num)):
+                        scaling_decisions.append(AutoscalerDecision(
+                            AutoscalerDecisionOperator.SCALE_UP,
+                            target=self._get_accelerator_override_dict(accelerator)))
+                # Need to scale down
+                elif diff_accel_num > 0:
+                    all_replica_ids_to_scale_down.extend(
+                        _get_replica_ids_to_scale_down(
+                        info_filter=lambda info: info.accelerator == accelerator,
+                        status_order=serve_state.ReplicaStatus.
+                        scale_down_decision_order(),
+                        num_limit=diff_accel_num,
+                ))
+                    
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_decisions.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
+
+        if not scaling_decisions:
+            logger.info('No scaling needed.')
+                    
+        return scaling_decisions

@@ -55,6 +55,9 @@ class ServiceComponent(enum.Enum):
     LOAD_BALANCER = 'load_balancer'
     REPLICA = 'replica'
 
+class AcceleratorType(enum.Enum):
+    A100 = 'A100'
+    A10 = 'A10'
 
 class UserSignal(enum.Enum):
     """User signal to send to controller.
@@ -173,7 +176,7 @@ class RequestHeteroGPU(RequestsAggregator):
 
     def __init__(self) -> None:
         self.total_requests = 0
-        self.buckets = [(0, 25), (25, 100), (100, 250), (250, 500), (500, 1000), (1000, 2000), (2000, 4000)]
+        self.bucket_size = [(0, 25), (25, 100), (100, 250), (250, 500), (500, 1000), (1000, 2000), (2000, 4000)]
         self.request_timestamp_distribution = [[],[],[],[],[],[],[]]
         self.timestamps = []
 
@@ -181,7 +184,7 @@ class RequestHeteroGPU(RequestsAggregator):
         """Add a request to the request aggregator."""
         del request  # unused
         self.total_requests += 1
-        for idx, (lower, upper) in enumerate(self.buckets):
+        for idx, (lower, upper) in enumerate(self.bucket_size):
             if lower == 2000 and lower <= input_token_length:
                 self.request_timestamp_distribution[idx].append(time.time())
                 break

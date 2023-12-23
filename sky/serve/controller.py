@@ -42,11 +42,11 @@ class SkyServeController:
                  task_yaml: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.HeteroGPUReplicaManager(service_name=service_name,
+            replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.HeteroGPUAutoscalerAutoscaler(
+            autoscalers.HeteroGPUAutoscaler(
                 service_spec,
                 frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
                 cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
@@ -97,17 +97,19 @@ class SkyServeController:
                     for info in replica_info
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
-                scaling_option = self._autoscaler.evaluate_scaling(replica_info)
-                if (scaling_option.operator ==
-                        autoscalers.AutoscalerDecisionOperator.SCALE_UP):
-                    assert isinstance(scaling_option.target,
-                                      int), scaling_option
-                    self._replica_manager.scale_up(scaling_option.target)
-                elif (scaling_option.operator ==
-                      autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
-                    assert isinstance(scaling_option.target,
-                                      list), scaling_option
-                    self._replica_manager.scale_down(scaling_option.target)
+                scaling_decisions = self._autoscaler.evaluate_scaling(replica_info)
+                # launch all the scaling options in parallel.
+                for scaling_decision in scaling_decisions:
+                    if (scaling_decision.operator ==
+                            autoscalers.AutoscalerDecisionOperator.SCALE_UP):
+                        assert isinstance(scaling_decision.target,
+                                        dict), scaling_decision
+                        self._replica_manager.scale_up(scaling_decision.target)
+                    elif (scaling_decision.operator ==
+                        autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                        assert isinstance(scaling_decision.target,
+                                        int), scaling_decision
+                        self._replica_manager.scale_down(scaling_decision.target)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
