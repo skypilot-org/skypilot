@@ -36,7 +36,13 @@ fi
 
 # Generate cluster YAML
 echo "Generating /tmp/skypilot-kind.yaml"
-python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
+
+# Add GPUs flag to the generate_kind_config.py command if GPUs are enabled
+if $ENABLE_GPUS; then
+    python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END} --gpus
+else
+  python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
+fi
 
 if $ENABLE_GPUS; then
     # Add GPU support. We don't run sudo commands since the script may not have sudo permissions.
@@ -67,6 +73,12 @@ if $ENABLE_GPUS; then
     else
         echo "NVIDIA visible devices are set as volume mounts"
     fi
+
+    # Check if helm is installed
+    if ! helm version > /dev/null 2>&1; then
+        >&2 echo "helm is not installed. Please install helm and try again. Installation instructions: https://helm.sh/docs/intro/install/"
+        exit 1
+    fi
 fi
 
 kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
@@ -94,7 +106,7 @@ wait_for_gpu_operator_installation() {
     echo "Waiting for GPU operator to be installed correctly..."
 
     while true; do
-        if kubectl describe nodes | grep -q 'nvidia.com/gpu'; then
+        if kubectl describe nodes | grep -q 'nvidia.com/gpu:'; then
             echo "GPU operator installed correctly."
             break
         else
@@ -109,14 +121,10 @@ if $ENABLE_GPUS; then
     # https://github.com/NVIDIA/nvidia-docker/issues/614#issuecomment-423991632
     docker exec -ti skypilot-control-plane ln -s /sbin/ldconfig /sbin/ldconfig.real
 
-    # Check if helm is installed
-    if ! helm version > /dev/null 2>&1; then
-        >&2 echo "helm is not installed. Please install helm and try again. Installation instructions: https://helm.sh/docs/intro/install/"
-        exit 1
-    fi
     # Install the NVIDIA GPU operator
     helm repo add nvidia https://helm.ngc.nvidia.com/nvidia || true
     helm repo update
+    echo "Installing NVIDIA GPU operator..."
     helm install --wait --generate-name \
          -n gpu-operator --create-namespace \
          nvidia/gpu-operator --set driver.enabled=false

@@ -5217,7 +5217,13 @@ def local_up(gpus: bool):
                 f'Current context in kube config: {curr_context}'
                 '\nWill automatically switch to kind-skypilot after the local '
                 'cluster is created.')
-    with rich_utils.safe_status('Creating local cluster...'):
+    message_str = 'Creating local cluster{}...'
+    message_str = message_str.format((' with GPU support (this may take up '
+                                      'to 15 minutes)') if gpus else '')
+    # TODO(romilb): we should update the safe_status message based on what step
+    #  the create_cluster.sh script is on (e.g., "Creating Kind cluster",
+    #  "Setting up Nvidia container runtime", "Running GPU labelling", etc.)
+    with rich_utils.safe_status(message_str):
         path_to_package = os.path.dirname(os.path.dirname(__file__))
         up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
                                       'create_cluster.sh')
@@ -5235,7 +5241,12 @@ def local_up(gpus: bool):
                            'Run `sky local down` to delete it.')
             else:
                 stderr = e.stderr.decode('utf-8')
-                click.echo(f'\nFailed to create local cluster. {stderr}')
+                # Kind always writes to stderr even if it succeeds.
+                # If the failure happens after the cluster is created, we need
+                # to strip all stderr of "No kind clusters found.", which is
+                # printed when querying with kind get clusters.
+                stderr = stderr.replace('No kind clusters found.\n', '')
+                click.echo(f'\nFailed to create local cluster.\n{stderr}')
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     stdout = e.stdout.decode('utf-8')
                     click.echo(f'Logs:\n{stdout}')
