@@ -266,22 +266,8 @@ class HeteroGPUAutoscaler(Autoscaler):
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
-        current_time = time.time()
         # get replica infos and retrieve number of GPU types currently running
         alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_replicas = len(replica_infos)
-        # Check if cooldown period has passed since the last scaling operation.
-        # Only cooldown if bootstrapping is done.
-        if num_replicas >= self.min_replicas:
-            if current_time - self.last_scale_operation < self.cooldown:
-                logger.info(
-                    f'Current time: {current_time}, '
-                    f'last scale operation: {self.last_scale_operation}, '
-                    f'cooldown: {self.cooldown}')
-                logger.info('Cooldown period has not passed since last scaling '
-                            'operation. Skipping scaling.')
-                return [AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                          target=None)]
         
         all_replica_ids_to_scale_down: List[int] = []
         scaling_decisions : List[AutoscalerDecision] = []
