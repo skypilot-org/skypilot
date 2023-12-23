@@ -526,7 +526,7 @@ class SSHConfigHelper(object):
         docker_proxy_command = None
         head_port = ports[0]
         if docker_user is not None:
-            docker_proxy_command = ' '.join(
+            docker_proxy_command_generator = ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(key_path, None) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ips}'])
             head_port = constants.DEFAULT_DOCKER_PORT
