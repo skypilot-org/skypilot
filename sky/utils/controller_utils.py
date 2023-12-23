@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import resources
@@ -26,7 +27,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
