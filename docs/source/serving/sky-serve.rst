@@ -22,9 +22,9 @@ Why SkyServe?
 
 How it works:
 
-- Each service gets an endpoint that automatically redirects requests to its underlying replicas.
-- The replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
-- SkyServe transparently handles the load balancing, recovery, and autoscaling of the replicas.
+- Each service gets an endpoint that automatically redirects requests to its replicas.
+- Replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
+- SkyServe handles the load balancing, recovery, and autoscaling of the replicas.
 
 .. GPU availability has become a critical bottleneck for many AI services. With Sky
 .. Serve, we offer a lightweight control plane that simplifies deployment across

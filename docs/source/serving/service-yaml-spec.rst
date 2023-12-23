@@ -10,7 +10,7 @@ Available fields:
 
 .. code-block:: yaml
 
-    # Additional section to turn your skypilot task.yaml to a service
+    # The `service` section turns a skypilot task yaml into a service yaml.
     service:
 
       # Readiness probe (required). Used by SkyServe to check if your service
@@ -58,14 +58,15 @@ Available fields:
       # replicas:
       replicas: 2
 
-    # Besides the `service` section, the rest is a regular SkyPilot task YAML,
-    # which describes each replica:
+    ##### Fields below describe each replica #####
+
+    # Besides the `service` section, the rest is a regular SkyPilot task YAML.
 
     resources:
       # Port to run your service on each replica (required). This port will be
-      # automatically exposed by SkyServe.
+      # automatically exposed to the public internet by SkyServe.
       ports: 8080
       # Other resources config...
 
-    # The rest of your SkyPilot task YAML...
+    # Other fields of your SkyPilot task YAML...
 
