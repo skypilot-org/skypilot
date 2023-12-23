@@ -16,21 +16,21 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
-          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.10.
           conda create -y -n sky python=3.10
           conda activate sky
 
           # Choose your cloud:
+
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
           pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[all]"
 
     .. tab-item:: Latest Release
@@ -38,21 +38,21 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
-          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.10.
           conda create -y -n sky python=3.10
           conda activate sky
 
           # Choose your cloud:
+
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[kubernetes]"
           pip install "skypilot[lambda]"
+          pip install "skypilot[oci]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
-          pip install "skypilot[oci]"
           pip install "skypilot[all]"
 
     .. tab-item:: From Source
@@ -60,9 +60,8 @@ Install SkyPilot using pip:
 
         .. code-block:: shell
 
-          # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
-          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.10.
           conda create -y -n sky python=3.10
           conda activate sky
 
@@ -70,17 +69,18 @@ Install SkyPilot using pip:
           cd skypilot
 
           # Choose your cloud:
+
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
           pip install -e ".[kubernetes]"
           pip install -e ".[lambda]"
+          pip install -e ".[oci]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
-          pip install -e ".[oci]"
           pip install -e ".[all]"
 
-To use more than one clouds, combine the pip extras:
+To use more than one cloud, combine the pip extras:
 
 .. tab-set::
 
@@ -105,7 +105,7 @@ To use more than one clouds, combine the pip extras:
 
           pip install -e ".[aws,gcp]"
 
-As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
+Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
 .. _verify-cloud-access:
 
@@ -126,10 +126,11 @@ This will produce a summary like:
     AWS: enabled
     GCP: enabled
     Azure: enabled
+    Kubernetes: enabled
     Lambda: enabled
+    OCI: enabled
     IBM: enabled
     SCP: enabled
-    OCI: enabled
     Cloudflare (for R2 object store): enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
