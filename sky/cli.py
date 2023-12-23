@@ -2383,10 +2383,11 @@ def stop(
       sky stop -a
 
     """
-    _down_or_stop_clusters(clusters,
-                           apply_to_all=all,
-                           down=False,
-                           no_confirm=yes)
+    sys.exit(
+        _down_or_stop_clusters(clusters,
+                               apply_to_all=all,
+                               down=False,
+                               no_confirm=yes))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2725,6 +2726,7 @@ def start(
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
+            sys.exit(1)
         else:
             click.secho(f'Cluster {name} started.', fg='green')
 
@@ -2790,11 +2792,12 @@ def down(
       sky down -a
 
     """
-    _down_or_stop_clusters(clusters,
-                           apply_to_all=all,
-                           down=True,
-                           no_confirm=yes,
-                           purge=purge)
+    sys.exit(
+        _down_or_stop_clusters(clusters,
+                               apply_to_all=all,
+                               down=True,
+                               no_confirm=yes,
+                               purge=purge))
 
 
 def _hint_or_raise_for_down_spot_controller(controller_name: str):
@@ -2896,7 +2899,7 @@ def _down_or_stop_clusters(
         down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
         purge: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None) -> None:
+        idle_minutes_to_autostop: Optional[int] = None) -> int:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
     Controllers (spot controller and sky serve controller) can only be
@@ -3014,7 +3017,7 @@ def _down_or_stop_clusters(
 
     if not clusters:
         click.echo('Cluster(s) not found (tip: see `sky status`).')
-        return
+        return 0
 
     if not no_confirm and len(clusters) > 0:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
@@ -3033,6 +3036,8 @@ def _down_or_stop_clusters(
     task = progress.add_task(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
+    errors = 0
+    error_lock = multiprocessing.Lock()
 
     def _down_or_stop(name: str):
         success_progress = False
@@ -3086,6 +3091,10 @@ def _down_or_stop_clusters(
         click.echo(message)
         if success_progress:
             progress.update(task, advance=1)
+        else:
+            with error_lock:
+                nonlocal errors
+                errors += 1  # pylint:disable=undefined-variable
         progress.start()
 
     with progress:
@@ -3093,6 +3102,18 @@ def _down_or_stop_clusters(
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
+
+    if not errors:
+        return 0
+    if purge:
+        msg_head = f'{colorama.Fore.YELLOW}WARNING'
+        exitcode = 0
+    else:
+        msg_head = f'{colorama.Fore.RED}ERROR'
+        exitcode = 1
+    click.echo(f'{msg_head}: {errors} cluster{plural} failed to {command}. '
+               f'Please see above for details.{colorama.Style.RESET_ALL}')
+    return exitcode
 
 
 @_interactive_node_cli_command
@@ -5089,10 +5110,11 @@ def benchmark_down(
             continue
         to_stop.append(cluster)
 
-    _down_or_stop_clusters(to_stop,
-                           apply_to_all=False,
-                           down=True,
-                           no_confirm=yes)
+    sys.exit(
+        _down_or_stop_clusters(to_stop,
+                               apply_to_all=False,
+                               down=True,
+                               no_confirm=yes))
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
