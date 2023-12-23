@@ -166,9 +166,3 @@ Documentation
    reference/api
    reference/config
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Developer Guides
-
-   contribute/contributing
-   contribute/new-cloud

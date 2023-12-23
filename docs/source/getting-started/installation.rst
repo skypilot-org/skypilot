@@ -17,13 +17,12 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
-          conda create -y -n sky python=3.8
+          conda create -y -n sky python=3.10
           conda activate sky
 
-          pip install skypilot-nightly
-
-          # Or, choose an extra:
+          # Choose your cloud:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
@@ -40,13 +39,12 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
-          conda create -y -n sky python=3.8
+          conda create -y -n sky python=3.10
           conda activate sky
 
-          pip install skypilot
-
-          # Or, choose an extra:
+          # Choose your cloud:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
@@ -63,15 +61,15 @@ Install SkyPilot using pip:
         .. code-block:: shell
 
           # SkyPilot requires python >= 3.7. For Apple Silicon, use >= 3.8.
+          # Python >= 3.11 is not supported yet.
           # Recommended: use a new conda env to avoid package conflicts.
-          conda create -y -n sky python=3.8
+          conda create -y -n sky python=3.10
           conda activate sky
 
           git clone https://github.com/skypilot-org/skypilot.git
           cd skypilot
-          pip install -e .
 
-          # Or, choose an extra:
+          # Choose your cloud:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
@@ -82,8 +80,7 @@ Install SkyPilot using pip:
           pip install -e ".[oci]"
           pip install -e ".[all]"
 
-To use a subset of the clouds, combine some of the pip extras above to
-reduce the dependencies:
+To use more than one clouds, combine the pip extras:
 
 .. tab-set::
 
