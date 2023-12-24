@@ -1150,7 +1150,7 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
     """
 
     try:
-        kubernetes.core_api().read_namespaced_secret(secret_name, namespace)
+        kubernetes.core_api().read_namespaced_secret(secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.api_exception() as e:
         if e.status == 404:
             return False
