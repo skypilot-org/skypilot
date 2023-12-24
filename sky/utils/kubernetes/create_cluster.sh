@@ -8,7 +8,8 @@ set -e
 PORT_RANGE_START=30000
 PORT_RANGE_END=30100
 
-docker_output=$(set +e; docker info 2>&1; set -e) # Temporarily disable 'exit on error' to capture docker info output
+# Temporarily disable 'exit on error' to capture docker info output
+docker_output=$(set +e; docker info 2>&1; set -e) 
 # Check if docker info command was successful
 if ! $docker_output > /dev/null 2>&1; then
     # Check for 'permission denied' in docker output
