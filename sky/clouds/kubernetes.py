@@ -27,7 +27,7 @@ CREDENTIAL_PATH = '~/.kube/config'
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
-    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-key'
+    SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_KEY_SECRET_FIELD_NAME = f'ssh-key-{common_utils.get_user_hash()}'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
     PORT_FORWARD_PROXY_CMD_TEMPLATE = \
