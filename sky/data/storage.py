@@ -338,10 +338,12 @@ class AbstractStore:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSpecError(
                         'Attempted to mount a non-sky managed bucket '
-                        f'{self.name!r} from S3 without specifying a '
-                        'storage source. To mount an externally created '
-                        'bucket, please specify the bucket URL as '
-                        'the storage source.')
+                        f'{self.name!r} without specifying the storage source.'
+                        ' To mount an externally created bucket (e.g., '
+                        'created through cloud console or cloud cli), '
+                        'specify the bucket URL in the source field '
+                        'instead of its name. E.g., replace `name: external-'
+                        'bucket` with `source: gs://external-bucket`.')
 
 
 class Storage(object):
