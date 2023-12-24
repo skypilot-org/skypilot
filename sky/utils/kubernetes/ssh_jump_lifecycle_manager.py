@@ -83,7 +83,7 @@ def reload_keys():
     try:
         subprocess.check_output(cmd, shell=True)
     except Exception as e:
-        sys.stdout.write(f'[SSH Key Reloader] [ERROR] failed to reload SSH keys: {e}\n')
+        sys.stdout.write(f'[SSH Key Reloader][ERROR] Failed to reload SSH keys: {e}\n')
         raise
 
 
@@ -132,7 +132,7 @@ def manage_lifecycle():
             v1.delete_namespaced_service(current_name, current_namespace)
             v1.delete_namespaced_pod(current_name, current_namespace)
         except Exception as e:
-            sys.stdout.write('[Lifecycle] [ERROR] Deletion failed. Exiting '
+            sys.stdout.write('[Lifecycle][ERROR] Deletion failed. Exiting '
                                 f'poll() with error: {e}\n')
             raise
 
