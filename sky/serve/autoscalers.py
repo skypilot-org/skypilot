@@ -99,12 +99,12 @@ class RequestRateAutoscaler(Autoscaler):
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 rps_window_size: int) -> None:
+                 qps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
             target_qps_per_replica: Target qps per replica for autoscaling.
-            rps_window_size: Window size for rps calculating.
+            qps_window_size: Window size for rps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
             downscale_counter: counter for downscale number of replicas.
@@ -114,7 +114,7 @@ class RequestRateAutoscaler(Autoscaler):
         super().__init__(spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
-        self.rps_window_size: int = rps_window_size
+        self.qps_window_size: int = qps_window_size
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
@@ -141,7 +141,7 @@ class RequestRateAutoscaler(Autoscaler):
             request_aggregator_info.get('timestamps', []))
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
-                                   current_time - self.rps_window_size)
+                                   current_time - self.qps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
     def _get_desired_num_replicas(self) -> int:
@@ -153,7 +153,7 @@ class RequestRateAutoscaler(Autoscaler):
 
         # Convert to requests per second.
         num_requests_per_second = len(
-            self.request_timestamps) / self.rps_window_size
+            self.request_timestamps) / self.qps_window_size
         target_num_replicas = math.ceil(num_requests_per_second /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
@@ -200,11 +200,9 @@ class RequestRateAutoscaler(Autoscaler):
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
 
-        def _get_replica_ids_to_scale_down(
-            status_order: List['serve_state.ReplicaStatus'],
-            num_limit: int,
-        ) -> List[int]:
+        def _get_replica_ids_to_scale_down(num_limit: int,) -> List[int]:
 
+            status_order = serve_state.ReplicaStatus.scale_down_decision_order()
             alive_replica_infos_sorted = sorted(
                 alive_replica_infos,
                 key=lambda info: status_order.index(info.status)
@@ -227,10 +225,7 @@ class RequestRateAutoscaler(Autoscaler):
                                           self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(
-                    status_order=serve_state.ReplicaStatus.
-                    scale_down_decision_order(),
-                    num_limit=num_replicas_to_scale_down,
-                ))
+                    num_limit=num_replicas_to_scale_down,))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(

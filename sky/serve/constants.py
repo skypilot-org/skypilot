@@ -32,7 +32,7 @@ READINESS_PROBE_TIMEOUT_SECONDS = 15
 
 # Autoscaler window size in seconds for request per second. We calculate rps by
 # divide the number of requests in last window size by this window size.
-AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
+AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale decision interval in seconds.
 # We will try to scale up/down every `decision_interval`.
 AUTOSCALER_DEFAULT_DECISION_INTERVAL = 20

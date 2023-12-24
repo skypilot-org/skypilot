@@ -21,14 +21,18 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
-        qps_upper_threshold: Optional[float] = None,
-        qps_lower_threshold: Optional[float] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
+        # Deprecated: Always be True
         auto_restart: Optional[bool] = None,
         autoscaling_decision_interval: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
+        # Deprecated: the two arguments below is replaced by the
+        # target_qps_per_replica
+        # TODO(ziming): remove this in version 0.6.0
+        qps_upper_threshold: Optional[float] = None,
+        qps_lower_threshold: Optional[float] = None,
     ) -> None:
         if min_replicas < 0:
             with ux_utils.print_exception_no_traceback():

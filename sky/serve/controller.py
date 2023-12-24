@@ -48,7 +48,7 @@ class SkyServeController:
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
                 service_spec,
-                rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS))
+                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
         self._port = port
         self._app = fastapi.FastAPI()
 
