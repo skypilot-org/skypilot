@@ -8,8 +8,9 @@ user re-launches a task before the duration is over, then ssh jump pod is being
 reused and will terminate itself when it sees that no ray clusters exist in
 that duration.
 
-This script also reloads SSH keys from the mounted secret volume on an
-interval.
+To allow multiple users to the share the same SSH jump pod, 
+this script also reloads SSH keys from the mounted secret volume on an
+interval and updates `~/.ssh/authorized_keys`.
 """
 import datetime
 import os
