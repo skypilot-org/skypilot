@@ -97,8 +97,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     # Define the Docker-in-Docker mount
     _dind_mount = {
         '/var/run/docker.sock': {
-            'bind': '/var/run/docker.sock', # change to docker.sock
-            'mode': 'rw' 
+            'bind': '/var/run/docker.sock',
+            'mode': 'rw'
         }
     }
 
