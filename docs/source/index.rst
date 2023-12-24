@@ -62,7 +62,7 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
-  * `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
+  * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
   * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
   * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
   * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
@@ -143,6 +143,13 @@ Documentation
    reference/faq
 
 .. toctree::
+   :maxdepth: 0
+   :caption: Developer Guides
+
+   developers/CONTRIBUTING
+   Guide: Adding a New Cloud <https://docs.google.com/document/d/1oWox3qb3Kz3wXXSGg9ZJWwijoa99a3PIQUHBR8UgEGs/edit?usp=sharing>
+
+.. toctree::
    :maxdepth: 1
    :caption: Cloud Admin and Usage
 
@@ -158,3 +165,4 @@ Documentation
    reference/cli
    reference/api
    reference/config
+
