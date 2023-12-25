@@ -196,8 +196,16 @@ setup_commands:
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
-# We do not need to list it here anymore.
-
+# TODO (zhwu): This is just used for TPU VM. For other VM, we have
+# moved it to the new provisioner.
+head_start_ray_commands:
+  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
+  # all the sessions to be reloaded. This is a workaround.
+  - export SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
+    ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ray_temp_dir}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    {{dump_port_command}};
 
 # SkyPilot: The following are required by Ray autoscaler to start TPU VM.
 # Remove them when we get rid of Ray autoscaler for TPU VM.
