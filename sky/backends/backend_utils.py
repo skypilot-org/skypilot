@@ -1107,8 +1107,7 @@ def write_cluster_config(
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
 
     # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if (resources_vars.get('tpu_type') is not None and
-            resources_vars.get('tpu_vm') is None):
+    if tpu_utils.is_tpu(to_provision) and not tpu_utils.is_tpu_vm(to_provision):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name

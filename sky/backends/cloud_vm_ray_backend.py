@@ -2404,7 +2404,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 6
+    _VERSION = 7
 
     def __init__(self,
                  *,
@@ -2746,6 +2746,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
+
+        if version < 7:
+            launched_resources = state['launched_resources']
+
+            # Backward compatibility: we change the default value for TPU VM to
+            # True in version 7 (#1758), so we need to explicitly set it to
+            # False when loading the old handle.
+            if tpu_utils.is_tpu(launched_resources):
+                accelerator_args = launched_resources.accelerator_args
+                accelerator_args['tpu_vm'] = accelerator_args.get(
+                    'tpu_vm', False)
+                state['launched_resources'] = launched_resources.copy(
+                    accelerator_args=accelerator_args)
 
         self.__dict__.update(state)
 
