@@ -1566,7 +1566,7 @@ def get_node_ips(cluster_yaml: str,
             not tpu_utils.is_tpu_vm(handle.launched_resources)):
         metadata = provision_lib.get_cluster_info(
             provider_name, ray_config['provider']['region'],
-            ray_config['cluster_name'])
+            ray_config['cluster_name'], ray_config['provider'])
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
