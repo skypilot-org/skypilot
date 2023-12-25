@@ -21,16 +21,18 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
 
 
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
-    if resources is None or resources.accelerator_args is None:
+    if not is_tpu(resources):
         return False
-    return resources.accelerator_args.get('tpu_vm', False)
+    if resources.accelerator_args is None:
+        return True
+    return resources.accelerator_args.get('tpu_vm', True)
 
 
 def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
-    if resources is None or not is_tpu_vm(resources):
+    if not is_tpu_vm(resources):
         return False
     acc, _ = list(resources.accelerators.items())[0]
-    return acc not in ['tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8']
+    return not acc.endswith('-8')
 
 
 def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:

@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
+from sky.utils import tpu_utils
 from sky.clouds.utils import gcp_utils
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -482,7 +483,7 @@ class GCP(clouds.Cloud):
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
-        use_tpu_vm = 'tpu' in acc
+        use_tpu_vm = tpu_utils.is_tpu_vm(resources)
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
@@ -807,7 +808,6 @@ class GCP(clouds.Cloud):
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
         # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
         return tpu_utils.is_tpu_vm(resources)
 
     @classmethod
@@ -941,7 +941,7 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel
         from sky.utils import tpu_utils
-        use_tpu_vm = kwargs.pop('use_tpu_vm', False)
+        use_tpu_vm = kwargs.pop('use_tpu_vm', True)
 
         label_filter_str = cls._label_filter_str(tag_filters)
         if use_tpu_vm:
