@@ -124,7 +124,10 @@ class ClusterInfo:
             A list of tuples (internal_ip, external_ip) of all instances.
         """
         head_node = self.get_head_instance()
-        head_node_ip = [(head_node.internal_ip, head_node.external_ip)]
+        if head_node is None:
+            head_node_ip = []
+        else:
+            head_node_ip = [(head_node.internal_ip, head_node.external_ip)]
         other_ips = []
         for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
@@ -162,4 +165,3 @@ class ClusterInfo:
     def get_feasible_ips(self, force_internal_ips: bool = False) -> List[str]:
         """Get external IPs if they exist, otherwise get internal ones."""
         return self._get_ips(not self.has_external_ips() or force_internal_ips)
-

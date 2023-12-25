@@ -351,7 +351,6 @@ def _post_provision_setup(
     ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
 

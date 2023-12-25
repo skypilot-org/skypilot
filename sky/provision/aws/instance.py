@@ -794,12 +794,14 @@ def get_cluster_info(
         tags = [(t['Key'], t['Value']) for t in inst.tags]
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
-        instances[inst.id] = common.InstanceInfo(
-            instance_id=inst.id,
-            internal_ip=inst.private_ip_address,
-            external_ip=inst.public_ip_address,
-            tags=dict(tags),
-        )
+        instances[inst.id] = [
+            common.InstanceInfo(
+                instance_id=inst.id,
+                internal_ip=inst.private_ip_address,
+                external_ip=inst.public_ip_address,
+                tags=dict(tags),
+            )
+        ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
     return common.ClusterInfo(
         instances=instances,

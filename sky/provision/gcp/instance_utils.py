@@ -1,5 +1,4 @@
 """Utilities for GCP instances."""
-import copy
 import enum
 import functools
 from multiprocessing import pool
@@ -255,7 +254,6 @@ class GCPInstance:
 
     @classmethod
     def create_node_tag(cls,
-                        cluster_name: str,
                         project_id: str,
                         availability_zone: str,
                         target_instance_id: str,
@@ -835,12 +833,14 @@ class GCPComputeInstance(GCPInstance):
                                                [{}])[0].get('natIP', None))
         internal_ip = result.get('networkInterfaces', [{}])[0].get('networkIP')
 
-        return [common.InstanceInfo(
-            instance_id=instance_id,
-            internal_ip=internal_ip,
-            external_ip=external_ip,
-            tags=result.get('labels', {}),
-        )]
+        return [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                internal_ip=internal_ip,
+                external_ip=external_ip,
+                tags=result.get('labels', {}),
+            )
+        ]
 
     @classmethod
     def resize_disk(cls,
@@ -1135,6 +1135,7 @@ class GCPTPUVMInstance(GCPInstance):
         #
         # https://cloud.google.com/compute/docs/instance-templates
         # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+        operations = []
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
@@ -1152,6 +1153,7 @@ class GCPTPUVMInstance(GCPInstance):
                         nodeId=name,
                     ))
                 operation = request.execute(num_retries=0)
+                operations.append(operation)
             except gcp.http_error_exception() as e:
                 # NOTE: Error example:
                 # {
@@ -1171,7 +1173,12 @@ class GCPTPUVMInstance(GCPInstance):
                         'message': e.get('message'),
                     })
                 return errors, names
-        errors = operation.get('error', {}).get('details')
+        errors = []
+        logger.info(str(operations))
+        for operation in operations:
+            error = operation.get('error', {}).get('details')
+            if error:
+                errors.extend(error)
         if errors:
             logger.warning('create_instances: Failed to create instances. '
                            f'Reason: {errors}')
@@ -1179,36 +1186,62 @@ class GCPTPUVMInstance(GCPInstance):
 
         logger.debug('Waiting GCP instances to be ready ...')
         wait_start = time.time()
-        success = False
+        success = [False] * len(operations)
+        results: List[dict] = [{} for _ in range(len(operations))]
         while time.time() - wait_start < GCP_TIMEOUT:
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
             # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait
-            request = (
-                cls.load_resource().projects().locations().operations().get(
-                    name=operation['name'],))
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-            success = result['done']
-            if success:
+            for i, operation in enumerate(operations):
+                if success[i]:
+                    continue
+                request = (
+                    cls.load_resource().projects().locations().operations().get(
+                        name=operation['name'],))
+                request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+                result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+                results[i] = result
+                success[i] = result['done']
+            if all(success):
+                logger.debug(f'create_instances: Finished {results}')
                 break
-            logger.debug(f'Retry waiting for operation {operation["name"]} to '
-                         f'finish (operation: {result})...')
+            logger.debug('create_instances: Retry waiting for TPU operations '
+                         f'to finish: {results}...')
+        else:
+            logger.warning('create_instances: Timeout waiting for TPU creation '
+                           'operation, cancelling the operation ...')
+            for i, operation in enumerate(operations):
+                if success[i]:
+                    continue
+                request = cls.load_resource().projects().locations().operations(
+                ).cancel(name=operation['name'],)
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            return [{
+                'code': 'TIMEOUT',
+                'message': 'Timeout waiting for creation operation',
+                'domain': 'create_instances'
+            }], names
 
         # NOTE: Error example:
         # {
-        #   'code': 'VM_MIN_COUNT_NOT_REACHED',
-        #   'message': 'Requested minimum count of 4 VMs could not be created.'
+        #    'code': 8,
+        #    'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x8261b549624b072d]'
         # }
-        errors = result.get('error', {}).get('errors')
+        errors = []
+        for result in results:
+            error = result.get('error', {})
+            if error:
+                errors.append(error)
         if errors:
             logger.warning(
                 'create_instances: Failed to create instances. Reason: '
                 f'{errors}')
             return errors, names
-        assert success, ('Failed to create instances, but there is no error. '
-                         f'Instance status: {result}')
+        assert all(success), (
+            'Failed to create instances, but there is no error. '
+            f'Instance status: {results}')
         return None, names
 
     @classmethod
@@ -1252,15 +1285,18 @@ class GCPTPUVMInstance(GCPInstance):
         external_ips = []
         internal_ips = []
         for endpoint in network_endpoints:
-            external_ips.append(endpoint.get('accessConfig', {}).get('externalIp', None))
+            external_ips.append(
+                endpoint.get('accessConfig', {}).get('externalIp', None))
             internal_ips.append(endpoint.get('ipAddress', None))
 
-        return [common.InstanceInfo(
-            instance_id=instance_id,
-            internal_ip=internal_ip,
-            external_ip=external_ip,
-            tags=result.get('labels', {}),
-        ) for internal_ip, external_ip in zip(internal_ips, external_ips)]
+        return [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                internal_ip=internal_ip,
+                external_ip=external_ip,
+                tags=result.get('labels', {}),
+            ) for internal_ip, external_ip in zip(internal_ips, external_ips)
+        ]
 
 
 class GCPNodeType(enum.Enum):

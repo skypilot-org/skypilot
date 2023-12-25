@@ -186,7 +186,6 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if head_instance_id is None:
         if running_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 running_instances[0]['name'],
@@ -194,7 +193,6 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             )
         elif pending_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 pending_instances[0]['name'],
@@ -227,7 +225,6 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 resumed_instance_ids[0],
@@ -336,7 +333,7 @@ def get_cluster_info(
         label_filters,
         lambda h: [h.RUNNING_STATE],
     )
-    instances: Dict[str, common.InstanceInfo] = {}
+    instances: Dict[str, List[common.InstanceInfo]] = {}
     for res, insts in handler_to_instances.items():
         with pool.ThreadPool() as p:
             inst_info = p.starmap(res.get_instance_info,

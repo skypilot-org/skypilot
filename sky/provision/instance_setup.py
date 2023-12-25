@@ -103,9 +103,8 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
         for instance_id, metadatas in cluster_info.instances.items():
             for i, metadata in enumerate(metadatas):
                 cache_id = f'{instance_id}-{i}'
-                runner = command_runner.SSHCommandRunner(metadata.get_feasible_ip(),
-                                                        port=22,
-                                                        **ssh_credentials)
+                runner = command_runner.SSHCommandRunner(
+                    metadata.get_feasible_ip(), port=22, **ssh_credentials)
                 wrapper = metadata_utils.cache_func(cluster_name, cache_id,
                                                     stage_name, digest)
                 if cluster_info.head_instance_id == instance_id:
@@ -256,9 +255,14 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
         ip_list[1:], port_list=None, **ssh_credentials)
     worker_instances = cluster_info.get_worker_instances()
     cache_ids = []
-    for inst_id, instances in worker_instances.items():
-        for i, _ in enumerate(instances):
-            cache_ids.append(f'{inst_id}-{i}')
+    prev_instance_id = None
+    cnt = 0
+    for instance in worker_instances:
+        if instance.instance_id != prev_instance_id:
+            cnt = 0
+            prev_instance_id = instance.instance_id
+        cache_ids.append(f'{prev_instance_id}-{cnt}')
+        cnt += 1
 
     head_instance = cluster_info.get_head_instance()
     assert head_instance is not None, cluster_info

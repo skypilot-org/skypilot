@@ -2119,7 +2119,6 @@ class RetryingVmProvisioner(object):
         if returncode != 0:
             return GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None, None
 
-
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.

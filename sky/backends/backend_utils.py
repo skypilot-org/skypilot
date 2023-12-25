@@ -1562,7 +1562,7 @@ def get_node_ips(cluster_yaml: str,
     cloud = cloud_registry.CLOUD_REGISTRY.from_str(provider_name)
     assert cloud is not None, provider_name
 
-    if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT):
+    if cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT:
         metadata = provision_lib.get_cluster_info(
             provider_name, ray_config['provider']['region'],
             ray_config['cluster_name'], ray_config['provider'])
