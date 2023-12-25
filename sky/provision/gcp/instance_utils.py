@@ -288,7 +288,7 @@ class GCPInstance:
 class GCPComputeInstance(GCPInstance):
     """Instance handler for GCP compute instances."""
     PENDING_STATES = ['PROVISIONING', 'STAGING', 'REPAIRING']
-    STOPPING_STATES = ['STOPPING' + 'SUSPENDING']
+    STOPPING_STATES = ['STOPPING', 'SUSPENDING']
     STOPPED_STATES = ['STOPPED', 'SUSPENDED']
     RUNNING_STATE = 'RUNNING'
     STATUS_FIELD = 'status'
