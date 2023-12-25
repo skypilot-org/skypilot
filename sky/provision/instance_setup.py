@@ -107,7 +107,7 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                     metadata.get_feasible_ip(), port=22, **ssh_credentials)
                 wrapper = metadata_utils.cache_func(cluster_name, cache_id,
                                                     stage_name, digest)
-                if cluster_info.head_instance_id == instance_id:
+                if (cluster_info.head_instance_id == instance_id and i == 0):
                     # Log the head node's output to the provision.log
                     log_path_abs = str(provision_logging.get_log_path())
                 else:
