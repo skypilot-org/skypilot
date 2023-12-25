@@ -1840,11 +1840,6 @@ def _query_cluster_status_via_cloud_api(
     # correctly yet.
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     provider_config = ray_config['provider']
-    region = provider_config.get('region') or provider_config.get('location')
-    zone = ray_config['provider'].get('availability_zone')
-    kwargs = {}
-    if isinstance(handle.launched_resources.cloud, clouds.GCP):
-        kwargs['use_tpu_vm'] = ray_config['provider'].get('_has_tpus', False)
 
     # Query the cloud provider.
     # TODO(suquark): move implementations of more clouds here
@@ -1867,30 +1862,12 @@ def _query_cluster_status_via_cloud_api(
                     f'status: {common_utils.format_exception(e, use_bracket=True)}'
                 )
     else:
-        node_statuses = handle.launched_resources.cloud.query_status(
+        region = provider_config.get('region') or provider_config.get(
+            'location')
+        zone = ray_config['provider'].get('availability_zone')
+        node_statuses = cloud.query_status(
             cluster_name_on_cloud,
-            tag_filter_for_cluster(cluster_name_on_cloud), region, zone,
-            **kwargs)
-    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
-    # TODO(wei-lin): handle multi-node cases.
-    # TODO(zhwu): this should be moved into the GCP class, after we refactor
-    # the cluster termination, as the preempted TPU VM should always be
-    # removed.
-    if kwargs.get('use_tpu_vm', False) and len(node_statuses) == 0:
-        logger.debug(
-            f'Terminating preempted TPU VM cluster {cluster_name_in_hint}')
-        backend = backends.CloudVmRayBackend()
-        # Do not use refresh cluster status during teardown, as that will
-        # cause infinite recursion by calling cluster status refresh
-        # again.
-
-        # Post teardown cleanup be done later in this function, which will
-        # remove the cluster entry from the status table & the ssh config file.
-        backend.teardown_no_lock(handle,
-                                 terminate=True,
-                                 purge=False,
-                                 post_teardown_cleanup=False,
-                                 refresh_cluster_status=False)
+            tag_filter_for_cluster(cluster_name_on_cloud), region, zone)
     return node_statuses
 
 

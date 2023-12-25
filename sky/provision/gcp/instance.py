@@ -85,9 +85,11 @@ def query_instances(
         status_filters=None,
     )
 
+    raw_statuses = {}
     statuses = {}
     for inst_id, instance in instances.items():
         raw_status = instance[handler.STATUS_FIELD]
+        raw_statuses[inst_id] = raw_status
         if raw_status in handler.PENDING_STATES:
             status = status_lib.ClusterStatus.INIT
         elif raw_status in handler.STOPPING_STATES + handler.STOPPED_STATES:
@@ -99,6 +101,14 @@ def query_instances(
         if non_terminated_only and status is None:
             continue
         statuses[inst_id] = status
+
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    if handler == instance_utils.GCPTPUVMInstance:
+        all_preempted = all(s == 'PREEMPTED' for s in raw_statuses.values())
+        if all_preempted:
+            logger.info(
+                f'Terminating preempted TPU VM cluster {cluster_name_on_cloud}')
+            terminate_instances(cluster_name_on_cloud, provider_config)
     # TODO(zhwu): TPU node should check the status of the attached TPU as well.
     return statuses
 
