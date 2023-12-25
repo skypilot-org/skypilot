@@ -663,6 +663,8 @@ def _configure_subnet(region: str, cluster_name: str,
         node_config['networkConfig'].pop('accessConfigs', None)
         if config.provider_config.get('use_internal_ips', False):
             node_config['networkConfig']['enableExternalIps'] = False
+        else:
+            node_config['networkConfig']['enableExternalIps'] = True
 
     return config
 
