@@ -2055,7 +2055,7 @@ def _update_cluster_status_no_lock(
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
 
-            if ready_head + ready_workers == handle.launched_nodes:
+            if ready_head + ready_workers == handle.num_node_ips:
                 return True
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
