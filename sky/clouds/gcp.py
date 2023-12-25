@@ -22,7 +22,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
-    from sky.utils import status_lib
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
