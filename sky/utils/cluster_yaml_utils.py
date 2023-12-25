@@ -1,26 +1,10 @@
-"""Utility functions for cluster yaml file on remote cluster.
+"""Utility functions for cluster yaml file."""
 
-This module should only be used on the remote cluster.
-"""
-
-import os
 import re
-
-from sky.utils import common_utils
 
 # The cluster yaml used to create the current cluster where the module is
 # called.
 SKY_CLUSTER_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
-
-
-def get_cluster_yaml_absolute_path() -> str:
-    """Return the absolute path of the cluster yaml file."""
-    return os.path.abspath(os.path.expanduser(SKY_CLUSTER_YAML_REMOTE_PATH))
-
-
-def load_cluster_yaml() -> dict:
-    """Load the cluster yaml file."""
-    return common_utils.read_yaml(get_cluster_yaml_absolute_path())
 
 
 def get_provider_name(config: dict) -> str:

@@ -39,15 +39,16 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
 from sky.backends import onprem_utils
+from sky.clouds import cloud_registry
 from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import cluster_yaml_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
-from sky.utils import remote_cluster_yaml_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1048,7 +1049,7 @@ def write_cluster_config(
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
                 'sky_ray_yaml_remote_path':
-                    remote_cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
+                    cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,
@@ -1558,9 +1559,16 @@ def get_node_ips(cluster_yaml: str,
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
-    if '.aws' in ray_config['provider']['module']:
+    provider_name = cluster_yaml_utils.get_provider_name(ray_config)
+    cloud = cloud_registry.CLOUD_REGISTRY.from_str(provider_name)
+    assert cloud is not None, provider_name
+    assert handle.launched_resources is not None, handle
+
+    if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT and
+            not tpu_utils.is_tpu_vm(handle.launched_resources)):
         metadata = provision_lib.get_cluster_info(
-            'aws', ray_config['provider']['region'], ray_config['cluster_name'])
+            provider_name, ray_config['provider']['region'],
+            ray_config['cluster_name'])
         if len(metadata.instances) < expected_num_nodes:
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
