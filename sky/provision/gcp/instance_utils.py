@@ -688,7 +688,7 @@ class GCPComputeInstance(GCPInstance):
         if 'reservationAffinity' in config:
             reservations = gcp_cloud.GCP().get_reservations_available_resources(
                 config['machineType'],
-                region=zone[:-2],
+                region=zone.rpartition('-')[0],
                 zone=zone,
                 specific_reservations=set(
                     config['reservationAffinity']['values']))
