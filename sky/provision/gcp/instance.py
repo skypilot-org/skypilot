@@ -180,7 +180,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=['STOPPING'],
+            status_filters=resource.STOPPING_STATES,
         )
         if not instances:
             break
@@ -218,7 +218,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     logger.info(str(exist_instances))
     for inst in exist_instances:
-        state = inst['status']
+        state = inst[resource.STATUS_FIELD]
         if state in resource.PENDING_STATES:
             pending_instances.append(inst)
         elif state == resource.RUNNING_STATE:

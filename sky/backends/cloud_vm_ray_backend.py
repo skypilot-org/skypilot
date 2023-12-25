@@ -2530,7 +2530,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
-                                 (self.num_node_ips - 1))
+                                 (self.num_node_ips * self.launched_nodes - 1))
 
     def update_cluster_ips(
             self,
@@ -2567,7 +2567,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
 
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
-            return (ips is not None and len(ips) == self.num_node_ips and
+            return (ips is not None and
+                    len(ips) == self.num_node_ips * self.launched_nodes and
                     all(ip is not None for ip in ips))
 
         use_internal_ips = self._use_internal_ips()
