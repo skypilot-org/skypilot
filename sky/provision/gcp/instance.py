@@ -11,6 +11,7 @@ from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -53,6 +54,53 @@ def _filter_instances(
         handler_to_instances[handler].append(instance)
     logger.debug(f'handler_to_instances: {handler_to_instances}')
     return handler_to_instances
+
+
+# TODO(suquark): Does it make sense to not expose this and always assume
+# non_terminated_only=True?
+# Will there be callers who would want this to be False?
+# stop() and terminate() for example already implicitly assume non-terminated.
+@common_utils.retry
+def query_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    zone = provider_config['availability_zone']
+    project_id = provider_config['project_id']
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+
+    handler: Type[
+        instance_utils.GCPInstance] = instance_utils.GCPComputeInstance
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+    if use_tpu_vms:
+        handler = instance_utils.GCPTPUVMInstance
+
+    instances = handler.filter(
+        project_id,
+        zone,
+        label_filters,
+        status_filters=None,
+    )
+
+    statuses = {}
+    for inst_id, instance in instances.items():
+        raw_status = instance[handler.STATUS_FIELD]
+        if raw_status in handler.PENDING_STATES:
+            status = status_lib.ClusterStatus.INIT
+        elif raw_status in handler.STOPPING_STATES + handler.STOPPED_STATES:
+            status = status_lib.ClusterStatus.STOPPED
+        elif raw_status == handler.RUNNING_STATE:
+            status = status_lib.ClusterStatus.UP
+        else:
+            status = None
+        if non_terminated_only and status is None:
+            continue
+        statuses[inst_id] = status
+    # TODO(zhwu): TPU node should check the status of the attached TPU as well.
+    return statuses
 
 
 def _wait_for_operations(
@@ -109,14 +157,11 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
-        stopped_status = 'TERMINATED'
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
-        stopped_status = 'STOPPED'
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    pending_status = ['PROVISIONING', 'STAGING']
     filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     # wait until all stopping instances are stopped/terminated
@@ -163,13 +208,13 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     for inst in exist_instances:
         state = inst['status']
-        if state in pending_status:
+        if state in resource.PENDING_STATES:
             pending_instances.append(inst)
-        elif state == 'RUNNING':
+        elif state == resource.RUNNING_STATE:
             running_instances.append(inst)
-        elif state == 'STOPPING':
+        elif state in resource.STOPPING_STATES:
             stopping_instances.append(inst)
-        elif state == stopped_status:
+        elif state in resource.STOPPED_STATES:
             stopped_instances.append(inst)
         else:
             raise RuntimeError(f'Unsupported state "{state}".')
@@ -253,7 +298,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=pending_status,
+            status_filters=resource.PENDING_STATES,
         )
         if not instances:
             break

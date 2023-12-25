@@ -127,9 +127,14 @@ def instance_to_handler(instance: str):
 
 class GCPInstance:
     """Base class for GCP instance handlers."""
+    PENDING_STATES: List[str] = []
     NEED_TO_STOP_STATES: List[str] = []
     NON_STOPPED_STATES: List[str] = []
     NEED_TO_TERMINATE_STATES: List[str] = []
+    RUNNING_STATE: str = ''
+    STOPPING_STATES: List[str] = []
+    STOPPED_STATES: List[str] = []
+    STATUS_FIELD: str = ''
 
     @classmethod
     def load_resource(cls):
@@ -282,13 +287,14 @@ class GCPInstance:
 
 class GCPComputeInstance(GCPInstance):
     """Instance handler for GCP compute instances."""
-    NEED_TO_STOP_STATES = [
-        'PROVISIONING',
-        'STAGING',
-        'RUNNING',
-    ]
+    PENDING_STATES = ['PROVISIONING', 'STAGING', 'REPAIRING']
+    STOPPING_STATES = ['STOPPING' + 'SUSPENDING']
+    STOPPED_STATES = ['STOPPED', 'SUSPENDED']
+    RUNNING_STATE = 'RUNNING'
+    STATUS_FIELD = 'status'
+    NEED_TO_STOP_STATES = PENDING_STATES + [RUNNING_STATE]
 
-    NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
+    NON_STOPPED_STATES = NEED_TO_STOP_STATES + STOPPED_STATES
 
     @classmethod
     def load_resource(cls):
@@ -943,14 +949,19 @@ class GCPComputeInstance(GCPInstance):
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU node."""
-    NEED_TO_STOP_STATES = [
+    PENDING_STATES = [
         'CREATING',
         'STARTING',
-        'READY',
         'RESTARTING',
+        'REPAIRING',
     ]
+    RUNNING_STATE = 'READY'
+    STOPPING_STATES = ['STOPPING']
+    STOPPED_STATES = ['STOPPED']
+    STATUS_FIELD = 'state'
+    NEED_TO_STOP_STATES = PENDING_STATES + [RUNNING_STATE]
 
-    NON_STOPPED_STATES = NEED_TO_STOP_STATES + ['STOPPING']
+    NON_STOPPED_STATES = NEED_TO_STOP_STATES + STOPPING_STATES
 
     @classmethod
     def load_resource(cls):

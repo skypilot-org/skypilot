@@ -13,7 +13,7 @@ from sky.provision.gcp import instance_utils
 logger = logging.getLogger(__name__)
 
 if typing.TYPE_CHECKING:
-    import google
+    import google.cloud
 
 
 def _skypilot_log_error_and_exit_for_failover(error_code: str,
