@@ -1141,8 +1141,6 @@ class FailoverCloudErrorHandlerV2:
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources, region, zones, err):
         # TODO: Handle TPU VMs when we have TPU VM integrated.
-        assert not tpu_utils.is_tpu_vm(
-            launchable_resources), launchable_resources
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
@@ -1694,9 +1692,8 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
-            if (to_provision.cloud.PROVISIONER_VERSION
-                    == clouds.ProvisionerVersion.SKYPILOT and
-                    not tpu_utils.is_tpu_vm(to_provision)):
+            if (to_provision.cloud.PROVISIONER_VERSION ==
+                    clouds.ProvisionerVersion.SKYPILOT):
                 # Use the new provisioner for AWS.
                 # TODO (suquark): Gradually move the other clouds to
                 #  the new provisioner once they are ready.
@@ -2122,11 +2119,6 @@ class RetryingVmProvisioner(object):
         if returncode != 0:
             return GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None, None
 
-        resources = cluster_handle.launched_resources
-        if tpu_utils.is_tpu_vm_pod(resources):
-            logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-                        f'{style.RESET_ALL}')
-            self._tpu_vm_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
@@ -3659,9 +3651,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        num_actual_nodes = len(handle.internal_ips())
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if task_copy.num_nodes > 1 or is_tpu_vm_pod:
+        if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
@@ -4997,13 +4989,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
-        if is_tpu_vm_pod:
-            num_actual_nodes = tpu_utils.get_num_tpu_devices(
-                handle.launched_resources)
-        else:
-            num_actual_nodes = task.num_nodes
-        assert isinstance(num_actual_nodes, int), num_actual_nodes
+        num_actual_nodes = len(handle.internal_ips())
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)

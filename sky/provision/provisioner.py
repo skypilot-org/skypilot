@@ -328,7 +328,7 @@ def _post_provision_setup(
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
 
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(

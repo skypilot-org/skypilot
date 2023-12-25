@@ -87,11 +87,34 @@ class InstanceInfo:
 @dataclasses.dataclass
 class ClusterInfo:
     """Cluster Information."""
-    instances: Dict[InstanceId, InstanceInfo]
+    instances: Dict[InstanceId, List[InstanceInfo]]
     # The unique identifier of the head instance, i.e., the
     # `instance_info.instance_id` of the head node.
     head_instance_id: Optional[InstanceId]
     docker_user: Optional[str] = None
+
+    @property
+    def num_instances(self) -> int:
+        """Get the number of instances in the cluster."""
+        return sum(len(instances) for instances in self.instances.values())
+
+    def get_head_instance(self) -> Optional[InstanceInfo]:
+        """Get the instance metadata of the head node"""
+        if self.head_instance_id is None:
+            return None
+        if self.head_instance_id not in self.instances:
+            raise ValueError('Head instance ID not in the cluster metadata.')
+        return self.instances[self.head_instance_id][0]
+
+    def get_worker_instances(self) -> List[InstanceInfo]:
+        """Get all worker instances."""
+        worker_instances = []
+        for inst_id, instances in self.instances.items():
+            if inst_id == self.head_instance_id:
+                worker_instances.extend(instances[1:])
+            else:
+                worker_instances.extend(instances)
+        return worker_instances
 
     def ip_tuples(self) -> List[Tuple[str, Optional[str]]]:
         """Get IP tuples of all instances. Make sure that list always
@@ -100,13 +123,12 @@ class ClusterInfo:
         Returns:
             A list of tuples (internal_ip, external_ip) of all instances.
         """
-        head_node_ip, other_ips = [], []
-        for instance in self.instances.values():
+        head_node = self.get_head_instance()
+        head_node_ip = [(head_node.internal_ip, head_node.external_ip)]
+        other_ips = []
+        for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
-            if instance.instance_id == self.head_instance_id:
-                head_node_ip.append(pair)
-            else:
-                other_ips.append(pair)
+            other_ips.append(pair)
         return head_node_ip + other_ips
 
     def has_external_ips(self) -> bool:
@@ -141,10 +163,3 @@ class ClusterInfo:
         """Get external IPs if they exist, otherwise get internal ones."""
         return self._get_ips(not self.has_external_ips() or force_internal_ips)
 
-    def get_head_instance(self) -> Optional[InstanceInfo]:
-        """Get the instance metadata of the head node"""
-        if self.head_instance_id is None:
-            return None
-        if self.head_instance_id not in self.instances:
-            raise ValueError('Head instance ID not in the cluster metadata.')
-        return self.instances[self.head_instance_id]

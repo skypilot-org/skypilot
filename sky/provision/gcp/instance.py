@@ -109,14 +109,12 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
-        stopped_status = 'TERMINATED'
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
-        stopped_status = 'STOPPED'
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    pending_status = ['PROVISIONING', 'STAGING']
+    pending_status = resource.PENDING_STATES
     filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     # wait until all stopping instances are stopped/terminated
@@ -161,15 +159,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                                               '%Y-%m-%dT%H:%M:%S.%f%z')
         return node['id']
 
+    logger.info(str(exist_instances))
     for inst in exist_instances:
-        state = inst['status']
+        state = inst[resource.STATUS_FIELD]
         if state in pending_status:
             pending_instances.append(inst)
-        elif state == 'RUNNING':
+        elif state == resource.RUNNING_STATE:
             running_instances.append(inst)
-        elif state == 'STOPPING':
+        elif state == resource.STOPPING_STATE:
             stopping_instances.append(inst)
-        elif state == stopped_status:
+        elif state == resource.STOPPED_STATE:
             stopped_instances.append(inst)
         else:
             raise RuntimeError(f'Unsupported state "{state}".')
@@ -263,7 +262,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         project_id=project_id,
         zone=availability_zone,
         label_filters=filter_labels,
-        status_filters=['RUNNING'],
+        status_filters=[resource.RUNNING_STATE],
     )
     if len(instances) != config.count:
         logger.warning('The number of running instances is different from '
@@ -335,7 +334,7 @@ def get_cluster_info(
         project_id,
         zone,
         label_filters,
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
     instances: Dict[str, common.InstanceInfo] = {}
     for res, insts in handler_to_instances.items():
@@ -351,7 +350,7 @@ def get_cluster_info(
         {
             **label_filters, TAG_RAY_NODE_KIND: 'head'
         },
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
     head_instance_id = None
     for insts in head_instances.values():
