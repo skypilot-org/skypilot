@@ -1116,14 +1116,16 @@ class GCPTPUVMInstance(GCPInstance):
         return result
 
     @classmethod
-    def create_instances(cls,
-                        cluster_name: str,
-                        project_id: str,
-                        availability_zone: str,
-                        node_config: dict,
-                        labels: dict,
-                        is_head_node: bool,
-                        wait_for_operation: bool = True) -> Tuple[dict, str]:
+    def create_instances(
+        cls,
+        cluster_name: str,
+        project_id: str,
+        zone: str,
+        node_config: dict,
+        labels: dict,
+        count: int,
+        include_head_node: bool,
+    ) -> Tuple[Optional[List], List[str]]:
         raise NotImplementedError
 
     @classmethod
