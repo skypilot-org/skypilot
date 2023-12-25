@@ -505,6 +505,7 @@ def terminate_instances(
     for handler, instances in handler_to_instances.items():
         for instance in instances:
             try:
+                logger.debug(f'Terminating instance: {instance}.')
                 operations[handler].append(
                     handler.terminate(project_id, zone, instance))
             except gcp.http_error_exception() as e:

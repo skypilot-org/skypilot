@@ -294,7 +294,7 @@ class GCPComputeInstance(GCPInstance):
     STATUS_FIELD = 'status'
     NEED_TO_STOP_STATES = PENDING_STATES + [RUNNING_STATE]
 
-    NON_STOPPED_STATES = NEED_TO_STOP_STATES + STOPPED_STATES
+    NON_STOPPED_STATES = NEED_TO_STOP_STATES + STOPPING_STATES
 
     @classmethod
     def load_resource(cls):
