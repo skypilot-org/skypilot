@@ -227,6 +227,7 @@ class AutostopEvent(SkyletEvent):
 
         # Stop the ray autoscaler to avoid scaling up, during
         # stopping/terminating of the cluster.
+        logger.info('Stopping the ray cluster.')
         subprocess.run('ray stop', shell=True, check=True)
 
         operation_fn = provision_lib.stop_instances
@@ -234,10 +235,12 @@ class AutostopEvent(SkyletEvent):
             operation_fn = provision_lib.terminate_instances
 
         if is_cluster_multinode:
+            logger.info('Terminating worker nodes first.')
             operation_fn(provider_name=provider_name,
                          cluster_name_on_cloud=cluster_name_on_cloud,
                          provider_config=cluster_config['provider'],
                          worker_only=True)
+        logger.info('Terminating head node.')
         operation_fn(provider_name=provider_name,
                      cluster_name_on_cloud=cluster_name_on_cloud,
                      provider_config=cluster_config['provider'])
