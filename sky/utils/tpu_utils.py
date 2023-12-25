@@ -23,6 +23,7 @@ def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu(resources):
         return False
+    assert resources is not None
     if resources.accelerator_args is None:
         return True
     return resources.accelerator_args.get('tpu_vm', True)
@@ -31,6 +32,7 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
 def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     if not is_tpu_vm(resources):
         return False
+    assert resources is not None
     acc, _ = list(resources.accelerators.items())[0]
     return not acc.endswith('-8')
 

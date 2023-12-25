@@ -16,11 +16,11 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
-from sky.utils import tpu_utils
 from sky.clouds.utils import gcp_utils
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -939,8 +939,6 @@ class GCP(clouds.Cloud):
         """Query the status of a cluster."""
         del region  # unused
 
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
         use_tpu_vm = kwargs.pop('use_tpu_vm', True)
 
         label_filter_str = cls._label_filter_str(tag_filters)
