@@ -195,6 +195,9 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
+# SkyPilot: The following are required by Ray autoscaler to start TPU VM.
+# Remove them when we get rid of Ray autoscaler for TPU VM.
+
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # TODO (zhwu): This is just used for TPU VM. For other VM, we have
 # moved it to the new provisioner.
@@ -207,8 +210,16 @@ head_start_ray_commands:
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
     {{dump_port_command}};
 
-# SkyPilot: The following are required by Ray autoscaler to start TPU VM.
-# Remove them when we get rid of Ray autoscaler for TPU VM.
+# Worker commands are needed for TPU VM Pods
+{%- if num_nodes > 1 or tpu_vm %}
+worker_start_ray_commands:
+  - SKYPILOT_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKYPILOT_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
+    ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKYPILOT_NUM_GPUS --temp-dir {{ray_temp_dir}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+{%- else %}
+worker_start_ray_commands: []
+{%- endif %}
+
 head_node: {}
 worker_nodes: {}
 
