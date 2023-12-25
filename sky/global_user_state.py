@@ -6,7 +6,6 @@ Concepts:
 - Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
-import enum
 import json
 import os
 import pathlib
@@ -14,14 +13,15 @@ import pickle
 import sqlite3
 import time
 import typing
-from typing import Any, Dict, List, Tuple, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-import colorama
-
 from sky import clouds
-from sky.utils import db_utils
+from sky import status_lib
+from sky.adaptors import cloudflare
+from sky.data import storage as storage_lib
 from sky.utils import common_utils
+from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -110,56 +110,13 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
 
+    db_utils.add_column_to_table(cursor, conn, 'clusters',
+                                 'storage_mounts_metadata', 'BLOB DEFAULT null')
+
     conn.commit()
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
-
-
-class ClusterStatus(enum.Enum):
-    """Cluster status as recorded in table 'clusters'."""
-    # NOTE: these statuses are as recorded in our local cache, the table
-    # 'clusters'.  The actual cluster state may be different (e.g., an UP
-    # cluster getting killed manually by the user or the cloud provider).
-
-    # Initializing.  This means a backend.provision() call has started but has
-    # not successfully finished. The cluster may be undergoing setup, may have
-    # failed setup, may be live or down.
-    INIT = 'INIT'
-
-    # The cluster is recorded as up.  This means a backend.provision() has
-    # previously succeeded.
-    UP = 'UP'
-
-    # Stopped.  This means a `sky stop` call has previously succeeded.
-    STOPPED = 'STOPPED'
-
-    def colored_str(self):
-        color = _STATUS_TO_COLOR[self]
-        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
-
-
-_STATUS_TO_COLOR = {
-    ClusterStatus.INIT: colorama.Fore.BLUE,
-    ClusterStatus.UP: colorama.Fore.GREEN,
-    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
-}
-
-
-class StorageStatus(enum.Enum):
-    """Storage status as recorded in table 'storage'."""
-
-    # Initializing and uploading storage
-    INIT = 'INIT'
-
-    # Initialization failed
-    INIT_FAILED = 'INIT_FAILED'
-
-    # Failed to Upload to Cloud
-    UPLOAD_FAILED = 'UPLOAD_FAILED'
-
-    # Finished uploading, in terminal state
-    READY = 'READY'
 
 
 def add_or_update_cluster(cluster_name: str,
@@ -182,7 +139,9 @@ def add_or_update_cluster(cluster_name: str,
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
-    status = ClusterStatus.UP if ready else ClusterStatus.INIT
+    status = status_lib.ClusterStatus.INIT
+    if ready:
+        status = status_lib.ClusterStatus.UP
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -197,12 +156,15 @@ def add_or_update_cluster(cluster_name: str,
         usage_intervals = []
 
     # if this is the cluster init or we are starting after a stop
-    if len(usage_intervals) == 0 or usage_intervals[-1][-1] is not None:
+    if not usage_intervals or usage_intervals[-1][-1] is not None:
+        if cluster_launched_at is None:
+            # This could happen when the cluster is restarted manually on the
+            # cloud console. In this case, we will use the current time as the
+            # cluster launched time.
+            # TODO(zhwu): We should use the time when the cluster is restarted
+            # to be more accurate.
+            cluster_launched_at = int(time.time())
         usage_intervals.append((cluster_launched_at, None))
-
-    if requested_resources:
-        assert len(requested_resources) == 1, requested_resources
-        requested_resources = list(requested_resources)[0]
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -211,7 +173,8 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata, owner, cluster_hash) '
+        'autostop, to_down, metadata, owner, cluster_hash, '
+        'storage_mounts_metadata) '
         'VALUES ('
         # name
         '?, '
@@ -243,7 +206,10 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT owner FROM clusters WHERE name=?), null),'
         # cluster_hash
-        '?'
+        '?,'
+        # storage_mounts_metadata
+        'COALESCE('
+        '(SELECT storage_mounts_metadata FROM clusters WHERE name=?), null)'
         ')',
         (
             # name
@@ -260,18 +226,22 @@ def add_or_update_cluster(cluster_name: str,
             status.value,
             # autostop
             cluster_name,
-            ClusterStatus.STOPPED.value,
+            status_lib.ClusterStatus.STOPPED.value,
             # to_down
             cluster_name,
-            ClusterStatus.STOPPED.value,
+            status_lib.ClusterStatus.STOPPED.value,
             # metadata
             cluster_name,
             # owner
             cluster_name,
             # cluster_hash
             cluster_hash,
+            # storage_mounts_metadata
+            cluster_name,
         ))
 
+    launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
+    launched_resources = getattr(cluster_handle, 'launched_resources', None)
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
         '(cluster_hash, name, num_nodes, requested_resources, '
@@ -295,11 +265,11 @@ def add_or_update_cluster(cluster_name: str,
             # name
             cluster_name,
             # number of nodes
-            cluster_handle.launched_nodes,
+            launched_nodes,
             # requested resources
             pickle.dumps(requested_resources),
             # launched resources
-            pickle.dumps(cluster_handle.launched_resources),
+            pickle.dumps(launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
         ))
@@ -314,13 +284,14 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
-def remove_cluster(cluster_name: str, terminate: bool) -> float:
+def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # usage_intervals is not None and not empty
     if usage_intervals:
+        assert cluster_hash is not None, cluster_name
         start_time = usage_intervals.pop()[0]
         end_time = int(time.time())
         usage_intervals.append((start_time, end_time))
@@ -335,12 +306,13 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
             return
         # Must invalidate IP list: otherwise 'sky cpunode'
         # on a stopped cpunode will directly try to ssh, which leads to timeout.
-        handle.stable_internal_external_ips = None
+        if hasattr(handle, 'stable_internal_external_ips'):
+            handle.stable_internal_external_ips = None
         _DB.cursor.execute(
             'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
                 pickle.dumps(handle),
-                ClusterStatus.STOPPED.value,
+                status_lib.ClusterStatus.STOPPED.value,
                 cluster_name,
             ))
     _DB.conn.commit()
@@ -353,6 +325,7 @@ def get_handle_from_cluster_name(
                               (cluster_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
+    return None
 
 
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
@@ -362,7 +335,8 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
+def set_cluster_status(cluster_name: str,
+                       status: status_lib.ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
         cluster_name,
@@ -396,18 +370,20 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
         if launch_time is None:
             return None
         return int(launch_time)
+    return None
 
 
-def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
         if metadata is None:
             return None
         return json.loads(metadata)
+    return None
 
 
-def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
         cluster_name,
@@ -419,7 +395,37 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def get_cluster_storage_mounts_metadata(
+        cluster_name: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT storage_mounts_metadata FROM clusters WHERE name=(?)',
+        (cluster_name,))
+    for (storage_mounts_metadata,) in rows:
+        if storage_mounts_metadata is None:
+            return None
+        return pickle.loads(storage_mounts_metadata)
+    return None
+
+
+def set_cluster_storage_mounts_metadata(
+        cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
+    _DB.cursor.execute(
+        'UPDATE clusters SET storage_mounts_metadata=(?) WHERE name=(?)', (
+            pickle.dumps(storage_mounts_metadata),
+            cluster_name,
+        ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+def _get_cluster_usage_intervals(
+        cluster_hash: Optional[str]
+) -> Optional[List[Tuple[int, Optional[int]]]]:
+    if cluster_hash is None:
+        return None
     rows = _DB.cursor.execute(
         'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
@@ -427,10 +433,13 @@ def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
         if usage_intervals is None:
             return None
         return pickle.loads(usage_intervals)
+    return None
 
 
-def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_launch_time(cluster_hash: str) -> Optional[int]:
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    if usage_intervals is None:
+        return None
     return usage_intervals[0][0]
 
 
@@ -443,6 +452,8 @@ def _get_cluster_duration(cluster_hash: str) -> int:
 
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
+        if start_time is None:
+            continue
         if end_time is None:
             assert i == len(usage_intervals) - 1, i
             end_time = int(time.time())
@@ -451,8 +462,9 @@ def _get_cluster_duration(cluster_hash: str) -> int:
     return total_duration
 
 
-def _set_cluster_usage_intervals(cluster_hash: str,
-                                 usage_intervals: Dict[str, Any]) -> None:
+def _set_cluster_usage_intervals(
+        cluster_hash: str, usage_intervals: List[Tuple[int,
+                                                       Optional[int]]]) -> None:
     _DB.cursor.execute(
         'UPDATE cluster_history SET usage_intervals=(?) WHERE cluster_hash=(?)',
         (
@@ -468,11 +480,12 @@ def _set_cluster_usage_intervals(cluster_hash: str,
 
 
 def set_owner_identity_for_cluster(cluster_name: str,
-                                   owner_identity: Optional[str]) -> None:
+                                   owner_identity: Optional[List[str]]) -> None:
     if owner_identity is None:
         return
+    owner_identity_str = json.dumps(owner_identity)
     _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
-                       (owner_identity, cluster_name))
+                       (owner_identity_str, cluster_name))
 
     count = _DB.cursor.rowcount
     _DB.conn.commit()
@@ -488,6 +501,7 @@ def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
         if cluster_hash is None:
             return None
         return cluster_hash
+    return None
 
 
 def get_launched_resources_from_cluster_hash(
@@ -501,6 +515,35 @@ def get_launched_resources_from_cluster_hash(
             return None
         launched_resources = pickle.loads(launched_resources)
         return num_nodes, launched_resources
+    return None
+
+
+def _load_owner(record_owner: Optional[str]) -> Optional[List[str]]:
+    if record_owner is None:
+        return None
+    try:
+        result = json.loads(record_owner)
+        if result is not None and not isinstance(result, list):
+            # Backwards compatibility for old records, which were stored as
+            # a string instead of a list. It is possible that json.loads
+            # will parse the string with all numbers as an int or escape
+            # some characters, such as \n, so we need to use the original
+            # record_owner.
+            return [record_owner]
+        return result
+    except json.JSONDecodeError:
+        # Backwards compatibility for old records, which were stored as
+        # a string instead of a list. This will happen when the previous
+        # UserId is a string instead of an int.
+        return [record_owner]
+
+
+def _load_storage_mounts_metadata(
+    record_storage_mounts_metadata: Optional[bytes]
+) -> Optional[Dict[str, 'Storage.StorageMetadata']]:
+    if not record_storage_mounts_metadata:
+        return None
+    return pickle.loads(record_storage_mounts_metadata)
 
 
 def get_cluster_from_name(
@@ -512,21 +555,24 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': ClusterStatus[status],
+            'status': status_lib.ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
         return record
+    return None
 
 
 def get_clusters() -> List[Dict[str, Any]]:
@@ -535,20 +581,21 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner, cluster_hash) = row[:10]
+         to_down, owner, cluster_hash, storage_mounts_metadata) = row[:11]
         # TODO: use namedtuple instead of dict
-
         record = {
             'name': name,
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': ClusterStatus[status],
+            'status': status_lib.ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
-            'owner': owner,
+            'owner': _load_owner(owner),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+            'storage_mounts_metadata':
+                _load_storage_mounts_metadata(storage_mounts_metadata),
         }
 
         records.append(record)
@@ -580,7 +627,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         ) = row[:6]
 
         if status is not None:
-            status = ClusterStatus[status]
+            status = status_lib.ClusterStatus[status]
 
         record = {
             'name': name,
@@ -613,7 +660,28 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     for (value,) in rows:
         ret = json.loads(value)
         break
-    return [clouds.CLOUD_REGISTRY.from_str(cloud) for cloud in ret]
+    enabled_clouds: List[clouds.Cloud] = []
+    for c in ret:
+        cloud = clouds.CLOUD_REGISTRY.from_str(c)
+        if cloud is not None:
+            enabled_clouds.append(cloud)
+    return enabled_clouds
+
+
+def get_enabled_storage_clouds() -> List[str]:
+    # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
+    # is resolved by implementing separate 'enabled_storage_clouds'
+    enabled_clouds = get_enabled_clouds()
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+
+    enabled_storage_clouds = [
+        cloud for cloud in enabled_clouds
+        if cloud in storage_lib.STORE_ENABLED_CLOUDS
+    ]
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        enabled_storage_clouds.append(cloudflare.NAME)
+    return enabled_storage_clouds
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
@@ -624,13 +692,13 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
 
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
-                          storage_status: StorageStatus):
+                          storage_status: status_lib.StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_pretty_entry_point()
 
     def status_check(status):
-        return status in StorageStatus
+        return status in status_lib.StorageStatus
 
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
@@ -647,7 +715,8 @@ def remove_storage(storage_name: str):
     _DB.conn.commit()
 
 
-def set_storage_status(storage_name: str, status: StorageStatus) -> None:
+def set_storage_status(storage_name: str,
+                       status: status_lib.StorageStatus) -> None:
     _DB.cursor.execute('UPDATE storage SET status=(?) WHERE name=(?)', (
         status.value,
         storage_name,
@@ -659,15 +728,17 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
         raise ValueError(f'Storage {storage_name} not found.')
 
 
-def get_storage_status(storage_name: str) -> None:
+def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)',
                               (storage_name,))
     for (status,) in rows:
-        return StorageStatus[status]
+        return status_lib.StorageStatus[status]
+    return None
 
 
-def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
+def set_storage_handle(storage_name: str,
+                       handle: 'Storage.StorageMetadata') -> None:
     _DB.cursor.execute('UPDATE storage SET handle=(?) WHERE name=(?)', (
         pickle.dumps(handle),
         storage_name,
@@ -689,6 +760,7 @@ def get_handle_from_storage_name(
         if handle is None:
             return None
         return pickle.loads(handle)
+    return None
 
 
 def get_glob_storage_name(storage_name: str) -> List[str]:
@@ -714,6 +786,6 @@ def get_storage() -> List[Dict[str, Any]]:
             'launched_at': launched_at,
             'handle': pickle.loads(handle),
             'last_use': last_use,
-            'status': StorageStatus[status],
+            'status': status_lib.StorageStatus[status],
         })
     return records

@@ -16,7 +16,6 @@ import uuid
 
 import colorama
 import prettytable
-from rich import console as rich_console
 from rich import progress as rich_progress
 
 import sky
@@ -24,13 +23,15 @@ from sky import backends
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
+from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.skylet import constants
-from sky.skylet import log_lib
 from sky.skylet import job_lib
-from sky.utils import log_utils
+from sky.skylet import log_lib
 from sky.utils import common_utils
+from sky.utils import log_utils
+from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -38,7 +39,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
-console = rich_console.Console()
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
@@ -96,7 +96,7 @@ def _get_optimized_resources(
             resources = config.get('resources', None)
             resources = sky.Resources.from_yaml_config(resources)
             task = sky.Task()
-            task.set_resources({resources})
+            task.set_resources(resources)
 
         dag = sky.optimize(dag, quiet=True)
         task = dag.tasks[0]
@@ -119,6 +119,7 @@ def _print_candidate_resources(
         '# NODES',
         'INSTANCE',
         'vCPUs',
+        'Mem(GB)',
         'ACCELERATORS',
         'PRICE ($/hr)',
     ]
@@ -136,18 +137,24 @@ def _print_candidate_resources(
             accelerator, count = list(resources.accelerators.items())[0]
             accelerators = f'{accelerator}:{count}'
         cloud = resources.cloud
-        vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
-        if vcpus is None:
-            vcpus = '-'
-        elif vcpus.is_integer():
-            vcpus = str(int(vcpus))
-        else:
-            vcpus = f'{vcpus:.1f}'
+        vcpus, mem = cloud.get_vcpus_mem_from_instance_type(
+            resources.instance_type)
+
+        def format_number(x):
+            if x is None:
+                return '-'
+            elif x.is_integer():
+                return str(int(x))
+            else:
+                return f'{x:.1f}'
+
+        vcpus = format_number(vcpus)
+        mem = format_number(mem)
         cost = num_nodes * resources.get_cost(3600)
         spot = '[Spot]' if resources.use_spot else ''
         row = [
             cluster, cloud, num_nodes, resources.instance_type + spot, vcpus,
-            accelerators, f'{cost:.2f}'
+            mem, accelerators, f'{cost:.2f}'
         ]
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')
@@ -216,7 +223,7 @@ def _launch_with_log_suppress_exception(
             log_path=os.path.join(log_dir, f'{cluster}.log'),
             stream_logs=True,
             streaming_prefix=prefix,
-            start_streaming_at='Creating a new cluster: "',
+            start_streaming_at='Creating a new cluster: ',
             skip_lines=[
                 'Tip: to reuse an existing cluster, specify --cluster (-c).',
             ],
@@ -294,6 +301,11 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     run_end_path = os.path.join(local_dir, _RUN_END)
     end_time = None
     if os.path.exists(run_end_path):
+        # The job has terminated with a zero exit code. See
+        # generate_benchmark_configs() which ensures the 'run' commands write
+        # out end_time remotely on success; and the caller of this func which
+        # downloads all benchmark log files including the end_time file to
+        # local.
         end_time = _read_timestamp(run_end_path)
 
     # Get the status of the benchmarking cluster and job.
@@ -303,39 +315,74 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     if record is not None:
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster)
-        backend = backend_utils.get_backend_from_handle(handle)
-        assert isinstance(backend, backends.CloudVmRayBackend)
+        if handle is not None:
+            backend = backend_utils.get_backend_from_handle(handle)
+            assert isinstance(backend, backends.CloudVmRayBackend)
 
-        if cluster_status == global_user_state.ClusterStatus.UP:
-            # NOTE: The id of the benchmarking job must be 1.
-            # TODO(woosuk): Handle exceptions.
-            job_status = backend.get_job_status(handle,
-                                                job_ids=['1'],
-                                                stream_logs=False)['1']
+            if cluster_status == status_lib.ClusterStatus.UP:
+                # NOTE: The id of the benchmarking job must be 1.
+                # TODO(woosuk): Handle exceptions.
+                job_status = backend.get_job_status(handle,
+                                                    job_ids=[1],
+                                                    stream_logs=False)[1]
+
+    logger.debug(f'Cluster {cluster}, cluster_status: {cluster_status}, '
+                 f'benchmark_status {benchmark_status}, job_status: '
+                 f'{job_status}, start_time {start_time}, end_time {end_time}')
 
     # Update the benchmark status.
-    if (cluster_status == global_user_state.ClusterStatus.INIT or
-            job_status < job_lib.JobStatus.RUNNING):
+    if end_time is not None:
+        # The job has terminated with zero exit code.
+        benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+    elif cluster_status is None:
+        # Candidate cluster: preempted or never successfully launched.
+        #
+        # Note that benchmark record is only inserted after all clusters
+        # finished launch() (successful or not). See
+        # launch_benchmark_clusters(). So this case doesn't include "just before
+        # candidate cluster's launch() is called".
+
+        # See above: if cluster_status is not UP, job_status is defined as None.
+        assert job_status is None, job_status
+        benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
+    elif cluster_status == status_lib.ClusterStatus.INIT:
+        # Candidate cluster's launch has something gone wrong, or is still
+        # launching.
+
+        # See above: if cluster_status is not UP, job_status is defined as None.
+        assert job_status is None, job_status
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
-    elif job_status == job_lib.JobStatus.RUNNING:
-        benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
-    elif (cluster_status is None or
-          cluster_status == global_user_state.ClusterStatus.STOPPED or
-          (job_status is not None and job_status.is_terminal())):
-        # The cluster has terminated or stopped, or
-        # the cluster is UP and the job has terminated.
-        if end_time is not None:
-            # The job has terminated with zero exit code.
-            benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
-        elif job_status == job_lib.JobStatus.SUCCEEDED:
-            # Since we download the benchmark logs before checking the cluster
-            # status, there is a chance that the end timestamp is saved
-            # and the cluster is stopped AFTER we download the logs.
-            # In this case, we consider the current timestamp as the end time.
-            end_time = time.time()
-            benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+    elif cluster_status == status_lib.ClusterStatus.STOPPED:
+        # Candidate cluster is auto-stopped, or user manually stops it at any
+        # time. Also, end_time is None.
+
+        # See above: if cluster_status is not UP, job_status is defined as None.
+        assert job_status is None, job_status
+        benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
+    else:
+        assert cluster_status == status_lib.ClusterStatus.UP, (
+            'ClusterStatus enum should have been handled')
+        if job_status is None:
+            benchmark_status = benchmark_state.BenchmarkStatus.INIT
         else:
-            benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
+            if job_status < job_lib.JobStatus.RUNNING:
+                benchmark_status = benchmark_state.BenchmarkStatus.INIT
+            elif job_status == job_lib.JobStatus.RUNNING:
+                benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
+            else:
+                assert job_status.is_terminal(), '> RUNNING means terminal'
+                # Case: cluster_status UP, job_status.is_terminal()
+                if job_status == job_lib.JobStatus.SUCCEEDED:
+                    # Since we download the benchmark logs before checking the
+                    # cluster status, there is a chance that the end timestamp
+                    # is saved and the cluster is stopped AFTER we download the
+                    # logs.  In this case, we consider the current timestamp as
+                    # the end time.
+                    end_time = time.time()
+                    benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+                else:
+                    benchmark_status = (
+                        benchmark_state.BenchmarkStatus.TERMINATED)
 
     callback_log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
     if callback_log_dirs:
@@ -561,7 +608,7 @@ def update_benchmark_state(benchmark: str) -> None:
     remote_dir = os.path.join(bucket_name, benchmark)
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     os.makedirs(local_dir, exist_ok=True)
-    with console.status('[bold cyan]Downloading benchmark logs[/]'):
+    with rich_utils.safe_status('[bold cyan]Downloading benchmark logs[/]'):
         _download_remote_dir(remote_dir, local_dir, bucket_type)
 
     # Update the benchmark results in parallel.

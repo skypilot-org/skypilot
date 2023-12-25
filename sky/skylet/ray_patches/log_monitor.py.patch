@@ -1,8 +1,9 @@
-0a1,3
-> # Adapted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/_private/log_monitor.py
+0a1,4
+> # Original file https://github.com/ray-project/ray/blob/ray-2.4.0/python/ray/_private/log_monitor.py
 > # Fixed the problem for progress bar, as the latest version does not preserve \r for progress bar.
-> # The change is adapted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/log_monitor.py#L299-L300
-351c354,355
+> # We change the newline handling back to https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/log_monitor.py#L299-L300
+> 
+354c358,359
 <                     next_line = next_line.rstrip("\r\n")
 ---
 >                     if next_line[-1] == "\n":

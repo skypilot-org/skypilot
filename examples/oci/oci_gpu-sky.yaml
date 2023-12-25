@@ -1,0 +1,37 @@
+name: gpu-task1
+
+resources:
+  # Optional; if left out, automatically pick the cheapest cloud.
+  cloud: oci
+
+  accelerators: A10:1  # 1x NVIDIA A10 GPU
+
+  region: ap-seoul-1
+  
+  # zone: AP-SEOUL-1-AD-1
+  
+  # instance_type: VM.GPU.A10.1
+
+  # image_id: skypilot:gpu-ubuntu-2004
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+# For example, prepare the workdir by cloning:
+# git clone https://github.com/pytorch/examples.git ~/torch_examples
+workdir: ~/torch_examples
+
+num_nodes: 1
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "*** Running setup. ***"
+  pip install torch torchvision
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "*** Running the task on OCI ***"
+  cd mnist
+  python main.py --epochs 1
+  echo "The task is completed."

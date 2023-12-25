@@ -1,56 +1,31 @@
 # The template for the spot controller
 
-name: {{cluster_name}}
-
-resources:
-  disk_size: 50
-# It is now using default CPU instance type hard-coded in code for spot controller,
-# i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
-# This allows users without the credits for some of the clouds available to use managed spot instances.
-# TODO(zhwu): Fix this to be able to failvoer across clouds with cheaper instance.
-#  instance_type: t3.xlarge
+name: {{dag_name}}
 
 file_mounts:
-  {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
-{% if user_config_path is not none %}
-  {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml: {{user_config_path}}
-{% endif %}
+  {{remote_user_yaml_path}}: {{user_yaml_path}}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
 
 setup: |
-  # Install cli dependencies
-  # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
-  # TODO(zhwu): Keep the dependencies align with the ones in setup.py
-  (pip list | grep boto3 > /dev/null 2>&1 && \
-   pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
-   pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
 
-  # We do not install azure dependencies for now since our subscription does not support spot instances.
-  # pip list | grep azure-cli > /dev/null 2>&1 || \
-  #  pip3 install azure-cli==2.31.0 azure-core
-
-  {{gcloud_installation_commands}}
-
-  # Internal: disable logging for manually logging into the spot controller for debugging.
   {% if is_dev %}
+  # Internal: disable logging for manually logging into the spot controller for debugging.
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
+  # Dashboard.
+  pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
+  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.spot.dashboard.dashboard") || (nohup python3 -m sky.spot.dashboard.dashboard >> ~/.sky/spot-dashboard.log 2>&1 &));
+
 run: |
-  python -u -m sky.spot.controller \
-    {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
+  # Start the controller for the current spot job.
+  python -u -m sky.spot.controller {{remote_user_yaml_path}} \
     --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
-  SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
-  # skip cloud identity check for spot controller to avoid the overhead.
-  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
-  SKYPILOT_USER: {{user}}
-{% if user_config_path is not none %}
-  {{env_var_skypilot_config}}: {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml
-{% endif %}
-{% if is_dev %}
-  SKYPILOT_DEV: 1
-{% endif %}
-{% if disable_logging %}
-  SKYPILOT_DISABLE_USAGE_COLLECTION: 1
-{% endif %}
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

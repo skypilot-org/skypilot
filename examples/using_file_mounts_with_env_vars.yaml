@@ -1,0 +1,52 @@
+# Example showcasing how env vars can be used in the file_mounts section.
+
+# You can set the default values for env vars in this 'envs' section.
+# When launching, `sky launch --env ENV=val` will override the default.
+envs:
+  MY_BUCKET: skypilot-temp-gcs-test
+  MY_LOCAL_PATH: tmp-workdir
+  MODEL_SIZE: 13b
+
+resources:
+  cloud: gcp
+
+# You can use env vars in
+#   - the destination: source paths
+#   - for SkyPilot Storage
+#     - the "name" (bucket name) and "source" (local dir/file to upload) fields.
+#
+# Both syntaxes work: ${MY_BUCKET} and $MY_BUCKET.
+file_mounts:
+  /mydir:
+    name: ${MY_BUCKET}  # Name of the bucket.
+    store: gcs
+    mode: MOUNT
+
+  /mydir2:
+    name: $MY_BUCKET  # Name of the bucket.
+    store: gcs
+    mode: MOUNT
+
+  /another-dir:
+    name: ${MY_BUCKET}-2
+    source: ["~/${MY_LOCAL_PATH}"]
+    store: gcs
+    mode: MOUNT
+
+  /another-dir2:
+    name: $MY_BUCKET-2
+    source: ["~/${MY_LOCAL_PATH}"]
+    store: gcs
+    mode: MOUNT
+
+  /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
+
+run: |
+  echo Env var MY_BUCKET has value: ${MY_BUCKET}
+  echo Env var MY_LOCAL_PATH has value: ${MY_LOCAL_PATH}
+
+  ls -lthr /mydir
+  ls -lthr /mydir2
+  ls -lthr /another-dir
+  ls -lthr /another-dir2
+  ls -lthr /checkpoint/${MODEL_SIZE}

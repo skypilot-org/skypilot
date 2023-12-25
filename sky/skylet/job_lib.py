@@ -3,15 +3,19 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import getpass
+import json
 import os
 import pathlib
 import shlex
+import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
+import psutil
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -61,6 +65,13 @@ def create_table(cursor, conn):
         run_timestamp TEXT CANDIDATE KEY,
         start_at FLOAT DEFAULT -1)""")
 
+    cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
+        job_id INTEGER,
+        run_cmd TEXT,
+        submit INTEGER,
+        created_time INTEGER
+    )""")
+
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
 
@@ -82,15 +93,15 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `submitted_at` column will be set to the current
     # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
+    # The job is waiting for the required resources. (`ray job status`
+    # shows RUNNING as the generated ray program has started, but blocked
+    # by the placement constraints.)
+    PENDING = 'PENDING'
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
     # the status to SETTING_UP, if the generated ray program has not set
     # the status to PENDING or RUNNING yet.
     SETTING_UP = 'SETTING_UP'
-    # The job is waiting for the required resources. (`ray job status`
-    # shows RUNNING as the generated ray program has started, but blocked
-    # by the placement constraints.)
-    PENDING = 'PENDING'
     # The job is running.
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
@@ -125,6 +136,77 @@ class JobStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
+# Only update status of the jobs after this many seconds of job submission,
+# to avoid race condition with `ray job` to make sure it job has been
+# correctly updated.
+# TODO(zhwu): This number should be tuned based on heuristics.
+_PENDING_SUBMIT_GRACE_PERIOD = 60
+
+_PRE_RESOURCE_STATUSES = [JobStatus.PENDING]
+
+
+class JobScheduler:
+    """Base class for job scheduler"""
+
+    def queue(self, job_id: int, cmd: str) -> None:
+        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
+                        (job_id, cmd, 0, int(time.time())))
+        _CONN.commit()
+        set_status(job_id, JobStatus.PENDING)
+        self.schedule_step()
+
+    def remove_job_no_lock(self, job_id: int) -> None:
+        _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
+        _CONN.commit()
+
+    def _run_job(self, job_id: int, run_cmd: str):
+        _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
+                         f'WHERE job_id={job_id!r}'))
+        _CONN.commit()
+        subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
+
+    def schedule_step(self) -> None:
+        job_owner = getpass.getuser()
+        jobs = self._get_jobs()
+        if len(jobs) > 0:
+            update_status(job_owner)
+        # TODO(zhwu, mraheja): One optimization can be allowing more than one
+        # job staying in the pending state after ray job submit, so that to be
+        # faster to schedule a large amount of jobs.
+        for job_id, run_cmd, submit, created_time in jobs:
+            with filelock.FileLock(_get_lock_path(job_id)):
+                status = get_status_no_lock(job_id)
+                if (status not in _PRE_RESOURCE_STATUSES or
+                        created_time < psutil.boot_time()):
+                    # Job doesn't exist, is running/cancelled, or created
+                    # before the last reboot.
+                    self.remove_job_no_lock(job_id)
+                    continue
+                if submit:
+                    # Next job waiting for resources
+                    return
+                self._run_job(job_id, run_cmd)
+                return
+
+    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+        """Returns the metadata for jobs in the pending jobs table
+
+        The information contains job_id, run command, submit time,
+        creation time.
+        """
+        raise NotImplementedError
+
+
+class FIFOScheduler(JobScheduler):
+    """First in first out job scheduler"""
+
+    def _get_jobs(self) -> List[Tuple[int, str, int, int]]:
+        return list(
+            _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id'))
+
+
+scheduler = FIFOScheduler()
+
 _JOB_STATUS_TO_COLOR = {
     JobStatus.INIT: colorama.Fore.BLUE,
     JobStatus.SETTING_UP: colorama.Fore.BLUE,
@@ -137,23 +219,24 @@ _JOB_STATUS_TO_COLOR = {
 }
 
 _RAY_TO_JOB_STATUS_MAP = {
-    # These are intentionally set to one status before, because:
+    # These are intentionally set this way, because:
     # 1. when the ray status indicates the job is PENDING the generated
-    # python program should not be started yet, i.e. the job should be INIT.
+    # python program has been `ray job submit` from the job queue
+    # and is now PENDING
     # 2. when the ray status indicates the job is RUNNING the job can be in
     # setup or resources may not be allocated yet, i.e. the job should be
-    # SETTING_UP.
-    # For case 2, update_job_status() would compare this mapped SETTING_UP to
+    # PENDING.
+    # For case 2, update_job_status() would compare this mapped PENDING to
     # the status in our jobs DB and take the max. This is because the job's
     # generated ray program is the only place that can determine a job has
     # reserved resources and actually started running: it will set the
-    # status in the DB to RUNNING.
+    # status in the DB to SETTING_UP or RUNNING.
     # If there is no setup specified in the task, as soon as it is started
     # (ray's status becomes RUNNING), i.e. it will be very rare that the job
     # will be set to SETTING_UP by the update_job_status, as our generated
     # ray program will set the status to PENDING immediately.
-    'PENDING': JobStatus.INIT,
-    'RUNNING': JobStatus.SETTING_UP,
+    'PENDING': JobStatus.PENDING,
+    'RUNNING': JobStatus.PENDING,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
     'STOPPED': JobStatus.CANCELLED,
@@ -168,12 +251,15 @@ def _create_ray_job_submission_client():
         logger.error('Failed to import ray')
         raise
     try:
-        from ray import job_submission  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from ray import job_submission
     except ImportError:
         logger.error(
             f'Failed to import job_submission with ray=={ray.__version__}')
         raise
-    return job_submission.JobSubmissionClient(address='http://127.0.0.1:8265')
+    port = get_job_submission_port()
+    return job_submission.JobSubmissionClient(
+        address=f'http://127.0.0.1:{port}')
 
 
 def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
@@ -282,10 +368,16 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    statuses = common_utils.decode_payload(statuses_payload)
-    for job_id, status in statuses.items():
-        if status is not None:
-            statuses[job_id] = JobStatus(status)
+    original_statuses = common_utils.decode_payload(statuses_payload)
+    statuses = dict()
+    for job_id, status in original_statuses.items():
+        # json.dumps will convert all keys to strings. Integers will
+        # become string representations of integers, e.g. "1" instead of 1;
+        # `None` will become "null" instead of None. Here we use
+        # json.loads to convert them back to their original values.
+        # See docstr of core::job_status for the meaning of `statuses`.
+        statuses[json.loads(job_id)] = (JobStatus(status)
+                                        if status is not None else None)
     return statuses
 
 
@@ -319,6 +411,32 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     return common_utils.encode_payload(None)
 
 
+def get_ray_port():
+    """Get the port Skypilot-internal Ray cluster uses.
+
+    If the port file does not exist, the cluster was launched before #1790,
+    return the default port.
+    """
+    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    if not os.path.exists(port_path):
+        return 6379
+    port = json.load(open(port_path))['ray_port']
+    return port
+
+
+def get_job_submission_port():
+    """Get the dashboard port Skypilot-internal Ray cluster uses.
+
+    If the port file does not exist, the cluster was launched before #1790,
+    return the default port.
+    """
+    port_path = os.path.expanduser(constants.SKY_REMOTE_RAY_PORT_FILE)
+    if not os.path.exists(port_path):
+        return 8265
+    port = json.load(open(port_path))['ray_dashboard_port']
+    return port
+
+
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     records = []
     for row in rows:
@@ -339,9 +457,10 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(username: Optional[str],
-              status_list: Optional[List[JobStatus]] = None,
-              submitted_gap_sec: int = 0) -> List[Dict[str, Any]]:
+def _get_jobs(
+        username: Optional[str],
+        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+    """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -350,18 +469,17 @@ def _get_jobs(username: Optional[str],
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, time.time() - submitted_gap_sec),
+            (*status_str_list,),
         )
     else:
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?) AND submitted_at <= (?)
+            AND username=(?)
             ORDER BY job_id DESC""",
-            (*status_str_list, username, time.time() - submitted_gap_sec),
+            (*status_str_list, username),
         )
 
     records = _get_records_from_rows(rows)
@@ -380,6 +498,18 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
+def _get_pending_jobs():
+    rows = _CURSOR.execute(
+        'SELECT job_id, created_time, submit FROM pending_jobs')
+    rows = list(rows)
+    return {
+        job_id: {
+            'created_time': created_time,
+            'submit': submit
+        } for job_id, created_time, submit in rows
+    }
+
+
 def update_job_status(job_owner: str,
                       job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
@@ -392,7 +522,7 @@ def update_job_status(job_owner: str,
     during job cancelling, we still need this to handle the staleness problem,
     caused by instance restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==2.0.1.
+    This function should only be run on the remote instance with ray==2.4.0.
     """
     if len(job_ids) == 0:
         return []
@@ -402,10 +532,11 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
+    # In ray 2.4.0, job_client.list_jobs returns a list of JobDetails,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
+    pending_jobs = _get_pending_jobs()
     job_details = {}
     ray_job_ids_set = set(ray_job_ids)
     for job_detail in job_detail_lists:
@@ -413,9 +544,27 @@ def update_job_status(job_owner: str,
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[Optional[JobStatus]] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
+        job_id = job_ids[i]
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
+        if job_id in pending_jobs:
+            if pending_jobs[job_id]['created_time'] < psutil.boot_time():
+                # The job is stale as it is created before the instance
+                # is booted, e.g. the instance is rebooted.
+                job_statuses[i] = JobStatus.FAILED
+            # Gives a 60 second grace period between job being submit from
+            # the pending table until appearing in ray jobs.
+            if (pending_jobs[job_id]['submit'] > 0 and
+                    pending_jobs[job_id]['submit'] <
+                    time.time() - _PENDING_SUBMIT_GRACE_PERIOD):
+                # For jobs submitted outside of the grace period, we will
+                # consider the ray job status.
+                continue
+            else:
+                # Reset the job status to PENDING even though it may not appear
+                # in the ray jobs, so that it will not be considered as stale.
+                job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
 
@@ -424,9 +573,6 @@ def update_job_status(job_owner: str,
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
-        # TODO(mraheja): remove pylint disabling when filelock version
-        # updated
-        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job_id)):
             original_status = get_status_no_lock(job_id)
             assert original_status is not None, (job_id, status)
@@ -474,7 +620,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
+def update_status(job_owner: str) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -482,8 +628,7 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
     nonterminal_jobs = _get_jobs(username=None,
-                                 status_list=JobStatus.nonterminal_statuses(),
-                                 submitted_gap_sec=submitted_gap_sec)
+                                 status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
     update_job_status(job_owner, nonterminal_job_ids)
@@ -564,40 +709,63 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
-    """Cancel the jobs.
+def cancel_jobs_encoded_results(job_owner: str,
+                                jobs: Optional[List[int]],
+                                cancel_all: bool = False) -> str:
+    """Cancel jobs.
 
     Args:
-        jobs: The job ids to cancel. If None, cancel all the jobs.
+        jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
+        cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
+            set to None. If False and `jobs` is None, cancel the latest
+            running job.
+
+    Returns:
+        Encoded job IDs that are actually cancelled. Caller should use
+        common_utils.decode_payload() to parse.
     """
-    # Update the status of the jobs to avoid setting the status of stale
-    # jobs to CANCELLED.
-    if jobs is None:
+    if cancel_all:
+        # Cancel all in-progress jobs.
+        assert jobs is None, ('If cancel_all=True, usage is to set jobs=None')
         job_records = _get_jobs(
-            None, [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING])
+            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
     else:
-        job_records = _get_jobs_by_ids(jobs)
+        if jobs is None:
+            # Cancel the latest (largest job ID) running job.
+            job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
+        else:
+            # Cancel jobs with specified IDs.
+            job_records = _get_jobs_by_ids(jobs)
 
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     job_client = _create_ray_job_submission_client()
+    cancelled_ids = []
 
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
     for job in job_records:
         job_id = make_ray_job_id(job['job_id'], job_owner)
-        try:
-            job_client.stop_job(job_id)
-        except RuntimeError as e:
-            # If the job does not exist or if the request to the
-            # job server fails.
-            logger.warning(str(e))
-            continue
+        # Job is locked to ensure that pending queue does not start it while
+        # it is being cancelled
+        with filelock.FileLock(_get_lock_path(job['job_id'])):
+            try:
+                job_client.stop_job(job_id)
+            except RuntimeError as e:
+                # If the request to the job server fails, we should not
+                # set the job to CANCELLED.
+                if 'does not exist' not in str(e):
+                    logger.warning(str(e))
+                    continue
 
-        if job['status'] in [
-                JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
-        ]:
-            set_status(job['job_id'], JobStatus.CANCELLED)
+            if job['status'] in [
+                    JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING
+            ]:
+                _set_status_no_lock(job['job_id'], JobStatus.CANCELLED)
+                cancelled_ids.append(job['job_id'])
+
+        scheduler.schedule_step()
+    return common_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -640,7 +808,7 @@ class JobLibCodeGen:
     _PREFIX = ['import os', 'from sky.skylet import job_lib, log_lib']
 
     @classmethod
-    def add_job(cls, job_name: str, username: str, run_timestamp: str,
+    def add_job(cls, job_name: Optional[str], username: str, run_timestamp: str,
                 resources_str: str) -> str:
         if job_name is None:
             job_name = '-'
@@ -652,6 +820,13 @@ class JobLibCodeGen:
             f'{resources_str!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
+        return cls._build(code)
+
+    @classmethod
+    def queue_job(cls, job_id: int, cmd: str) -> str:
+        code = ['job_lib.scheduler.queue('
+                f'{job_id!r},'
+                f'{cmd!r})']
         return cls._build(code)
 
     @classmethod
@@ -670,8 +845,17 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
+    def cancel_jobs(cls,
+                    job_owner: str,
+                    job_ids: Optional[List[int]],
+                    cancel_all: bool = False) -> str:
+        """See job_lib.cancel_jobs()."""
+        code = [
+            (f'cancelled = job_lib.cancel_jobs_encoded_results({job_owner!r},'
+             f' {job_ids!r}, {cancel_all})'),
+            # Print cancelled IDs. Caller should parse by decoding.
+            'print(cancelled, flush=True)',
+        ]
         return cls._build(code)
 
     @classmethod

@@ -1,0 +1,349 @@
+cluster_name: {{cluster_name_on_cloud}}
+
+# The maximum number of workers nodes to launch in addition to the head
+# node.
+max_workers: {{num_nodes - 1}}
+upscaling_speed: {{num_nodes - 1}}
+idle_timeout_minutes: 60
+
+
+# Kubernetes resources that need to be configured for the autoscaler to be
+# able to manage the Ray cluster. If any of the provided resources don't
+# exist, the autoscaler will attempt to create them. If this fails, you may
+# not have the required permissions and will have to request them to be
+# created by your cluster administrator.
+provider:
+    type: external
+    module: sky.skylet.providers.kubernetes.KubernetesNodeProvider
+
+    # We use internal IPs since we set up a port-forward between the kubernetes
+    # cluster and the local machine, or directly use NodePort to reach the
+    # head node.
+    use_internal_ips: true
+
+    timeout: {{timeout}}
+
+    ssh_jump_image: {{k8s_ssh_jump_image}}
+
+    # ServiceAccount created by the autoscaler for the head node pod that it
+    # runs in. If this field isn't provided, the head pod config below must
+    # contain a user-created service account with the proper permissions.
+    autoscaler_service_account:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account
+
+    # Role created by the autoscaler for the head node pod that it runs in.
+    # If this field isn't provided, the role referenced in
+    # autoscaler_role_binding must exist and have at least these permissions.
+    autoscaler_role:
+        kind: Role
+        apiVersion: rbac.authorization.k8s.io/v1
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-role
+        # TODO(romilb): This is a very permissive role - gives all access in the
+        #  namespace. We should restrict this. For reference, this is required
+        #  for autodown and creating more SkyPilot clusters from within the pod.
+        rules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
+
+    # RoleBinding created by the autoscaler for the head node pod that it runs
+    # in. If this field isn't provided, the head pod config below must contain
+    # a user-created service account with the proper permissions.
+    autoscaler_role_binding:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+            labels:
+                parent: skypilot
+            name: skypilot-service-account-role-binding
+        subjects:
+        - kind: ServiceAccount
+          name: skypilot-service-account
+        roleRef:
+            kind: Role
+            name: skypilot-service-account-role
+            apiGroup: rbac.authorization.k8s.io
+
+    services:
+      # Service to expose the head node pod's SSH port.
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          labels:
+            parent: skypilot
+            skypilot-cluster: {{cluster_name_on_cloud}}
+          name: {{cluster_name_on_cloud}}-ray-head-ssh
+        spec:
+          selector:
+            component: {{cluster_name_on_cloud}}-ray-head
+          ports:
+            - protocol: TCP
+              port: 22
+              targetPort: 22
+      # Service that maps to the head node of the Ray cluster.
+      - apiVersion: v1
+        kind: Service
+        metadata:
+            labels:
+              parent: skypilot
+              skypilot-cluster: {{cluster_name_on_cloud}}
+            # NOTE: If you're running multiple Ray clusters with services
+            # on one Kubernetes cluster, they must have unique service
+            # names.
+            name: {{cluster_name_on_cloud}}-ray-head
+        spec:
+            # This selector must match the head node pod's selector below.
+            selector:
+                component: {{cluster_name_on_cloud}}-ray-head
+            ports:
+                - name: client
+                  protocol: TCP
+                  port: 10001
+                  targetPort: 10001
+                - name: dashboard
+                  protocol: TCP
+                  port: 8265
+                  targetPort: 8265
+
+# Specify the pod type for the ray head node (as configured below).
+head_node_type: ray_head_default
+# Specify the allowed pod types for this ray cluster and the resources they provide.
+available_node_types:
+  ray_head_default:
+    node_config:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: {{cluster_name_on_cloud}}-ray-head
+        # Must match the head node service selector above if a head node
+        # service is required.
+        labels:
+            parent: skypilot
+            component: {{cluster_name_on_cloud}}-ray-head
+            skypilot-cluster: {{cluster_name_on_cloud}}
+            # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+            skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+      spec:
+        # Change this if you altered the autoscaler_service_account above
+        # or want to provide your own.
+        serviceAccountName: skypilot-service-account
+
+        restartPolicy: Never
+
+        # Add node selector if GPUs are requested:
+        {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
+        nodeSelector:
+            {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+        {% endif %}
+
+        # This volume allocates shared memory for Ray to use for its plasma
+        # object store. If you do not provide this, Ray will fall back to
+        # /tmp which cause slowdowns if is not a shared memory volume.
+        volumes:
+        - name: secret-volume
+          secret:
+            secretName: {{k8s_ssh_key_secret_name}}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: dev-fuse    # Required for fuse mounting
+          hostPath:
+            path: /dev/fuse
+        containers:
+        - name: ray-node
+          imagePullPolicy: IfNotPresent
+          image: {{image_id}}
+          # Do not change this command - it keeps the pod alive until it is
+          # explicitly killed.
+          command: ["/bin/bash", "-c", "--"]
+          args: ['trap : TERM INT; sleep infinity & wait;']
+          ports:
+          - containerPort: 22  # Used for SSH
+          - containerPort: {{ray_port}}  # Redis port
+          - containerPort: 10001  # Used by Ray Client
+          - containerPort: {{ray_dashboard_port}}  # Used by Ray Dashboard
+
+          # This volume allocates shared memory for Ray to use for its plasma
+          # object store. If you do not provide this, Ray will fall back to
+          # /tmp which cause slowdowns if is not a shared memory volume.
+          volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "/etc/secret-volume"
+          - mountPath: /dev/shm
+            name: dshm
+          - mountPath: /dev/fuse    # Required for FUSE mounting
+            name: dev-fuse
+          securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
+            privileged: true
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+          resources:
+            requests:
+              cpu: {{cpus}}
+              memory: {{memory}}G
+              nvidia.com/gpu: {{accelerator_count}}
+            limits:
+              nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+  ray_worker_default:
+    # Minimum number of Ray workers of this Pod type.
+    min_workers: {{num_nodes - 1}}
+    # Maximum number of Ray workers of this Pod type. Takes precedence over min_workers.
+    max_workers: {{num_nodes - 1}}
+    # User-specified custom resources for use by Ray. Object with string keys and integer values.
+    # (Ray detects CPU and GPU from pod spec resource requests and limits, so no need to fill those here.)
+    # resources: {"example-resource-a": 1, "example-resource-b": 2}
+    node_config:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        labels:
+          parent: skypilot
+          skypilot-cluster: {{cluster_name_on_cloud}}
+          # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
+          skypilot-ssh-jump: {{k8s_ssh_jump_name}}
+        # Automatically generates a name for the pod with this prefix.
+        generateName: {{cluster_name_on_cloud}}-ray-worker-
+      spec:
+        # For multi-node support, we put a soft-constraint to schedule worker
+        # pods on different nodes than the head pod.
+        # This is not set as a hard constraint because if different nodes are
+        # not available, we still want to be able to schedule worker pods on
+        # larger nodes which may be able to fit multiple SkyPilot "nodes".
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                matchExpressions:
+                  - key: skypilot-cluster
+                    operator: In
+                    values:
+                    - {{cluster_name_on_cloud}}
+                topologyKey: "kubernetes.io/hostname"
+        serviceAccountName: skypilot-service-account
+        restartPolicy: Never
+        volumes:
+        - name: secret-volume
+          secret:
+            secretName: {{k8s_ssh_key_secret_name}}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+        - name: dev-fuse    # Required for fuse mounting
+          hostPath:
+            path: /dev/fuse
+        containers:
+        - name: ray-node
+          imagePullPolicy: IfNotPresent
+          image: {{image_id}}
+          command: ["/bin/bash", "-c", "--"]
+          args: ["trap : TERM INT; sleep infinity & wait;"]
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cp /etc/secret-volume/ssh-publickey ~/.ssh/authorized_keys && sudo service ssh restart"]
+          ports:
+          - containerPort: 22  # Used for SSH
+          # This volume allocates shared memory for Ray to use for its plasma
+          # object store. If you do not provide this, Ray will fall back to
+          # /tmp which cause slowdowns if is not a shared memory volume.
+          volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "/etc/secret-volume"
+          - mountPath: /dev/shm
+            name: dshm
+          - mountPath: /dev/fuse    # Required for fuse mounting
+            name: dev-fuse
+          securityContext:          # Required for FUSE mounting. TODO(romilb): See if we can grant a reduced set of privileges.
+            privileged: true
+          resources:
+            requests:
+              cpu: {{cpus}}
+              memory: {{memory}}G
+              nvidia.com/gpu: {{accelerator_count}}
+            limits:
+              nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+
+setup_commands:
+  # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
+  # Create ~/.ssh/config file in case the file does not exist in the image.
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
+  # Line 'mkdir -p ..': disable host key check
+  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
+    (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
+    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+    {{ conda_installation_commands }}
+    source ~/.bashrc;
+    mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
+    (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[remote]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
+    sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
+    sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
+    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
+    python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
+
+# Command to start ray on the head node. You don't need to change this.
+# NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
+# connection, which is expensive. Try your best to co-locate commands into fewer
+# items! The same comment applies for worker_start_ray_commands.
+#
+# Increment the following for catching performance bugs easier:
+#   current num items (num SSH connections): 2
+# Note dashboard-host is set to 0.0.0.0 so that kubernetes can port forward.
+head_start_ray_commands:
+  # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
+  # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
+  # all the sessions to be reloaded. This is a workaround.
+  # We manually set --object-store-memory=500000000 to avoid ray from allocating a very large object store in each pod that may cause problems for other pods.
+  - ((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
+    ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --head --port={{ray_port}} --dashboard-port={{ray_dashboard_port}} --dashboard-host 0.0.0.0 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} --object-store-memory=500000000 || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+    {{dump_port_command}};
+
+{%- if num_nodes > 1 %}
+worker_start_ray_commands:
+  - ray stop; RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 ray start --disable-usage-stats --address=$RAY_HEAD_IP:{{ray_port}} --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --temp-dir {{ray_temp_dir}} --object-store-memory=500000000 || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
+{%- else %}
+worker_start_ray_commands: []
+{%- endif %}
+
+head_node: {}
+worker_nodes: {}
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+auth:
+  ssh_user: sky
+  ssh_private_key: {{ssh_private_key}}
+
+# These fields are required for external cloud providers.
+head_setup_commands: []
+worker_setup_commands: []
+cluster_synced_files: []
+file_mounts_sync_continuously: False
+initialization_commands: []
+rsync_exclude: []
+

@@ -1,7 +1,7 @@
 .. _yaml-spec:
 
 Task YAML
-==================
+=========
 
 SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
@@ -44,17 +44,42 @@ Available fields:
       #
       # Use `sky show-gpus` to view available accelerator configurations.
       #
-      # Format: <name>:<count> (or simply <name>, short for a count of 1).
+      # The following three ways are valid for specifying accelerators for a cluster:
+      #
+      #   To specify a single type of accelerator:
+      #     Format: <name>:<count> (or simply <name>, short for a count of 1).
+      #     accelerators: V100:4
+      #
+      #   To specify an ordered list of accelerators (try the accelerators in
+      #   the specified order):
+      #     Format: [<name>:<count>, ...]
+      #     accelerators: ['K80:1', 'V100:1', 'T4:1']
+      #
+      #   To specify an unordered set of accelerators (optimize all specified
+      #   accelerators together, and try accelerator with lowest cost first):
+      #     Format: {<name>:<count>, ...}
+      #     accelerators: {'K80:1', 'V100:1', 'T4:1'}
       accelerators: V100:4
 
       # Number of vCPUs per node (optional).
       #
-      # Format: <count> (exactly <count> vCPUs) or <count>+
-      # (at least <count> vCPUs).
+      # Format:
+      #   <count>: exactly <count> vCPUs
+      #   <count>+: at least <count> vCPUs
       #
-      # E.g., 4+ would first try to find an instance type with 4 vCPUs. If not
-      # found, it will use the next cheapest instance with more than 4 vCPUs.
-      cpus: 32
+      # E.g., 4+ means first try to find an instance type with >= 4 vCPUs. If
+      # not found, use the next cheapest instance with more than 4 vCPUs.
+      cpus: 4+
+
+      # Memory in GiB per node (optional).
+      #
+      # Format:
+      #  <num>: exactly <num> GiB
+      #  <num>+: at least <num> GiB
+      #
+      # E.g., 32+ means first try to find an instance type with >= 32 GiB. If
+      # not found, use the next cheapest instance with more than 32 GiB.
+      memory: 32+
 
       # Instance type to use (optional). If 'accelerators' is specified,
       # the corresponding instance type is automatically inferred.
@@ -73,6 +98,40 @@ Available fields:
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
+      # Disk tier to use for OS (optional).
+      # Could be one of 'low', 'medium', or 'high' (default: 'medium').
+      # Rough performance estimates:
+      #   low: 500 IOPS; read 20MB/s; write 40 MB/s
+      #   medium: 3000 IOPS; read 220 MB/s; write 200 MB/s
+      #   high: 6000 IOPS; 340 MB/s; write 250 MB/s
+      disk_tier: medium
+
+      # Ports to expose (optional).
+      #
+      # All ports specified here will be exposed to the public Internet. Under
+      # the hood, a firewall rule / inbound rule is automatically added to allow
+      # inbound traffic to these ports. Applies to all VMs of a cluster created
+      # with this field set.
+      #
+      # Currently only TCP protocol is supported.
+      #
+      # Ports Lifecycle:
+      # A cluster's ports will be updated whenever `sky launch` is executed.
+      # When launching an existing cluster, any new ports specified will be
+      # opened for the cluster, and the firewall rules for old ports will never
+      # be removed until the cluster is terminated.
+      #
+      # Could be an integer, a range, or a list of integers and ranges:
+      #   To specify a single port:
+      #     ports: 8081
+      #   To specify a port range:
+      #     ports: 10052-10100
+      #   To specify multiple ports / port ranges:
+      #     ports:
+      #       - 8080
+      #       - 10022-10040
+      ports: 8081
+
       # Additional accelerator metadata (optional); only used for TPU node
       # and TPU VM.
       # Example usage:
@@ -89,31 +148,104 @@ Available fields:
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.5.0
+        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.12.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
-      # will use the default debian-based image suitable for machine learning tasks.
+      # instances. Only supported for AWS and GCP (for non-docker image). If not
+      # specified, SkyPilot will use the default debian-based image suitable for
+      # machine learning tasks.
+      #
+      # Docker support
+      # You can specify docker image to use by setting the image_id to
+      # `docker:<image name>` for Azure, AWS and GCP. For example,
+      #   image_id: docker:ubuntu:latest
+      # Currently, only debian and ubuntu images are supported.
+      # If you want to use a docker image in a private registry, you can specify your
+      # username, password, and registry server as task environment variable. For
+      # details, please refer to the `envs` section below.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
-      # You can also change the default OS version by choosing from the following image tags provided by SkyPilot:
+      # You can also change the default OS version by choosing from the
+      # following image tags provided by SkyPilot:
       #   image_id: skypilot:gpu-ubuntu-2004
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
-      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
-      # useful when you have the custom images in multiple regions):
+      #
+      # It is also possible to specify a per-region image id (failover will only
+      # go through the regions specified as keys; useful when you have the
+      # custom images in multiple regions):
       #   image_id:
       #     us-east-1: ami-0729d913a335efca7
       #     us-west-2: ami-050814f384259894c
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
-      # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
+      # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
+      # Or machine image: https://cloud.google.com/compute/docs/machine-images
+      # image_id: projects/my-project/global/machineImages/my-machine-image
+      #
+      # IBM
+      # Create a private VPC image and paste its ID in the following format:
+      # image_id: <unique_image_id>
+      # To create an image manually:
+      # https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume.
+      # To use an official VPC image creation tool:
+      # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
+      # To use a more limited but easier to manage tool:
+      # https://github.com/IBM/vpc-img-inst
+
+      # Candidate resources (optional). If specified, SkyPilot will only use
+      # these candidate resources to launch the cluster. The fields specified
+      # outside of `any_of`, `ordered` will be used as the default values for
+      # all candidate resources, and any duplicate fields specified inside
+      # `any_of`, `ordered` will override the default values.
+      # `any_of:` means that SkyPilot will try to find a resource that matches
+      # any of the candidate resources, i.e. the failover order will be decided
+      # by the optimizer.
+      # `ordered:` means that SkyPilot will failover through the candidate
+      # resources with the specified order.
+      # Note: accelerators under `any_of` and `ordered` cannot be a list or set.
+      any_of:
+        - cloud: aws
+          region: us-west-2
+          acceraltors: V100
+        - cloud: gcp
+          acceraltors: A100
+
+
+    # Environment variables (optional). These values can be accessed in the
+    # `file_mounts`, `setup`, and `run` sections below.
+    #
+    # Values set here can be overridden by a CLI flag:
+    # `sky launch/exec --env ENV=val` (if ENV is present).
+    #
+    # If you want to use a docker image as runtime environment in a private
+    # registry, you can specify your username, password, and registry server as
+    # task environment variable.  For example:
+    #   envs:
+    #     SKYPILOT_DOCKER_USERNAME: <username>
+    #     SKYPILOT_DOCKER_PASSWORD: <password>
+    #     SKYPILOT_DOCKER_SERVER: <registry server>
+    #
+    # SkyPilot will execute `docker login --username <username> --password
+    # <password> <registry server>` before pulling the docker image. For `docker
+    # login`, see https://docs.docker.com/engine/reference/commandline/login/
+    #
+    # You could also specify any of them through the CLI flag if you don't want
+    # to store them in your yaml file or if you want to generate them for
+    # constantly changing password. For example:
+    #   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
+    #
+    # For more information about docker support in SkyPilot, please refer to the `image_id` section above.
+    envs:
+      MY_BUCKET: skypilot-temp-gcs-test
+      MY_LOCAL_PATH: tmp-workdir
+      MODEL_SIZE: 13b
 
     file_mounts:
       # Uses rsync to sync local files/directories to all nodes of the cluster.
@@ -126,7 +258,7 @@ Available fields:
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
       # as persistent (it will not be deleted after the completion of this task).
-      # Symlink contents are copied over.
+      # Symlinks and their contents are NOT copied.
       #
       # Mounts the bucket at /datasets-storage on every node of the cluster.
       /datasets-storage:
@@ -138,6 +270,12 @@ Available fields:
 
       # Copies a cloud object store URI to the cluster. Can be private buckets.
       /datasets-s3: s3://my-awesome-dataset
+
+      # Demoing env var usage.
+      /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
+      /mydir:
+        name: ${MY_BUCKET}  # Name of the bucket.
+        mode: MOUNT
 
     # Setup script (optional) to execute on every `sky launch`.
     # This is executed before the 'run' commands.
@@ -153,3 +291,6 @@ Available fields:
     run: |
       echo "Beginning task."
       python train.py
+
+      # Demoing env var usage.
+      echo Env var MODEL_SIZE has value: ${MODEL_SIZE}

@@ -13,16 +13,14 @@ on:
       - 'releases/**'
 jobs:
   mypy:
-    # Need to specify 20.04, because ubuntu-latest does not work with
-    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.8"]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies

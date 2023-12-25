@@ -6,17 +6,19 @@ Syncing Code and Artifacts
 SkyPilot simplifies transferring code, data, and artifacts to and
 from cloud clusters:
 
-- To :ref:`upload code and project files<Uploading code and project files>` - use :code:`workdir`
+- To :ref:`upload code and project files <upload-code-and-project-files>` - use :code:`workdir`
 
-- To :ref:`upload files outside of workdir<Uploading files outside of workdir>` (e.g., dotfiles) - use :code:`file_mounts`
+- To :ref:`upload files outside of workdir <file-mounts-example>` (e.g., dotfiles) - use :code:`file_mounts`
 
-- To :ref:`upload/reuse large files<Uploading or reusing large files>` (e.g., datasets) - use :ref:`SkyPilot Storage <sky-storage>`
+- To :ref:`upload/reuse large files <uploading-or-reusing-large-files>` (e.g., datasets) - use :ref:`SkyPilot Storage <sky-storage>`
 
-- To :ref:`download files and artifacts from a cluster<Downloading files and artifacts>` - use :ref:`SkyPilot Storage <sky-storage>` or :code:`rsync`
+- To :ref:`download files and artifacts from a cluster <downloading-files-and-artifacts>` - use :ref:`SkyPilot Storage <sky-storage>` or :code:`rsync`
 
 Here, "upload" means uploading files from your local machine (or a cloud object
 store) to a SkyPilot cluster, while "download" means the reverse direction.  The same
 mechanisms work for both files and directories.
+
+.. _upload-code-and-project-files:
 
 Uploading code and project files
 --------------------------------------
@@ -103,6 +105,8 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
     under a local file_mount source are also ignored (the same behavior as
     handling ``workdir``).
 
+.. _uploading-or-reusing-large-files:
+
 Uploading or reusing large files
 --------------------------------------
 
@@ -111,6 +115,7 @@ file_mount may be slow because they are processed by ``rsync``.  Use
 :ref:`SkyPilot Storage <sky-storage>` (cloud object stores) to efficiently handle
 large files.
 
+.. _downloading-files-and-artifacts:
 
 Downloading files and artifacts
 --------------------------------------

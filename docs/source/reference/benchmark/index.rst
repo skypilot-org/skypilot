@@ -29,14 +29,14 @@ In this example, AWS g5.xlarge (NVIDIA A10G GPU) turns out to be the best choice
 Using SkyPilot Benchmark
 ------------------------
 
-A part of the SkyPilot Benchmark report relies on the :ref:`SkyCallback` library instrumented in the training code to report step completion.
+A part of the SkyPilot Benchmark report relies on the :ref:`SkyCallback <benchmark-skycallback>` library instrumented in the training code to report step completion.
 Depending on the level of detail required by you in the benchmark report, SkyPilot Benchmark can be used in two modes:
 
 1. Without SkyCallback - You can get a basic benchmark report using SkyPilot Benchmark :ref:`benchmark-cli`. **This requires zero changes in your code**.
-2. With SkyCallback - You can get a more detailed benchmark report **by a few lines of code changes**. Please refer to :ref:`SkyCallback`.
+2. With SkyCallback - You can get a more detailed benchmark report **by a few lines of code changes**. Please refer to :ref:`SkyCallback <benchmark-skycallback>`.
 
 Table of Contents
--------------------
+-----------------
 .. toctree::
    cli
    config

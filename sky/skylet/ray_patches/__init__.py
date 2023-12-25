@@ -14,7 +14,7 @@ To get original versions, go to the Ray branch with version:
 
 Example workflow:
 
-  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.0.1/python/ray/autoscaler/_private/command_runner.py
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.4.0/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
   >> # Make some edits to command_runner.py.1...
@@ -69,9 +69,6 @@ def patch() -> None:
     from ray.dashboard.modules.job import cli
     _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
 
-    from ray.dashboard.modules.job import job_manager
-    _run_patch(job_manager.__file__, _to_absolute('job_manager.py.patch'))
-
     from ray.autoscaler._private import autoscaler
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
 
@@ -85,15 +82,5 @@ def patch() -> None:
     from ray.autoscaler._private import updater
     _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
 
-    # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue,
-    # by increasing the timeout.
-    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
-    # Only patch it if azure cli is installed.
-    try:
-        import azure
-        from azure.identity._credentials import azure_cli
-        version = pkg_resources.get_distribution('azure-cli').version
-        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'),
-                   version)
-    except ImportError:
-        pass
+    from ray.dashboard.modules.job import job_head
+    _run_patch(job_head.__file__, _to_absolute('job_head.py.patch'))

@@ -24,6 +24,10 @@ from sky.skylet.providers.aws.utils import (
     resource_cache,
     client_cache,
 )
+from sky.skylet.providers.command_runner import SkyDockerCommandRunner
+from sky.provision import docker_utils
+
+from ray.autoscaler._private.command_runner import SSHCommandRunner
 from ray.autoscaler._private.cli_logger import cli_logger, cf
 from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
 from ray.autoscaler._private.log_timer import LogTimer
@@ -499,6 +503,11 @@ class AWSNodeProvider(NodeProvider):
                 break
             except botocore.exceptions.ClientError as exc:
                 if attempt == max_tries:
+                    # SkyPilot: do not adopt the changes from upstream in
+                    # https://github.com/ray-project/ray/commit/c2abfdb2f7eee7f3e4320cb0d9e8e3bd639d5680#diff-eeb7bc1d8342583cf12c40536240dbcc67f089466a18a37bd60f187265a2dc94
+                    # which replaces the exception to NodeLaunchException. As we directly
+                    # handle the exception output in
+                    # cloud_vm_ray_backend._update_blocklist_on_aws_error
                     cli_logger.abort(
                         "Failed to launch instances. Max attempts exceeded.",
                         exc=exc,
@@ -708,6 +717,34 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+    def get_command_runner(
+        self,
+        log_prefix,
+        node_id,
+        auth_config,
+        cluster_name,
+        process_runner,
+        use_internal_ip,
+        docker_config=None,
+    ):
+        common_args = {
+            "log_prefix": log_prefix,
+            "node_id": node_id,
+            "provider": self,
+            "auth_config": auth_config,
+            "cluster_name": cluster_name,
+            "process_runner": process_runner,
+            "use_internal_ip": use_internal_ip,
+        }
+        if docker_config and docker_config["container_name"] != "":
+            if "docker_login_config" in self.provider_config:
+                docker_config["docker_login_config"] = docker_utils.DockerLoginConfig(
+                    **self.provider_config["docker_login_config"]
+                )
+            return SkyDockerCommandRunner(docker_config, **common_args)
+        else:
+            return SSHCommandRunner(**common_args)
 
 
 class AWSNodeProviderV2(AWSNodeProvider):

@@ -1,7 +1,7 @@
 # Configuration file for the Sphinx documentation builder.
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 # -- Project information
 
 project = 'SkyPilot'
-copyright = '2022, SkyPilot Team'
+copyright = '2023, SkyPilot Team'
 author = 'the SkyPilot authors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -24,8 +24,8 @@ release = version
 # -- General configuration
 
 extensions = [
+    'sphinxemoji.sphinxemoji',
     'sphinx.ext.autodoc',
-    'sphinx.ext.autosectionlabel',
     'sphinx.ext.autosummary',
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
@@ -35,6 +35,8 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    'sphinx_design',
+    'myst_parser',
 ]
 
 intersphinx_mapping = {
@@ -95,3 +97,5 @@ html_favicon = '_static/favicon.ico'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named 'default.css' will overwrite the builtin 'default.css'.
 html_static_path = ['_static']
+html_js_files = ["custom.js"]
+html_css_files = ["custom.css"]

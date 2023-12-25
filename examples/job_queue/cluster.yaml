@@ -7,4 +7,4 @@
 #   sky exec jq job.yaml
 
 resources:
-  accelerators: K80
+  accelerators: T4

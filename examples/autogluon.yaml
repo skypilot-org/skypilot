@@ -1,0 +1,23 @@
+resources:
+  cloud: gcp
+
+setup: |
+  git clone https://github.com/autogluon/autogluon.git
+
+  conda activate autogluon
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n autogluon python=3.8 -y
+    conda activate autogluon
+    pip install torch==1.13.1+cpu torchvision==0.14.1+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+    pip install autogluon
+    # Ray + Torch Dataloader failed with latest grpcio
+    # See: https://github.com/ray-project/ray/pull/33903
+    pip install grpcio==1.51.3
+  fi
+
+run: |
+  conda activate autogluon
+  cd autogluon
+  python examples/automm/tabular_dl/example_tabular.py --mode single_hpo

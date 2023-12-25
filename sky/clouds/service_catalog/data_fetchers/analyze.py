@@ -1,6 +1,7 @@
 """Analyze the new catalog fetched with the original."""
 
 from typing import List
+
 import pandas as pd
 
 from sky.clouds.service_catalog import common

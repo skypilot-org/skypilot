@@ -4,10 +4,12 @@ Job Queue
 =========
 
 SkyPilot's **job queue** allows multiple jobs to be scheduled on a cluster.
-This enables parallel experiments or :ref:`hyperparameter tuning <grid-search>`.
+
+Getting started
+--------------------------------
 
 Each task submitted by :code:`sky exec` is automatically queued and scheduled
-for execution:
+for execution on an existing cluster:
 
 .. code-block:: bash
 
@@ -20,12 +22,16 @@ for execution:
 
 The :code:`-d / --detach` flag detaches logging from the terminal, which is useful for launching many long-running jobs concurrently.
 
-To view the output for each job:
+To show a cluster's jobs and their statuses:
 
 .. code-block:: bash
 
-   # Show a cluster's jobs (IDs, statuses).
+   # Show a cluster's jobs (job IDs, statuses).
    sky queue mycluster
+
+To show the output for each job:
+
+.. code-block:: bash
 
    # Stream the outputs of a job.
    sky logs mycluster JOB_ID
@@ -77,7 +83,7 @@ This specifies a task that needs to be run on 2 nodes, each of which must have 4
 
 Use :code:`sky exec mycluster task.yaml` to submit this task, which will be scheduled correctly by the job queue.
 
-See :ref:`Distributed Jobs on Many VMs` for more details.
+See :ref:`dist-jobs` for more details.
 
 Using ``CUDA_VISIBLE_DEVICES``
 --------------------------------
@@ -90,10 +96,53 @@ For example, ``task.yaml`` above launches a 4-GPU task on each node that has 8
 GPUs, so the task's ``run`` commands will be invoked with
 ``CUDA_VISIBLE_DEVICES`` populated with 4 device IDs.
 
-If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``
-as the correct environment variable is made available to the container (only the
+If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``;
+the correct environment variable would be set inside the container (only the
 allocated device IDs will be set).
 
+Example: Grid Search
+----------------------
+
+To submit multiple trials with different hyperparameters to a cluster:
+
+.. code-block:: bash
+
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 3e-3
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-4
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-2
+  $ sky exec mycluster --gpus V100:1 -d -- python train.py --lr 1e-6
+
+Options used:
+
+- :code:`--gpus`: specify the resource requirement for each job.
+- :code:`-d` / :code:`--detach`: detach the run and logging from the terminal, allowing multiple trials to run concurrently.
+
+If there are only 4 V100 GPUs on the cluster, SkyPilot will queue 1 job while the
+other 4 run in parallel. Once a job finishes, the next job will begin executing
+immediately.
+See :ref:`below <scheduling-behavior>` for more details on SkyPilot's scheduling behavior.
+
+.. tip::
+
+  You can also use :ref:`environment variables <env-vars>` to set different arguments for each trial.
+
+Example: Fractional GPUs
+-------------------------
+
+To run multiple trials per GPU, use *fractional GPUs* in the resource requirement.
+For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:
+
+.. code-block:: bash
+
+  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 1e-3
+  $ sky exec mycluster --gpus V100:0.5 -d -- python train.py --lr 3e-3
+  ...
+
+When sharing a GPU, ensure that the GPU's memory is not oversubscribed
+(otherwise, out-of-memory errors could occur).
+
+.. _scheduling-behavior:
 
 Scheduling behavior
 --------------------------------
@@ -111,7 +160,7 @@ SkyPilot's scheduler serves two goals:
 2. **Minimizing resource idleness**: If a resource is idle, SkyPilot will schedule a
    queued job that can utilize that resource.
 
-We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
+We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <dnn-training>`.
 In that tutorial, we have a task YAML that specifies these resource requirements:
 
 .. code-block:: yaml

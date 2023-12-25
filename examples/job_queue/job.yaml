@@ -9,7 +9,7 @@
 name: job
 
 resources:
-  accelerators: K80:0.5
+  accelerators: T4:0.5
 
 setup: |
   echo "running setup"
@@ -17,7 +17,7 @@ setup: |
 run: |
   timestamp=$(date +%s)
   conda env list
-  for i in {1..120}; do
+  for i in {1..140}; do
     echo "$timestamp $i"
     sleep 1
   done

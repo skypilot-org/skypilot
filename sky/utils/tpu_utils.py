@@ -1,39 +1,41 @@
 """Utility functions for TPUs."""
 import json
 import os
+import typing
 from typing import Optional
 
 from packaging import version
 
-from sky import resources as resources_lib
 from sky.skylet import log_lib
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
 
-def is_tpu(resources: Optional[resources_lib.Resources]) -> bool:
+
+def is_tpu(resources: Optional['resources_lib.Resources']) -> bool:
     if resources is None or resources.accelerators is None:
         return False
     acc, _ = list(resources.accelerators.items())[0]
     return acc.startswith('tpu')
 
 
-def is_tpu_vm(resources: Optional[resources_lib.Resources]) -> bool:
+def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     if resources is None or resources.accelerator_args is None:
         return False
     return resources.accelerator_args.get('tpu_vm', False)
 
 
-def is_tpu_vm_pod(resources: Optional[resources_lib.Resources]) -> bool:
+def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:
     if resources is None or not is_tpu_vm(resources):
         return False
     acc, _ = list(resources.accelerators.items())[0]
-    return acc not in ['tpu-v2-8', 'tpu-v3-8']
+    return acc not in ['tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8']
 
 
-def get_num_tpu_devices(
-        resources: Optional[resources_lib.Resources]) -> Optional[int]:
+def get_num_tpu_devices(resources: Optional['resources_lib.Resources']) -> int:
     if resources is None or not is_tpu(resources):
-        return None
+        raise ValueError('resources must be a valid TPU resource.')
     acc, _ = list(resources.accelerators.items())[0]
     num_tpu_devices = int(int(acc.split('-')[2]) / 8)
     return num_tpu_devices
@@ -71,34 +73,3 @@ def check_gcp_cli_include_tpu_vm() -> None:
                 raise RuntimeError(
                     'Google Cloud SDK version must be >= 382.0.0 to use'
                     ' TPU VM APIs, check "gcloud version" for details.')
-
-
-def terminate_tpu_vm_cluster_cmd(cluster_name: str,
-                                 zone: str,
-                                 log_path: str = os.devnull) -> str:
-    check_gcp_cli_include_tpu_vm()
-    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name={cluster_name})" '
-                 f'--zone={zone} --format="value(name)"')
-    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                      log_path,
-                                                      shell=True,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-
-    # Skip the termination command, if the TPU ID
-    # query command fails.
-    if returncode != 0:
-        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
-                         f'echo "{stdout}" && '
-                         f'echo "{stderr}" >&2 && '
-                         f'exit {returncode}')
-    else:
-        # Needs to create a list as GCP does not allow deleting
-        # multiple TPU VMs at once.
-        tpu_terminate_cmds = []
-        for tpu_id in stdout.splitlines():
-            tpu_terminate_cmds.append('gcloud compute tpus tpu-vm delete '
-                                      f'--zone={zone} --quiet {tpu_id}')
-        terminate_cmd = ' && '.join(tpu_terminate_cmds)
-    return terminate_cmd

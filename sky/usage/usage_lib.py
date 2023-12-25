@@ -1,9 +1,8 @@
 """Logging events to Grafana Loki."""
 
-import enum
-import click
 import contextlib
 import datetime
+import enum
 import inspect
 import json
 import os
@@ -12,6 +11,7 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import click
 import requests
 
 import sky
@@ -19,10 +19,11 @@ from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import global_user_state
     from sky import resources as resources_lib
+    from sky import status_lib
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -30,12 +31,6 @@ logger = sky_logging.init_logger(__name__)
 
 def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
-
-
-def _get_user_hash():
-    """Returns a unique user-machine specific hash as a user id for logging."""
-    user_id = os.getenv(constants.USAGE_USER_ENV)
-    return common_utils.get_user_hash(default_value=user_id)
 
 
 class MessageType(enum.Enum):
@@ -74,9 +69,10 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = _get_user_hash()
+        self.user: str = common_utils.get_user_hash()
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
+        self.sky_commit: str = sky.__commit__
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()
@@ -121,6 +117,7 @@ class UsageMessageToReport(MessageToReport):
         #: Whether the cluster is newly launched.
         self.is_new_cluster: bool = False  # set_new_cluster
 
+        self.task_id: Optional[int] = None  # update_task_id
         # Task requested
         #: The number of nodes requested by the task.
         #: Requested cloud
@@ -143,12 +140,15 @@ class UsageMessageToReport(MessageToReport):
         #: Requested number of nodes
         self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
-        self.user_task_yaml: Optional[str] = None  # update_user_task_yaml
-        self.actual_task: Optional[Dict[str, Any]] = None  # update_actual_task
+        self.user_task_yaml: Optional[List[Dict[
+            str, Any]]] = None  # update_user_task_yaml
+        self.actual_task: Optional[List[Dict[str,
+                                             Any]]] = None  # update_actual_task
         self.ray_yamls: Optional[List[Dict[str, Any]]] = None
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
         self.runtimes: Dict[str, float] = {}  # update_runtime
+        self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
@@ -191,10 +191,13 @@ class UsageMessageToReport(MessageToReport):
                 self.task_num_accelerators = resources.accelerators[
                     self.task_accelerators]
 
+    def update_task_id(self, task_id: int):
+        self.task_id = task_id
+
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
             self.ray_yamls = []
-        self.ray_yamls.append(
+        self.ray_yamls.extend(
             prepare_json_from_yaml_config(yaml_config_or_path))
         self.num_tried_regions = len(self.ray_yamls)
 
@@ -230,7 +233,7 @@ class UsageMessageToReport(MessageToReport):
         self.local_resources = [r.to_yaml_config() for r in local_resources]
 
     def update_cluster_status(
-            self, original_status: Optional['global_user_state.ClusterStatus']):
+            self, original_status: Optional['status_lib.ClusterStatus']):
         status = original_status.value if original_status else None
         if not self._original_cluster_status_specified:
             self.original_cluster_status = status
@@ -238,7 +241,7 @@ class UsageMessageToReport(MessageToReport):
         self.final_cluster_status = status
 
     def update_final_cluster_status(
-            self, status: Optional['global_user_state.ClusterStatus']):
+            self, status: Optional['status_lib.ClusterStatus']):
         self.final_cluster_status = status.value if status is not None else None
 
     def set_new_cluster(self):
@@ -246,8 +249,8 @@ class UsageMessageToReport(MessageToReport):
 
     @contextlib.contextmanager
     def update_runtime_context(self, name: str):
+        start = time.time()
         try:
-            start = time.time()
             yield
         finally:
             self.runtimes[name] = time.time() - start
@@ -351,19 +354,23 @@ def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
     return cleaned_yaml_info
 
 
-def prepare_json_from_yaml_config(yaml_config_or_path: Union[Dict, str]):
+def prepare_json_from_yaml_config(
+        yaml_config_or_path: Union[Dict, str]) -> List[Dict[str, Any]]:
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
-        yaml_info = yaml_config_or_path
+        yaml_info = [yaml_config_or_path]
         comment_lines = []
     else:
         with open(yaml_config_or_path, 'r') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = common_utils.read_yaml(yaml_config_or_path)
+        yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
 
-    yaml_info = _clean_yaml(yaml_info)
-    yaml_info['__redacted_comment_lines'] = len(comment_lines)
+    for i in range(len(yaml_info)):
+        if yaml_info[i] is None:
+            yaml_info[i] = {}
+        yaml_info[i] = _clean_yaml(yaml_info[i])
+        yaml_info[i]['__redacted_comment_lines'] = len(comment_lines)
     return yaml_info
 
 
@@ -414,9 +421,14 @@ def entrypoint_context(name: str, fallback: bool = False):
     # Should be the outermost entrypoint or the fallback entrypoint.
     try:
         yield
-    except (Exception, SystemExit, KeyboardInterrupt):
-        trace = traceback.format_exc()
-        messages.usage.stacktrace = trace
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
+        with ux_utils.enable_traceback():
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            messages.usage.exception = common_utils.remove_color(
+                common_utils.format_exception(e))
         raise
     finally:
         if fallback:

@@ -4,8 +4,10 @@ import textwrap
 from click import testing as cli_testing
 
 import sky
-from sky import clouds
+from sky import exceptions
 import sky.cli as cli
+
+CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
 
 
 def test_infer_gpunode_type():
@@ -53,7 +55,7 @@ def test_accelerator_mismatch(enable_all_clouds):
     def _capture_mismatch_gpus_spec(file_path, gpus: str):
         result = cli_runner.invoke(cli.launch,
                                    [file_path, '--gpus', gpus, '--dryrun'])
-        assert isinstance(result.exception, ValueError)
+        assert isinstance(result.exception, exceptions.ResourcesMismatchError)
         assert 'Infeasible resource demands found:' in str(result.exception)
 
     def _capture_match_gpus_spec(file_path, gpus: str):
@@ -69,8 +71,67 @@ def test_accelerator_mismatch(enable_all_clouds):
         _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
         _capture_mismatch_gpus_spec(f.name, 'V100:2')
         _capture_mismatch_gpus_spec(f.name, 'v100:2')
+        _capture_mismatch_gpus_spec(f.name, 'V100:0.5')
 
         _capture_match_gpus_spec(f.name, 'V100:1')
         _capture_match_gpus_spec(f.name, 'v100:1')
-        _capture_match_gpus_spec(f.name, 'V100:0.5')
         _capture_match_gpus_spec(f.name, 'V100')
+
+
+def test_show_gpus():
+    """
+    This is a test suite for `sky show-gpus` to check functionality (but not correctness).
+    The tests below correspond to the following terminal commands,
+    in order:
+
+    -> sky show-gpus
+    -> sky show-gpus --all
+    -> sky show-gpus V100:4
+    -> sky show-gpus :4
+    -> sky show-gpus V100:0
+    -> sky show-gpus V100:-2
+    -> sky show-gpus --cloud aws --region us-west-1
+    -> sky show-gpus --cloud lambda
+    -> sky show-gpus --cloud lambda --all
+    -> sky show-gpus V100:4 --cloud lambda
+    -> sky show-gpus V100:4 --cloud lambda --all
+    """
+    cli_runner = cli_testing.CliRunner()
+    result = cli_runner.invoke(cli.show_gpus, [])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['--all'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:4'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, [':4'])
+    assert not result.exit_code
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:0'])
+    assert isinstance(result.exception, SystemExit)
+
+    result = cli_runner.invoke(cli.show_gpus, ['V100:-2'])
+    assert isinstance(result.exception, SystemExit)
+
+    result = cli_runner.invoke(cli.show_gpus,
+                               ['--cloud', 'aws', '--region', 'us-west-1'])
+    assert not result.exit_code
+
+    for cloud in CLOUDS_TO_TEST:
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['--cloud', cloud, '--all'])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100', '--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus, ['V100:4', '--cloud', cloud])
+        assert not result.exit_code
+
+        result = cli_runner.invoke(cli.show_gpus,
+                                   ['V100:4', '--cloud', cloud, '--all'])
+        assert isinstance(result.exception, SystemExit)

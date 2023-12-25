@@ -14,8 +14,6 @@ on:
       - 'releases/**'
 jobs:
   python-test:
-    # Need to specify 20.04, because ubuntu-latest does not work with
-    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - run: 'echo "No tests to run"'

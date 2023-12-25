@@ -1,0 +1,103 @@
+# Example: a distributed DeepSpeed job (DeepSpeed-Chat) on 2 VMs.
+#
+# This takes care constructing a "hostfile" to pass to DeepSpeed.
+#
+# Usage:
+#
+#   $ sky launch sky.yaml -r --down -c ds
+#
+#   # Optional: After the job starts running, you can log into the two nodes and
+#   # check gpustat:
+#   $ ssh ds
+#   $ gpustat -i
+#   $ ssh ds-worker1
+#   $ gpustat -i
+
+resources:
+  accelerators: A100:1  # GCP, Lambda
+  # accelerators: A100-80GB:1  # Azure, GCP, SCP
+  # accelerators: A10G:1  # AWS. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
+  # accelerators: T4:1  # AWS, Azure, GCP. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
+num_nodes: 2
+
+setup: |
+  git clone https://github.com/microsoft/DeepSpeedExamples.git || true
+  cd DeepSpeedExamples
+  git checkout d7c42b4f34df91035e7ed3e0c51500bb53d0bc71
+
+  conda activate deepspeed
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n deepspeed python=3.8 -y
+    conda activate deepspeed
+
+    pip install deepspeed
+
+    cd applications/DeepSpeed-Chat
+    pip install -r requirements.txt
+
+    # Required by DeepSpeed in multi-node settings.
+    #
+    # NOTE(skypilot): DeepSpeed uses `pdsh` to log into each node and calls
+    # `ninja --version`; so it has to be installed system-wide rather than in
+    # the above 'deepspeed' conda env.
+    sudo apt-get -y install pdsh ninja-build
+  fi
+
+file_mounts:
+  # Required for DeepSpeed's passwordless SSH (run commands on nodes).
+  ~/.ssh/id_rsa: ~/.ssh/sky-key
+
+run: |
+  cd DeepSpeedExamples
+  conda activate deepspeed
+
+  # Launch on the first node only
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+
+    # Prepare a hostfile.
+    HOSTFILE_PATH=/tmp/hostfile.${SKYPILOT_TASK_ID}
+    python -c "import os;n_gpus=os.environ['SKYPILOT_NUM_GPUS_PER_NODE'];print('\n'.join([f'{ip} slots={n_gpus}' for ip in os.environ['SKYPILOT_NODE_IPS'].splitlines()]))" > ${HOSTFILE_PATH}
+
+    echo "*******************************************"
+    echo "Hostfile: ${HOSTFILE_PATH}"
+    cat ${HOSTFILE_PATH}
+    echo "*******************************************"
+
+    ################ Your launch command goes here ################
+
+    cd applications/DeepSpeed-Chat/training/step1_supervised_finetuning/
+
+    # Adapted from: training_scripts/single_node/run_1.3b_lora.sh
+    # Note the additional argument: --hostfile $HOSTFILE_PATH
+    # Alternatively, you can move HOSTFILE_PATH to /job/hostfile:
+    #   sudo mkdir -p /job; sudo chmod 777 /job; mv ${HOSTFILE_PATH} /job/hostfile
+
+    OUTPUT_PATH=./output
+    mkdir -p $OUTPUT_PATH
+    deepspeed \
+      --hostfile $HOSTFILE_PATH \
+      main.py \
+      --data_path Dahoas/rm-static Dahoas/full-hh-rlhf Dahoas/synthetic-instruct-gptj-pairwise yitingxie/rlhf-reward-datasets \
+      --data_split 2,4,4 \
+      --model_name_or_path facebook/opt-1.3b \
+      --per_device_train_batch_size 8 \
+      --per_device_eval_batch_size 8 \
+      --max_seq_len 512 \
+      --learning_rate 1e-3 \
+      --weight_decay 0.1 \
+      --num_train_epochs 16 \
+      --gradient_accumulation_steps 1 \
+      --lr_scheduler_type cosine \
+      --num_warmup_steps 0 \
+      --seed 1234 \
+      --zero_stage 0 \
+      --lora_dim 128 \
+      --lora_module_name decoder.layers. \
+      --only_optimize_lora \
+      --deepspeed \
+      --output_dir $OUTPUT_PATH \
+      | tee $OUTPUT_PATH/training.log
+
+  fi

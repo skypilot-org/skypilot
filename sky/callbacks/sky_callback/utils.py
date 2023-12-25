@@ -16,11 +16,13 @@ class CallbackLoader:
     @staticmethod
     def pytorch_lightning(log_dir: Optional[str] = None,
                           total_steps: Optional[int] = None):
-        from sky_callback.integrations.pytorch_lightning import SkyLightningCallback
+        from sky_callback.integrations.pytorch_lightning import (
+            SkyLightningCallback)
         return SkyLightningCallback(log_dir=log_dir, total_steps=total_steps)
 
     @staticmethod
     def transformers(log_dir: Optional[str] = None,
                      total_steps: Optional[int] = None):
-        from sky_callback.integrations.transformers import SkyTransformersCallback
+        from sky_callback.integrations.transformers import (
+            SkyTransformersCallback)
         return SkyTransformersCallback(log_dir=log_dir, total_steps=total_steps)

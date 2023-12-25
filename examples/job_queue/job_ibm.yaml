@@ -1,0 +1,23 @@
+# A task submitted to an existing cluster.
+#
+# Runs a task on a existing cluster.
+#
+# Usage:
+#   sky launch -c jq cluster.yaml
+#   sky exec jq job_ibm.yaml
+
+name: job
+
+resources:
+  accelerators: v100:0.5
+
+setup: |
+  echo "running setup"
+
+run: |
+  timestamp=$(date +%s)
+  conda env list
+  for i in {1..120}; do
+    echo "$timestamp $i"
+    sleep 1
+  done

@@ -1,0 +1,39 @@
+name: cpu-task1
+
+resources:
+  # Optional; if left out, automatically pick the cheapest cloud.
+  cloud: oci
+
+  region: ap-seoul-1
+  
+  # zone: AP-SEOUL-1-AD-1
+  
+  instance_type: VM.Standard.E4.Flex$_2_16
+
+  cpus: 2
+
+  image_id: skypilot:cpu-ubuntu-2004
+
+  # use_spot: False
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+workdir: .
+
+num_nodes: 2
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "*** Running setup for the task. ***"
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "*** Running the task on OCI ***"
+  timestamp=$(date +%s)
+  for i in {1..10}; do
+    echo "$timestamp $i"
+    sleep 1
+  done
+  echo "The task is completed."

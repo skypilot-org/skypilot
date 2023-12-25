@@ -1,27 +1,29 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
+from sky import backends
 from sky import clouds
 from sky import dag
-from sky import task
-from sky import backends
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky import status_lib
+from sky import task
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
-from sky.utils import log_utils
+from sky.utils import controller_utils
+from sky.utils import rich_utils
+from sky.utils import subprocess_utils
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
-from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -33,7 +35,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
+def status(cluster_names: Optional[Union[str, List[str]]] = None,
            refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
@@ -103,7 +105,7 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    return backend_utils.get_clusters(include_reserved=True,
+    return backend_utils.get_clusters(include_controller=True,
                                       refresh=refresh,
                                       cluster_names=cluster_names)
 
@@ -168,12 +170,12 @@ def _start(
         cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if not force and cluster_status == global_user_state.ClusterStatus.UP:
+    if not force and cluster_status == status_lib.ClusterStatus.UP:
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
-        global_user_state.ClusterStatus.INIT,
-        global_user_state.ClusterStatus.STOPPED), cluster_status
+        status_lib.ClusterStatus.INIT,
+        status_lib.ClusterStatus.STOPPED), cluster_status
 
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -181,18 +183,19 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    if cluster_name == spot.SPOT_CONTROLLER_NAME:
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
         if down:
             raise ValueError('Using autodown (rather than autostop) is not '
-                             'supported for the spot controller. Pass '
+                             'supported for SkyPilot controllers. Pass '
                              '`down=False` or omit it instead.')
         if idle_minutes_to_autostop is not None:
             raise ValueError(
                 'Passing a custom autostop setting is currently not '
-                'supported when starting the spot controller. To '
+                'supported when starting SkyPilot controllers. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
                 f'default autostop settings (got: {idle_minutes_to_autostop}).')
-        idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        idle_minutes_to_autostop = (
+            constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.
@@ -207,6 +210,12 @@ def _start(
                                stream_logs=True,
                                cluster_name=cluster_name,
                                retry_until_up=retry_until_up)
+    storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
+    # Passing all_file_mounts as None ensures the local source set in Storage
+    # to not redundantly sync source to the bucket.
+    backend.sync_file_mounts(handle=handle,
+                             all_file_mounts=None,
+                             storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
         backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
     return handle
@@ -296,37 +305,38 @@ def stop(cluster_name: str, purge: bool = False) -> None:
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
           cluster, or a TPU VM Pod cluster, or the managed spot controller.
     """
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(
-            f'Stopping sky reserved cluster {cluster_name!r} '
+            f'Stopping SkyPilot controller {cluster_name!r} '
             f'is not supported.')
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-        # Reference:
-        # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
-        raise exceptions.NotSupportedError(
-            f'Stopping cluster {cluster_name!r} with TPU VM Pod '
-            'is not supported.')
-
-    # Check cloud supports stopping instances
-    cloud = handle.launched_resources.cloud
-    cloud.check_features_are_supported(
-        {clouds.CloudImplementationFeatures.STOP})
 
     backend = backend_utils.get_backend_from_handle(handle)
-    if (isinstance(backend, backends.CloudVmRayBackend) and
-            handle.launched_resources.use_spot):
-        # Disable spot instances to be stopped.
-        # TODO(suquark): enable GCP+spot to be stopped in the future.
-        raise exceptions.NotSupportedError(
-            f'{colorama.Fore.YELLOW}Stopping cluster '
-            f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-            '  Stopping spot instances is not supported as the attached '
-            'disks will be lost.\n'
-            '  To terminate the cluster instead, run: '
-            f'{colorama.Style.BRIGHT}sky down {cluster_name}')
+
+    if isinstance(backend, backends.CloudVmRayBackend):
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+        if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+            # Reference:
+            # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
+            raise exceptions.NotSupportedError(
+                f'Stopping cluster {cluster_name!r} with TPU VM Pod '
+                'is not supported.')
+        # Check cloud supports stopping instances
+        cloud = handle.launched_resources.cloud
+        cloud.check_features_are_supported(
+            {clouds.CloudImplementationFeatures.STOP})
+        if handle.launched_resources.use_spot:
+            # Disable spot instances to be stopped.
+            # TODO(suquark): enable GCP+spot to be stopped in the future.
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}Stopping cluster '
+                f'{cluster_name!r}... skipped.{colorama.Style.RESET_ALL}\n'
+                '  Stopping spot instances is not supported as the attached '
+                'disks will be lost.\n'
+                '  To terminate the cluster instead, run: '
+                f'{colorama.Style.BRIGHT}sky down {cluster_name}')
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
 
@@ -350,6 +360,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Raises:
         ValueError: the specified cluster does not exist.
+        RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           spot controller.
     """
@@ -417,9 +428,9 @@ def autostop(
     if is_cancel:
         option_str = '{stop,down}'
     operation = f'{verb} auto{option_str}'
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
         raise exceptions.NotSupportedError(
-            f'{operation} sky reserved cluster {cluster_name!r} '
+            f'{operation} SkyPilot controller {cluster_name!r} '
             f'is not supported.')
     handle = backend_utils.check_cluster_available(
         cluster_name,
@@ -522,53 +533,90 @@ def queue(cluster_name: str,
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def cancel(cluster_name: str,
-           all: bool = False,
-           job_ids: Optional[List[int]] = None) -> None:
+def cancel(
+    cluster_name: str,
+    all: bool = False,
+    job_ids: Optional[List[int]] = None,
+    # pylint: disable=invalid-name
+    _try_cancel_if_cluster_is_init: bool = False,
+) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
 
+    When `all` is False and `job_ids` is None, cancel the latest running job.
+
+    Additional arguments:
+        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+            even if the cluster is not UP, but the head node is still alive.
+            This is used by the spot controller to cancel the job when the
+            worker node is preempted in the spot cluster.
+
     Raises:
         ValueError: if arguments are invalid, or the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the specified cluster is a
-          reserved cluster that does not support this operation.
+          controller that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    if not job_ids and not all:
-        raise ValueError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster_name} -s`) or the --all flag.')
-
-    backend_utils.check_cluster_name_not_reserved(
+    controller_utils.check_cluster_name_not_controller(
         cluster_name, operation_str='Cancelling jobs')
 
+    if all and job_ids:
+        raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
+                         'all jobs, set `job_ids` to None.')
+
     # Check the status of the cluster.
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='cancelling jobs',
-    )
+    handle = None
+    try:
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation='cancelling jobs',
+        )
+    except exceptions.ClusterNotUpError as e:
+        if not _try_cancel_if_cluster_is_init:
+            raise
+        assert (e.handle is None or
+                isinstance(e.handle, backends.CloudVmRayResourceHandle)), e
+        if (e.handle is None or e.handle.head_ip is None):
+            raise
+        handle = e.handle
+        # Even if the cluster is not UP, we can still try to cancel the job if
+        # the head node is still alive. This is useful when a spot cluster's
+        # worker node is preempted, but we can still cancel the job on the head
+        # node.
+
+    assert handle is not None, (
+        f'handle for cluster {cluster_name!r} should not be None')
+
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           f'Cancelling all jobs on cluster {cluster_name!r}...'
                           f'{colorama.Style.RESET_ALL}')
-        job_ids = None
-    else:
-        assert job_ids is not None, 'job_ids should not be None'
+    elif job_ids is None:
+        # all = False, job_ids is None => cancel the latest running job.
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
+    elif len(job_ids):
+        # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
+    else:
+        # all = False, len(job_ids) == 0 => no jobs to cancel.
+        return
 
-    backend.cancel_jobs(handle, job_ids)
+    backend.cancel_jobs(handle, job_ids, all)
 
 
 @usage_lib.entrypoint
@@ -664,7 +712,7 @@ def job_status(cluster_name: str,
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        Dict[Optional[int], Optional[job_lib.JobStatus]]: A mapping of job_id to
+        Dict[Optional[str], Optional[job_lib.JobStatus]]: A mapping of job_id to
         job statuses. The status will be None if the job does not exist.
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
@@ -749,22 +797,22 @@ def spot_queue(refresh: bool,
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = spot.is_spot_controller_up(stop_msg)
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+        stopped_message=stop_msg)
 
     if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
+            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.INIT
     ]):
         sky_logging.print(f'{colorama.Fore.YELLOW}'
                           'Restarting controller for latest status...'
                           f'{colorama.Style.RESET_ALL}')
 
-        log_utils.force_update_rich_status(
-            '[cyan] Checking spot jobs - restarting '
-            'controller[/]')
+        rich_utils.force_update_status('[cyan] Checking spot jobs - restarting '
+                                       'controller[/]')
         handle = _start(spot.SPOT_CONTROLLER_NAME)
-        controller_status = global_user_state.ClusterStatus.UP
-        log_utils.force_update_rich_status('[cyan] Checking spot jobs[/]')
+        controller_status = status_lib.ClusterStatus.UP
+        rich_utils.force_update_status('[cyan] Checking spot jobs[/]')
 
     if handle is None or handle.head_ip is None:
         # When the controller is STOPPED, the head_ip will be None, as
@@ -797,14 +845,20 @@ def spot_queue(refresh: bool,
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
-        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
+        # Filter out the finished jobs. If a multi-task job is partially
+        # finished, we will include all its tasks.
+        non_finished_tasks = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
+        non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
+        jobs = list(
+            filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
     return jobs
 
 
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str] = None,
-                job_ids: Optional[Sequence[int]] = None,
+                job_ids: Optional[List[int]] = None,
                 all: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel managed spot jobs.
@@ -816,13 +870,15 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    cluster_status, handle = spot.is_spot_controller_up(
-        'All managed spot jobs should have finished.')
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+        stopped_message='All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
-        # The error message is already printed in spot.is_spot_controller_up.
+        # The error message is already printed in
+        # backend_utils.is_controller_up
         # TODO(zhwu): Move the error message into the exception.
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError('',
+            raise exceptions.ClusterNotUpError(message='',
                                                cluster_status=cluster_status)
 
     job_id_str = ','.join(map(str, job_ids))
@@ -874,12 +930,13 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    controller_status, handle = spot.is_spot_controller_up(
-        'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
+    controller_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SPOT_CONTROLLER,
+        stopped_message=('Please restart the spot controller with '
+                         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.'))
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
-        if controller_status == global_user_state.ClusterStatus.INIT:
+        if controller_status == status_lib.ClusterStatus.INIT:
             msg = ''
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(msg,

@@ -1,7 +1,7 @@
 """DAGs: user applications to be run."""
 import pprint
 import threading
-from typing import List
+from typing import List, Optional
 
 
 class Dag:
@@ -18,6 +18,7 @@ class Dag:
         import networkx as nx  # pylint: disable=import-outside-toplevel
 
         self.graph = nx.DiGraph()
+        self.name = None
 
     def add(self, task):
         self.graph.add_node(task)
@@ -85,7 +86,7 @@ class _DagContext(threading.local):
             self._current_dag = None
         return old_dag
 
-    def get_current_dag(self):
+    def get_current_dag(self) -> Optional[Dag]:
         return self._current_dag
 
 

@@ -1,0 +1,20 @@
+service:
+  readiness_probe:
+    path: /health
+    # For install dependencies
+    initial_delay_seconds: 180
+  replica_policy:
+    min_replicas: 3
+    auto_restart: false
+
+resources:
+  ports: 8080
+  cloud: gcp
+  zone: us-central1-a
+  cpus: 2+
+
+workdir: tests/skyserve/replica_failure
+
+setup: pip install fastapi[all] uvicorn
+
+run: python3 server.py --port 8080

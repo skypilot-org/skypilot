@@ -7,6 +7,7 @@
 
 Tested (run the relevant ones):
 
+- [ ] Code formatting: `bash format.sh`
 - [ ] Any manual or new tests for this PR (please specify below)
 - [ ] All smoke tests: `pytest tests/test_smoke.py` 
 - [ ] Relevant individual smoke tests: `pytest tests/test_smoke.py::test_fill_in_the_name` 

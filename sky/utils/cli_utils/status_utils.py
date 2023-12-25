@@ -1,16 +1,19 @@
 """Utilities for sky status."""
 from typing import Any, Callable, Dict, List, Optional
+
 import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
-from sky import spot
+from sky import status_lib
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import resources_utils
 
-_COMMAND_TRUNC_LENGTH = 25
+COMMAND_TRUNC_LENGTH = 25
+NUM_COST_REPORT_LINES = 5
 
 # A record in global_user_state's 'clusters' table.
 _ClusterRecord = Dict[str, Any]
@@ -18,7 +21,7 @@ _ClusterRecord = Dict[str, Any]
 _ClusterCostReportRecord = Dict[str, Any]
 
 
-def _truncate_long_string(s: str, max_length: int = 35) -> str:
+def truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(s) <= max_length:
         return s
     splits = s.split(' ')
@@ -53,7 +56,7 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = _truncate_long_string(str(val), self.trunc_length)
+            val = truncate_long_string(str(val), self.trunc_length)
         return val
 
 
@@ -77,9 +80,10 @@ def show_status_table(cluster_records: List[_ClusterRecord],
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status_colored),
         StatusColumn('AUTOSTOP', _get_autostop),
+        StatusColumn('HEAD_IP', _get_head_ip, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
-                     trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
+                     trunc_length=COMMAND_TRUNC_LENGTH if not show_all else 0),
     ]
 
     columns = []
@@ -104,10 +108,39 @@ def show_status_table(cluster_records: List[_ClusterRecord],
     return num_pending_autostop
 
 
+def get_total_cost_of_displayed_records(
+        cluster_records: List[_ClusterCostReportRecord], display_all: bool):
+    """Compute total cost of records to be displayed in cost report."""
+    cluster_records.sort(
+        key=lambda report: -_get_status_value_for_cost_report(report))
+
+    displayed_records = cluster_records[:NUM_COST_REPORT_LINES]
+    if display_all:
+        displayed_records = cluster_records
+
+    total_cost = sum(record['total_cost'] for record in displayed_records)
+    return total_cost
+
+
 def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
                            show_all: bool,
-                           reserved_group_name: Optional[str] = None):
+                           controller_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
+
+    For each cluster, this shows: cluster name, resources, launched time,
+    duration that cluster was up, and total estimated cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until now. This
+    means if the cluster is UP, successive calls to cost-report will show
+    increasing price.
+
+    The estimated cost is calculated based on the local cache of the cluster
+    status, and may not be accurate for:
+
+      - clusters with autostop/use_spot set; or
+
+      - clusters that were terminated/stopped on the cloud console.
 
     Returns:
         Number of pending auto{stop,down} clusters.
@@ -124,7 +157,7 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         StatusColumn('STATUS',
                      _get_status_for_cost_report,
                      show_by_default=True),
-        StatusColumn('HOURLY_PRICE',
+        StatusColumn('COST/hr',
                      _get_price_for_cost_report,
                      show_by_default=True),
         StatusColumn('COST (est.)',
@@ -138,7 +171,15 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
-    for record in cluster_records:
+    num_lines_to_display = NUM_COST_REPORT_LINES
+    if show_all:
+        num_lines_to_display = len(cluster_records)
+
+    # prioritize showing non-terminated clusters in table
+    cluster_records.sort(
+        key=lambda report: -_get_status_value_for_cost_report(report))
+
+    for record in cluster_records[:num_lines_to_display]:
         row = []
         for status_column in status_columns:
             if status_column.show_by_default or show_all:
@@ -146,10 +187,10 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
         cluster_table.add_row(row)
 
     if cluster_records:
-        if reserved_group_name is not None:
-            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        if controller_name is not None:
+            autostop_minutes = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{controller_name}{colorama.Style.RESET_ALL}'
                        f'{colorama.Style.DIM} (will be autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
@@ -171,7 +212,7 @@ def show_local_status_table(local_clusters: List[str]):
     has ran at least one job on the cluster.
     """
     clusters_status = backend_utils.get_clusters(
-        include_reserved=False,
+        include_controller=False,
         refresh=False,
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [
@@ -228,7 +269,7 @@ def show_local_status_table(local_clusters: List[str]):
             # RESOURCES
             resources_str,
             # COMMAND
-            _truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
+            truncate_long_string(command_str, COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)
@@ -269,8 +310,7 @@ _get_duration = (lambda cluster_record: log_utils.readable_time_duration(
     0, cluster_record['duration'], absolute=True))
 
 
-def _get_status(
-        cluster_record: _ClusterRecord) -> global_user_state.ClusterStatus:
+def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:
     return cluster_record['status']
 
 
@@ -280,15 +320,10 @@ def _get_status_colored(cluster_record: _ClusterRecord) -> str:
 
 def _get_resources(cluster_record: _ClusterRecord) -> str:
     handle = cluster_record['handle']
-    resources_str = '<initializing>'
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'
     elif isinstance(handle, backends.CloudVmRayResourceHandle):
-        if (handle.launched_nodes is not None and
-                handle.launched_resources is not None):
-            launched_resource_str = str(handle.launched_resources)
-            resources_str = (f'{handle.launched_nodes}x '
-                             f'{launched_resource_str}')
+        resources_str = resources_utils.get_readable_resources_repr(handle)
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
@@ -303,26 +338,43 @@ def _get_zone(cluster_record: _ClusterRecord) -> str:
 
 def _get_autostop(cluster_record: _ClusterRecord) -> str:
     autostop_str = ''
-    separtion = ''
+    separation = ''
     if cluster_record['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
         autostop_str = str(cluster_record['autostop']) + 'm'
-        separtion = ' '
+        separation = ' '
 
     if cluster_record['to_down']:
-        autostop_str += f'{separtion}(down)'
+        autostop_str += f'{separation}(down)'
     if autostop_str == '':
         autostop_str = '-'
     return autostop_str
 
 
+def _get_head_ip(cluster_record: _ClusterRecord) -> str:
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        return '-'
+    if handle.head_ip is None:
+        return '-'
+    return handle.head_ip
+
+
 def _is_pending_autostop(cluster_record: _ClusterRecord) -> bool:
     # autostop < 0 means nothing scheduled.
     return cluster_record['autostop'] >= 0 and _get_status(
-        cluster_record) != global_user_state.ClusterStatus.STOPPED
+        cluster_record) != status_lib.ClusterStatus.STOPPED
 
 
 # ---- 'sky cost-report' helper functions below ----
+
+
+def _get_status_value_for_cost_report(
+        cluster_cost_report_record: _ClusterCostReportRecord) -> int:
+    status = cluster_cost_report_record['status']
+    if status is None:
+        return -1
+    return 1
 
 
 def _get_status_for_cost_report(
@@ -351,7 +403,7 @@ def _get_price_for_cost_report(
     launched_resources = cluster_cost_report_record['resources']
 
     hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
-    price_str = f'$ {hourly_cost:.3f}'
+    price_str = f'$ {hourly_cost:.2f}'
     return price_str
 
 
@@ -362,4 +414,4 @@ def _get_estimated_cost_for_cost_report(
     if not cost:
         return '-'
 
-    return f'${cost:.3f}'
+    return f'$ {cost:.2f}'

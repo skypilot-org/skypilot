@@ -4,7 +4,7 @@ resources:
   instance_type: n1-highmem-8
   accelerators: tpu-v2-8
   accelerator_args:
-    runtime_version: 2.5.0
+    runtime_version: 2.12.0
 
 file_mounts:
   /dataset:
@@ -23,7 +23,7 @@ setup: |
   else
     conda create -n mnist python=3.8 -y
     conda activate mnist
-    pip install tensorflow==2.5.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
+    pip install tensorflow==2.12.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
   fi
 
 # The command to run.  Will be run under the working directory.

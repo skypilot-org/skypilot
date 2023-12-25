@@ -1,25 +1,16 @@
 """Local/On-premise."""
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
 
-def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.stdout.decode('ascii')
-
-
-@clouds.CLOUD_REGISTRY.register
+# TODO(skypilot): remove Local now that we're using Kubernetes.
 class Local(clouds.Cloud):
     """Local/on-premise cloud.
 
@@ -40,7 +31,15 @@ class Local(clouds.Cloud):
         clouds.CloudImplementationFeatures.STOP:
             ('Local cloud does not support stopping instances.'),
         clouds.CloudImplementationFeatures.AUTOSTOP:
-            ('Local cloud does not support stopping instances.')
+            ('Local cloud does not support stopping instances.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            ('Migrating disk is not supported for Local.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker image is not supported in Local. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not supported for Local.'),
     }
 
     @classmethod
@@ -49,7 +48,7 @@ class Local(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_length(cls) -> Optional[int]:
+    def max_cluster_name_length(cls) -> Optional[int]:
         return None
 
     @classmethod
@@ -108,15 +107,18 @@ class Local(clouds.Cloud):
         return isinstance(other, Local)
 
     @classmethod
-    def get_default_instance_type(cls, cpus: Optional[str] = None) -> str:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None,
+                                  memory: Optional[str] = None,
+                                  disk_tier: Optional[str] = None) -> str:
         # There is only "1" instance type for local cloud: on-prem
-        del cpus  # Unused.
+        del cpus, memory, disk_tier  # Unused.
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
-    def get_vcpus_from_instance_type(cls,
-                                     instance_type: str) -> Optional[float]:
-        return None
+    def get_vcpus_mem_from_instance_type(
+            cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
+        return None, None
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -134,12 +136,15 @@ class Local(clouds.Cloud):
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
+            cluster_name_on_cloud: str, region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
+        if resources.disk_tier is not None:
+            return ([], [])
         # The entire local cluster's resources is considered launchable, as the
         # check for task resources is deferred later.
         # The check for task resources meeting cluster resources is run in
@@ -186,8 +191,15 @@ class Local(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        assert zone is None
+        if zone is not None:
+            raise ValueError('Local cloud does not support zones.')
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
-                             ' cloud region {Local.LOCAL_REGION.name!r}.')
+                             f' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
+
+    @classmethod
+    def check_disk_tier_enabled(cls, instance_type: str,
+                                disk_tier: str) -> None:
+        raise exceptions.NotSupportedError(
+            'Local cloud does not support disk tiers.')

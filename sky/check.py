@@ -5,9 +5,11 @@ import click
 
 from sky import clouds
 from sky import global_user_state
+from sky.adaptors import cloudflare
 
 
-def check(quiet: bool = False) -> None:
+# TODO(zhwu): add check for a single cloud to improve performance
+def check(quiet: bool = False, verbose: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
     echo('Checking credentials to enable clouds for SkyPilot.')
 
@@ -22,15 +24,35 @@ def check(quiet: bool = False) -> None:
         if not isinstance(cloud, clouds.Local):
             echo('  ' + click.style(
                 f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-                 ' ' * 10)
+                 ' ' * 30)
         if ok:
             enabled_clouds.append(str(cloud))
+            if verbose:
+                activated_account = cloud.get_current_user_identity_str()
+                if activated_account is not None:
+                    echo(f'    Activated account: {activated_account}')
             if reason is not None:
                 echo(f'    Hint: {reason}')
         else:
             echo(f'    Reason: {reason}')
 
-    if len(enabled_clouds) == 0:
+    # Currently, clouds.CLOUD_REGISTRY.values() does not
+    # support r2 as only clouds with computing instances
+    # are added as 'cloud'. This will be removed when
+    # cloudflare/r2 is added as a 'cloud'.
+    cloud = 'Cloudflare (for R2 object store)'
+    echo(f'  Checking {cloud}...', nl=False)
+    r2_is_enabled, reason = cloudflare.check_credentials()
+    echo('\r', nl=False)
+    status_msg = 'enabled' if r2_is_enabled else 'disabled'
+    status_color = 'green' if r2_is_enabled else 'red'
+    echo('  ' +
+         click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+         ' ' * 30)
+    if not r2_is_enabled:
+        echo(f'    Reason: {reason}')
+
+    if len(enabled_clouds) == 0 and not r2_is_enabled:
         click.echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -61,4 +83,12 @@ def get_cloud_credential_file_mounts() -> Dict[str, str]:
     for cloud in enabled_clouds:
         cloud_file_mounts = cloud.get_credential_file_mounts()
         file_mounts.update(cloud_file_mounts)
+    # Currently, get_enabled_clouds() does not support r2
+    # as only clouds with computing instances are marked
+    # as enabled by skypilot. This will be removed when
+    # cloudflare/r2 is added as a 'cloud'.
+    r2_is_enabled, _ = cloudflare.check_credentials()
+    if r2_is_enabled:
+        r2_credential_mounts = cloudflare.get_credential_file_mounts()
+        file_mounts.update(r2_credential_mounts)
     return file_mounts
