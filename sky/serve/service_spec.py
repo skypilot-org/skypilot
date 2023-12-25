@@ -25,7 +25,6 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         # Deprecated: Always be True
         auto_restart: Optional[bool] = None,
-        autoscaling_decision_interval: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # Deprecated: the two arguments below is replaced by the
@@ -67,9 +66,6 @@ class SkyServiceSpec:
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
 
-        self._autoscaling_decision_interval = (
-            autoscaling_decision_interval if autoscaling_decision_interval
-            is not None else constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
         self._upscale_delay_seconds = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
             constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
@@ -135,9 +131,6 @@ class SkyServiceSpec:
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
                 'auto_restart', None)
-            service_config[
-                'autoscaling_decision_interval'] = policy_section.get(
-                    'autoscaling_decision_interval', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
@@ -187,8 +180,6 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
-        add_if_not_none('replica_policy', 'autoscaling_decision_interval',
-                        self.autoscaling_decision_interval)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
@@ -242,10 +233,6 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
-
-    @property
-    def autoscaling_decision_interval(self) -> int:
-        return self._autoscaling_decision_interval
 
     @property
     def upscale_delay_seconds(self) -> int:

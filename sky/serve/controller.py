@@ -88,7 +88,7 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
-            time.sleep(self._autoscaler.autoscaling_decision_interval)
+            time.sleep(constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
 
     def run(self) -> None:
 

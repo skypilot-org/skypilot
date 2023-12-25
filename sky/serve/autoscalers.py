@@ -63,19 +63,10 @@ class Autoscaler:
             min_replicas: Minimum number of replicas.
             max_replicas: Maximum number of replicas. Default to fixed
                 number of replicas, i.e. min_replicas == max_replicas.
-            autoscaling_decision_interval: Interval of
-            autoscaling decisions in seconds.
             target_num_replicas: Target number of replicas output by autoscaler.
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.autoscaling_decision_interval: int = (
-            spec.autoscaling_decision_interval)
-        if (self.autoscaling_decision_interval <
-                constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS):
-            logger.warning('Autoscaler decision interval is less than '
-                           'controller sync interval. It might '
-                           'not always got the latest information.')
         self.target_num_replicas: int = spec.min_replicas
 
     def collect_request_information(
@@ -119,9 +110,11 @@ class RequestRateAutoscaler(Autoscaler):
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
         self.scale_up_consecutive_periods: int = int(
-            spec.upscale_delay_seconds / self.autoscaling_decision_interval)
+            spec.upscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
         self.scale_down_consecutive_periods: int = int(
-            spec.downscale_delay_seconds / self.autoscaling_decision_interval)
+            spec.downscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
         # Target number of replicas is initialized to min replicas.
         # TODO(MaoZiming): add init replica numbers.
         self.target_num_replicas: int = spec.min_replicas
@@ -185,8 +178,10 @@ class RequestRateAutoscaler(Autoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        alive_replica_infos = [info for info in replica_infos if info.is_alive]
-        num_alive_replicas = len(alive_replica_infos)
+        launched_replica_infos = [
+            info for info in replica_infos if info.is_alive
+        ]
+        num_alive_replicas = len(launched_replica_infos)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -203,12 +198,12 @@ class RequestRateAutoscaler(Autoscaler):
         def _get_replica_ids_to_scale_down(num_limit: int,) -> List[int]:
 
             status_order = serve_state.ReplicaStatus.scale_down_decision_order()
-            alive_replica_infos_sorted = sorted(
-                alive_replica_infos,
+            launched_replica_infos_sorted = sorted(
+                launched_replica_infos,
                 key=lambda info: status_order.index(info.status)
                 if info.status in status_order else len(status_order))
 
-            return [info.replica_id for info in alive_replica_infos_sorted
+            return [info.replica_id for info in launched_replica_infos_sorted
                    ][:num_limit]
 
         if num_alive_replicas < self.target_num_replicas:

@@ -347,9 +347,6 @@ def get_service_schema():
                     'auto_restart': {
                         'type': 'boolean',
                     },
-                    'autoscaling_decision_interval': {
-                        'type': 'number',
-                    },
                     'upscale_delay_seconds': {
                         'type': 'number',
                     },

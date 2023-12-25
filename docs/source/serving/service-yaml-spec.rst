@@ -50,19 +50,13 @@ Available fields:
         # target_rps_per_replica queries per second. **Autoscaling will only be
         # enabled if this value is specified.**
         target_qps_per_replica: 5
-        # Autoscaling decision interval in seconds (optional). Defaults to 20 seconds.
-        # Every autoscaling_decision_interval seconds, SkyServe will check the QPS
-        # of your service and make autoscaling decisions. Target number of replicas
-        # will be calculated by:
-        #   target_replicas = ceil(current_qps / target_rps_per_replica)
-        # This value will also be capped by min_replicas and max_replicas.
-        autoscaling_decision_interval: 20
         # Upscale and downscale delay in seconds (optional). Defaults to 300 seconds
         # (5 minutes) and 1200 seconds (20 minutes) respectively. To avoid aggressive
         # autoscaling, SkyServe will only upscale or downscale your service if the
         # QPS of your service is higher or lower than the target QPS for a period
         # of time. This period of time is controlled by upscale_delay_seconds and
-        # downscale_delay_seconds. If you want to scale your service more aggressively,
+        # downscale_delay_seconds. The default values should work in most cases.
+        # If you want to scale your service more aggressively,
         # you can set these values to a smaller number.
         upscale_delay_seconds: 300
         downscale_delay_seconds: 1200
