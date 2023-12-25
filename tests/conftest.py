@@ -62,7 +62,7 @@ def pytest_addoption(parser):
                      default=False,
                      help='Only run tests for sky serve.')
     parser.addoption('--tpu',
-                    action='store_true',
+                     action='store_true',
                      default=False,
                      help='Only run tests for TPU.')
     parser.addoption(
@@ -143,8 +143,7 @@ def pytest_collection_modifyitems(config, items):
         if (not 'managed_spot'
                 in item.keywords) and config.getoption('--managed-spot'):
             item.add_marker(skip_marks['managed_spot'])
-        if (not 'tpu'
-                in item.keywords) and config.getoption('--tpu'):
+        if (not 'tpu' in item.keywords) and config.getoption('--tpu'):
             item.add_marker(skip_marks['tpu'])
         if (not 'sky_serve'
                 in item.keywords) and config.getoption('--sky-serve'):
