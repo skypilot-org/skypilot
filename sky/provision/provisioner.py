@@ -351,12 +351,6 @@ def _post_provision_setup(
     ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
 
-    # TODO(suquark): Handle TPU VMs when dealing with GCP later.
-    # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-    #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-    #                 f'{style.RESET_ALL}')
-    #     RetryingVmProvisioner._tpu_pod_setup(
-    #         None, handle.cluster_yaml, handle)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
