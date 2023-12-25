@@ -814,8 +814,23 @@ class GCPComputeInstance(GCPInstance):
             success = result['status'] == 'DONE'
             if success:
                 break
-            logger.debug(f'Retry waiting for operation {operation["name"]} to '
-                         'finish ...')
+            logger.debug(f'create_instances: Retry waiting for operation '
+                         f'{operation["name"]} to finish (result: {result})...')
+        else:
+            logger.warning('create_instances: Timeout waiting for creation '
+                           'operation, cancelling the operation ...')
+            request = cls.load_resource().zoneOperations().delete(
+                project=project_id,
+                operation=operation['name'],
+                zone=zone,
+            )
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            return [{
+                'code': 'TIMEOUT',
+                'message': 'Timeout waiting for creation operation',
+                'domain': 'create_instances'
+            }], names
 
         # NOTE: Error example:
         # {
