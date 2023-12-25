@@ -516,7 +516,6 @@ class Resources:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if use_tpu_vm:
-                    accelerator_args['tpu_vm'] = True
                     tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
