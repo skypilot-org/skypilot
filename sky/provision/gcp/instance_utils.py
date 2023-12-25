@@ -949,12 +949,7 @@ class GCPComputeInstance(GCPInstance):
 
 class GCPTPUVMInstance(GCPInstance):
     """Instance handler for GCP TPU node."""
-    PENDING_STATES = [
-        'CREATING',
-        'STARTING',
-        'RESTARTING',
-        'REPAIRING',
-    ]
+    PENDING_STATES = ['CREATING', 'STARTING', 'RESTARTING', 'REPAIRING']
     RUNNING_STATE = 'READY'
     STOPPING_STATES = ['STOPPING']
     STOPPED_STATES = ['STOPPED']
