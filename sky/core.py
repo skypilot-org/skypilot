@@ -450,7 +450,8 @@ def autostop(
             '  Stopping spot instances is not supported as the attached '
             'disks will be lost.')
 
-    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+    if (tpu_utils.is_tpu_vm_pod(handle.launched_resources) and not down and
+            not is_cancel):
         # Reference:
         # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(

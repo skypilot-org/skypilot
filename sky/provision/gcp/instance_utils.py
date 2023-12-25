@@ -887,7 +887,7 @@ class GCPComputeInstance(GCPInstance):
 
 
 class GCPTPUVMInstance(GCPInstance):
-    """Instance handler for GCP TPU node."""
+    """Instance handler for GCP TPU VM."""
     PENDING_STATES = ['CREATING', 'STARTING', 'RESTARTING', 'REPAIRING']
     RUNNING_STATE = 'READY'
     STOPPING_STATES = ['STOPPING']
@@ -983,7 +983,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def stop(cls, project_id: str, zone: str, instance: str) -> dict:
-        """Stop a TPU node."""
+        """Stop a TPU VM."""
         del project_id, zone  # unused
         operation = cls.load_resource().projects().locations().nodes().stop(
             name=instance).execute()
@@ -991,7 +991,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def terminate(cls, project_id: str, zone: str, instance: str) -> dict:
-        """Terminate a TPU node."""
+        """Terminate a TPU VM."""
         del project_id, zone  # unused
         operation = cls.load_resource().projects().locations().nodes().delete(
             name=instance).execute()
