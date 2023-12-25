@@ -1227,7 +1227,7 @@ class GCPTPUVMInstance(GCPInstance):
         # NOTE: Error example:
         # {
         #    'code': 8,
-        #    'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x8261b549624b072d]'
+        #    'message': 'There is no more capacity in the zone ...
         # }
         errors = []
         for result in results:
