@@ -1531,8 +1531,7 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
-                 handle: Optional[
-                     'cloud_vm_ray_backend.CloudVmRayResourceHandle'] = None,
+                 handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
@@ -1562,7 +1561,6 @@ def get_node_ips(cluster_yaml: str,
     provider_name = cluster_yaml_utils.get_provider_name(ray_config)
     cloud = cloud_registry.CLOUD_REGISTRY.from_str(provider_name)
     assert cloud is not None, provider_name
-    assert handle.launched_resources is not None, handle
 
     if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.SKYPILOT and
             not tpu_utils.is_tpu_vm(handle.launched_resources)):
