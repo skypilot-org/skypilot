@@ -1116,7 +1116,7 @@ class GCPTPUVMInstance(GCPInstance):
         return result
 
     @classmethod
-    def create_instance(cls,
+    def create_instances(cls,
                         cluster_name: str,
                         project_id: str,
                         availability_zone: str,
