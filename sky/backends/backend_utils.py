@@ -1850,7 +1850,7 @@ def _query_cluster_status_via_cloud_api(
     # TODO(suquark): move implementations of more clouds here
     cloud = handle.launched_resources.cloud
     assert cloud is not None, handle
-    if (cloud.STATUS_VERSION >= clouds.StatusVersion.SKYPILOT):
+    if cloud.STATUS_VERSION >= clouds.StatusVersion.SKYPILOT:
         cloud_name = repr(handle.launched_resources.cloud)
         try:
             node_status_dict = provision_lib.query_instances(
