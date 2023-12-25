@@ -72,6 +72,8 @@ def generate_random_dag(
                          clouds='gcp')
                     assert instance_list, (candidate, instance_list)
                     instance_type = random.choice(instance_list)
+                    if 'tpu' in candidate.accelerator_name:
+                        instance_type = None
                 resources = sky.Resources(
                     cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
