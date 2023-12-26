@@ -5,14 +5,15 @@ from typing import Dict, List, Optional, Tuple, Iterator
 
 import requests
 
-from sky import clouds
+import sky
+from sky import clouds, status_lib
 from sky import sky_logging
 from sky.adaptors.scaleway import get_client, get_instance
 from sky.clouds import Region, Zone, service_catalog
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
-    pass
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -35,8 +36,8 @@ class Scaleway(clouds.Cloud):
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 50
 
-    _regions: List[clouds.Region] = ["fr-par"]
-    _zones: List[clouds.Zone] = ["fr-par-1", "fr-par-2"]
+    _regions: List[clouds.Region] = [clouds.Region(name='fr-par')]
+    _zones: List[clouds.Zone] = [clouds.Zone(name='fr-par-1'), clouds.Zone(name='fr-par-2')]
 
     @classmethod
     def _cloud_unsupported_features(
@@ -62,7 +63,22 @@ class Scaleway(clouds.Cloud):
             which have the offerings. For the clouds that do not expose `Zone`s,
             `region.zones` is an empty list.
         """
-        raise NotImplementedError
+        if use_spot:
+            return []
+        if instance_type is None:
+            # Fall back to default regions
+            regions = cls.regions()
+        else:
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'scaleway')
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                assert r.zones is not None, r
+                r.set_zones([z for z in r.zones if z.name == zone])
+        return regions
 
     @classmethod
     def zones_provision_loop(
@@ -126,7 +142,15 @@ class Scaleway(clouds.Cloud):
                 if success:
                     break
         """
-        raise NotImplementedError
+        del num_nodes  # unused
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
+        for r in regions:
+            assert r.zones is not None, r
+            yield r.zones
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -137,13 +161,16 @@ class Scaleway(clouds.Cloud):
                                      region: Optional[str],
                                      zone: Optional[str]) -> float:
         """Returns the hourly on-demand/spot price for an instance type."""
-        return get_instance().get_server_types()
+        instance = get_instance()
+        hourly_cost = instance(client=get_client()).list_servers_types(zone=zone, per_page=100).servers[
+            instance_type].hourly_price
+        return hourly_cost
 
     def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
                                     use_spot: bool, region: Optional[str],
                                     zone: Optional[str]) -> float:
         """Returns the hourly on-demand price for accelerators."""
-        raise NotImplementedError
+        return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
         """Returns the egress cost.
@@ -187,14 +214,7 @@ class Scaleway(clouds.Cloud):
             self, resources: 'resources_lib.Resources'
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         """See get_feasible_launchable_resources()."""
-        r = resources.copy(
-            cloud=Scaleway,
-            instance_type="RTX-3090",
-            region="fr-par",
-            zone="fr-par-2",
-        )
-        # TODO: We currently do not perform any search on instancetype
-        return [r], []
+        return [sky.Resources(cloud=Scaleway(), instance_type='GPU-3070-S', zone='fr-par-2', region='fr-par')], []
 
     def make_deploy_resources_variables(
             self,
@@ -214,13 +234,20 @@ class Scaleway(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-        raise NotImplementedError
+        return {
+            'instance_type': 'GPU-3070-S',
+            'region': 'fr-par',
+            'zone': 'fr-par-2',
+            # scw marketplace local-image list image-label=ubuntu_jammy_gpu_os_12 zone=fr-par-2
+            'image': 'dd88ce8e-6184-44ed-aa9d-4d3d8158196e',
+        }
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        raise NotImplementedError
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='scaleway')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -228,7 +255,8 @@ class Scaleway(clouds.Cloud):
             instance_type: str,
     ) -> Optional[Dict[str, int]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
-        raise NotImplementedError
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='scaleway')
 
     @classmethod
     def get_default_instance_type(
@@ -263,7 +291,9 @@ class Scaleway(clouds.Cloud):
 
         Returns a dictionary that will be added to a task's file mounts.
         """
-        raise NotImplementedError
+        return {
+            '~/.config/scw/config.yaml': f'~/.config/scw/config.yaml'
+        }
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
@@ -276,7 +306,7 @@ class Scaleway(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
-        raise NotImplementedError
+        return service_catalog.instance_type_exists(instance_type, clouds='scaleway')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
@@ -284,7 +314,8 @@ class Scaleway(clouds.Cloud):
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         """Returns whether the accelerator is valid in the region or zone."""
-        raise NotImplementedError
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'scaleway')
 
     @classmethod
     def check_disk_tier_enabled(cls, instance_type: str,
