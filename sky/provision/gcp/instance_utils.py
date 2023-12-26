@@ -243,12 +243,8 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -256,8 +252,7 @@ class GCPInstance:
                         project_id: str,
                         availability_zone: str,
                         target_instance_id: str,
-                        is_head: bool = True,
-                        wait_for_operation: bool = True) -> str:
+                        is_head: bool = True) -> str:
         if is_head:
             node_tag = {
                 TAG_SKYPILOT_HEAD_NODE: '1',
@@ -271,8 +266,7 @@ class GCPInstance:
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,
                        node_id=target_instance_id,
-                       labels=node_tag,
-                       wait_for_operation=wait_for_operation)
+                       labels=node_tag)
 
         return target_instance_id
 
@@ -544,12 +538,8 @@ class GCPComputeInstance(GCPInstance):
         return operation
 
     @classmethod
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         node = cls.load_resource().instances().get(
             project=project_id,
             instance=node_id,
@@ -566,12 +556,8 @@ class GCPComputeInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
-
+        result = cls.wait_for_operation(operation, project_id,
+                                        availability_zone)
         return result
 
     @classmethod
@@ -656,7 +642,7 @@ class GCPComputeInstance(GCPInstance):
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
                 errors, created_names = cls._create_instances(
-                    cluster_name, names[:reservation_count], project_id, zone,
+                    names[:reservation_count], project_id, zone,
                     config, reservation_count,
                     head_tag_needed[:reservation_count])
                 all_names.extend(names)
@@ -669,7 +655,7 @@ class GCPComputeInstance(GCPInstance):
                 head_tag_needed = head_tag_needed[reservation_count:]
             config.pop('reservationAffinity', None)
 
-        errors, created_names = cls._create_instances(cluster_name, names,
+        errors, created_names = cls._create_instances(names,
                                                       project_id, zone, config,
                                                       count, head_tag_needed)
 
@@ -679,7 +665,6 @@ class GCPComputeInstance(GCPInstance):
     @classmethod
     def _create_instances(
         cls,
-        cluster_name: str,
         names: List[str],
         project_id: str,
         zone: str,
@@ -793,10 +778,9 @@ class GCPComputeInstance(GCPInstance):
                          f'Instance status: {result}')
         # assign labels for head node
         with pool.ThreadPool() as p:
-            p.starmap(
-                cls.create_node_tag,
-                [(cluster_name, project_id, zone, names[i], head_tag_needed[i])
-                 for i in range(count)])
+            p.starmap(cls.create_node_tag,
+                      [(project_id, zone, names[i], head_tag_needed[i])
+                       for i in range(count)])
         return None, names
 
     @classmethod
@@ -1047,12 +1031,8 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     @_retry_on_http_exception('unable to queue the operation')
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         while True:
             # wait until the instance become ready before setting labels
             # as Cloud TPU API does not allow setting labels on pending
@@ -1083,11 +1063,8 @@ class GCPTPUVMInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
+        result = cls.wait_for_operation(operation, project_id,
+                                        availability_zone)
 
         return result
 

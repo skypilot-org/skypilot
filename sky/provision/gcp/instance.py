@@ -344,11 +344,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         error_details = getattr(e, 'error_details')
         errors = []
         if isinstance(error_details, list):
-            for e in error_details:
+            for detail in error_details:
                 errors.append({
-                    'code': e.get('reason'),
-                    'domain': e.get('domain'),
-                    'message': e.get('message'),
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message'),
                 })
         elif isinstance(error_details, str):
             errors.append({
