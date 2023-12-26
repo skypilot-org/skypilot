@@ -184,9 +184,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         )
         if not instances:
             break
-        logger.info(
-            f'run_instances: Waiting for {len(instances)} instances in '
-            'STOPPING status')
+        logger.info(f'run_instances: Waiting for {len(instances)} instances in '
+                    'STOPPING status')
         time.sleep(POLL_INTERVAL)
 
     exist_instances = resource.filter(
@@ -312,7 +311,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         if not instances:
             break
         logger.debug(f'run_instances: Waiting for {len(instances)} instances '
-        'in PENDING status.')
+                     'in PENDING status.')
 
     # Check if the number of running instances is the same as the requested.
     instances = resource.filter(
