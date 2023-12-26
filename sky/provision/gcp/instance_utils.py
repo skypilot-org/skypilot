@@ -29,6 +29,7 @@ TAG_RAY_NODE_KIND = 'ray-node-type'
 # The number is identical to those we use for AWS boto3.
 GCP_MAX_RETRIES = 12
 GCP_CREATE_MAX_RETRIES = 5
+GCP_RETRY_INTERVAL_SECONDS = 5
 GCP_TIMEOUT = 300
 
 logger = sky_logging.init_logger(__name__)
@@ -39,8 +40,8 @@ _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
 
 def _retry_on_http_exception(
     regex: Optional[str] = None,
-    max_retries: int = constants.MAX_POLLS,
-    retry_interval_s: int = constants.POLL_INTERVAL,
+    max_retries: int = GCP_MAX_RETRIES,
+    retry_interval_s: int = GCP_RETRY_INTERVAL_SECONDS,
 ):
     """Retry a function call n-times for as long as it throws an exception."""
 
