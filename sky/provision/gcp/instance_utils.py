@@ -1151,13 +1151,22 @@ class GCPTPUVMInstance(GCPInstance):
                 logger.warning(
                     f'create_instances: googleapiclient.errors.HttpError: {e}')
                 errors = []
-                for e in error_details:
+                for detail in error_details:
                     # To be consistent with error messages returned by operation wait.
-                    errors.append({
-                        'code': e.get('reason'),
-                        'domain': e.get('domain'),
-                        'message': e.get('message'),
-                    })
+                    viloations = detail.get('violations', [])
+                    if not viloations:
+                        errors.append({
+                            'code': detail.get('reason'),
+                            'domain': detail.get('domain'),
+                            'message': str(e),
+                        })
+                    else:
+                        for violation in viloations:
+                            errors.append({
+                                'code': detail.get('@type'),
+                                'domain': violation.get('subject'),
+                                'message': violation.get('description'),
+                            })
                 return errors, names
         errors = []
         logger.info(str(operations))

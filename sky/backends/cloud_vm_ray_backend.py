@@ -1052,6 +1052,22 @@ class FailoverCloudErrorHandlerV2:
                                    f'in {region.name}.')
                 blocked_resources.add(
                     launchable_resources.copy(region=region.name, zone=None))
+            elif code == 'type.googleapis.com/google.rpc.QuotaFailure':
+                # TPU VM pod specific error.
+                if 'in region' in message:
+                    # Example:
+                    # "Quota 'TPUV2sPreemptiblePodPerProjectPerRegionForTPUAPI'
+                    # exhausted. Limit 32 in region europe-west4"
+                    blocked_resources.add(
+                        launchable_resources.copy(region=region.name,
+                                                  zone=None))
+                elif 'in zone' in message:
+                    # Example:
+                    # "Quota 'TPUV2sPreemptiblePodPerProjectPerZoneForTPUAPI'
+                    # exhausted. Limit 32 in zone europe-west4-a"
+                    blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
+
             elif 'Requested disk size cannot be smaller than the image size' in message:
                 logger.info('Skipping all regions due to disk size issue.')
                 blocked_resources.add(
@@ -1814,43 +1830,6 @@ class RetryingVmProvisioner(object):
                     logger.info(
                         'Retrying head node provisioning due to head fetching '
                         'timeout.')
-                    return True
-
-            if isinstance(to_provision_cloud, clouds.GCP):
-                if ('Quota exceeded for quota metric \'List requests\' and '
-                        'limit \'List requests per minute\'' in stderr):
-                    logger.info(
-                        'Retrying due to list request rate limit exceeded.')
-                    return True
-
-                # https://github.com/skypilot-org/skypilot/issues/2666
-                if ('Head node fetch timed out. Failed to create head node.'
-                        in stderr):
-                    logger.info(
-                        'Retrying head node provisioning due to head fetching '
-                        'timeout.')
-                    return True
-
-                # https://github.com/skypilot-org/skypilot/issues/1797
-                # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
-                pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
-                           r'.*instances\/.*-compute\' was not found')
-                result = re.search(pattern, stderr)
-                if result is not None:
-                    # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info('Retrying due to the possibly transient '
-                                'RESOURCE_NOT_FOUND error.')
-                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
-                    return True
-
-                # "The resource 'projects/skypilot-375900/regions/us-central1/subnetworks/default' is not ready". Details: "[{'message': "The resource 'projects/xxx/regions/us-central1/subnetworks/default' is not ready", 'domain': 'global', 'reason': 'resourceNotReady'}]"> # pylint: disable=line-too-long
-                pattern = (r'is not ready(.*)\'reason\': \'resourceNotReady\'')
-                result = re.search(pattern, stderr)
-                if result is not None:
-                    # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info('Retrying due to the possibly transient '
-                                'resourceNotReady error.')
-                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
                     return True
 
             if isinstance(to_provision_cloud, clouds.Lambda):
