@@ -11,8 +11,7 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
-from sky.provision.gcp.constants import MAX_POLLS
-from sky.provision.gcp.constants import POLL_INTERVAL
+from sky.provision.gcp import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -46,8 +45,8 @@ _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
 
 def _retry_on_http_exception(
     regex: Optional[str] = None,
-    max_retries: int = MAX_POLLS,
-    retry_interval_s: int = POLL_INTERVAL,
+    max_retries: int = constants.MAX_POLLS,
+    retry_interval_s: int = constants.POLL_INTERVAL,
 ):
     """Retry a function call n-times for as long as it throws an exception."""
 
@@ -1069,6 +1068,7 @@ class GCPTPUVMInstance(GCPInstance):
                 break
             logger.debug(f'set_labels: Waiting for instance {node_id} to be '
                          'ready...')
+            time.sleep(constants.POLL_INTERVAL)
 
         node = (cls.load_resource().projects().locations().nodes().get(
             name=node_id).execute(num_retries=GCP_CREATE_MAX_RETRIES))
@@ -1263,7 +1263,6 @@ class GCPTPUVMInstance(GCPInstance):
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
-        # FIXME: original implementation has the 'max_polls=MAX_POLLS' option.
         if wait_for_operation:
             result = cls.wait_for_operation(operation, project_id, zone)
         else:

@@ -188,6 +188,7 @@ TPU_MINIMAL_PERMISSIONS = [
     'tpu.operations.get',
 ]
 
-# The maximum number of times to poll for the status of an operation.
-MAX_POLLS = 12
-POLL_INTERVAL = 5
+POLL_INTERVAL = 1
+MAX_POLLS = 60 // POLL_INTERVAL
+# Stopping instances can take several minutes, so we increase the timeout
+MAX_POLLS_STOP = MAX_POLLS * 8
