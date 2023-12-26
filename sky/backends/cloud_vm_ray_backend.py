@@ -1,5 +1,4 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
-import ast
 import copy
 import enum
 import getpass
