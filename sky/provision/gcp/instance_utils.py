@@ -642,9 +642,8 @@ class GCPComputeInstance(GCPInstance):
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
                 errors, created_names = cls._create_instances(
-                    names[:reservation_count], project_id, zone,
-                    config, reservation_count,
-                    head_tag_needed[:reservation_count])
+                    names[:reservation_count], project_id, zone, config,
+                    reservation_count, head_tag_needed[:reservation_count])
                 all_names.extend(names)
                 if errors:
                     return errors, all_names
@@ -655,9 +654,9 @@ class GCPComputeInstance(GCPInstance):
                 head_tag_needed = head_tag_needed[reservation_count:]
             config.pop('reservationAffinity', None)
 
-        errors, created_names = cls._create_instances(names,
-                                                      project_id, zone, config,
-                                                      count, head_tag_needed)
+        errors, created_names = cls._create_instances(names, project_id, zone,
+                                                      config, count,
+                                                      head_tag_needed)
 
         all_names.extend(created_names)
         return errors, all_names
