@@ -354,7 +354,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             })
         error = common.ProvisionError('Failed to launch instances.')
         error.errors = errors
-        raise error from e
+        raise error
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
