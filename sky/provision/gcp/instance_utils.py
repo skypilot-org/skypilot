@@ -5,7 +5,7 @@ import functools
 from multiprocessing import pool
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 from sky import sky_logging
@@ -20,12 +20,9 @@ from sky.utils import ux_utils
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 # Tag for the name of the node
-TAG_RAY_NODE_NAME = 'ray-node-name'
 INSTANCE_NAME_MAX_LEN = 64
 INSTANCE_NAME_UUID_LEN = 8
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_RAY_NODE_KIND = 'ray-node-type'
 
 # This is the maximum number of times we will retry a GCP API call.
@@ -35,10 +32,6 @@ GCP_CREATE_MAX_RETRIES = 5
 GCP_TIMEOUT = 300
 
 logger = sky_logging.init_logger(__name__)
-
-# Using v2 according to
-# https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
-TPU_VERSION = 'v2'
 
 _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/global/firewalls/.*\' was not found')
@@ -235,49 +228,31 @@ class GCPInstance:
         raise NotImplementedError
 
     @classmethod
-    def start_instance(cls,
-                       node_id: str,
-                       project_id: str,
-                       zone: str,
-                       wait_for_operation: bool = True) -> Union[bool, dict]:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
         """Start a stopped instance."""
         raise NotImplementedError
 
     @classmethod
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         raise NotImplementedError
 
     @classmethod
     def create_node_tag(cls,
-                        cluster_name: str,
                         project_id: str,
                         availability_zone: str,
                         target_instance_id: str,
-                        is_head: bool = True,
-                        wait_for_operation: bool = True) -> str:
+                        is_head: bool = True) -> str:
         raise NotImplementedError
 
     @classmethod
-    def get_instance_info(
-            cls,
-            project_id: str,
-            availability_zone: str,
-            instance_id: str,
-            wait_for_operation: bool = True) -> common.InstanceInfo:
+    def get_instance_info(cls, project_id: str, availability_zone: str,
+                          instance_id: str) -> common.InstanceInfo:
         raise NotImplementedError
 
     @classmethod
-    def resize_disk(cls,
-                    project_id: str,
-                    availability_zone: str,
-                    node_config: dict,
-                    instance_name: str,
-                    wait_for_operation: bool = True) -> Union[bool, dict]:
+    def resize_disk(cls, project_id: str, availability_zone: str,
+                    node_config: dict, instance_name: str) -> bool:
         """Resize a Google Cloud disk based on the provided configuration.
         Returns the response of resize operation.
         """
@@ -514,7 +489,8 @@ class GCPComputeInstance(GCPInstance):
                     ) from e
             body = {
                 'name': firewall_rule_name,
-                'description': f'Allow user-specified port {ports} for cluster {cluster_name_on_cloud}',
+                'description': (f'Allow user-specified port {ports} for '
+                                f'cluster {cluster_name_on_cloud}'),
                 'network': f'projects/{project_id}/global/networks/{vpc_name}',
                 'selfLink': f'projects/{project_id}/global/firewalls/' +
                             firewall_rule_name,
@@ -534,12 +510,8 @@ class GCPComputeInstance(GCPInstance):
         return operation
 
     @classmethod
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         node = cls.load_resource().instances().get(
             project=project_id,
             instance=node_id,
@@ -556,22 +528,17 @@ class GCPComputeInstance(GCPInstance):
             body=body,
         ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
+        result = cls.wait_for_operation(operation, project_id,
+                                        availability_zone)
 
         return result
 
     @classmethod
     def create_node_tag(cls,
-                        cluster_name: str,
                         project_id: str,
                         availability_zone: str,
                         target_instance_id: str,
-                        is_head: bool = True,
-                        wait_for_operation: bool = True) -> str:
+                        is_head: bool = True) -> str:
         if is_head:
             node_tag = {
                 TAG_SKYPILOT_HEAD_NODE: '1',
@@ -585,47 +552,9 @@ class GCPComputeInstance(GCPInstance):
         cls.set_labels(project_id=project_id,
                        availability_zone=availability_zone,
                        node_id=target_instance_id,
-                       labels=node_tag,
-                       wait_for_operation=wait_for_operation)
+                       labels=node_tag)
 
         return target_instance_id
-
-    @classmethod
-    def _convert_resources_to_urls(
-            cls, project_id: str, availability_zone: str,
-            configuration_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Ensures that resources are in their full URL form.
-
-        GCP expects machineType and accleratorType to be a full URL (e.g.
-        `zones/us-west1/machineTypes/n1-standard-2`) instead of just the
-        type (`n1-standard-2`)
-
-        Args:
-            configuration_dict: Dict of options that will be passed to GCP
-        Returns:
-            Input dictionary, but with possibly expanding `machineType` and
-                `acceleratorType`.
-        """
-        configuration_dict = copy.deepcopy(configuration_dict)
-        existing_machine_type = configuration_dict['machineType']
-        if not re.search('.*/machineTypes/.*', existing_machine_type):
-            configuration_dict[
-                'machineType'] = 'zones/{zone}/machineTypes/{machine_type}'.format(
-                    zone=availability_zone,
-                    machine_type=configuration_dict['machineType'],
-                )
-
-        for accelerator in configuration_dict.get('guestAccelerators', []):
-            gpu_type = accelerator['acceleratorType']
-            if not re.search('.*/acceleratorTypes/.*', gpu_type):
-                accelerator[
-                    'acceleratorType'] = 'projects/{project}/zones/{zone}/acceleratorTypes/{accelerator}'.format(  # noqa: E501
-                        project=project_id,
-                        zone=availability_zone,
-                        accelerator=gpu_type,
-                    )
-
-        return configuration_dict
 
     @classmethod
     def create_instances(
@@ -641,10 +570,7 @@ class GCPComputeInstance(GCPInstance):
         # NOTE: The syntax for bulkInsert() is different from insert().
         # bulkInsert expects resource names without prefix. Otherwise
         # it causes a 503 error.
-
-        # TODO: We could remove '_convert_resources_to_urls'. It is here
-        # just for possible backward compat.
-        config = cls._convert_resources_to_urls(project_id, zone, node_config)
+        config = copy.deepcopy(node_config)
 
         if 'scheduling' in config and isinstance(config['scheduling'], list):
             # For backeward compatibility: converting the list of dictionaries
@@ -715,9 +641,8 @@ class GCPComputeInstance(GCPInstance):
                              f'with reservation {reservation}')
                 config['reservationAffinity']['values'] = [reservation]
                 errors, created_names = cls._create_instances(
-                    cluster_name, names[:reservation_count], project_id, zone,
-                    config, reservation_count,
-                    head_tag_needed[:reservation_count])
+                    names[:reservation_count], project_id, zone, config,
+                    reservation_count, head_tag_needed[:reservation_count])
                 all_names.extend(names)
                 if errors:
                     return errors, all_names
@@ -728,9 +653,9 @@ class GCPComputeInstance(GCPInstance):
                 head_tag_needed = head_tag_needed[reservation_count:]
             config.pop('reservationAffinity', None)
 
-        errors, created_names = cls._create_instances(cluster_name, names,
-                                                      project_id, zone, config,
-                                                      count, head_tag_needed)
+        errors, created_names = cls._create_instances(names, project_id, zone,
+                                                      config, count,
+                                                      head_tag_needed)
 
         all_names.extend(created_names)
         return errors, all_names
@@ -738,7 +663,6 @@ class GCPComputeInstance(GCPInstance):
     @classmethod
     def _create_instances(
         cls,
-        cluster_name: str,
         names: List[str],
         project_id: str,
         zone: str,
@@ -779,7 +703,7 @@ class GCPComputeInstance(GCPInstance):
         except gcp.http_error_exception() as e:
             # NOTE: Error example:
             # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
             #   'domain': 'usageLimits',
             #   'reason': 'quotaExceeded'
             # }
@@ -808,7 +732,7 @@ class GCPComputeInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
             request = cls.load_resource().zoneOperations().wait(
                 project=project_id,
                 operation=operation['name'],
@@ -852,38 +776,25 @@ class GCPComputeInstance(GCPInstance):
                          f'Instance status: {result}')
         # assign labels for head node
         with pool.ThreadPool() as p:
-            p.starmap(
-                cls.create_node_tag,
-                [(cluster_name, project_id, zone, names[i], head_tag_needed[i])
-                 for i in range(count)])
+            p.starmap(cls.create_node_tag,
+                      [(project_id, zone, names[i], head_tag_needed[i])
+                       for i in range(count)])
         return None, names
 
     @classmethod
-    def start_instance(cls,
-                       node_id: str,
-                       project_id: str,
-                       zone: str,
-                       wait_for_operation: bool = True) -> Union[bool, dict]:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
         operation = (cls.load_resource().instances().start(
             project=project_id,
             zone=zone,
             instance=node_id,
         ).execute())
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id, zone)
-        else:
-            result = operation
-
+        result = cls.wait_for_operation(operation, project_id, zone)
         return result
 
     @classmethod
-    def get_instance_info(
-            cls,
-            project_id: str,
-            availability_zone: str,
-            instance_id: str,
-            wait_for_operation: bool = True) -> common.InstanceInfo:
+    def get_instance_info(cls, project_id: str, availability_zone: str,
+                          instance_id: str) -> common.InstanceInfo:
         result = cls.load_resource().instances().get(
             project=project_id,
             zone=availability_zone,
@@ -902,12 +813,8 @@ class GCPComputeInstance(GCPInstance):
         )
 
     @classmethod
-    def resize_disk(cls,
-                    project_id: str,
-                    availability_zone: str,
-                    node_config: dict,
-                    instance_name: str,
-                    wait_for_operation: bool = True) -> Union[bool, dict]:
+    def resize_disk(cls, project_id: str, availability_zone: str,
+                    node_config: dict, instance_name: str) -> bool:
         """Resize a Google Cloud disk based on the provided configuration."""
 
         # Extract the specified disk size from the configuration
@@ -932,16 +839,14 @@ class GCPComputeInstance(GCPInstance):
                 },
             ).execute())
         except gcp.http_error_exception() as e:
-            # Catch HttpError when provided with invalid value for new disk size.
-            # Allowing users to create instances with the same size as the image
+            # Catch HttpError when provided with invalid value for new disk
+            # size. Allowing users to create instances with the same size as the
+            # image.
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return False
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
+        result = cls.wait_for_operation(operation, project_id,
+                                        availability_zone)
 
         return result
 
@@ -961,7 +866,7 @@ class GCPTPUVMInstance(GCPInstance):
     def load_resource(cls):
         return gcp.build(
             'tpu',
-            TPU_VERSION,
+            constants.TPU_VERSION,
             credentials=None,
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
@@ -1108,12 +1013,8 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     @_retry_on_http_exception('unable to queue the operation')
-    def set_labels(cls,
-                   project_id: str,
-                   availability_zone: str,
-                   node_id: str,
-                   labels: dict,
-                   wait_for_operation: bool = True) -> Union[bool, dict]:
+    def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
+                   labels: dict) -> bool:
         node = cls.load_resource().projects().locations().nodes().get(
             name=node_id)
         body = {
@@ -1127,11 +1028,8 @@ class GCPTPUVMInstance(GCPInstance):
             body=body,
         ).execute())
 
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id,
-                                            availability_zone)
-        else:
-            result = operation
+        result = cls.wait_for_operation(operation, project_id,
+                                        availability_zone)
 
         return result
 
@@ -1149,29 +1047,18 @@ class GCPTPUVMInstance(GCPInstance):
         raise NotImplementedError
 
     @classmethod
-    def start_instance(cls,
-                       node_id: str,
-                       project_id: str,
-                       zone: str,
-                       wait_for_operation: bool = True) -> Union[bool, dict]:
+    def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
         # FIXME: original implementation has the 'max_polls=MAX_POLLS' option.
-        if wait_for_operation:
-            result = cls.wait_for_operation(operation, project_id, zone)
-        else:
-            result = operation
+        result = cls.wait_for_operation(operation, project_id, zone)
 
         return result
 
     @classmethod
-    def resize_disk(cls,
-                    project_id: str,
-                    availability_zone: str,
-                    node_config: dict,
-                    instance_name: str,
-                    wait_for_operation: bool = True) -> Union[bool, dict]:
+    def resize_disk(cls, project_id: str, availability_zone: str,
+                    node_config: dict, instance_name: str) -> bool:
         """Resize the disk a machine image with a different size is used.
 
         TODO: Implement the feature to attach persistent disks for TPU VMs.
