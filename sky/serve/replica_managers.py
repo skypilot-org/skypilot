@@ -623,7 +623,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         corresponding replica.
         """
         for replica_id, p in list(self._launch_process_pool.items()):
-            if not p.is_launch():
+            if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None, replica_id
@@ -663,7 +663,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id, sync_down_logs=True)
         for replica_id, p in list(self._down_process_pool.items()):
-            if not p.is_launch():
+            if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')
                 del self._down_process_pool[replica_id]
