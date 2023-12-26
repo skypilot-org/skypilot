@@ -180,6 +180,11 @@ class RequestRateAutoscaler(Autoscaler):
         """Evaluate Autoscaling decisions based on replica information.
         If the number of launched replicas is less than the target,
         Trigger a scale up. Else, trigger a scale down.
+
+        For future compatibility, we return a list of AutoscalerDecision.
+        Scale-up could include both spot and on-demand,
+        each with a resource override dict.
+        Active migration could require returning both SCALE_UP and SCALE_DOWN.
         """
         launched_replica_infos = [
             info for info in replica_infos if info.is_launched
