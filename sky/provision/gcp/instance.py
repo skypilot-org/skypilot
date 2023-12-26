@@ -348,7 +348,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 errors.append({
                     'code': detail.get('reason'),
                     'domain': detail.get('domain'),
-                    'message': detail.get('message'),
+                    'message': detail.get('message', str(e)),
                 })
         elif isinstance(error_details, str):
             errors.append({

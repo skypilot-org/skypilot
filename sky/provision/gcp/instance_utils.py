@@ -712,12 +712,12 @@ class GCPComputeInstance(GCPInstance):
             logger.warning(
                 f'create_instances: googleapiclient.errors.HttpError: {e}')
             errors = []
-            for e in error_details:
+            for detail in error_details:
                 # To be consistent with error messages returned by operation wait.
                 errors.append({
-                    'code': e.get('reason'),
-                    'domain': e.get('domain'),
-                    'message': e.get('message'),
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message', str(e)),
                 })
             return errors, names
         errors = operation.get('error', {}).get('errors')
@@ -1158,7 +1158,7 @@ class GCPTPUVMInstance(GCPInstance):
                         errors.append({
                             'code': detail.get('reason'),
                             'domain': detail.get('domain'),
-                            'message': str(e),
+                            'message': detail.get('message', str(e)),
                         })
                     else:
                         for violation in viloations:
