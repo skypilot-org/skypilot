@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 import requests
-import yaml
 
 import sky
 from sky import backends
@@ -65,12 +64,7 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
-        # TODO(zongheng): use
-        #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
-        # to raise errors on duplicate keys.
-        with open(os.path.expanduser(task_yaml_path), 'r',
-                  encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+        config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         if resources_override is not None:
             resource_config = config.get('resources', {})
             resource_config.update(resources_override)
@@ -354,8 +348,8 @@ class ReplicaInfo:
         return handle
 
     @property
-    def is_alive(self) -> bool:
-        return self.status in serve_state.ReplicaStatus.alive_statuses()
+    def is_launched(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.launched_statuses()
 
     @property
     def url(self) -> Optional[str]:
@@ -480,7 +474,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._task_yaml_path = task_yaml_path
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
-        # poll the Process (by join or is_alive), otherwise, it will never
+        # poll the Process (by join or is_launch), otherwise, it will never
         # finish and become a zombie process. Probably we could use
         # psutil.Process(p.pid).status() == psutil.STATUS_ZOMBIE to check
         # such cases.
@@ -629,7 +623,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         corresponding replica.
         """
         for replica_id, p in list(self._launch_process_pool.items()):
-            if not p.is_alive():
+            if not p.is_launch():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
                 assert info is not None, replica_id
@@ -669,7 +663,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id, sync_down_logs=True)
         for replica_id, p in list(self._down_process_pool.items()):
-            if not p.is_alive():
+            if not p.is_launch():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')
                 del self._down_process_pool[replica_id]

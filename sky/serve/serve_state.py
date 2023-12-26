@@ -99,7 +99,7 @@ class ReplicaStatus(enum.Enum):
         return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
     @classmethod
-    def alive_statuses(cls) -> List['ReplicaStatus']:
+    def launched_statuses(cls) -> List['ReplicaStatus']:
         return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
 
     @classmethod

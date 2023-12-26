@@ -177,11 +177,14 @@ class RequestRateAutoscaler(Autoscaler):
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
-
+        """Evaluate Autoscaling decisions based on replica information.
+        If the number of launched replicas is less than the target,
+        Trigger a scale up. Else, trigger a scale down.
+        """
         launched_replica_infos = [
-            info for info in replica_infos if info.is_alive
+            info for info in replica_infos if info.is_launched
         ]
-        num_alive_replicas = len(launched_replica_infos)
+        num_launched_replicas = len(launched_replica_infos)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -190,7 +193,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods} '
-            f'Number of alive replicas: {num_alive_replicas}')
+            f'Number of alive replicas: {num_launched_replicas}')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -206,17 +209,17 @@ class RequestRateAutoscaler(Autoscaler):
             return [info.replica_id for info in launched_replica_infos_sorted
                    ][:num_limit]
 
-        if num_alive_replicas < self.target_num_replicas:
+        if num_launched_replicas < self.target_num_replicas:
             num_replicas_to_scale_up = (self.target_num_replicas -
-                                        num_alive_replicas)
+                                        num_launched_replicas)
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        elif num_alive_replicas > self.target_num_replicas:
-            num_replicas_to_scale_down = (num_alive_replicas -
+        elif num_launched_replicas > self.target_num_replicas:
+            num_replicas_to_scale_down = (num_launched_replicas -
                                           self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(
