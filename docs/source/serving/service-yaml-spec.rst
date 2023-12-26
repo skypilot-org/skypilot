@@ -47,7 +47,7 @@ Available fields:
         # Following specs describe the autoscaling policy.
         # Target request per second per replica (optional). SkyServe will scale your
         # service so that, ultimately, each replica manages approximately
-        # target_rps_per_replica queries per second. **Autoscaling will only be
+        # target_qps_per_replica queries per second. **Autoscaling will only be
         # enabled if this value is specified.**
         target_qps_per_replica: 5
         # Upscale and downscale delay in seconds (optional). Defaults to 300 seconds

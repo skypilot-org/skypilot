@@ -95,7 +95,7 @@ class RequestRateAutoscaler(Autoscaler):
 
         Variables:
             target_qps_per_replica: Target qps per replica for autoscaling.
-            qps_window_size: Window size for rps calculating.
+            qps_window_size: Window size for qps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
             downscale_counter: counter for downscale number of replicas.

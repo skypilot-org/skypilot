@@ -30,7 +30,7 @@ ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT_SECONDS = 15
 
-# Autoscaler window size in seconds for request per second. We calculate rps by
+# Autoscaler window size in seconds for request per second. We calculate qps by
 # divide the number of requests in last window size by this window size.
 AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale decision interval in seconds.
