@@ -621,7 +621,7 @@ class GangSchedulingStatus(enum.Enum):
     HEAD_FAILED = 2
 
 
-class FailoverCloudErrorHandler:
+class FailoverCloudErrorHandlerV1:
     """Handles errors during provisioning and updates the blocked_resources
 
     Deprecated: Newly added cloud should use the FailoverCloudErrorHandlerV2.
@@ -1104,7 +1104,7 @@ class FailoverCloudErrorHandler:
 
         # TODO(zongheng): refactor into Cloud interface?
         cloud = launchable_resources.cloud
-        handler = getattr(FailoverCloudErrorHandler,
+        handler = getattr(FailoverCloudErrorHandlerV1,
                           f'_{str(cloud).lower()}_handler')
         if handler is None:
             raise NotImplementedError(
@@ -1813,7 +1813,7 @@ class RetryingVmProvisioner(object):
             definitely_no_nodes_launched = False
             if status == GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
-                definitely_no_nodes_launched = FailoverCloudErrorHandler.update_blocklist_on_error(
+                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
                     self._blocked_resources, to_provision, region, zones,
                     stdout, stderr)
             else:
@@ -1821,7 +1821,7 @@ class RetryingVmProvisioner(object):
                 assert status == GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
-                definitely_no_nodes_launched = FailoverCloudErrorHandler.update_blocklist_on_error(
+                definitely_no_nodes_launched = FailoverCloudErrorHandlerV1.update_blocklist_on_error(
                     self._blocked_resources,
                     to_provision,
                     region,
