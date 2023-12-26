@@ -1054,8 +1054,8 @@ class GCPTPUVMInstance(GCPInstance):
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> Union[bool, dict]:
-        node = cls.load_resource().projects().locations().nodes().get(
-            name=node_id)
+        node = (cls.load_resource().projects().locations().nodes().get(
+            name=node_id).execute(num_retries=GCP_CREATE_MAX_RETRIES))
         body = {
             'labels': dict(node['labels'], **labels),
         }
@@ -1065,7 +1065,7 @@ class GCPTPUVMInstance(GCPInstance):
             name=node_id,
             updateMask=update_mask,
             body=body,
-        ).execute())
+        ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
         if wait_for_operation:
             result = cls.wait_for_operation(operation, project_id,
