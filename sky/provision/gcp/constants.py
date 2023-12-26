@@ -1,7 +1,7 @@
 """Constants used by the GCP provisioner."""
 
 VERSION = 'v1'
-TPU_VERSION = 'v2'  # change once v2 is stable
+TPU_VERSION = 'v2'
 
 RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
@@ -189,5 +189,7 @@ TPU_MINIMAL_PERMISSIONS = [
 ]
 
 # The maximum number of times to poll for the status of an operation.
-MAX_POLLS = 12
-POLL_INTERVAL = 5
+POLL_INTERVAL = 1
+MAX_POLLS = 60 // POLL_INTERVAL
+# Stopping instances can take several minutes, so we increase the timeout
+MAX_POLLS_STOP = MAX_POLLS * 8

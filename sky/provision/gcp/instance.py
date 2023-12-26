@@ -10,15 +10,11 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
+from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
-
-MAX_POLLS = 12
-# Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_STOP = MAX_POLLS * 8
-POLL_INTERVAL = 5
 
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Tag uniquely identifying all nodes of a cluster
@@ -129,10 +125,10 @@ def _wait_for_operations(
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            while total_polls < MAX_POLLS:
+            while total_polls < constants.MAX_POLLS:
                 if handler.wait_for_operation(operation, project_id, zone):
                     break
-                time.sleep(POLL_INTERVAL)
+                time.sleep(constants.POLL_INTERVAL)
                 total_polls += 1
 
 
@@ -186,7 +182,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             break
         logger.info(
             f'Waiting for {len(instances)} instances in STOPPING status')
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = resource.filter(
         project_id=project_id,
@@ -458,7 +454,7 @@ def stop_instances(
     # Check if the instance is actually stopped.
     # GCP does not fully stop an instance even after
     # the stop operation is finished.
-    for _ in range(MAX_POLLS_STOP):
+    for _ in range(constants.MAX_POLLS_STOP):
         handler_to_instances = _filter_instances(
             handler_to_instances.keys(),
             project_id,
@@ -469,10 +465,10 @@ def stop_instances(
         )
         if not handler_to_instances:
             break
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
-                           f'{MAX_POLLS_STOP} reached. '
+                           f'{constants.MAX_POLLS_STOP} reached. '
                            f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 

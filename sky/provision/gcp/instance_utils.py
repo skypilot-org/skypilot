@@ -12,8 +12,7 @@ from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import gcp as gcp_cloud
 from sky.provision import common
-from sky.provision.gcp.constants import MAX_POLLS
-from sky.provision.gcp.constants import POLL_INTERVAL
+from sky.provision.gcp import constants
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -47,8 +46,8 @@ _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
 
 def _retry_on_http_exception(
     regex: Optional[str] = None,
-    max_retries: int = MAX_POLLS,
-    retry_interval_s: int = POLL_INTERVAL,
+    max_retries: int = constants.MAX_POLLS,
+    retry_interval_s: int = constants.POLL_INTERVAL,
 ):
     """Retry a function call n-times for as long as it throws an exception."""
 
