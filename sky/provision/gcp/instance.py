@@ -348,11 +348,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         errors = []
         if error_details is None:
             raise
-        for e in error_details:
+        for detail in error_details:
             errors.append({
-                'code': e.get('reason'),
-                'domain': e.get('domain'),
-                'message': e.get('message'),
+                'code': detail.get('reason'),
+                'domain': detail.get('domain'),
+                'message': detail.get('message'),
             })
         error = common.ProvisionError('Failed to launch instances.')
         error.errors = errors
