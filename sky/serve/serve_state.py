@@ -25,6 +25,7 @@ _DB_PATH = str(_DB_PATH)
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     """Creates the service and replica tables if they do not exist."""
 
+    # auto_restart column is deprecated.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
@@ -34,6 +35,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         status TEXT,
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
+        auto_restart INTEGER DEFAULT NULL,
         requested_resources BLOB DEFAULT NULL)""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS replicas (
@@ -259,7 +261,7 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, requested_resources, requested_resources_str) = row[:9]
+     uptime, policy, _, requested_resources, requested_resources_str) = row[:10]
     return {
         'name': name,
         'controller_job_id': controller_job_id,

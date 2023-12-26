@@ -331,28 +331,28 @@ def get_service_schema():
                     'max_replicas': {
                         'type': 'integer',
                     },
-                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
-                    # `qps_lower_threshold` and `auto_restart` are deprecated.
-                    # Temporarily keep these fields for backward compatibility.
-                    # Remove after 2 minor release, i.e., 0.6.0.
-                    'qps_upper_threshold': {
-                        'type': 'number',
-                    },
-                    'qps_lower_threshold': {
-                        'type': 'number',
-                    },
                     'target_qps_per_replica': {
                         'type': 'number',
-                    },
-                    'auto_restart': {
-                        'type': 'boolean',
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
                     },
                     'downscale_delay_seconds': {
                         'type': 'number',
-                    }
+                    },
+                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
+                    # `qps_lower_threshold` and `auto_restart` are deprecated.
+                    # Temporarily keep these fields for backward compatibility.
+                    # Remove after 2 minor release, i.e., 0.6.0.
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
+                    'qps_upper_threshold': {
+                        'type': 'number',
+                    },
+                    'qps_lower_threshold': {
+                        'type': 'number',
+                    },
                 }
             },
             'replicas': {

@@ -448,7 +448,10 @@ class ReplicaManager:
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
-        """Scale up the service by 1 replica with resources_override."""
+        """Scale up the service by 1 replica with resources_override.
+        resources_override is of the same format with resources section
+        in skypilot task yaml
+        """
         raise NotImplementedError
 
     def scale_down(self, replica_id: int) -> None:

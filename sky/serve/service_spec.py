@@ -23,13 +23,13 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        # Deprecated: Always be True
-        auto_restart: Optional[bool] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
-        # Deprecated: the two arguments below is replaced by the
-        # target_qps_per_replica
-        # TODO(ziming): remove this in version 0.6.0
+        # The following arguments are deprecated.
+        # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
+        # Deprecated: Always be True
+        auto_restart: Optional[bool] = None,
+        # Deprecated: replaced by the target_qps_per_replica.
         qps_upper_threshold: Optional[float] = None,
         qps_lower_threshold: Optional[float] = None,
     ) -> None:
@@ -49,8 +49,9 @@ class SkyServiceSpec:
         if qps_upper_threshold is not None or qps_lower_threshold is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'qps_upper_threshold and qps_lower_threshold are '
-                    'deprecated. Please use target_qps_per_replica instead.')
+                    'Field `qps_upper_threshold` and `qps_lower_threshold`'
+                    'under `replica_policy` are deprecated. '
+                    'Please use target_qps_per_replica instead.')
 
         if auto_restart is not None:
             with ux_utils.print_exception_no_traceback():
@@ -119,6 +120,8 @@ class SkyServiceSpec:
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
             service_config['target_qps_per_replica'] = None
+            service_config['upscale_delay_seconds'] = None
+            service_config['downscale_delay_seconds'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(

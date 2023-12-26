@@ -30,12 +30,12 @@ ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT_SECONDS = 15
 
-# Autoscaler window size in seconds for request per second. We calculate qps by
-# divide the number of requests in last window size by this window size.
+# Autoscaler window size in seconds for query per second. We calculate qps by
+# divide the number of queries in last window size by this window size.
 AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale decision interval in seconds.
 # We will try to scale up/down every `decision_interval`.
-AUTOSCALER_DEFAULT_DECISION_INTERVAL = 20
+AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20
 # Autoscaler default upscale delays in seconds.
 # We will upscale only if the target number of instances
 # is larger than the current launched instances for delay amount of time.

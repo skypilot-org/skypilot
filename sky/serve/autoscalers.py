@@ -39,13 +39,13 @@ class AutoscalerDecision:
     target: Union[Optional[Dict[str, Any]], int]
 
     # TODO(MaoZiming): Add a doc to elaborate on autoscaling policies.
-    def __init__(self,
-                 operator: AutoscalerDecisionOperator,
-                 target: Union[Optional[Dict[str, Any]], int] = None):
+    def __init__(self, operator: AutoscalerDecisionOperator,
+                 target: Union[Optional[Dict[str, Any]], int]):
 
-        # Scale down requires replica ids to remove.
-        assert not (operator == AutoscalerDecisionOperator.SCALE_DOWN and
-                    target is None)
+        assert (operator == AutoscalerDecisionOperator.SCALE_UP and
+                (target is None or isinstance(target, dict))) or (
+                    operator == AutoscalerDecisionOperator.SCALE_DOWN and
+                    isinstance(target, int))
         self.operator = operator
         self.target = target
 
@@ -111,12 +111,12 @@ class RequestRateAutoscaler(Autoscaler):
         self.downscale_counter: int = 0
         self.scale_up_consecutive_periods: int = int(
             spec.upscale_delay_seconds /
-            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
         self.scale_down_consecutive_periods: int = int(
             spec.downscale_delay_seconds /
-            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL)
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
         # Target number of replicas is initialized to min replicas.
-        # TODO(MaoZiming): add init replica numbers.
+        # TODO(MaoZiming): add init replica numbers in SkyServe spec.
         self.target_num_replicas: int = spec.min_replicas
         self.bootstrap_done: bool = False
 
@@ -182,9 +182,9 @@ class RequestRateAutoscaler(Autoscaler):
         Trigger a scale up. Else, trigger a scale down.
 
         For future compatibility, we return a list of AutoscalerDecision.
-        Scale-up could include both spot and on-demand,
-        each with a resource override dict.
-        Active migration could require returning both SCALE_UP and SCALE_DOWN.
+        Scale-up could include both spot and on-demand, each with a resource
+        override dict. Active migration could require returning both SCALE_UP
+        and SCALE_DOWN.
         """
         launched_replica_infos = [
             info for info in replica_infos if info.is_launched
@@ -203,7 +203,7 @@ class RequestRateAutoscaler(Autoscaler):
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
 
-        def _get_replica_ids_to_scale_down(num_limit: int,) -> List[int]:
+        def _get_replica_ids_to_scale_down(num_limit: int) -> List[int]:
 
             status_order = serve_state.ReplicaStatus.scale_down_decision_order()
             launched_replica_infos_sorted = sorted(
@@ -228,7 +228,7 @@ class RequestRateAutoscaler(Autoscaler):
                                           self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(
-                    num_limit=num_replicas_to_scale_down,))
+                    num_limit=num_replicas_to_scale_down))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
