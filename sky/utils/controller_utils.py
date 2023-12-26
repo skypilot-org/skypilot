@@ -152,8 +152,8 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    # TODO(tian): Make dependency installation command a method of cloud class
-    # and get all installation command for enabled clouds.
+    # TODO(tian): Make dependency installation command a method of cloud
+    # class and get all installation command for enabled clouds.
     if any(
             cloud.is_same_cloud(clouds.Azure())
             for cloud in global_user_state.get_enabled_clouds()):
