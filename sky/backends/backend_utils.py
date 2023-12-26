@@ -1,7 +1,6 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
-import json
 import os
 import pathlib
 import pprint
@@ -42,7 +41,6 @@ from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
 from sky.provision import instance_setup
 from sky.skylet import constants
-from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import cluster_yaml_utils
 from sky.utils import command_runner
@@ -1551,10 +1549,6 @@ def get_node_ips(cluster_yaml: str,
         exceptions.FetchIPError: if we failed to get the IPs. e.reason is
             HEAD or WORKER.
     """
-    # When ray up launches TPU VM Pod, Pod workers (except for the head)
-    # won't be connected to Ray cluster. Thus "ray get-worker-ips"
-    # won't work and we need to query the node IPs with gcloud as
-    # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     # Use the new provisioner for AWS.
     provider_name = cluster_yaml_utils.get_provider_name(ray_config)
@@ -1569,20 +1563,6 @@ def get_node_ips(cluster_yaml: str,
             # Simulate the exception when Ray head node is not up.
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return metadata.get_feasible_ips(get_internal_ips)
-
-    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
-    if use_tpu_vm:
-        assert expected_num_nodes == 1, (
-            'TPU VM only supports single node for now.')
-        assert handle is not None, 'handle is required for TPU VM.'
-        try:
-            ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
-        except exceptions.CommandError as e:
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.HEAD) from e
-        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
-        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1655,74 +1635,6 @@ def get_node_ips(cluster_yaml: str,
     else:
         worker_ips = []
     return head_ip_list + worker_ips
-
-
-@timeline.event
-def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
-                        get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all TPU VM Pod workers using gcloud."""
-
-    cluster_name = ray_config['cluster_name']
-    zone = ray_config['provider']['availability_zone']
-    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name={cluster_name})" '
-                 f'--zone={zone} --format="value(name)"')
-    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                      '/dev/null',
-                                                      shell=True,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-    subprocess_utils.handle_returncode(
-        returncode,
-        query_cmd,
-        'Failed to run gcloud to get TPU VM IDs.',
-        stderr=stdout + stderr)
-    if len(stdout) == 0:
-        logger.debug('No TPU VMs found with cluster name '
-                     f'{cluster_name} in zone {zone}.')
-    if len(stdout.splitlines()) > 1:
-        # Rare case, this could mean resource leakage. Hint user.
-        logger.warning('Found more than one TPU VM/Pod with the same cluster '
-                       f'name {cluster_name} in zone {zone}.')
-
-    all_ips = []
-    for tpu_id in stdout.splitlines():
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
-                     f' --zone {zone} --format=json')
-        returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                          os.devnull,
-                                                          shell=True,
-                                                          stream_logs=False,
-                                                          require_outputs=True)
-        subprocess_utils.handle_returncode(
-            returncode,
-            tpuvm_cmd,
-            'Failed to run gcloud tpu-vm describe.',
-            stderr=stdout + stderr)
-
-        tpuvm_json = json.loads(stdout)
-        if tpuvm_json['state'] != 'READY':
-            # May be a leaked preempted resource, or terminated by user in the
-            # console, or still in the process of being created.
-            ux_utils.console_newline()
-            logger.debug(f'TPU VM {tpu_id} is in {tpuvm_json["state"]} '
-                         'state. Skipping IP query... '
-                         'Hint: make sure it is not leaked.')
-            continue
-
-        ips = []
-        for endpoint in tpuvm_json['networkEndpoints']:
-            # Note: if TPU VM is being preempted, its IP field may not exist.
-            # We use get() to avoid KeyError.
-            if get_internal_ips:
-                ip = endpoint.get('ipAddress', None)
-            else:
-                ip = endpoint['accessConfig'].get('externalIp', None)
-            if ip is not None:
-                ips.append(ip)
-        all_ips.extend(ips)
-
-    return all_ips
 
 
 def check_network_connection():
@@ -2013,9 +1925,8 @@ def _update_cluster_status_no_lock(
             # in the worst case we time out in the `ray status` SSH command
             # below.
             external_ips = handle.cached_external_ips
-            # This happens to a stopped TPU VM as we use gcloud to query the IP.
-            # Or user interrupt the `sky launch` process before the first time
-            # resources handle is written back to local database.
+            # This happens when user interrupt the `sky launch` process before
+            # the first time resources handle is written back to local database.
             # This is helpful when user interrupt after the provision is done
             # and before the skylet is restarted. After #2304 is merged, this
             # helps keep the cluster status to INIT after `sky status -r`, so

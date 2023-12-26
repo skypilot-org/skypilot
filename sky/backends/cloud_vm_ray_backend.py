@@ -966,7 +966,6 @@ class FailoverCloudErrorHandlerV2:
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources, region, zones, err):
-        # TODO: Handle TPU VMs when we have TPU VM integrated.
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
@@ -1703,49 +1702,6 @@ class RetryingVmProvisioner(object):
         # UP or STOPPED, since the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=is_prev_cluster_healthy)
-
-    def _tpu_vm_pod_setup(self, cluster_yaml: str,
-                          cluster_handle: 'backends.CloudVmRayResourceHandle'):
-        """Completes setup and start Ray cluster on TPU VM Pod nodes.
-
-        This is a workaround for Ray Autoscaler where `ray up` does not
-        run setup or launch ray cluster on TPU VM Pod nodes.
-        """
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            cluster_yaml, cluster_handle.docker_user)
-        # Always fetch the latest IPs, since GCP may change them without notice
-        cluster_handle.update_cluster_ips()
-        all_ips = cluster_handle.external_ips()
-        num_tpu_devices = tpu_utils.get_num_tpu_devices(
-            cluster_handle.launched_resources)
-        if all_ips is None or len(all_ips) != num_tpu_devices:
-            raise RuntimeError(
-                f'Nodes IPs: {all_ips} does not'
-                f'match number of TPU devices: {num_tpu_devices}.')
-
-        # Get the private IP of head node for connecting Ray cluster.
-        head_runner = command_runner.SSHCommandRunner(
-            all_ips[0], port=cluster_handle.head_ssh_port, **ssh_credentials)
-        cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
-        rc, stdout, stderr = head_runner.run(cmd_str,
-                                             require_outputs=True,
-                                             stream_logs=False)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd_str,
-            'Failed to get private IP from head node.',
-            stderr=stdout + stderr)
-        head_ip_private = stdout.strip()
-
-        ray_config = common_utils.read_yaml(cluster_yaml)
-        worker_start_ray_commands = [f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
-        worker_start_ray_commands += ray_config['worker_start_ray_commands']
-
-        # Setup TPU VM Pod workers and launch Ray cluster.
-        onprem_utils.do_filemounts_and_setup_on_local_workers(
-            cluster_yaml,
-            worker_ips=all_ips[1:],
-            extra_setup_cmds=worker_start_ray_commands)
 
     # TODO(suquark): Deprecate this method
     # once the `provision_utils` is adopted for all the clouds.
@@ -4827,7 +4783,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
-        # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
+        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
         num_actual_nodes = len(handle.internal_ips())
 
         codegen = RayCodeGen()

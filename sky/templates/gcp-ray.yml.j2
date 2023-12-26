@@ -195,8 +195,5 @@ setup_commands:
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
 
-# SkyPilot: The following are required by Ray autoscaler to start TPU VM.
-# Remove them when we get rid of Ray autoscaler for TPU VM.
-
 # Command to start ray clusters are now placed in `sky.provision.instance_setup`.
 # We do not need to list it here anymore.
