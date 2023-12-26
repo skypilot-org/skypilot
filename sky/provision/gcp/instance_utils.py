@@ -1054,6 +1054,22 @@ class GCPTPUVMInstance(GCPInstance):
                    node_id: str,
                    labels: dict,
                    wait_for_operation: bool = True) -> Union[bool, dict]:
+        while True:
+            # wait until the instance become ready before setting labels
+            # as Cloud TPU API does not allow setting labels on pending
+            # instances
+            instances = cls.filter(
+                project_id=project_id,
+                zone=availability_zone,
+                label_filters=None,
+                status_filters=cls.PENDING_STATES,
+                included_instances=[node_id],
+            )
+            if not instances:
+                break
+            logger.debug(f'set_labels: Waiting for instance {node_id} to be '
+                         'ready...')
+
         node = (cls.load_resource().projects().locations().nodes().get(
             name=node_id).execute(num_retries=GCP_CREATE_MAX_RETRIES))
         body = {

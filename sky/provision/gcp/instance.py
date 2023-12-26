@@ -185,7 +185,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         if not instances:
             break
         logger.info(
-            f'Waiting for {len(instances)} instances in STOPPING status')
+            f'run_instances: Waiting for {len(instances)} instances in '
+            'STOPPING status')
         time.sleep(POLL_INTERVAL)
 
     exist_instances = resource.filter(
@@ -310,6 +311,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         )
         if not instances:
             break
+        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
+        'in PENDING status.')
 
     # Check if the number of running instances is the same as the requested.
     instances = resource.filter(
@@ -344,17 +347,24 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     except gcp.http_error_exception() as e:
         error_details = getattr(e, 'error_details')
         errors = []
-        if error_details is None:
-            raise
-        for e in error_details:
+        if isinstance(error_details, list):
+            for e in error_details:
+                errors.append({
+                    'code': e.get('reason'),
+                    'domain': e.get('domain'),
+                    'message': e.get('message'),
+                })
+        elif isinstance(error_details, str):
             errors.append({
-                'code': e.get('reason'),
-                'domain': e.get('domain'),
-                'message': e.get('message'),
+                'code': None,
+                'domain': 'run_instances',
+                'message': error_details,
             })
+        else:
+            raise
         error = common.ProvisionError('Failed to launch instances.')
         error.errors = errors
-        raise error
+        raise error from e
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
