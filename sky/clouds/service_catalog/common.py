@@ -144,10 +144,10 @@ def read_catalog(filename: str,
 
 
 def _get_instance_type(
-    df: pd.DataFrame,
-    instance_type: str,
-    region: Optional[str],
-    zone: Optional[str] = None,
+        df: pd.DataFrame,
+        instance_type: str,
+        region: Optional[str],
+        zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
@@ -234,11 +234,11 @@ def validate_region_zone_impl(
 
 
 def get_hourly_cost_impl(
-    df: pd.DataFrame,
-    instance_type: str,
-    use_spot: bool,
-    region: Optional[str],
-    zone: Optional[str],
+        df: pd.DataFrame,
+        instance_type: str,
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
 ) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
 
@@ -279,8 +279,8 @@ def _get_value(value):
 
 
 def get_vcpus_mem_from_instance_type_impl(
-    df: pd.DataFrame,
-    instance_type: str,
+        df: pd.DataFrame,
+        instance_type: str,
 ) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
@@ -384,8 +384,8 @@ def get_instance_type_for_cpus_mem_impl(
 
 
 def get_accelerators_from_instance_type_impl(
-    df: pd.DataFrame,
-    instance_type: str,
+        df: pd.DataFrame,
+        instance_type: str,
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
@@ -399,14 +399,14 @@ def get_accelerators_from_instance_type_impl(
 
 
 def get_instance_type_for_accelerator_impl(
-    df: pd.DataFrame,
-    acc_name: str,
-    acc_count: int,
-    cpus: Optional[str] = None,
-    memory: Optional[str] = None,
-    use_spot: bool = False,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
+        df: pd.DataFrame,
+        acc_name: str,
+        acc_count: int,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        use_spot: bool = False,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
@@ -531,7 +531,7 @@ def list_accelerators_impl(
             axis='columns',
         ).tolist()
         ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if info.cpu_count is not None else 0))
+        if info.cpu_count is not None else 0))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
@@ -573,11 +573,11 @@ def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
 
 
 def accelerator_in_region_or_zone_impl(
-    df: pd.DataFrame,
-    accelerator_name: str,
-    acc_count: int,
-    region: Optional[str] = None,
-    zone: Optional[str] = None,
+        df: pd.DataFrame,
+        accelerator_name: str,
+        acc_count: int,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
 ) -> bool:
     """Returns True if the accelerator is in the region or zone."""
     assert region is not None or zone is not None, (

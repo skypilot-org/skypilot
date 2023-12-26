@@ -1,6 +1,0 @@
-AvailabilityZone,InstanceType,vCPUs,MemoryGiB,AcceleratorName,AcceleratorCount,GPUInfo,Region,Price,SpotPrice
-fr-par-1,RENDER-S,10,45097156608,P100,1,"{'Gpus': [{'Name': 'Tesla P100-PCIE-16GB', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}",fr-par,1.2426,
-fr-par-2,GPU-3070-S,8,17179869184,RTX 3070,1,"{'Gpus': [{'Name': 'NVIDIA GeForce RTX 3070', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",fr-par,0.98,
-fr-par-2,H100-1-80G,24,257698037760,H100,1,"{'Gpus': [{'Name': 'NVIDIA H100 PCIe', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 81559}}], 'TotalGpuMemoryInMiB': 81559}",fr-par,2.52,
-fr-par-2,H100-2-80G,48,515396075520,H100,2,"{'Gpus': [{'Name': 'NVIDIA H100 PCIe', 'Manufacturer': 'NVIDIA', 'Count': 2, 'MemoryInfo': {'SizeInMiB': 81559}}], 'TotalGpuMemoryInMiB': 163118}",fr-par,5.04,
-fr-par-2,RENDER-S,10,45097156608,P100,1,"{'Gpus': [{'Name': 'Tesla P100-PCIE-16GB', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}",fr-par,1.2426,

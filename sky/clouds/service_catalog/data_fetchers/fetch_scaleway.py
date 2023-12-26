@@ -83,7 +83,7 @@ def fetch_pricing():
                 'MemoryGiB': server_type.ram // (1024 ** 3),
                 'AcceleratorName': name_to_accelerator_name.get(key, 'Unknown'),
                 'AcceleratorCount': server_type.gpu,
-                'GPUInfo': name_to_gpu_info.get(key, 'Unknown'),
+                'GpuInfo': name_to_gpu_info.get(key, 'Unknown'),
                 'Region': zone_to_region[zone],
                 'Price': server_type.hourly_price,
                 'SpotPrice': None

@@ -15,7 +15,6 @@ scaleway_client = None
 
 
 def import_package(func):
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global scaleway
@@ -36,6 +35,12 @@ def import_package(func):
 def get_instance():
     from scaleway.instance.v1 import InstanceV1API
     return InstanceV1API
+
+
+@import_package
+def get_marketplace():
+    from scaleway.marketplace.v2 import MarketplaceV2API
+    return MarketplaceV2API
 
 
 @import_package

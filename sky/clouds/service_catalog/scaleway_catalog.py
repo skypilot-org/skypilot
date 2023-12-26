@@ -9,7 +9,7 @@ from sky.clouds.service_catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('scaleway/prices.csv')
+_df = common.read_catalog('scaleway/vms.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
