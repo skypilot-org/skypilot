@@ -198,7 +198,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods} '
-            f'Number of alive replicas: {num_launched_replicas}')
+            f'Number of launched replicas: {num_launched_replicas}')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
