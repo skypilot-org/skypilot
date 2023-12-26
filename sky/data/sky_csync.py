@@ -141,8 +141,7 @@ class Passthrough(Operations):
     def _full_path(self, partial, write: bool = False, read: bool = False):
         if partial.startswith("/"):
             partial = partial[1:]
-        
-        
+
         # Unless specified with write boolean, we default to the
         # read directory where the bucket is mounted.
         if write:
@@ -169,13 +168,20 @@ class Passthrough(Operations):
 
     def is_in_read_dir(self, filename):
         # Construct the full file path
+        if filename.startswith("/"):
+            filename = filename[1:]
         file_path = os.path.join(self.root_read, filename)
         return os.path.isfile(file_path) or os.path.isdir(file_path)
 
 
     def is_in_write_dir(self, filename):
         # Construct the full file path
+        if filename.startswith("/"):
+            filename = filename[1:]
         file_path = os.path.join(self.root_write, filename)
+        #print('is_in_write_dir(filename): ', filename)
+        #print('is_in_write_dir(self.root_write): ', self.root_write)
+        #print('is_in_write_dir(file_path): ', file_path)
         return os.path.isfile(file_path) or os.path.isdir(file_path)
 
 
@@ -202,7 +208,6 @@ class Passthrough(Operations):
     def getattr(self, path, fh=None):
         # a path is passed to this function
         full_path = self._full_path(path)
-        logger.warning('getattr(full_path): ', full_path)
         st = os.lstat(full_path)
         ret_dict = dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
                      'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid', 'st_blocks'))
@@ -212,18 +217,19 @@ class Passthrough(Operations):
     def readdir(self, path, fh):
         full_read_path = self._full_path(path, read=True)
         full_write_path = self._full_path(path, write=True)
-        #print('readdir(path): ', path)
-        #print('readdir(full_read_path): ', full_read_path)
-        dirents = ['.','..']
+        read_path_dir_set = set()
+        write_path_dir_set = set()
 
         if os.path.isdir(full_read_path):
-            dirents.extend(os.listdir(full_read_path))
+            read_path_dir_set = set(os.listdir(full_read_path))
 
         if os.path.isdir(full_write_path):
-            dirents.extend(os.listdir(full_write_path))
-
+            write_path_dir_set = set(os.listdir(full_write_path))
+        
+        dirents = read_path_dir_set.union(write_path_dir_set)
+        dirents.add('.')
+        dirents.add('..')
         for r in dirents:
-            #print('readdir(r): ', r)
             yield r
 
     def readlink(self, path):
@@ -238,10 +244,15 @@ class Passthrough(Operations):
         return os.mknod(self._full_path(path), mode, dev)
 
     def rmdir(self, path):
-        return os.rmdir(self._full_path(path))
+        if self.is_in_read_dir(path):
+            os.rmdir(self._full_path(path, read=True))
+        if self.is_in_write_dir(path):
+            os.rmdir(self._full_path(path, write=True))
 
     def mkdir(self, path, mode):
-        return os.mkdir(self._full_path(path, write=True), mode)
+        path = self._full_path(path, write=True)
+        print('mkdir(path): ', path)
+        return os.mkdir(path, mode)
 
     def statfs(self, path):
         full_path = self._full_path(path)
@@ -251,8 +262,10 @@ class Passthrough(Operations):
             'f_frsize', 'f_namemax'))
 
     def unlink(self, path):
-        logger.warning("unlink(self._full_path(path)): ", self._full_path(path))
-        return os.unlink(self._full_path(path))
+        if self.is_in_read_dir(path):
+            os.unlink(self._full_path(path, read=True))
+        if self.is_in_write_dir(path):
+            os.unlink(self._full_path(path, write=True))
 
     def symlink(self, name, target):
         return os.symlink(name, self._full_path(target))
@@ -274,7 +287,7 @@ class Passthrough(Operations):
 
     def create(self, path, mode, fi=None):
         full_path = self._full_path(path, write=True)
-        print('create(full_path): ', full_path)
+        #print('create(full_path): ', full_path)
         return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
@@ -482,19 +495,19 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     # part of it a static method so it can be called from here by specifying
     # the bucket name and or whatever. Need to try to think of a way to reuse the code.
     mount_path = read_path
-    bucket_name = 'fuse-csync-test'
+    bucket_name = 'csync-tmp-mount'
     #install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
     #                f'/releases/download/v1.0.1/'
     #                f'gcsfuse_1.0.1_amd64.deb '
     #                '-O /tmp/gcsfuse.deb && '
     #                'sudo dpkg --install /tmp/gcsfuse.deb')
-    mount_cmd = ('gcsfuse -o allow_other '
-                    '--implicit-dirs '
-                    f'--stat-cache-capacity 4096 '
-                    f'--stat-cache-ttl 5s '
+    mount_cmd = ('gcsfuse '#-o allow_other '
+                    #'--implicit-dirs '
+                    #f'--stat-cache-capacity 4096 '
+                    #f'--stat-cache-ttl 5s '
                     f'--type-cache-ttl 5s '
                     f'--rename-dir-limit 10000 '
-                    f'{bucket_name} {mount_path}')
+                    f'{destination} {mount_path}')
     output = subprocess.run(mount_cmd,
                             shell=True,
                             stdout=subprocess.PIPE,
