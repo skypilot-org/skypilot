@@ -1535,7 +1535,6 @@ class RetryingVmProvisioner(object):
 
             if (to_provision.cloud.PROVISIONER_VERSION ==
                     clouds.ProvisionerVersion.SKYPILOT):
-                # Use the new provisioner for AWS.
                 # TODO (suquark): Gradually move the other clouds to
                 #  the new provisioner once they are ready.
                 assert to_provision.region == region.name, (to_provision,
@@ -3831,7 +3830,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         stdout = ''
         stderr = ''
 
-        # Use the new provisioner for AWS.
         if (cloud.PROVISIONER_VERSION >=
                 clouds.ProvisionerVersion.RAY_PROVISIONER_SKYPILOT_TERMINATOR):
             logger.debug(f'Provisioner version: {cloud.PROVISIONER_VERSION} '
@@ -4101,7 +4099,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # so that our backend do not need to know the specific details
             # for different clouds.
             if (cloud.PROVISIONER_VERSION >= clouds.ProvisionerVersion.
-                    RAY_PROVISIONER_SKYPILOT_TERMINATOR):
+                    RAY_PROVISIONER_SKYPILOT_TERMINATOR or
+                    isinstance(cloud, clouds.Azure)):
                 provision_lib.cleanup_ports(repr(cloud), cluster_name_on_cloud,
                                             config['provider'])
 

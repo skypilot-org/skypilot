@@ -1,7 +1,9 @@
 """Constants used by the GCP provisioner."""
 
 VERSION = 'v1'
-TPU_VERSION = 'v2'  # change once v2 is stable
+# Using v2 according to
+# https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
+TPU_VERSION = 'v2'
 
 RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION
@@ -188,6 +190,7 @@ TPU_MINIMAL_PERMISSIONS = [
     'tpu.operations.get',
 ]
 
+# The maximum number of times to poll for the status of an operation.
 POLL_INTERVAL = 1
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout

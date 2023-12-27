@@ -450,7 +450,7 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
-                # Pass the ray_port to worker nodes for backward compatibilirt
+                # Pass the ray_port to worker nodes for backward compatibility
                 # as in some existing clusters the ray_port is not dumped with
                 # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
                 # from the head node for worker nodes.
