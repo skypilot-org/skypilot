@@ -350,7 +350,7 @@ class GCPComputeInstance(GCPInstance):
             project=project_id,
             filter=filter_expr,
             zone=zone,
-        ).execute())
+        ).execute(num_retries=GCP_MAX_RETRIES))
         instances = response.get('items', [])
         instances = {i['name']: i for i in instances}
         if included_instances:
@@ -901,13 +901,14 @@ class GCPTPUVMInstance(GCPInstance):
         path = f'projects/{project_id}/locations/{zone}'
         try:
             response = (cls.load_resource().projects().locations().nodes().list(
-                parent=path).execute())
+                parent=path).execute(num_retries=GCP_MAX_RETRIES))
         except gcp.http_error_exception() as e:
             # SKY: Catch HttpError when accessing unauthorized region.
-            # Return empty list instead of raising exception to not break
-            # ray down.
-            logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
-            return {}
+            # Return empty dict instead of raising exception to not break.
+            logger.warning(f'googleapiclient.errors.HttpError: {e}')
+            if 'is not found or access is unauthorized.' in str(e):
+                return {}
+            raise
 
         instances = response.get('nodes', [])
 
