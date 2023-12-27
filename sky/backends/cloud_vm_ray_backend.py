@@ -3425,7 +3425,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
-        num_actual_nodes = len(handle.internal_ips())
+        num_actual_nodes = task.num_nodes * handle.num_node_ips
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
@@ -4763,7 +4763,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
-        num_actual_nodes = len(handle.internal_ips())
+        num_actual_nodes = task.num_nodes * handle.num_node_ips
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
