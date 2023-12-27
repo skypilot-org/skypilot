@@ -1135,7 +1135,7 @@ class FailoverCloudErrorHandlerV1:
 
 
 class FailoverCloudErrorHandlerV2:
-    """Handles errors during provisioning and updates the blocked_resources"""
+    """Handles errors during provisioning and updates the blocked_resources."""
 
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
