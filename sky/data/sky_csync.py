@@ -8,7 +8,9 @@ import time
 from typing import Any, List, Optional
 
 import click
-from fuse import FUSE, FuseOSError, Operations
+from fuse import FUSE
+from fuse import FuseOSError
+from fuse import Operations
 import psutil
 
 from sky import sky_logging
@@ -130,7 +132,9 @@ def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
         return row[0]
     return None
 
+
 class Passthrough(Operations):
+
     def __init__(self, root_read, root_write):
         self.root_read = root_read
         self.root_write = root_write
@@ -153,7 +157,7 @@ class Passthrough(Operations):
         else:
             full_path = self._full_read_path(partial)
         return full_path
-        
+
     def _full_read_path(self, partial):
         if partial.startswith("/"):
             partial = partial[1:]
@@ -173,7 +177,6 @@ class Passthrough(Operations):
         file_path = os.path.join(self.root_read, filename)
         return os.path.isfile(file_path) or os.path.isdir(file_path)
 
-
     def is_in_write_dir(self, filename):
         # Construct the full file path
         if filename.startswith("/"):
@@ -183,7 +186,6 @@ class Passthrough(Operations):
         #print('is_in_write_dir(self.root_write): ', self.root_write)
         #print('is_in_write_dir(file_path): ', file_path)
         return os.path.isfile(file_path) or os.path.isdir(file_path)
-
 
     # Filesystem methods
     # ==================
@@ -204,13 +206,14 @@ class Passthrough(Operations):
         full_path = self._full_path(path)
         return os.chown(full_path, uid, gid)
 
-
     def getattr(self, path, fh=None):
         # a path is passed to this function
         full_path = self._full_path(path)
         st = os.lstat(full_path)
-        ret_dict = dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
-                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid', 'st_blocks'))
+        ret_dict = dict(
+            (key, getattr(st, key))
+            for key in ('st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime',
+                        'st_nlink', 'st_size', 'st_uid', 'st_blocks'))
 
         return ret_dict
 
@@ -225,7 +228,7 @@ class Passthrough(Operations):
 
         if os.path.isdir(full_write_path):
             write_path_dir_set = set(os.listdir(full_write_path))
-        
+
         dirents = read_path_dir_set.union(write_path_dir_set)
         dirents.add('.')
         dirents.add('..')
@@ -257,9 +260,10 @@ class Passthrough(Operations):
     def statfs(self, path):
         full_path = self._full_path(path)
         stv = os.statvfs(full_path)
-        return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
-            'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
-            'f_frsize', 'f_namemax'))
+        return dict((key, getattr(stv, key))
+                    for key in ('f_bavail', 'f_bfree', 'f_blocks', 'f_bsize',
+                                'f_favail', 'f_ffree', 'f_files', 'f_flag',
+                                'f_frsize', 'f_namemax'))
 
     def unlink(self, path):
         if self.is_in_read_dir(path):
@@ -317,7 +321,6 @@ class Passthrough(Operations):
         return self.flush(path, fh)
 
 
-
 @click.group()
 def main():
     pass
@@ -367,7 +370,7 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
         excluded_list = [r'\..*\.swp$']
         excludes = '|'.join(excluded_list)
         base_sync_cmd.append(excludes)
-        
+
         base_sync_cmd.extend([source, f'gs://{destination}'])
         full_cmd = ' '.join(base_sync_cmd)
     else:
@@ -382,14 +385,14 @@ def _clean_write_path(read_path, write_path):
     return
 
 
-def run_sync(source: str, read_path: str, storetype: str, destination: str, num_threads: int,
-             interval_seconds: int, delete: bool, no_follow_symlinks: bool,
-             csync_pid: int):
+def run_sync(source: str, read_path: str, storetype: str, destination: str,
+             num_threads: int, interval_seconds: int, delete: bool,
+             no_follow_symlinks: bool, csync_pid: int):
     """Runs the sync command from source to storetype bucket"""
     # Check if any files in the write path also exists in read path. If exists,
     # then remove those from write path.
     _clean_write_path(read_path, source)
-    
+
     # TODO(Doyoung): add enum type class to handle storetypes
     storetype = storetype.lower()
     sync_cmd = get_upload_cmd(storetype, source, destination, num_threads,
@@ -428,9 +431,13 @@ def run_sync(source: str, read_path: str, storetype: str, destination: str, num_
 
 def run_fuse_operation(read_path, write_path, full_src):
     try:
-        FUSE(Passthrough(read_path, write_path), full_src, nothreads=True, foreground=False)
+        FUSE(Passthrough(read_path, write_path),
+             full_src,
+             nothreads=True,
+             foreground=False)
     except Exception as e:
         print(f"Error in FUSE operation: {e}")
+
 
 @main.command()
 @click.argument('source', required=True, type=str)
@@ -490,24 +497,24 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     os.mkdir(write_path)
     os.mkdir(read_path)
     # mount destination bucket to /.tmp_mount
-    # TODO(doyoung): Currently, manually getting the mount_command, but 
+    # TODO(doyoung): Currently, manually getting the mount_command, but
     # later, we need to refactor the mount_command perhaps making some
     # part of it a static method so it can be called from here by specifying
     # the bucket name and or whatever. Need to try to think of a way to reuse the code.
     mount_path = read_path
-    bucket_name = 'csync-tmp-mount'
     #install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
     #                f'/releases/download/v1.0.1/'
     #                f'gcsfuse_1.0.1_amd64.deb '
     #                '-O /tmp/gcsfuse.deb && '
     #                'sudo dpkg --install /tmp/gcsfuse.deb')
-    mount_cmd = ('gcsfuse '#-o allow_other '
-                    #'--implicit-dirs '
-                    #f'--stat-cache-capacity 4096 '
-                    #f'--stat-cache-ttl 5s '
-                    f'--type-cache-ttl 5s '
-                    f'--rename-dir-limit 10000 '
-                    f'{destination} {mount_path}')
+    mount_cmd = (
+        'gcsfuse '  #-o allow_other '
+        '--implicit-dirs '
+        #f'--stat-cache-capacity 4096 '
+        f'--stat-cache-ttl 5s '
+        f'--type-cache-ttl 5s '
+        f'--rename-dir-limit 10000 '
+        f'{destination} {mount_path}')
     output = subprocess.run(mount_cmd,
                             shell=True,
                             stdout=subprocess.PIPE,
@@ -517,7 +524,9 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     # Use FUSE to mount both /.tmp_csync and /.tmp_mount to full_src
     #fuse_thread = threading.Thread(target=run_fuse_operation, args=(read_path, write_path, full_src))
     #fuse_thread.start()
-    fuse_process = multiprocessing.Process(target=run_fuse_operation, args=(read_path, write_path, full_src))
+    fuse_process = multiprocessing.Process(target=run_fuse_operation,
+                                           args=(read_path, write_path,
+                                                 full_src))
     fuse_process.start()
     while True:
         start_time = time.time()

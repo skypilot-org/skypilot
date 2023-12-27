@@ -346,7 +346,10 @@ class AbstractStore:
                             raise exceptions.StorageSpecError(
                                 f'Currently, {store_type} does not support '
                                 'CSYNC mode.')
-                    destination = '/'.join([bucket_name, path])
+                    if path:
+                        destination = '/'.join([bucket_name, path])
+                    else:
+                        destination = bucket_name
                 elif isinstance(self.source, list):
                     raise TypeError(
                         'CSYNC mode does not supprot multiple sources '
