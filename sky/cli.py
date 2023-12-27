@@ -235,11 +235,12 @@ def _interactive_node_cli_command(cli_func):
                              help=('OS disk size in GBs.'))
     disk_tier = click.option('--disk-tier',
                              default=None,
-                             type=click.Choice(['low', 'medium', 'high'],
+                             type=click.Choice(['low', 'medium', 'high', 'none'],
                                                case_sensitive=False),
                              required=False,
-                             help=('OS disk tier. Could be one of "low", '
-                                   '"medium", "high". Default: medium'))
+    help=(
+        'OS disk tier. Could be one of "low", "medium", "high" or "none" ("none" for using the default value). Default: medium'
+    ))
     ports = click.option(
         '--ports',
         required=False,
@@ -697,7 +698,10 @@ def _parse_override_params(
     if disk_size is not None:
         override_params['disk_size'] = disk_size
     if disk_tier is not None:
-        override_params['disk_tier'] = disk_tier
+        if disk_tier.lower() == 'none':
+            override_params['disk_tier'] = None
+        else:
+            override_params['disk_tier'] = disk_tier
     if ports:
         override_params['ports'] = ports
     return override_params
@@ -1303,10 +1307,10 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
     help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high" or "none" ("none" for using the default value). Default: medium'
     ))
 @click.option(
     '--idle-minutes-to-autostop',
@@ -3797,10 +3801,10 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
     help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high" or "none" ("none" for using the default value). Default: medium'
     ))
 @click.option(
     '--detach-run',
@@ -4651,10 +4655,10 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
     help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
+        'OS disk tier. Could be one of "low", "medium", "high" or "none" ("none" for using the default value). Default: medium'
     ))
 @click.option(
     '--idle-minutes-to-autostop',
