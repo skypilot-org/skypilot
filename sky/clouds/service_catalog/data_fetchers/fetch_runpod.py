@@ -7,11 +7,34 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import runpod
 
 SECURE_CLOUD_REGIONS = [
-    'CA', 'CZ', 'NL', 'RO', 'SE', 'IS', 'NO', 'US'
+    'CA',
+    'CZ',
+    'NL',
+    'RO',
+    'SE',
+    'IS',
+    'NO',
+    'US'
 ]
 
 COMMUNITY_CLOUD_REGIONS = [
-    'AR', 'AT', 'BG', 'CA', 'CZ', 'ES', 'FR', 'GB', 'HR', 'IL', 'NL', 'PT', 'RO', 'SE', 'SK', 'US', 'ZA'
+    'AR',
+    'AT',
+    'BG',
+    'CA',
+    'CZ',
+    'ES',
+    'FR',
+    'GB',
+    'HR',
+    'IL',
+    'NL',
+    'PT',
+    'RO',
+    'SE',
+    'SK',
+    'US',
+    'ZA'
 ]
 
 ID_TO_VCPU_NUM = {
@@ -94,16 +117,14 @@ def get_instance_types() -> List[Dict[str,Any]]:
             gpu = runpod.get_gpu(gpu_id, size)
             if gpu['secureCloud']:
                 for region in SECURE_CLOUD_REGIONS:
-                    secure_cloud_entry = get_instance_entry(gpu,
-                                                            size,
+                    secure_cloud_entry = get_instance_entry(gpu, size,
                                                             region,
                                                             id_to_name,
                                                             'SECURE')
                     instance_data.append(secure_cloud_entry)
             if gpu['communityCloud']:
                 for region in COMMUNITY_CLOUD_REGIONS:
-                    community_cloud_entry = get_instance_entry(gpu,
-                                                               size,
+                    community_cloud_entry = get_instance_entry(gpu, size,
                                                                region,
                                                                id_to_name,
                                                                'COMMUNITY')
