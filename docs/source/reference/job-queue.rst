@@ -22,12 +22,16 @@ for execution on an existing cluster:
 
 The :code:`-d / --detach` flag detaches logging from the terminal, which is useful for launching many long-running jobs concurrently.
 
-To view the output for each job:
+To show a cluster's jobs and their statuses:
 
 .. code-block:: bash
 
-   # Show a cluster's jobs (IDs, statuses).
+   # Show a cluster's jobs (job IDs, statuses).
    sky queue mycluster
+
+To show the output for each job:
+
+.. code-block:: bash
 
    # Stream the outputs of a job.
    sky logs mycluster JOB_ID

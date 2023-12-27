@@ -547,3 +547,26 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
+
+
+def get_cleaned_username(username: str = '') -> str:
+    """Cleans the username as some cloud provider have limitation on
+    characters usage such as dot (.) is not allowed in GCP.
+
+    Clean up includes:
+     1. Making all characters lowercase
+     2. Removing any non-alphanumeric characters (excluding hyphens)
+     3. Removing any numbers and/or hyphens at the start of the username.
+     4. Removing any hyphens at the end of the username
+
+    e.g. 1SkY-PiLot2- becomes sky-pilot2
+
+    Returns:
+      A cleaned username.
+    """
+    username = username or getpass.getuser()
+    username = username.lower()
+    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'^[0-9-]+', '', username)
+    username = re.sub(r'-$', '', username)
+    return username

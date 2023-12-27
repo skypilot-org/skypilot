@@ -68,7 +68,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
-    assert not use_spot, 'Current Azure subscription does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')

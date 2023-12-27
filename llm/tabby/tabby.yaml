@@ -1,0 +1,35 @@
+resources:
+  # you could change this section to any resources you want, like a CPU VM
+  accelerators: T4:1
+  ports: 8080
+
+# tabby base dir
+workdir: .
+
+setup: |
+  # On some cloud providers, docker-compose is not installed by default.
+  sudo curl -sS -L https://github.com/docker/compose/releases/download/v2.17.2/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+  sudo chmod a+x /usr/local/bin/docker-compose
+
+  # On certain cloud providers (e.g lambda cloud), the default user is not added to docker group, so we need sudo here
+  sudo docker-compose pull > /dev/null 2>&1
+
+  # Add current user to docker group, it won't take effect immediately as skypilot job is started by a long-running daemon.
+  sudo usermod -aG docker $USER
+
+
+run: |
+  docker-compose down
+
+  if nvidia-smi; then
+    docker-compose -f docker-compose.yaml -f docker-compose.cuda.yaml up -d
+  else
+    docker-compose up -d
+  fi
+
+  while ! curl -s -X POST http://localhost:8080/v1/health; do
+    echo "server not ready, waiting..."
+    sleep 5
+  done
+
+  echo "tabby server is ready, enjoy!"

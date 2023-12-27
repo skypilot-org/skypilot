@@ -709,7 +709,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
+    return f'sky-{node_type}-{common_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -1205,6 +1205,18 @@ def _add_command_alias_to_group(group, command, name, hidden):
     group.add_command(new_command, name=name)
 
 
+def _deprecate_and_hide_command(group, command_to_deprecate,
+                                alternative_command):
+    """Hide a command and show a deprecation note, hinting the alternative."""
+    command_to_deprecate.hidden = True
+    if group is not None:
+        orig = f'sky {group.name} {command_to_deprecate.name}'
+    else:
+        orig = f'sky {command_to_deprecate.name}'
+    command_to_deprecate.invoke = _with_deprecation_warning(
+        command_to_deprecate.invoke, alternative_command, orig)
+
+
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
@@ -1386,7 +1398,7 @@ def launch(
     no_setup: bool,
     clone_disk_from: Optional[str],
 ):
-    """Launch a task from a YAML or a command (rerun setup if cluster exists).
+    """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
@@ -1400,15 +1412,6 @@ def launch(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
-
-    # A basic check. Programmatic calls will have a proper (but less
-    # informative) error from optimizer.
-    if (cloud is not None and cloud.lower() == 'azure' and
-            use_spot is not None and use_spot):
-        raise click.UsageError(
-            'SkyPilot currently has not implemented '
-            'support for spot instances on Azure. Please file '
-            'an issue if you need this feature.')
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1505,7 +1508,7 @@ def exec(
     env: List[Tuple[str, str]],
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Execute a task or a command on a cluster (skip setup).
+    """Execute a task or command on an existing cluster.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
@@ -1971,6 +1974,7 @@ def status(all: bool, refresh: bool, ip: bool, show_spot_jobs: bool,
         if show_services:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Services{colorama.Style.RESET_ALL}')
+            num_services = None
             if spot_jobs_query_interrupted:
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
@@ -3669,7 +3673,9 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     subprocess_utils.run_in_parallel(sky.storage_delete, names)
 
 
-@cli.group(cls=_NaturalOrderGroup)
+# TODO(skypilot): remove all code related to the deprecated `sky admin` code
+# path.
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
 def admin():
     """SkyPilot On-prem administrator CLI."""
     pass
@@ -3746,8 +3752,14 @@ def admin_deploy(clusterspec_yaml: str):
 
 
 @cli.group(cls=_NaturalOrderGroup)
+def bench():
+    """SkyPilot Benchmark CLI."""
+    pass
+
+
+@cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Managed Spot commands (spot instances with auto-recovery)."""
+    """Managed Spot CLI (spot instances with auto-recovery)."""
     pass
 
 
@@ -4022,9 +4034,6 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
                f'{in_progress_only_hint}\n{msg}')
 
 
-_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
-
-
 @spot.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
               '-n',
@@ -4187,7 +4196,7 @@ def spot_dashboard(port: Optional[int]):
 
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
-    """SkyServe commands CLI."""
+    """SkyServe CLI (multi-region, multi-cloud serving)."""
     pass
 
 
@@ -4260,13 +4269,32 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
@@ -4590,12 +4618,6 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     return candidates
 
 
-@cli.group(cls=_NaturalOrderGroup)
-def bench():
-    """SkyPilot Benchmark CLI."""
-    pass
-
-
 @bench.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
                 required=True,
@@ -4742,13 +4764,13 @@ def benchmark_launch(
     if gpus is not None:
         gpu_list = gpus.split(',')
         gpu_list = [gpu.strip() for gpu in gpu_list]
-        if '' in gpus:
+        if ' ' in gpus:
             raise click.BadParameter('Remove blanks in --gpus.')
 
         if len(gpu_list) == 1:
             override_gpu = gpu_list[0]
         else:
-            # If len(gpus) > 1, gpus is intrepreted
+            # If len(gpu_list) > 1, gpus is interpreted
             # as a list of benchmark candidates.
             if candidates is None:
                 candidates = [{'accelerators': gpu} for gpu in gpu_list]
@@ -5259,6 +5281,19 @@ def local_down():
         with rich_utils.safe_status('Running sky check...'):
             sky_check.check(quiet=True)
         click.echo('Local cluster removed.')
+
+
+# TODO(skypilot): remove the below in v0.5.
+_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=cpunode,
+                            alternative_command='sky launch')
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=gpunode,
+                            alternative_command='sky launch --gpus <gpus>')
+_deprecate_and_hide_command(group=None,
+                            command_to_deprecate=tpunode,
+                            alternative_command='sky launch --gpus <tpus>')
 
 
 def main():

@@ -195,12 +195,19 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                                   use_spot=True,
                                                   region=None,
                                                   zone=None)
+    original_resources = sky.Resources(cloud=sky.AWS(),
+                                       instance_type='p3.16xlarge',
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
 
     for region in candidate_regions:
-        resources = sky.Resources(cloud=sky.AWS(),
-                                  instance_type='p3.16xlarge',
-                                  region=region.name,
-                                  use_spot=True)
+        resources = original_resources.copy(region=region.name)
         if not AWS.check_quota_available(resources):
             return region.name
 
@@ -215,12 +222,21 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                                   region=None,
                                                   zone=None)
 
+    original_resources = sky.Resources(cloud=sky.GCP(),
+                                       instance_type='a2-ultragpu-1g',
+                                       accelerators={'A100-80GB': 1},
+                                       use_spot=True)
+
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    filtered_regions = original_resources.get_valid_regions_for_launchable()
+    candidate_regions = [
+        region for region in candidate_regions
+        if region.name in filtered_regions
+    ]
+
     for region in candidate_regions:
         if not GCP.check_quota_available(
-                sky.Resources(cloud=sky.GCP(),
-                              region=region.name,
-                              accelerators={'A100-80GB': 1},
-                              use_spot=True)):
+                original_resources.copy(region=region.name)):
             return region.name
 
     return None
@@ -1235,7 +1251,7 @@ def test_large_job_queue(generic_cloud: str):
             ],
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1620,7 +1636,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1678,7 +1694,7 @@ def test_autodown(generic_cloud: str):
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
@@ -2973,7 +2989,6 @@ def test_skyserve_cancel():
 
 
 # ------- Testing user ray cluster --------
-@pytest.mark.no_kubernetes  # Kubernetes does not support sky status -r yet.
 def test_user_ray_cluster(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -3326,6 +3341,27 @@ class TestStorageWithCredentials:
                 storage_obj.delete()
 
     @pytest.fixture
+    def tmp_multiple_custom_source_storage_obj(self):
+        # Creates a list of storage objects with custom source names to
+        # create multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        custom_source_names = ['"path With Spaces"', 'path With Spaces']
+        storage_mult_obj = []
+        for name in custom_source_names:
+            src_path = os.path.expanduser(f'~/{name}')
+            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=src_path)
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -3369,7 +3405,7 @@ class TestStorageWithCredentials:
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
         # Creates a temporary storage object for testing .gitignore filter.
         # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
-        # foramt. Created storage object will contain the file structure along
+        # format. Created storage object will contain the file structure along
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3500,6 +3536,30 @@ class TestStorageWithCredentials:
             if store_type.value in item
         ]
         assert all([item not in out for item in storage_obj_name])
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_upload_source_with_spaces(self, store_type,
+                                       tmp_multiple_custom_source_storage_obj):
+        # Creates two buckets with specified local sources
+        # with spaces in the name
+        storage_obj_names = []
+        for storage_obj in tmp_multiple_custom_source_storage_obj:
+            storage_obj.add_store(store_type)
+            storage_obj_names.append(storage_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_names])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -3837,6 +3897,21 @@ def test_multiple_accelerators_ordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_ordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -3854,6 +3929,20 @@ def test_multiple_accelerators_unordered():
     run_one_test(test)
 
 
+def test_multiple_accelerators_unordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 def test_multiple_resources():
     name = _get_cluster_name()
     test = Test(
@@ -3863,5 +3952,20 @@ def test_multiple_resources():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Sky Benchmark ----------
+def test_sky_bench(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'sky-bench',
+        [
+            f'sky bench launch -y -b {name} --cloud {generic_cloud} -i0 tests/test_yamls/minimal.yaml',
+            'sleep 120',
+            f'sky bench show {name} | grep sky-bench-{name} | grep FINISHED',
+        ],
+        f'sky bench down {name} -y; sky bench delete {name} -y',
     )
     run_one_test(test)
