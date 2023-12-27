@@ -1644,10 +1644,10 @@ def test_autostop(generic_cloud: str):
 
             # Test restarting the idleness timer via cancel + reset:
             f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 45',  # Almost reached the threshold.
+            'sleep 30',  # Almost reached the threshold.
             f'sky autostop -y {name} --cancel',
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
