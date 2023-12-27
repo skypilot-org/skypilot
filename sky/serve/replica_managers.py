@@ -1,12 +1,10 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
-import base64
 import dataclasses
 import enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
-import pickle
 import threading
 import time
 import traceback
@@ -15,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 import requests
-import yaml
 
 import sky
 from sky import backends
@@ -172,10 +169,12 @@ def _get_resources_ports(task_yaml: str) -> str:
 
 
 def _get_use_spot_override(task_yaml: str,
-                           override: Optional[Dict[str, Any]]) -> bool:
-    """Get the resources ports used by the task."""
-    if override is not None:
-        use_spot_override = override.get('use_spot')
+                           resource_override: Optional[Dict[str, Any]]) -> bool:
+    """Get whether the task uses spot
+    from either overeride or task_yaml.
+    """
+    if resource_override is not None:
+        use_spot_override = resource_override.get('use_spot')
         if use_spot_override is not None:
             assert isinstance(use_spot_override, bool)
             return use_spot_override
@@ -183,6 +182,18 @@ def _get_use_spot_override(task_yaml: str,
     assert len(task.resources) == 1, task
     task_resources = list(task.resources)[0]
     return task_resources.use_spot
+
+
+def _get_zone_override(
+        resource_override: Optional[Dict[str, Any]]) -> Optional[str]:
+    """ Get zone override from resource_override.
+    """
+    if resource_override is not None:
+        zone_override = resource_override.get('zone')
+        if zone_override is not None:
+            assert isinstance(zone_override, str)
+            return zone_override
+    return None
 
 
 def with_lock(func):
@@ -245,7 +256,7 @@ class ReplicaStatusProperty:
             return False
         if self.preempted:
             return True
-        if (auto_restart and self.first_ready_time is not None and
+        if (self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
             # If the service is up for more than `initial_delay_seconds`,
             # we assume there is no bug in the user code and the scale down
@@ -440,8 +451,7 @@ class ReplicaInfo:
             'is_spot': self.is_spot,
             'status': self.status.value,
             'status_property': self.status_property.json(),
-            'cluster_record': base64.b64encode(pickle.dumps(cluster_record)
-                                              ).decode('utf-8'),
+            'cluster_record': cluster_record,
         }
 
     def probe(
@@ -480,8 +490,9 @@ class ReplicaInfo:
                 msg += '.'
             else:
                 msg += f' and response {response.text}.'
+            logger.info(msg)
             if response.status_code == 200:
-                logger.debug(msg)
+                logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
             else:
                 logger.info(msg)
@@ -607,9 +618,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _get_use_spot_override(self._task_yaml_path,
                                           resources_override)
-        zone = None
-        if resources_override is not None:
-            zone = resources_override.get('zone')
+        zone = _get_zone_override(resources_override)
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            zone)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)

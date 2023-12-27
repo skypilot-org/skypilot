@@ -334,16 +334,10 @@ def get_service_schema():
                     'target_qps_per_replica': {
                         'type': 'number',
                     },
-                    'auto_restart': {
-                        'type': 'boolean',
-                    },
                     'spot_placer': {
                         'type': 'string',
                     },
                     'spot_mixer': {
-                        'type': 'string',
-                    },
-                    'on_demand_type': {
                         'type': 'string',
                     },
                     'spot_zones': {
@@ -353,29 +347,11 @@ def get_service_schema():
                             'type': 'string'
                         },
                     },
-                    'on_demand_zones': {
-                        'type': 'array',
-                        'minItems': 1,
-                        'items': {
-                            'type': 'string'
-                        },
-                    },
-                    'num_extra': {
+                    'num_overprovision': {
                         'type': 'integer',
                     },
                     'num_init_replicas': {
                         'type': 'integer',
-                    },
-                    'upscale_delay_s': {
-                        'type': 'integer',
-                    },
-                    'downscale_delay_s': {
-                        'type': 'integer',
-                    },
-                    'slo_threshold': {
-                        'type': 'float',
-                    },
-                        'type': 'number',
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',

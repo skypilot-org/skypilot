@@ -8,7 +8,6 @@ import os
 import threading
 import time
 import traceback
-from typing import Type
 
 import fastapi
 import uvicorn
@@ -49,47 +48,13 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
-        autoscaler_class: Type[autoscalers.Autoscaler]
-        overprovision = False
-        static_spot_provision = False
-
-        if service_spec.spot_mixer is not None:
-            if service_spec.spot_mixer == 'StaticSpotProvision':
-                static_spot_provision = True
-            elif service_spec.spot_mixer == 'OnDemandFallback':
-                static_spot_provision = False
-            else:
-                raise ValueError(
-                    f'Unknown spot mixer: {service_spec.spot_mixer}')
-            autoscaler_class = autoscalers.SpotRequestRateAutoscaler
-
-        elif service_spec.on_demand_type is not None:
-            if service_spec.on_demand_type == 'OD+':
-                overprovision = True
-            elif service_spec.on_demand_type == 'OD':
-                overprovision = False
-            else:
-                raise ValueError(
-                    f'Unknown on-demand type: {service_spec.on_demand_type}')
-            autoscaler_class = autoscalers.OnDemandRateAutoscaler
-        else:
-            autoscaler_class = autoscalers.RequestRateAutoscaler
-        logger.info(f'Using autoscaler: {autoscaler_class}')
-        self._autoscaler: autoscalers.Autoscaler = autoscaler_class(
-            service_spec,
-            frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
-            rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS,
-            overprovision=overprovision,
-            static_spot_provision=static_spot_provision)
+        self._autoscaler: autoscalers.Autoscaler = (
+            autoscalers.Autoscaler.from_service_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
         self.dump_path = os.path.expanduser(
             serve_utils.generate_remote_service_dir_name(
                 self._service_name)) + '/dump_infos.jsonl'
-        if service_spec.num_extra is not None:
-            self._num_extra = service_spec.num_extra
-        else:
-            self._num_extra = 0
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler.')
@@ -131,7 +96,7 @@ class SkyServeController:
                     f.write(json.dumps(dump_infos) + '\n')
 
                 scaling_options = self._autoscaler.evaluate_scaling(
-                    self._num_extra, replica_info)
+                    replica_info)
                 for scaling_option in scaling_options:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==

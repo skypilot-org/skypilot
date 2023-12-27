@@ -1155,6 +1155,9 @@ def fill_in_launchable_resources(
     quiet: bool = False
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates, List[str]]:
+    """Fills in the launchable resources for the task.
+    Function exposed for SkyServe.
+    """
 
     return _fill_in_launchable_resources(task, blocked_resources,
                                          try_fix_with_sky_check, quiet)

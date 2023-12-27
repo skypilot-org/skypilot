@@ -47,12 +47,12 @@ class RoundRobinPolicy(LoadBalancingPolicy):
             return None
         ready_replica_url = self.ready_replicas[self.index]
         self.index = (self.index + 1) % len(self.ready_replicas)
-        # request_repr = ('<Request '
-        #                 f'method="{request.method}" '
-        #                 f'url="{request.url}" '
-        #                 f'headers={dict(request.headers)} '
-        #                 f'query_params={dict(request.query_params)}'
-        #                 '>')
-        # logger.info(f'Selected replica {ready_replica_url} '
-        #             f'for request {request_repr}')
+        request_repr = ('<Request '
+                        f'method="{request.method}" '
+                        f'url="{request.url}" '
+                        f'headers={dict(request.headers)} '
+                        f'query_params={dict(request.query_params)}'
+                        '>')
+        logger.info(f'Selected replica {ready_replica_url} '
+                    f'for request {request_repr}')
         return ready_replica_url

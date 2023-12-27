@@ -4316,12 +4316,6 @@ def serve_up(
                 logger.info(f'{res} use_spot will be override to True, '
                             'because spot placer is enabled.')
 
-    if (not service_spec.auto_restart and service_spec.spot_placer is not None):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Cannot specify auto_restart=False when spot placer is enabled.'
-            )
-
     # TODO(tian): Limit zones to optimize if spot-zone is specified.
     sky.optimize(dag)
 

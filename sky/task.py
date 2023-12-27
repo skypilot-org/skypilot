@@ -622,21 +622,19 @@ class Task:
     def service(self) -> Optional[service_spec.SkyServiceSpec]:
         return self._service
 
-    def set_service(self,
-                    service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
+    def set_service(self, service: Optional[service_spec.SkyServiceSpec]):
         """Sets the service spec for this task.
-
         Args:
           service: a SkyServiceSpec object.
-
-        Returns:
-          self: The current task, with service set.
         """
-        self._service = service
-        if service is None:
-            return self
 
-        if service.spot_zones is None:
+        if service is None:
+            return
+
+        if service.spot_zones is None and service.spot_placer is not None:
+
+            logger.info('service.spot_zones is not specified, '
+                        'use all available zones')
 
             launchable_resources, _, _ = (
                 optimizer.fill_in_launchable_resources(
@@ -647,17 +645,15 @@ class Task:
 
             launchable_zones = set()
             for res in launchable_resources[list(self.resources)[0]]:
-                # print(res, res.cloud, res._instance_type)
                 regions = res.get_valid_regions_for_launchable()
                 for region in regions:
                     if region.zones is not None:
                         for zone in region.zones:
                             launchable_zones.add(zone.name)
-            logger.info('service.spot_zones is not specified, '
-                        'use all available zones')
+
             service.set_spot_zones(list(launchable_zones))
 
-        return self
+        self._service = service
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':

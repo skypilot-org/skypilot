@@ -26,13 +26,8 @@ class SkyServiceSpec:
         spot_placer: Optional[str] = None,
         spot_mixer: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
-        on_demand_zones: Optional[List[str]] = None,
-        on_demand_type: Optional[str] = None,
-        num_extra: Optional[int] = None,
+        num_overprovision: Optional[int] = None,
         num_init_replicas: Optional[int] = None,
-        upscale_delay_s: int = 300,
-        downscale_delay_s: int = 300,
-        default_slo_theshold: float = 0.99,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # The following arguments are deprecated.
@@ -76,42 +71,28 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-        self._auto_restart = auto_restart
-        spot_args = [spot_placer, spot_mixer, target_qps_per_replica, num_extra]
-        on_demand_args = [target_qps_per_replica, on_demand_type]
+
+        spot_args = [spot_placer, spot_mixer, spot_zones, num_overprovision]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
-        on_demand_args_num = sum(
-            [on_demand_arg is not None for on_demand_arg in on_demand_args])
-        if not spot_placer:
-            if (on_demand_args_num != 0 and
-                    on_demand_args_num != len(on_demand_args)):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('target_qps_per_replica and'
-                                     'on_demand_type must be all '
-                                     'specified or all not specified'
-                                     'in the service YAML.')
-        if spot_placer:
-            if spot_args_num != 0 and spot_args_num != len(
-                    spot_args) and on_demand_args_num == 0:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'spot_placer, spot_mixer, '
-                        'target_qps_per_replica, num_extra '
-                        'must be all '
-                        'specified or all not specified in the service YAML.')
+        if spot_args_num != 0 and spot_args_num != len(spot_args):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'spot_placer, spot_mixer, '
+                    'target_qps_per_replica, num_overprovision '
+                    'must be all '
+                    'specified or all not specified in the service YAML.')
 
         self._spot_placer = spot_placer
         self._spot_mixer = spot_mixer
-        self._num_extra = num_extra
+        self._num_overprovision = num_overprovision
         self._num_init_replicas = num_init_replicas
-
         self._spot_zones = spot_zones
-        self._on_demand_zones = on_demand_zones
-        self._on_demand_type = on_demand_type
-
-        self._upscale_delay_s = upscale_delay_s
-        self._downscale_delay_s = downscale_delay_s
-        self._default_slo_threshold = default_slo_theshold
+        self._upscale_delay_seconds = (
+            upscale_delay_seconds if upscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
+        self._downscale_delay_seconds = (
+            downscale_delay_seconds if downscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
 
     @staticmethod
     def from_yaml_config(config: Dict[str, Any]) -> 'SkyServiceSpec':
@@ -178,6 +159,17 @@ class SkyServiceSpec:
             service_config['downscale_delay_seconds'] = policy_section.get(
                 'downscale_delay_seconds', None)
 
+            service_config['spot_placer'] = policy_section.get(
+                'spot_placer', None)
+            service_config['spot_mixer'] = policy_section.get(
+                'spot_mixer', None)
+            service_config['spot_zones'] = policy_section.get(
+                'spot_zones', None)
+            service_config['num_overprovision'] = policy_section.get(
+                'num_overprovision', None)
+            service_config['num_init_replicas'] = policy_section.get(
+                'num_init_replicas', None)
+
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -222,28 +214,17 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
-        add_if_not_none('replica_policy', 'auto_restart', self._auto_restart)
         add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
         add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
-        add_if_not_none('replica_policy', 'on_demand_zones',
-                        self._on_demand_zones)
-        add_if_not_none('replica_policy', 'on_demand_type',
-                        self._on_demand_type)
-        add_if_not_none('replica_policy', 'num_extra', self._num_extra)
+        add_if_not_none('replica_policy', 'num_overprovision',
+                        self._num_overprovision)
         add_if_not_none('replica_policy', 'num_init_replicas',
                         self._num_init_replicas)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
-                        self.upscale_delay_seconds)
+                        self._upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
-                        self.downscale_delay_seconds)
-
-        add_if_not_none('replica_policy', 'upscale_delay_s',
-                        self._upscale_delay_s)
-        add_if_not_none('replica_policy', 'downscale_delay_s',
-                        self._downscale_delay_s)
-        add_if_not_none('replica_policy', 'default_slo_theshold',
-                        self._default_slo_threshold)
+                        self._downscale_delay_seconds)
         return config
 
     def probe_str(self):
@@ -257,16 +238,15 @@ class SkyServiceSpec:
             policy += self.spot_placer
         if self.spot_mixer:
             policy += f' with {self.spot_mixer}'
-        if self.num_extra is not None and self.num_extra > 0:
-            policy += f' with {self.num_extra} extra spot instance(s)'
+        if self.num_overprovision is not None and self.num_overprovision > 0:
+            policy += f' with {self.num_overprovision} extra spot instance(s)'
         return policy if policy else 'No spot policy'
 
     def policy_str(self):
         # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
-            return (f'Fixed {self.min_replicas} replica{min_plural}'
-                    f' ({self.spot_policy_str()})')
+            return f'Fixed {self.min_replicas} replica{min_plural}'
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         return (f'Autoscaling from {self.min_replicas} to '
@@ -277,7 +257,6 @@ class SkyServiceSpec:
             Readiness probe method:           {self.probe_str()}
             Readiness initial delay seconds:  {self.initial_delay_seconds}
             Replica autoscaling policy:       {self.policy_str()}
-            Replica auto restart:             {self.auto_restart}
             Spot Policy:                      {self.spot_policy_str()}\
         """)
 
@@ -310,10 +289,6 @@ class SkyServiceSpec:
         return self._post_data
 
     @property
-    def auto_restart(self) -> bool:
-        return self._auto_restart
-
-    @property
     def spot_placer(self) -> Optional[str]:
         return self._spot_placer
 
@@ -326,29 +301,17 @@ class SkyServiceSpec:
         return self._spot_zones
 
     @property
-    def on_demand_zones(self) -> Optional[List[str]]:
-        return self._on_demand_zones
-
-    @property
-    def on_demand_type(self) -> Optional[str]:
-        return self._on_demand_type
-
-    @property
-    def num_extra(self) -> Optional[int]:
-        return self._num_extra
+    def num_overprovision(self) -> Optional[int]:
+        return self._num_overprovision
 
     @property
     def num_init_replicas(self) -> Optional[int]:
         return self._num_init_replicas
 
     @property
-    def upscale_delay_s(self) -> int:
-        return self._upscale_delay_s
+    def upscale_delay_seconds(self) -> int:
+        return self._upscale_delay_seconds
 
     @property
-    def downscale_delay_s(self) -> int:
-        return self._downscale_delay_s
-
-    @property
-    def default_slo_threshold(self) -> float:
-        return self._default_slo_threshold
+    def downscale_delay_seconds(self) -> int:
+        return self._downscale_delay_seconds
