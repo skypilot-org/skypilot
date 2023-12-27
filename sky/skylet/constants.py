@@ -76,7 +76,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'bash Miniconda3-Linux-x86_64.sh -b && '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && '
     'conda config --set auto_activate_base true); '
-    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init > /dev/null;')
+    'grep "# >>> conda initialize >>>" ~/.bashrc || conda init;')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
