@@ -20,7 +20,8 @@ SKY_REMOTE_RAY_PORT_FILE = '~/.sky/ray_port.json'
 SKY_REMOTE_RAY_TEMPDIR = '/tmp/ray_skypilot'
 SKY_REMOTE_RAY_VERSION = '2.4.0'
 SKY_REMOTE_WHEEL_PATH = '~/.sky/wheels'
-SKY_REMOTE_PYTHON_ENV = '~/skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
+SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
 UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
