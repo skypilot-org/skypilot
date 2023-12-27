@@ -28,16 +28,27 @@ class AutoscalerDecisionOperator(enum.Enum):
 class AutoscalerDecision:
     """Autoscaling decisions.
 
-    |---------------------------------------------------------------|
-    | Operator   | TargetType       | Meaning                       |
-    |------------|------------------|-------------------------------|
-    | SCALE_UP   | Dict[str, Any]   | Resource override to add      |
-    |------------|------------------|-------------------------------|
-    | SCALE_DOWN | int              | Replica id to remove          |
-    |---------------------------------------------------------------|
+    |------------------------------------------------------------------------|
+    | Operator   | TargetType                | Meaning                       |
+    |------------|---------------------------|-------------------------------|
+    | SCALE_UP   | Optional[Dict[str, Any]   | Resource override to add      |
+    |------------|---------------------------|-------------------------------|
+    | SCALE_DOWN | int                       | Replica id to remove          |
+    |------------------------------------------------------------------------|
     """
     operator: AutoscalerDecisionOperator
     target: Union[Optional[Dict[str, Any]], int]
+
+    # TODO(MaoZiming): Add a doc to elaborate on autoscaling policies.
+    def __init__(self, operator: AutoscalerDecisionOperator,
+                 target: Union[Optional[Dict[str, Any]], int]):
+
+        assert (operator == AutoscalerDecisionOperator.SCALE_UP and
+                (target is None or isinstance(target, dict))) or (
+                    operator == AutoscalerDecisionOperator.SCALE_DOWN and
+                    isinstance(target, int))
+        self.operator = operator
+        self.target = target
 
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
@@ -46,24 +57,18 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 frequency: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
         Variables:
             min_replicas: Minimum number of replicas.
             max_replicas: Maximum number of replicas. Default to fixed
                 number of replicas, i.e. min_replicas == max_replicas.
-            frequency: Frequency of autoscaling in seconds.
+            target_num_replicas: Target number of replicas output by autoscaler.
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.frequency = frequency
-        if self.frequency < constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS:
-            logger.warning('Autoscaler frequency is less than '
-                           'controller sync interval. It might '
-                           'not always got the latest information.')
-        self.target_num_replicas = spec.min_replicas
+        self.target_num_replicas: int = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -86,26 +91,23 @@ class RequestRateAutoscaler(Autoscaler):
     the threshold.
     """
 
-    def __init__(self,
-                 spec: 'service_spec.SkyServiceSpec',
-                 frequency: int,
-                 rps_window_size: int,
-                 overprovision: bool = False,
-                 static_spot_provision: bool = False) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',
+                 qps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
-            target_qps_per_replica: Target qps per replica for autoscaling
-            rps_window_size: Window size for rps calculating.
+            target_qps_per_replica: Target qps per replica for autoscaling.
+            qps_window_size: Window size for qps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
             downscale_counter: counter for downscale number of replicas.
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
         """
-        super().__init__(spec, frequency)
-        self.target_qps_per_replica = spec.target_qps_per_replica
-        self.rps_window_size: int = rps_window_size
+        super().__init__(spec)
+        self.target_qps_per_replica: Optional[
+            float] = spec.target_qps_per_replica
+        self.qps_window_size: int = qps_window_size
         self.request_timestamps: List[float] = []
         self.overprovision = overprovision
         self.static_spot_provision = static_spot_provision
@@ -118,6 +120,16 @@ class RequestRateAutoscaler(Autoscaler):
                                                        self.frequency)
         self.target_num_replicas = spec.min_replicas
         self.default_slo_threshold = spec.default_slo_threshold
+        self.scale_up_consecutive_periods: int = int(
+            spec.upscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        self.scale_down_consecutive_periods: int = int(
+            spec.downscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        # Target number of replicas is initialized to min replicas.
+        # TODO(MaoZiming): add init replica numbers in SkyServe spec.
+        self.target_num_replicas: int = spec.min_replicas
+        self.bootstrap_done: bool = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -133,7 +145,7 @@ class RequestRateAutoscaler(Autoscaler):
             request_aggregator_info.get('timestamps', []))
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
-                                   current_time - self.rps_window_size)
+                                   current_time - self.qps_window_size)
         self.request_timestamps = self.request_timestamps[index:]
 
     def evaluate_scaling(
@@ -144,6 +156,12 @@ class RequestRateAutoscaler(Autoscaler):
         # Deprecated
         raise NotImplementedError
 
+    def _get_desired_num_replicas(self) -> int:
+        # Always return self.target_num_replicas when autoscaling
+        # is not enabled, i.e. self.target_qps_per_replica is None.
+        # In this case, self.target_num_replicas will be min_replicas.
+        if self.target_qps_per_replica is None:
+            return self.target_num_replicas
 
 class OnDemandRateAutoscaler(RequestRateAutoscaler):
     """OnDemandRateAutoscaler: Use on-demand to autoscale based on request rate.
@@ -182,7 +200,7 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
         assert self.target_qps_per_replica is not None
         # Convert to requests per second.
         num_requests_per_second = len(
-            self.request_timestamps) / self.rps_window_size
+            self.request_timestamps) / self.qps_window_size
         target_num_replicas = math.ceil(num_requests_per_second /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
@@ -190,7 +208,10 @@ class OnDemandRateAutoscaler(RequestRateAutoscaler):
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
-        if target_num_replicas > self.target_num_replicas:
+        if not self.bootstrap_done:
+            self.bootstrap_done = True
+            return target_num_replicas
+        elif target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:

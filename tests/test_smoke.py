@@ -2853,62 +2853,6 @@ def test_skyserve_spot_user_bug():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
-def test_skyserve_replica_failure():
-    """Test skyserve with manually interrupting some replica"""
-    name = _get_service_name()
-    zone = 'us-central1-a'
-
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
-
-    # In the worst case, the controller will first wait
-    # ENDPOINT_PROBE_INTERVAL_SECONDS for next probe, and wait
-    # LB_CONTROLLER_SYNC_INTERVAL_SECONDS for load balancer's
-    # next sync with controller. We add 5s more for any overhead,
-    # such as database read/write.
-    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL_SECONDS +
-                                    serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS +
-                                    5)
-
-    test = Test(
-        f'test-skyserve-replica-failure',
-        [
-            f'sky serve up -n {name} -y tests/skyserve/replica_failure/service.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
-            f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
-            '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
-            terminate_replica(1),
-            f'sleep {time_to_wait_after_terminate}',
-            f'sky serve status {name} | grep 2/3',
-            f'{_get_replica_line(name, 1)} | grep NOT_READY',
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
-            f'{_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
-            '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
-            terminate_replica(2),
-            f'sleep {time_to_wait_after_terminate}',
-            f'sky serve status {name} | grep 1/3',
-            f'{_get_replica_line(name, 2)} | grep NOT_READY',
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
-            '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
-        ],
-        _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
-    )
-    run_one_test(test)
-
-
-@pytest.mark.gcp
-@pytest.mark.sky_serve
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -3888,6 +3832,21 @@ def test_multiple_accelerators_ordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_ordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -3899,6 +3858,20 @@ def test_multiple_accelerators_unordered():
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
         ],
         f'sky down -y {name}',
     )

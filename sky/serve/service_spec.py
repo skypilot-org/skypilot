@@ -23,7 +23,6 @@ class SkyServiceSpec:
         max_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
-        auto_restart: bool = True,
         spot_placer: Optional[str] = None,
         spot_mixer: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
@@ -34,11 +33,19 @@ class SkyServiceSpec:
         upscale_delay_s: int = 300,
         downscale_delay_s: int = 300,
         default_slo_theshold: float = 0.99,
+        upscale_delay_seconds: Optional[int] = None,
+        downscale_delay_seconds: Optional[int] = None,
+        # The following arguments are deprecated.
+        # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
+        # Deprecated: Always be True
+        auto_restart: Optional[bool] = None,
+        # Deprecated: replaced by the target_qps_per_replica.
+        qps_upper_threshold: Optional[float] = None,
+        qps_lower_threshold: Optional[float] = None,
     ) -> None:
-        if min_replicas < 0:
+        if min_replicas <= 0:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'min_replicas must be greater than or equal to 0')
+                raise ValueError('min_replicas must be greater than 0')
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -48,6 +55,21 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
+
+        if qps_upper_threshold is not None or qps_lower_threshold is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Field `qps_upper_threshold` and `qps_lower_threshold`'
+                    'under `replica_policy` are deprecated. '
+                    'Please use target_qps_per_replica instead.')
+
+        if auto_restart is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Field `auto_restart` under `replica_policy` is deprecated.'
+                    'Currently, SkyServe will cleanup failed replicas'
+                    'and auto restart it to keep the service running.')
+
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas
@@ -137,34 +159,24 @@ class SkyServiceSpec:
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
             service_config['target_qps_per_replica'] = None
-            service_config['auto_restart'] = True
+            service_config['upscale_delay_seconds'] = None
+            service_config['downscale_delay_seconds'] = None
         else:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
+            service_config['qps_upper_threshold'] = policy_section.get(
+                'qps_upper_threshold', None)
+            service_config['qps_lower_threshold'] = policy_section.get(
+                'qps_lower_threshold', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
             service_config['auto_restart'] = policy_section.get(
-                'auto_restart', True)
-            service_config['spot_placer'] = policy_section.get(
-                'spot_placer', None)
-            service_config['spot_mixer'] = policy_section.get(
-                'spot_mixer', None)
-            service_config['spot_zones'] = policy_section.get(
-                'spot_zones', None)
-            service_config['on_demand_zones'] = policy_section.get(
-                'on_demand_zones', None)
-            service_config['on_demand_type'] = policy_section.get(
-                'on_demand_type', None)
-            service_config['num_extra'] = policy_section.get('num_extra', None)
-            service_config['num_init_replicas'] = policy_section.get(
-                'num_init_replicas', None)
-            service_config['upscale_delay_s'] = policy_section.get(
-                'upscale_delay_s', 300)
-            service_config['downscale_delay_s'] = policy_section.get(
-                'downscale_delay_s', 1200)
-            service_config['default_slo_theshold'] = policy_section.get(
-                'default_slo_theshold', 0.99)
+                'auto_restart', None)
+            service_config['upscale_delay_seconds'] = policy_section.get(
+                'upscale_delay_seconds', None)
+            service_config['downscale_delay_seconds'] = policy_section.get(
+                'downscale_delay_seconds', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -221,6 +233,10 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'num_extra', self._num_extra)
         add_if_not_none('replica_policy', 'num_init_replicas',
                         self._num_init_replicas)
+        add_if_not_none('replica_policy', 'upscale_delay_seconds',
+                        self.upscale_delay_seconds)
+        add_if_not_none('replica_policy', 'downscale_delay_seconds',
+                        self.downscale_delay_seconds)
 
         add_if_not_none('replica_policy', 'upscale_delay_s',
                         self._upscale_delay_s)
@@ -246,6 +262,7 @@ class SkyServiceSpec:
         return policy if policy else 'No spot policy'
 
     def policy_str(self):
+        # TODO(MaoZiming): Update policy_str
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return (f'Fixed {self.min_replicas} replica{min_plural}'

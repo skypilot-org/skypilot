@@ -152,9 +152,12 @@ def get_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
-                    'maxProperties': 1,
                     'additionalProperties': {
-                        'type': 'number'
+                        'anyOf': [{
+                            'type': 'null',
+                        }, {
+                            'type': 'number',
+                        }]
                     }
                 }, {
                     'type': 'array',
@@ -371,6 +374,27 @@ def get_service_schema():
                     },
                     'slo_threshold': {
                         'type': 'float',
+                    },
+                        'type': 'number',
+                    },
+                    'upscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    'downscale_delay_seconds': {
+                        'type': 'number',
+                    },
+                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
+                    # `qps_lower_threshold` and `auto_restart` are deprecated.
+                    # Temporarily keep these fields for backward compatibility.
+                    # Remove after 2 minor release, i.e., 0.6.0.
+                    'auto_restart': {
+                        'type': 'boolean',
+                    },
+                    'qps_upper_threshold': {
+                        'type': 'number',
+                    },
+                    'qps_lower_threshold': {
+                        'type': 'number',
                     },
                 }
             },

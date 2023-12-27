@@ -36,6 +36,7 @@ extensions = [
     'sphinx_click',
     'sphinx_copybutton',
     'sphinx_design',
+    'myst_parser',
 ]
 
 intersphinx_mapping = {
