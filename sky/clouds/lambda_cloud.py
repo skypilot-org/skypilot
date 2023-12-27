@@ -42,16 +42,15 @@ class Lambda(clouds.Cloud):
             'You can try running docker command inside the `run` section in task.yaml.'
         ),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: f'Spot instances are not supported in {_REPR}.',
-        clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
-            ('Stopping spot instances is currently not supported on'
-             f' {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: f'Custom disk tiers are not supported in {_REPR}.',
         clouds.CloudImplementationFeatures.OPEN_PORTS: f'Opening ports is currently not supported on {_REPR}.',
     }
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod

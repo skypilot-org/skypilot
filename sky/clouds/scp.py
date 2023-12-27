@@ -51,9 +51,6 @@ class SCP(clouds.Cloud):
              '`run` section in task.yaml.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             (f'Spot instances are not supported in {_REPR}.'),
-        clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
-            ('Stopping spot instances is currently not supported on'
-             f' {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
             (f'Custom disk tiers are not supported in {_REPR}.'),
         clouds.CloudImplementationFeatures.OPEN_PORTS:
@@ -63,9 +60,15 @@ class SCP(clouds.Cloud):
     _INDENT_PREFIX = '    '
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = cls._CLOUD_UNSUPPORTED_FEATURES
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                'Stopping spot instances is currently not supported on'
+                f' {cls._REPR}.')
+        return features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

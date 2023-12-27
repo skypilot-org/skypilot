@@ -57,9 +57,6 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
-        clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE:
-            ('Stopping spot instances is currently not supported on Kubernetes.'
-            ),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
                                                              'tiers are not '
                                                              'supported in '
@@ -76,8 +73,9 @@ class Kubernetes(clouds.Cloud):
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod

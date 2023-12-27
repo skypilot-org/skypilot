@@ -2205,7 +2205,7 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
-                    self._requested_features)
+                    to_provision, self._requested_features)
 
                 config_dict = self._retry_zones(
                     to_provision,
@@ -4289,7 +4289,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # any stage after PRE_EXEC is not executed.
                 cloud = handle.launched_resources.cloud
                 cloud.check_features_are_supported(
-                    {clouds.CloudImplementationFeatures.STOP_SPOT_INSTANCE})
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
 
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
