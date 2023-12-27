@@ -16,9 +16,7 @@ setup: |
   fi
 
   # Install dependencies
-  pip install git+https://github.com/lm-sys/FastChat.git
-  # Need the latest transformers to support 70B model
-  pip install git+https://github.com/huggingface/transformers.git
+  pip install "fschat[model_worker,webui]"
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 

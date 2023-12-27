@@ -40,6 +40,7 @@ def _create_config_file(config_file_path: pathlib.Path) -> None:
 
             gcp:
                 vpc_name: {VPC_NAME}
+                use_internal_ips: true
 
             kubernetes:
                 networking: {NODEPORT_MODE_NAME}
@@ -195,6 +196,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
+    assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
     # Check config with only partial keys still works
     new_config3 = copy.copy(new_config2)
@@ -230,3 +232,4 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == PROXY_COMMAND
     assert skypilot_config.get_nested(('gcp', 'vpc_name'), None) == VPC_NAME
+    assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)

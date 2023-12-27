@@ -1,4 +1,12 @@
-"""Interfaces: clouds, regions, and zones."""
+"""Interfaces: clouds, regions, and zones.
+
+clouds.Cloud is lightweight stateless objects. SkyPilot may create multiple such
+objects; therefore, subclasses should take care to make methods inexpensive to
+call, and should not store heavy state. If state needs to be queried from the
+cloud provider and cached, create a module in sky/clouds/utils/ and probably add
+caches for the return value (e.g., sky/clouds/utils/gcp_utils), so they can be
+reused across cloud object creation.
+"""
 import collections
 import enum
 import re

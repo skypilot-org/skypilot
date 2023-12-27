@@ -6,7 +6,7 @@ Using Docker Containers
 SkyPilot can run a container either as a task, or as the runtime environment of a cluster.
 
 * If the container image is invocable / has an entrypoint: run it :ref:`as a task <docker-containers-as-tasks>`.
-* Otherwise, the container image is likely to be used as a runtime environment (e.g., ``ubuntu``) and you likely have extra commands to run inside the container: run it :ref:`as a runtime environment <docker-containers-as-runtime-environments>`.
+* If the container image is to be used as a runtime environment (e.g., ``ubuntu``, ``nvcr.io/nvidia/pytorch:23.10-py3``, etc.) and if you have extra commands to run inside the container: run it :ref:`as a runtime environment <docker-containers-as-runtime-environments>`.
 
 .. _docker-containers-as-tasks:
 
@@ -99,6 +99,7 @@ When a container is used as the runtime environment, everything happens inside t
 - Any files created by the task will be stored inside the container.
 
 To use a Docker image as your runtime environment, set the :code:`image_id` field in the :code:`resources` section of your task YAML file to :code:`docker:<image_id>`.
+
 For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
 
 .. code-block:: yaml
@@ -111,6 +112,26 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
 
   run: |
     # Commands to run inside the container
+
+As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch>`_:
+
+.. code-block:: yaml
+
+  resources:
+    image_id: docker:nvcr.io/nvidia/pytorch:23.10-py3
+    accelerators: T4
+
+  setup: |
+    # Commands to run inside the container
+
+  run: |
+    # Commands to run inside the container
+
+    # Since SkyPilot tasks are run inside a fresh conda "(base)" environment,
+    # deactivate first to access what the Docker image has already installed.
+    source deactivate
+    nvidia-smi
+    python -c 'import torch; print(torch.__version__)'
 
 Any GPUs assigned to the task will be automatically mapped to your Docker container, and all subsequent tasks within the cluster will also run inside the container. In a multi-node scenario, the container will be launched on all nodes, and the corresponding node's container will be assigned for task execution.
 

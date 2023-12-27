@@ -1,5 +1,6 @@
 """Script to label GPU nodes in a Kubernetes cluster for use with SkyPilot"""
 import argparse
+import hashlib
 import os
 import subprocess
 from typing import Tuple
@@ -54,6 +55,12 @@ def cleanup() -> Tuple[bool, str]:
         return success, reason
 
 
+def get_node_hash(node_name: str):
+    # Generates a 32 character md5 hash from a string
+    md5_hash = hashlib.md5(node_name.encode()).hexdigest()
+    return md5_hash[:32]
+
+
 def label():
     deletion_success, reason = cleanup()
     if not deletion_success:
@@ -102,7 +109,8 @@ def label():
             node_name = node.metadata.name
 
             # Modify the job manifest for the current node
-            job_manifest['metadata']['name'] = f'sky-gpu-labeler-{node_name}'
+            job_manifest['metadata']['name'] = ('sky-gpu-labeler-'
+                                                f'{get_node_hash(node_name)}')
             job_manifest['spec']['template']['spec']['nodeSelector'] = {
                 'kubernetes.io/hostname': node_name
             }
