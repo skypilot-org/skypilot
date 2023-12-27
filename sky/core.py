@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import getpass
 import sys
+import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -23,6 +24,9 @@ from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -283,6 +287,15 @@ def start(
            force=force)
 
 
+def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
+    if resources.use_spot:
+        message = ('Stopping spot instances is currently not supported on '
+                   f'{resources.cloud}')
+    else:
+        message = f'Stopping is currently not supported for {resources}'
+    return message
+
+
 @usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -328,8 +341,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}Stopping cluster '
                 f'{cluster_name!r}... skipped.{colorama.Style.RESET_ALL}\n'
-                '  Stopping instances is not supported for '
-                f'{handle.launched_resources}.\n'
+                f'  {_stop_not_supported_message(handle.launched_resources)}.\n'
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
 
@@ -453,8 +465,8 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
                 f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                '  Stopping instances is not supported for '
-                f'{handle.launched_resources}.') from e
+                f'  {_stop_not_supported_message(handle.launched_resources)}.'
+            ) from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
