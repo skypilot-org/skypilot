@@ -101,8 +101,8 @@ class SkyServeController:
                     logger.info(f'Scaling option received: {scaling_option}')
                     if (scaling_option.operator ==
                             autoscalers.AutoscalerDecisionOperator.SCALE_UP):
-                        assert isinstance(scaling_option.target,
-                                          dict), scaling_option
+                        assert (scaling_option.target is None or isinstance(
+                            scaling_option.target, dict)), scaling_option
                         self._replica_manager.scale_up(scaling_option.target)
                     elif (scaling_option.operator ==
                           autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):

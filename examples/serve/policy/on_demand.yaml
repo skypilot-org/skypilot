@@ -1,0 +1,20 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 20
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 3
+    num_init_replicas: 2
+    num_overprovision: 0
+    target_qps_per_replica: 1
+    autoscaler: RequestRateAutoscaler
+
+resources:
+  ports: 8081
+  cloud: gcp
+  cpus: 2+
+
+workdir: examples/serve/http_server
+
+run: python3 server.py

@@ -69,9 +69,10 @@ class SkyServiceSpec:
 
         if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Unsupported spot mixer: {autoscaler}.')
+                raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
 
-        if spot_placer not in spot_policy.SpotPlacer.get_policy_names():
+        if (spot_placer is not None and
+                spot_placer not in spot_policy.SpotPlacer.get_policy_names()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported spot placer: {spot_placer}.')
 
@@ -82,14 +83,12 @@ class SkyServiceSpec:
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
 
-        spot_args = [spot_placer, autoscaler, spot_zones, num_overprovision]
+        spot_args = [spot_placer, spot_zones]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         if spot_args_num != 0 and spot_args_num != len(spot_args):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'spot_placer, autoscaler, '
-                    'target_qps_per_replica, num_overprovision '
-                    'must be all '
+                    'spot_placer, spot_zones must be all'
                     'specified or all not specified in the service YAML.')
 
         self._spot_placer = spot_placer
@@ -246,6 +245,8 @@ class SkyServiceSpec:
         policy = ''
         if self.spot_placer:
             policy += self.spot_placer
+        else:
+            return 'No spot policy'
         if self.autoscaler:
             policy += f' with {self.autoscaler}'
         if self.num_overprovision is not None and self.num_overprovision > 0:

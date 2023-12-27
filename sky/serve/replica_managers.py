@@ -451,7 +451,8 @@ class ReplicaInfo:
             'is_spot': self.is_spot,
             'status': self.status.value,
             'status_property': self.status_property.json(),
-            'cluster_record': cluster_record,
+            'launched_at': (cluster_record['launched_at']
+                            if cluster_record is not None else None),
         }
 
     def probe(

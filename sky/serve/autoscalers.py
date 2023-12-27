@@ -11,7 +11,6 @@ from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import spot_policy
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -102,15 +101,8 @@ class Autoscaler:
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec'):
-
-        if spec.spot_placer is None:
-            return RequestRateAutoscaler(spec)
-
-        if spec.autoscaler not in ['DynamicFallback', 'StaticSpotProvision']:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Unsupported spot mixer: {spec.autoscaler}.')
-
-        return SpotRequestRateAutoscaler(spec)
+        assert (spec.autoscaler is not None and spec.autoscaler in cls.REGISTRY)
+        return cls.REGISTRY[spec.autoscaler](spec)
 
 
 class RequestRateAutoscaler(Autoscaler):
@@ -146,7 +138,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods: int = int(
             spec.downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-        self.bootstrap_done: bool = False
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -183,11 +174,7 @@ class RequestRateAutoscaler(Autoscaler):
                                   min(self.max_replicas, target_num_replicas))
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
-
-        if not self.bootstrap_done:
-            self.bootstrap_done = True
-            return target_num_replicas
-        elif target_num_replicas > self.target_num_replicas:
+        if target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
@@ -246,12 +233,13 @@ class RequestRateAutoscaler(Autoscaler):
         num_launched_replicas = len(launched_replica_infos)
 
         self.target_num_replicas = self._get_desired_num_replicas()
+        num_to_provision = (self.target_num_replicas + self.num_overprovision)
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
 
-        if num_launched_replicas < self.target_num_replicas:
-            num_replicas_to_scale_up = (self.target_num_replicas -
+        if num_launched_replicas < num_to_provision:
+            num_replicas_to_scale_up = (num_to_provision -
                                         num_launched_replicas)
 
             for _ in range(num_replicas_to_scale_up):
@@ -259,9 +247,9 @@ class RequestRateAutoscaler(Autoscaler):
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
 
-        elif num_launched_replicas > self.target_num_replicas:
+        elif num_launched_replicas > num_to_provision:
             num_replicas_to_scale_down = (num_launched_replicas -
-                                          self.target_num_replicas)
+                                          num_to_provision)
             all_replica_ids_to_scale_down.extend(
                 self._get_replica_ids_to_scale_down(num_replicas_to_scale_down,
                                                     launched_replica_infos))
