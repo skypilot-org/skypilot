@@ -39,6 +39,7 @@ from sky import skypilot_config
 from sky import status_lib
 from sky.backends import onprem_utils
 from sky.clouds import cloud_registry
+from sky.clouds.utils import gcp_utils
 from sky.provision import instance_setup
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -50,7 +51,6 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -1105,7 +1105,7 @@ def write_cluster_config(
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
 
     # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if tpu_utils.is_tpu(to_provision) and not tpu_utils.is_tpu_vm(to_provision):
+    if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name

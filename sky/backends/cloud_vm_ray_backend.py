@@ -38,6 +38,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
@@ -57,7 +58,6 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -2480,9 +2480,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def num_node_ips(self) -> int:
         """Returns number of IPs of the cluster, correctly handling TPU Pod."""
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
+        is_tpu_vm_pod = gcp_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
-            num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
+            num_ips = gcp_utils.get_num_tpu_devices(self.launched_resources)
         else:
             num_ips = self.launched_nodes
         return num_ips
@@ -2514,7 +2514,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # Backward compatibility: we change the default value for TPU VM to
             # True in version 7 (#1758), so we need to explicitly set it to
             # False when loading the old handle.
-            if tpu_utils.is_tpu(launched_resources):
+            if gcp_utils.is_tpu(launched_resources):
                 accelerator_args = launched_resources.accelerator_args
                 accelerator_args['tpu_vm'] = accelerator_args.get(
                     'tpu_vm', False)

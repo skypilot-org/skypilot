@@ -16,13 +16,13 @@ from sky import spot
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.clouds.utils import gcp_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -317,7 +317,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
     if isinstance(backend, backends.CloudVmRayBackend):
         assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
-        if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+        if gcp_utils.is_tpu_vm_pod(handle.launched_resources):
             # Reference:
             # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
             raise exceptions.NotSupportedError(
@@ -450,7 +450,7 @@ def autostop(
             '  Stopping spot instances is not supported as the attached '
             'disks will be lost.')
 
-    if (tpu_utils.is_tpu_vm_pod(handle.launched_resources) and not down and
+    if (gcp_utils.is_tpu_vm_pod(handle.launched_resources) and not down and
             not is_cancel):
         # Reference:
         # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
