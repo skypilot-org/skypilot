@@ -24,6 +24,7 @@ release = version
 # -- General configuration
 
 extensions = [
+    'sphinxemoji.sphinxemoji',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.duration',
@@ -35,6 +36,7 @@ extensions = [
     'sphinx_click',
     'sphinx_copybutton',
     'sphinx_design',
+    'myst_parser',
 ]
 
 intersphinx_mapping = {

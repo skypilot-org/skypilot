@@ -199,6 +199,25 @@ Available fields:
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
 
+      # Candidate resources (optional). If specified, SkyPilot will only use
+      # these candidate resources to launch the cluster. The fields specified
+      # outside of `any_of`, `ordered` will be used as the default values for
+      # all candidate resources, and any duplicate fields specified inside
+      # `any_of`, `ordered` will override the default values.
+      # `any_of:` means that SkyPilot will try to find a resource that matches
+      # any of the candidate resources, i.e. the failover order will be decided
+      # by the optimizer.
+      # `ordered:` means that SkyPilot will failover through the candidate
+      # resources with the specified order.
+      # Note: accelerators under `any_of` and `ordered` cannot be a list or set.
+      any_of:
+        - cloud: aws
+          region: us-west-2
+          acceraltors: V100
+        - cloud: gcp
+          acceraltors: A100
+
+
     # Environment variables (optional). These values can be accessed in the
     # `file_mounts`, `setup`, and `run` sections below.
     #

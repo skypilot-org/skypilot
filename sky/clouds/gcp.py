@@ -1,6 +1,4 @@
 """Google Cloud Platform."""
-import dataclasses
-import datetime
 import functools
 import json
 import os
@@ -8,9 +6,8 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-import cachetools
 import colorama
 
 from sky import clouds
@@ -19,6 +16,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
+from sky.clouds.utils import gcp_utils
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -120,68 +118,6 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
-@dataclasses.dataclass
-class SpecificReservation:
-    count: int
-    in_use_count: int
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'SpecificReservation':
-        return cls(count=int(d['count']), in_use_count=int(d['inUseCount']))
-
-
-class GCPReservation:
-    """GCP Reservation object that contains the reservation information."""
-
-    def __init__(self, self_link: str, zone: str,
-                 specific_reservation: SpecificReservation,
-                 specific_reservation_required: bool) -> None:
-        self.self_link = self_link
-        self.zone = zone
-        self.specific_reservation = specific_reservation
-        self.specific_reservation_required = specific_reservation_required
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'GCPReservation':
-        return cls(
-            self_link=d['selfLink'],
-            zone=d['zone'],
-            specific_reservation=SpecificReservation.from_dict(
-                d['specificReservation']),
-            specific_reservation_required=d['specificReservationRequired'],
-        )
-
-    @property
-    def available_resources(self) -> int:
-        """Count resources available that can be used in this reservation."""
-        return (self.specific_reservation.count -
-                self.specific_reservation.in_use_count)
-
-    def is_consumable(
-        self,
-        specific_reservations: Set[str],
-    ) -> bool:
-        """Check if the reservation is consumable.
-
-        Check if the reservation is consumable with the provided specific
-        reservation names. This is defined by the Consumption type.
-        For more details:
-        https://cloud.google.com/compute/docs/instances/reservations-overview#how-reservations-work
-        """
-        return (not self.specific_reservation_required or
-                self.name in specific_reservations)
-
-    @property
-    def name(self) -> str:
-        """Name derived from reservation self link.
-
-        The naming convention can be found here:
-        https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
-        """
-        parts = self.self_link.split('/')
-        return '/'.join(parts[-6:-4] + parts[-2:])
-
-
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
@@ -224,11 +160,6 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}For more info: '
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
-
-    def __init__(self):
-        super().__init__()
-
-        self._list_reservations_cache = None
 
     @classmethod
     def _cloud_unsupported_features(
@@ -633,82 +564,6 @@ class GCP(clouds.Cloud):
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='gcp')
 
-    def get_reservations_available_resources(
-        self,
-        instance_type: str,
-        region: str,
-        zone: Optional[str],
-        specific_reservations: Set[str],
-    ) -> Dict[str, int]:
-        del region  # Unused
-        if zone is None:
-            # For backward compatibility, the cluster in INIT state launched
-            # before #2352 may not have zone information. In this case, we
-            # return 0 for all reservations.
-            return {reservation: 0 for reservation in specific_reservations}
-        reservations = self._list_reservations_for_instance_type_in_zone(
-            instance_type, zone)
-
-        return {
-            r.name: r.available_resources
-            for r in reservations
-            if r.is_consumable(specific_reservations)
-        }
-
-    def _list_reservations_for_instance_type_in_zone(
-        self,
-        instance_type: str,
-        zone: str,
-    ) -> List[GCPReservation]:
-        reservations = self._list_reservations_for_instance_type(instance_type)
-        return [r for r in reservations if r.zone.endswith(f'/{zone}')]
-
-    def _get_or_create_ttl_cache(self):
-        if getattr(self, '_list_reservations_cache', None) is None:
-            # Backward compatibility: Clusters created before #2352 has GCP
-            # objects serialized without the attribute. So we access it this
-            # way.
-            self._list_reservations_cache = cachetools.TTLCache(
-                maxsize=1,
-                ttl=datetime.timedelta(300),
-                timer=datetime.datetime.now)
-        return self._list_reservations_cache
-
-    @cachetools.cachedmethod(cache=lambda self: self._get_or_create_ttl_cache())
-    def _list_reservations_for_instance_type(
-        self,
-        instance_type: str,
-    ) -> List[GCPReservation]:
-        """List all reservations for the given instance type.
-
-        TODO: We need to incorporate accelerators because the reserved instance
-        can be consumed only when the instance_type + GPU type matches, and in
-        GCP GPUs except for A100 and L4 do not have their own instance type.
-        For example, if we have a specific reservation with n1-highmem-8
-        in us-central1-c. `sky launch --gpus V100` will fail.
-        """
-        list_reservations_cmd = (
-            'gcloud compute reservations list '
-            f'--filter="specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
-            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink, zone)"'
-        )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
-            list_reservations_cmd,
-            # 1: means connection aborted (although it shows 22 in the error,
-            # but the actual error code is 1)
-            # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument')) # pylint: disable=line-too-long
-            retry_returncode=[255, 1],
-        )
-        subprocess_utils.handle_returncode(
-            returncode,
-            list_reservations_cmd,
-            error_msg=
-            f'Failed to get list reservations for {instance_type!r}:\n{stderr}',
-            stderr=stderr,
-            stream_logs=True,
-        )
-        return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
-
     @classmethod
     def _find_application_key_path(cls) -> str:
         # Check the application default credentials in the environment variable.
@@ -1058,6 +913,28 @@ class GCP(clouds.Cloud):
         # Quota found to be greater than zero, try provisioning
         return True
 
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        del region  # Unused
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = gcp_utils.list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+
+        return {
+            r.name: r.available_resources
+            for r in reservations
+            if r.is_consumable(specific_reservations)
+        }
+
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
@@ -1227,10 +1104,3 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
-
-    def __getstate__(self) -> Dict[str, Any]:
-        state = self.__dict__.copy()
-        # We should avoid saving third-party object to the state, as it may
-        # cause unpickling error when the third-party API is updated.
-        state.pop('_list_reservations_cache', None)
-        return state

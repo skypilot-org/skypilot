@@ -678,7 +678,10 @@ def spot_launch(
             'retry_until_up': retry_until_up,
             'skypilot_runtime_env': constants.SKY_REMOTE_PYTHON_ENV,
             'remote_user_config_path': remote_user_config_path,
-            **controller_utils.shared_controller_vars_to_fill('spot'),
+            **controller_utils.shared_controller_vars_to_fill(
+                'spot',
+                remote_user_config_path=remote_user_config_path,
+            ),
         }
 
         yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
