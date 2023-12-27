@@ -1173,8 +1173,8 @@ def test_job_queue_multinode(generic_cloud: str):
         'job_queue_multinode',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_multinode.yaml',
-            f'sky exec {name} -n {name}-1 --detach-setup -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -n {name}-2 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
             f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
