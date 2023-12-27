@@ -77,7 +77,7 @@ It has some convenience features which you might find helpful (see [Dockerfile](
 - Fork the SkyPilot repository and create a new branch for your changes.
 - If relevant, add tests for your changes. For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
-- Ensure code is properly formatted by running [`format.sh`](./format.sh).
+- Ensure code is properly formatted by running [`format.sh`](https://github.com/skypilot-org/skypilot/blob/master/format.sh).
 - Push your changes to your fork and open a pull request in the SkyPilot repository.
 - In the PR description, write a `Tested:` section to describe relevant tests performed.
 
