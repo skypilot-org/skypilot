@@ -337,7 +337,7 @@ def get_service_schema():
                     'spot_placer': {
                         'type': 'string',
                     },
-                    'spot_mixer': {
+                    'autoscaler': {
                         'type': 'string',
                     },
                     'spot_zones': {

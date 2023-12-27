@@ -29,6 +29,10 @@ class SpotPlacer:
         assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
         cls.REGISTRY[cls.NAME] = cls
 
+    @classmethod
+    def get_policy_names(cls) -> List[str]:
+        return list(cls.REGISTRY.keys())
+
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                current_considered_zones: List[str]) -> str:
         """Select next zone to place spot instance."""
@@ -47,7 +51,8 @@ class SpotPlacer:
 
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
-        assert spec.spot_placer is not None
+        assert (spec.spot_placer is not None and
+                spec.spot_placer in cls.REGISTRY)
         return cls.REGISTRY[spec.spot_placer](spec)
 
 

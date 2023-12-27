@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -58,6 +58,9 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
+    NAME: Optional[str] = None
+    REGISTRY: Dict[str, Type['Autoscaler']] = dict()
+
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
@@ -69,7 +72,10 @@ class Autoscaler:
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        self.target_num_replicas: int = spec.min_replicas
+        # Target number of replicas is initialized to min replicas.
+        self.target_num_replicas: int = (spec.num_init_replicas
+                                         if spec.num_init_replicas is not None
+                                         else spec.min_replicas)
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -83,15 +89,26 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
+    def __init_subclass__(cls) -> None:
+        if cls.NAME is None:
+            # This is an abstract class, don't put it in the registry.
+            return
+        assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
+        cls.REGISTRY[cls.NAME] = cls
+
+    @classmethod
+    def get_autoscaler_names(cls) -> List[str]:
+        return list(cls.REGISTRY.keys())
+
     @classmethod
     def from_spec(cls, spec: 'service_spec.SkyServiceSpec'):
 
         if spec.spot_placer is None:
             return RequestRateAutoscaler(spec)
 
-        if spec.spot_mixer not in ['DynamicFallback', 'StaticSpotProvision']:
+        if spec.autoscaler not in ['DynamicFallback', 'StaticSpotProvision']:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Unsupported spot mixer: {spec.spot_mixer}.')
+                raise ValueError(f'Unsupported spot mixer: {spec.autoscaler}.')
 
         return SpotRequestRateAutoscaler(spec)
 
@@ -102,6 +119,7 @@ class RequestRateAutoscaler(Autoscaler):
     Scales when the number of requests in the given interval is above or below
     the threshold.
     """
+    NAME: Optional[str] = 'RequestRateAutoscaler'
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
@@ -128,10 +146,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods: int = int(
             spec.downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-        # Target number of replicas is initialized to min replicas.
-        self.target_num_replicas: int = (spec.num_init_replicas
-                                         if spec.num_init_replicas is not None
-                                         else spec.min_replicas)
         self.bootstrap_done: bool = False
 
     def collect_request_information(
@@ -269,17 +283,12 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     same performance as OnDemand instances.
     """
 
+    NAME: Optional[str] = 'SpotRequestRateAutoscaler'
+
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         super().__init__(spec)
         self.spot_placer: 'spot_policy.SpotPlacer' = (
             spot_policy.SpotPlacer.from_spec(spec))
-        self.is_on_demand_fallback = (spec.spot_mixer == 'DynamicFallback')
-
-    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': True, 'spot_recovery': None}
-
-    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': False, 'spot_recovery': None}
 
     def handle_active_history(self, history: List[str]) -> None:
         for zone in history:
@@ -289,37 +298,13 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         for zone in history:
             self.spot_placer.handle_preemption(zone)
 
-    def evaluate_scaling(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[AutoscalerDecision]:
+    def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': True, 'spot_recovery': None}
 
-        launched_replica_infos = self._get_launched_replica_infos(replica_infos)
-        self.target_num_replicas = self._get_desired_num_replicas()
-
-        num_alive_spot, num_ready_spot = 0, 0
-        num_alive_on_demand, num_ready_on_demand = 0, 0
-        for info in launched_replica_infos:
-            if info.is_spot:
-                if info.status == serve_state.ReplicaStatus.READY:
-                    num_ready_spot += 1
-                num_alive_spot += 1
-            else:
-                if info.status == serve_state.ReplicaStatus.READY:
-                    num_ready_on_demand += 1
-                num_alive_on_demand += 1
-        logger.info(
-            f'Number of alive spot instances: {num_alive_spot}, '
-            f'Number of ready spot instances: {num_ready_spot}, '
-            f'Number of alive on-demand instances: {num_alive_on_demand}, '
-            f'Number of ready on-demand instances: {num_ready_on_demand}')
-
-        if isinstance(self.spot_placer, spot_policy.HistoricalSpotPlacer):
-            log_zone_to_type = {
-                zone: zone_type.value
-                for zone, zone_type in self.spot_placer.zone2type.items()
-            }
-            logger.info(f'Current zone to type: {log_zone_to_type}')
+    def _scale_spot_instances(
+        self, num_alive_spot: int,
+        launched_replica_infos: List['replica_managers.ReplicaInfo']
+    ) -> Tuple[List[AutoscalerDecision], List[int]]:
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -348,21 +333,90 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                     num_spot_to_scale_down,
                     [info for info in launched_replica_infos if info.is_spot]))
 
+        return scaling_options, all_replica_ids_to_scale_down
+
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+
+        launched_replica_infos = self._get_launched_replica_infos(replica_infos)
+        self.target_num_replicas = self._get_desired_num_replicas()
+
+        num_alive_spot, num_ready_spot = 0, 0
+        for info in launched_replica_infos:
+            if info.status == serve_state.ReplicaStatus.READY:
+                num_ready_spot += 1
+            num_alive_spot += 1
+        logger.info(f'Number of alive spot instances: {num_alive_spot}, '
+                    f'Number of ready spot instances: {num_ready_spot}')
+
+        scaling_options, all_replica_ids_to_scale_down = (
+            self._scale_spot_instances(num_alive_spot, launched_replica_infos))
+
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
+        return scaling_options
+
+
+class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
+    """SpotOnDemandRequestRateAutoscaler: Use spot/on-demand mixture
+    to autoscale based on request rate.
+    """
+
+    NAME: Optional[str] = 'SpotOnDemandRequestRateAutoscaler'
+
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(spec)
+        self.spot_placer: 'spot_policy.SpotPlacer' = (
+            spot_policy.SpotPlacer.from_spec(spec))
+
+    def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
+        return {'use_spot': False, 'spot_recovery': None}
+
+    def evaluate_scaling(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+
+        launched_replica_infos = self._get_launched_replica_infos(replica_infos)
+        self.target_num_replicas = self._get_desired_num_replicas()
+
+        num_alive_spot, num_ready_spot = 0, 0
+        num_alive_on_demand, num_ready_on_demand = 0, 0
+        for info in launched_replica_infos:
+            if info.is_spot:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_spot += 1
+                num_alive_spot += 1
+            else:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_on_demand += 1
+                num_alive_on_demand += 1
+        logger.info(
+            f'Number of alive spot instances: {num_alive_spot}, '
+            f'Number of ready spot instances: {num_ready_spot}, '
+            f'Number of alive on-demand instances: {num_alive_on_demand}, '
+            f'Number of ready on-demand instances: {num_ready_on_demand}')
+
+        scaling_options, all_replica_ids_to_scale_down = (
+            self._scale_spot_instances(num_alive_spot, launched_replica_infos))
+
         # OnDemand fallback.
-        if self.is_on_demand_fallback:
-            num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
-            if num_ready_spot + num_alive_on_demand < num_to_provision:
-                # Enable OnDemand fallback.
-                num_demand_to_scale_up = min(
-                    self.target_num_replicas,
-                    num_to_provision - num_ready_spot) - num_alive_on_demand
+        num_to_provision = (self.target_num_replicas + self.num_overprovision)
+        num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
+        if num_ready_spot + num_alive_on_demand < num_to_provision:
+            # Enable OnDemand fallback.
+            num_demand_to_scale_up = min(
+                self.target_num_replicas,
+                num_to_provision - num_ready_spot) - num_alive_on_demand
 
-            elif num_ready_spot + num_alive_on_demand > num_to_provision:
-                # OnDemand fallback is not needed.
-                num_demand_to_scale_down = (num_ready_spot +
-                                            num_alive_on_demand -
-                                            num_to_provision)
-
+        elif num_ready_spot + num_alive_on_demand > num_to_provision:
+            # OnDemand fallback is not needed.
+            num_demand_to_scale_down = (num_ready_spot + num_alive_on_demand -
+                                        num_to_provision)
         if num_demand_to_scale_up > 0:
             for _ in range(num_demand_to_scale_up):
                 scaling_options.append(
@@ -371,7 +425,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
                         target=self._get_on_demand_resources_override_dict()))
         elif num_demand_to_scale_down > 0:
             all_replica_ids_to_scale_down.extend(
-                self._get_replica_ids_to_scale_down(num_spot_to_scale_down, [
+                self._get_replica_ids_to_scale_down(num_demand_to_scale_down, [
                     info for info in launched_replica_infos if not info.is_spot
                 ]))
 

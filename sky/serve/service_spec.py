@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from sky.serve import autoscalers
 from sky.serve import constants
+from sky.serve import spot_policy
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -24,7 +26,7 @@ class SkyServiceSpec:
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         spot_placer: Optional[str] = None,
-        spot_mixer: Optional[str] = None,
+        autoscaler: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
         num_overprovision: Optional[int] = None,
         num_init_replicas: Optional[int] = None,
@@ -65,6 +67,14 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unsupported spot mixer: {autoscaler}.')
+
+        if spot_placer not in spot_policy.SpotPlacer.get_policy_names():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unsupported spot placer: {spot_placer}.')
+
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas
@@ -72,18 +82,18 @@ class SkyServiceSpec:
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
 
-        spot_args = [spot_placer, spot_mixer, spot_zones, num_overprovision]
+        spot_args = [spot_placer, autoscaler, spot_zones, num_overprovision]
         spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
         if spot_args_num != 0 and spot_args_num != len(spot_args):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'spot_placer, spot_mixer, '
+                    'spot_placer, autoscaler, '
                     'target_qps_per_replica, num_overprovision '
                     'must be all '
                     'specified or all not specified in the service YAML.')
 
         self._spot_placer = spot_placer
-        self._spot_mixer = spot_mixer
+        self._autoscaler = autoscaler
         self._num_overprovision = num_overprovision
         self._num_init_replicas = num_init_replicas
         self._spot_zones = spot_zones
@@ -161,8 +171,8 @@ class SkyServiceSpec:
 
             service_config['spot_placer'] = policy_section.get(
                 'spot_placer', None)
-            service_config['spot_mixer'] = policy_section.get(
-                'spot_mixer', None)
+            service_config['autoscaler'] = policy_section.get(
+                'autoscaler', None)
             service_config['spot_zones'] = policy_section.get(
                 'spot_zones', None)
             service_config['num_overprovision'] = policy_section.get(
@@ -215,7 +225,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
-        add_if_not_none('replica_policy', 'spot_mixer', self._spot_mixer)
+        add_if_not_none('replica_policy', 'autoscaler', self._autoscaler)
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         add_if_not_none('replica_policy', 'num_overprovision',
                         self._num_overprovision)
@@ -236,8 +246,8 @@ class SkyServiceSpec:
         policy = ''
         if self.spot_placer:
             policy += self.spot_placer
-        if self.spot_mixer:
-            policy += f' with {self.spot_mixer}'
+        if self.autoscaler:
+            policy += f' with {self.autoscaler}'
         if self.num_overprovision is not None and self.num_overprovision > 0:
             policy += f' with {self.num_overprovision} extra spot instance(s)'
         return policy if policy else 'No spot policy'
@@ -293,8 +303,8 @@ class SkyServiceSpec:
         return self._spot_placer
 
     @property
-    def spot_mixer(self) -> Optional[str]:
-        return self._spot_mixer
+    def autoscaler(self) -> Optional[str]:
+        return self._autoscaler
 
     @property
     def spot_zones(self) -> Optional[List[str]]:

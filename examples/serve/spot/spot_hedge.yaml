@@ -5,20 +5,18 @@ service:
   replica_policy:
     min_replicas: 1
     max_replicas: 3
-    num_extra: 2
     num_init_replicas: 2
+    num_overprovision: 1
     target_qps_per_replica: 1
     spot_placer: DynamicFailover
-    spot_mixer: OnDemandFallback
     spot_zones:
-      - us-east-2a
-      - us-east-2b
-      - us-west-2a
-      - us-west-2b
+      - us-central1-a
+      - us-central1-b
+    autoscaler: SpotOnDemandRequestRateAutoscaler
 
 resources:
   ports: 8081
-  cloud: aws
+  cloud: gcp
   cpus: 2+
 
 workdir: examples/serve/http_server
