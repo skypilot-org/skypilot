@@ -1180,6 +1180,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_kubernetes_authentication(config)
     elif isinstance(cloud, clouds.IBM):
         config = auth.setup_ibm_authentication(config)
+    elif isinstance(cloud, clouds.OVHCloud):
+        config = auth.setup_ovhcloud_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
