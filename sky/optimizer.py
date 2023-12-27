@@ -338,7 +338,7 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = global_user_state.get_enabled_clouds()
-                if _cloud_in_list(clouds.Kubernetes(), enabled_clouds):
+                if clouds.Kubernetes().in_cloud_list(enabled_clouds):
                     if any(orig_resources.cloud is None
                            for orig_resources in node.resources):
                         source_hint = 'catalog and kubernetes cluster'
@@ -1086,10 +1086,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _cloud_in_list(cloud: clouds.Cloud, lst: Iterable[clouds.Cloud]) -> bool:
-    return any(cloud.is_same_cloud(c) for c in lst)
-
-
 def _make_launchables_for_valid_region_zones(
     launchable_resources: resources_lib.Resources
 ) -> List[resources_lib.Resources]:
@@ -1173,8 +1169,8 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
-        if resources.cloud is not None and not _cloud_in_list(
-                resources.cloud, enabled_clouds):
+        if (resources.cloud is not None and
+                not resources.cloud.in_cloud_list(enabled_clouds)):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)

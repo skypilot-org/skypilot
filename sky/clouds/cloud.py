@@ -11,7 +11,7 @@ import collections
 import enum
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from sky import exceptions
 from sky import skypilot_config
@@ -68,6 +68,8 @@ class Cloud:
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
+    _REQUIRE_CREDENTIAL_ON_REMOTE = True
+
     @classmethod
     def _cloud_unsupported_features(
             cls) -> Dict[CloudImplementationFeatures, str]:
@@ -92,6 +94,15 @@ class Cloud:
         None means no limit.
         """
         return None
+
+    @classmethod
+    def require_credential_on_remote(cls) -> bool:
+        """Returns whether the cloud requires credential on remote cluster.
+
+        This method is used by backend_utils.write_cluster_config() to decide
+        whether to upload the cloud credential files to the remote cluster.
+        """
+        return cls._REQUIRE_CREDENTIAL_ON_REMOTE
 
     #### Regions/Zones ####
 
@@ -206,8 +217,12 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def is_same_cloud(self, other):
+    def is_same_cloud(self, other: 'Cloud'):
         raise NotImplementedError
+
+    def in_cloud_list(self, cloud_list: Iterable['Cloud']) -> bool:
+        """Returns whether this cloud is in the given cloud list."""
+        return any(self.is_same_cloud(cloud) for cloud in cloud_list)
 
     def make_deploy_resources_variables(
         self,

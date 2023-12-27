@@ -945,7 +945,10 @@ def write_cluster_config(
         min(available_specific_reservations - 1, num_nodes - 1), 0)
 
     assert cluster_name is not None
-    credentials = sky_check.get_cloud_credential_file_mounts()
+    excluded_clouds = []
+    if not cloud.require_credential_on_remote():
+        excluded_clouds = [cloud]
+    credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     ip_list = None
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
