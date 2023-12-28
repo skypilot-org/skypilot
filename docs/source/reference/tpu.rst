@@ -57,10 +57,9 @@ To use TPU VMs, set the following in a task YAML's ``resources`` field:
    resources:
       accelerators: tpu-v2-8
       accelerator_args:
-         tpu_vm: True
          runtime_version: tpu-vm-base  # optional
 
-The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the :code:`tpu_vm` bool (defaults to false, which means TPU Node is used), and an optional  TPU ``runtime_version`` field.
+The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the optional :code:`tpu_vm` bool (defaults to true, which means TPU VM is used), and an optional TPU ``runtime_version`` field.
 To show what TPU types are supported, run :code:`sky show-gpus`.
 
 Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU VM using JAX.
@@ -131,6 +130,7 @@ To use a TPU Node, set the following in a task YAML's ``resources`` field:
       accelerators: tpu-v2-8
       accelerator_args:
          runtime_version: 2.12.0  # optional, TPU runtime version.
+         tpu_vm: False
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
 You can modify the host instance type or the TPU type.
@@ -146,6 +146,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
       accelerators: tpu-v2-8
       accelerator_args:
          runtime_version: 2.12.0  # optional, TPU runtime version.
+         tpu_vm: False
 
    # TPU node requires loading data from a GCS bucket.
    # We use SkyPilot Storage to mount a GCS bucket to /dataset.
@@ -228,7 +229,6 @@ To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.
       accelerators: tpu-v2-32  # Pods have > 8 cores (the last number)
       accelerator_args:
          runtime_version: tpu-vm-base
-         tpu_vm: True
 
 .. note::
 
@@ -272,7 +272,6 @@ Here is a task YAML for a cifar10 training job on a :code:`v2-32` TPU Pod with J
       accelerators: tpu-v2-32
       accelerator_args:
          runtime_version: tpu-vm-base
-         tpu_vm: True
 
    setup: |
       git clone https://github.com/infwinston/tpu-example.git

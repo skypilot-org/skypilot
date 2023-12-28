@@ -139,19 +139,20 @@ Available fields:
       #   To request a TPU node:
       #     accelerator_args:
       #       tpu_name: ...
+      #       tpu_vm: False
       #
       #   To request a TPU VM:
       #     accelerator_args:
-      #       tpu_vm: True
+      #       tpu_vm: True (optional, default: True)
       #
       # By default, the value for "runtime_version" is decided based on which is
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default is "2.12.0" for TPU node and "tpu-vm-base" for TPU VM.
-        runtime_version: 2.12.0
-        tpu_name: mytpu
-        tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
+        # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
+        runtime_version: tpu-vm-base
+      # tpu_name: mytpu
+      # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
 
       # Custom image id (optional, advanced). The image id used to boot the
       # instances. Only supported for AWS and GCP (for non-docker image). If not
