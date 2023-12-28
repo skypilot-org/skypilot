@@ -82,15 +82,6 @@ class SkyServiceSpec:
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
-
-        spot_args = [spot_placer, spot_zones]
-        spot_args_num = sum([spot_arg is not None for spot_arg in spot_args])
-        if spot_args_num != 0 and spot_args_num != len(spot_args):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'spot_placer, spot_zones must be all'
-                    'specified or all not specified in the service YAML.')
-
         self._spot_placer = spot_placer
         self._autoscaler = autoscaler
         self._num_overprovision = num_overprovision

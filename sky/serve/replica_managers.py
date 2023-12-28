@@ -41,7 +41,7 @@ _PROCESS_POOL_REFRESH_INTERVAL = 20
 # TODO(tian): Maybe let user determine this threshold
 _CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT = 180
 _RETRY_INIT_GAP_SECONDS = 60
-_DEFAULT_DRAIN_SECONDS = 60
+_DEFAULT_DRAIN_SECONDS = 120
 
 # Since sky.launch is very resource demanding, we limit the number of
 # concurrent sky.launch process to avoid overloading the machine.
