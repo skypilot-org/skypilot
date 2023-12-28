@@ -1967,7 +1967,7 @@ def _update_cluster_status_no_lock(
                     f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
             ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
-            total_nodes = handle.launched_nodes * handle.num_node_ips
+            total_nodes = handle.launched_nodes * handle.num_ips_per_node
             if ready_head + ready_workers == total_nodes:
                 return True
             raise RuntimeError(

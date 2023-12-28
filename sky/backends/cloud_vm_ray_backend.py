@@ -2344,7 +2344,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
-                                 (self.num_node_ips * self.launched_nodes - 1))
+                                 (self.num_ips_per_node * self.launched_nodes - 1))
 
     def update_cluster_ips(
             self,
@@ -2382,7 +2382,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
             return (ips is not None and
-                    len(ips) == self.num_node_ips * self.launched_nodes and
+                    len(ips) == self.num_ips_per_node * self.launched_nodes and
                     all(ip is not None for ip in ips))
 
         use_internal_ips = self._use_internal_ips()
@@ -2531,13 +2531,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         return None
 
     @property
-    def num_node_ips(self) -> int:
-        """Returns number of IPs of the cluster, correctly handling TPU Pod."""
+    def num_ips_per_node(self) -> int:
+        """Returns number of IPs per node in the cluster, handling TPU Pod."""
         is_tpu_vm_pod = gcp_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
             num_ips = gcp_utils.get_num_tpu_devices(self.launched_resources)
         else:
-            num_ips = self.launched_nodes
+            num_ips = 1
         return num_ips
 
     def __setstate__(self, state):
@@ -3478,7 +3478,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
-        num_actual_nodes = task.num_nodes * handle.num_node_ips
+        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
@@ -4816,7 +4816,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
-        num_actual_nodes = task.num_nodes * handle.num_node_ips
+        num_actual_nodes = task.num_nodes * handle.num_ips_per_node
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
