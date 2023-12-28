@@ -1316,7 +1316,8 @@ def test_docker_preinstalled_package(generic_cloud: str):
         'docker_with_preinstalled_package',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
-            f'sky exec {name} "nginx -V" | grep SUCCEEDED',
+            f'sky exec {name} "nginx -V"',
+            f'sky logs {name} 1 --status',
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
