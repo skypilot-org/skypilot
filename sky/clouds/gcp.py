@@ -18,7 +18,6 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:

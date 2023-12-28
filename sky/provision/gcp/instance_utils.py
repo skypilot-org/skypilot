@@ -1056,7 +1056,7 @@ class GCPTPUVMInstance(GCPInstance):
         count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
-        config = node_config.copy()
+        config = copy.deepcopy(node_config)
         # removing Compute-specific default key set in config.py
         config.pop('networkInterfaces', None)
 
@@ -1121,7 +1121,7 @@ class GCPTPUVMInstance(GCPInstance):
             except gcp.http_error_exception() as e:
                 # NOTE: Error example:
                 # {
-                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.",
+                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
                 #   'domain': 'usageLimits',
                 #   'reason': 'quotaExceeded'
                 # }
@@ -1130,7 +1130,8 @@ class GCPTPUVMInstance(GCPInstance):
                     f'create_instances: googleapiclient.errors.HttpError: {e}')
                 errors = []
                 for detail in error_details:
-                    # To be consistent with error messages returned by operation wait.
+                    # To be consistent with error messages returned by operation
+                    # wait.
                     viloations = detail.get('violations', [])
                     if not viloations:
                         errors.append({
@@ -1165,7 +1166,7 @@ class GCPTPUVMInstance(GCPInstance):
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
-            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
             for i, operation in enumerate(operations):
                 if success[i]:
                     continue
@@ -1241,6 +1242,7 @@ class GCPTPUVMInstance(GCPInstance):
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
                           instance_id: str) -> List[common.InstanceInfo]:
+        del project_id, availability_zone  # unused
         result = cls.load_resource().projects().locations().nodes().get(
             name=instance_id).execute()
         network_endpoints = result.get('networkEndpoints', [{}])
