@@ -360,6 +360,7 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         super().__init__(spec)
         self.spot_placer: 'spot_policy.SpotPlacer' = (
             spot_policy.SpotPlacer.from_spec(spec))
+        self.min_on_demand_replicas = spec.min_on_demand_replicas
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}
@@ -397,9 +398,10 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
         if num_ready_spot + num_alive_on_demand < num_to_provision:
             # Enable OnDemand fallback.
-            num_demand_to_scale_up = min(
-                self.target_num_replicas,
-                num_to_provision - num_ready_spot) - num_alive_on_demand
+            num_demand_to_scale_up = max(
+                self.min_on_demand_replicas,
+                min(self.target_num_replicas,
+                    num_to_provision - num_ready_spot)) - num_alive_on_demand
 
         elif num_ready_spot + num_alive_on_demand > num_to_provision:
             # OnDemand fallback is not needed.

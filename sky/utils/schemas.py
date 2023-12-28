@@ -353,6 +353,9 @@ def get_service_schema():
                     'num_init_replicas': {
                         'type': 'integer',
                     },
+                    'min_on_demand_replicas': {
+                        'type': 'integer',
+                    },
                     'upscale_delay_seconds': {
                         'type': 'number',
                     },

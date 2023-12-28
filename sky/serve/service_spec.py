@@ -23,6 +23,7 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
+        min_on_demand_replicas: int = 0,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         spot_placer: Optional[str] = None,
@@ -86,6 +87,7 @@ class SkyServiceSpec:
         self._autoscaler = autoscaler
         self._num_overprovision = num_overprovision
         self._num_init_replicas = num_init_replicas
+        self._min_on_demand_replicas = min_on_demand_replicas
         self._spot_zones = spot_zones
         self._upscale_delay_seconds = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
@@ -169,6 +171,8 @@ class SkyServiceSpec:
                 'num_overprovision', None)
             service_config['num_init_replicas'] = policy_section.get(
                 'num_init_replicas', None)
+            service_config['min_on_demand_replicas'] = policy_section.get(
+                'min_on_demand_replicas', 0)
 
         return SkyServiceSpec(**service_config)
 
@@ -221,6 +225,8 @@ class SkyServiceSpec:
                         self._num_overprovision)
         add_if_not_none('replica_policy', 'num_init_replicas',
                         self._num_init_replicas)
+        add_if_not_none('replica_policy', 'min_on_demand_replicas',
+                        self._min_on_demand_replicas)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
                         self._upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
@@ -309,6 +315,10 @@ class SkyServiceSpec:
     @property
     def num_init_replicas(self) -> Optional[int]:
         return self._num_init_replicas
+
+    @property
+    def min_on_demand_replicas(self) -> int:
+        return self._min_on_demand_replicas
 
     @property
     def upscale_delay_seconds(self) -> int:
