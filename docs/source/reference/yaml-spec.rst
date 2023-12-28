@@ -136,14 +136,14 @@ Available fields:
       # and TPU VM.
       # Example usage:
       #
+      #   To request a TPU VM:
+      #     accelerator_args:
+      #       tpu_vm: True (optional, default: True)
+      #
       #   To request a TPU node:
       #     accelerator_args:
       #       tpu_name: ...
       #       tpu_vm: False
-      #
-      #   To request a TPU VM:
-      #     accelerator_args:
-      #       tpu_vm: True (optional, default: True)
       #
       # By default, the value for "runtime_version" is decided based on which is
       # requested and should work for either case. If passing in an incompatible
