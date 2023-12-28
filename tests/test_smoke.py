@@ -2147,7 +2147,7 @@ def test_spot_pipeline_recovery_gcp():
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
-            'sleep 100',
+            'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
