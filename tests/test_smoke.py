@@ -2857,6 +2857,27 @@ def test_skyserve_spot_user_bug():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
+def test_skyserve_load_balancer():
+    """Test skyserve load balancer round-robin policy"""
+    name = _get_service_name()
+    test = Test(
+        f'test-skyserve-load-balancer',
+        [
+            f'sky serve up -n {name} -y tests/skyserve/load_balancer/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
+            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
+            f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
+            'python tests/skyserve/load_balancer/test_round_robin.py '
+            '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.sky_serve
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
