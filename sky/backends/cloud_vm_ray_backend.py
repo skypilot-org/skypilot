@@ -988,7 +988,7 @@ class FailoverCloudErrorHandlerV1:
 
 class FailoverCloudErrorHandlerV2:
     """Handles errors during provisioning and updates the blocked_resources.
-    
+
     This is a more robust version of FailoverCloudErrorHandlerV1, which parses
     the errors raised by the cloud's API using the exception, instead of the
     stdout and stderr.
