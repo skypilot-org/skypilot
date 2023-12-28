@@ -64,7 +64,10 @@ autodoc_member_order = 'bysource'
 html_theme = 'sphinx_book_theme'
 html_theme_options = {
     # 'show_toc_level': 2,
-    'logo_only': True,
+    'logo': {
+        'image_light': 'images/skypilot-wide-light-1k.png',
+        'image_dark': 'images/skypilot-wide-dark-1k.png',
+    },
     'repository_url': 'https://github.com/skypilot-org/skypilot',
     'use_repository_button': True,
     'use_issues_button': True,
