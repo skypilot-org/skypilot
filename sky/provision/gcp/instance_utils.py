@@ -1144,7 +1144,7 @@ class GCPTPUVMInstance(GCPInstance):
                 #   'reason': 'quotaExceeded'
                 # }
                 error_details = getattr(e, 'error_details', [])
-                logger.warning(
+                logger.debug(
                     f'create_instances: googleapiclient.errors.HttpError: {e}')
                 errors = []
                 for detail in error_details:
@@ -1164,6 +1164,7 @@ class GCPTPUVMInstance(GCPInstance):
                                 'domain': violation.get('subject'),
                                 'message': violation.get('description'),
                             })
+                _log_errors(errors, e, zone)
                 return errors, names
         errors = []
         logger.info(str(operations))
@@ -1172,8 +1173,9 @@ class GCPTPUVMInstance(GCPInstance):
             if error:
                 errors.extend(error)
         if errors:
-            logger.warning('create_instances: Failed to create instances. '
-                           f'Reason: {errors}')
+            logger.debug('create_instances: Failed to create instances. '
+                         f'Reason: {errors}')
+            _log_errors(errors, operations, zone)
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
@@ -1210,11 +1212,13 @@ class GCPTPUVMInstance(GCPInstance):
                 ).cancel(name=operation['name'],)
             request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
             request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-            return [{
+            errors = [{
                 'code': 'TIMEOUT',
                 'message': 'Timeout waiting for creation operation',
                 'domain': 'create_instances'
-            }], names
+            }]
+            _log_errors(errors, None, zone)
+            return errors, names
 
         # NOTE: Error example:
         # {
@@ -1227,9 +1231,10 @@ class GCPTPUVMInstance(GCPInstance):
             if error:
                 errors.append(error)
         if errors:
-            logger.warning(
+            logger.debug(
                 'create_instances: Failed to create instances. Reason: '
                 f'{errors}')
+            _log_errors(errors, results, zone)
             return errors, names
         assert all(success), (
             'Failed to create instances, but there is no error. '
