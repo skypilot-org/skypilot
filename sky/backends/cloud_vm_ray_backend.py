@@ -622,10 +622,12 @@ class GangSchedulingStatus(enum.Enum):
 
 def _add_to_blocked_resources(blocked_resources: Set['resources_lib.Resources'],
                               resources: 'resources_lib.Resources') -> None:
-    # If the resources is already in the blocked_resources, we don't need to
+    # If the resources is already blocked by blocked_resources, we don't need to
     # add it again to avoid duplicated entries.
-    if not resources.should_be_blocked_by(blocked_resources):
-        blocked_resources.add(resources)
+    for r in blocked_resources:
+        if resources.should_be_blocked_by(r):
+            return
+    blocked_resources.add(resources)
 
 
 class FailoverCloudErrorHandlerV1:
