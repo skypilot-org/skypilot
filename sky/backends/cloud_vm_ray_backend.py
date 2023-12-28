@@ -1082,11 +1082,15 @@ class FailoverCloudErrorHandlerV2:
                     f'Details: {message}')
                 blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
-            else:
+            elif 'is not found or access is unauthorized' in message:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
+                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+            else:
+                logger.warning(f'Got an unknown error: {message}; blocking '
+                               f'resources by its zone {zone.name}')
                 blocked_resources.add(launchable_resources.copy(zone=zone.name))
 
     @staticmethod

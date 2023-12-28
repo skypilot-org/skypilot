@@ -100,8 +100,9 @@ def _log_errors(errors: List[Dict[str, str]], e: Any, zone: str) -> None:
     """Format errors into a string."""
     if errors:
         plural = 's' if len(errors) > 1 else ''
-        codes = ', '.join(e.get('code', 'NA') for e in errors)
-        messages = '; '.join(e.get('message', 'NA').strip('.') for e in errors)
+        codes = ', '.join(repr(e.get('code', 'NA')) for e in errors)
+        messages = '; '.join(
+            repr(e.get('message', 'NA').strip('.')) for e in errors)
         logger.warning(
             f'create_instances: Failed with return code{plural} {codes} in '
             f'{zone}. (message{plural}: {messages})')
@@ -916,9 +917,9 @@ class GCPTPUVMInstance(GCPInstance):
         except gcp.http_error_exception() as e:
             # SKY: Catch HttpError when accessing unauthorized region.
             # Return empty dict instead of raising exception to not break.
-            logger.warning(f'googleapiclient.errors.HttpError: {e}')
             if 'is not found or access is unauthorized.' in str(e):
                 return {}
+            logger.debug(f'filter: googleapiclient.errors.HttpError: {e}')
             raise
 
         instances = response.get('nodes', [])
@@ -1147,6 +1148,14 @@ class GCPTPUVMInstance(GCPInstance):
                 logger.debug(
                     f'create_instances: googleapiclient.errors.HttpError: {e}')
                 errors = []
+                if isinstance(error_details, str):
+                    errors.append({
+                        'code': 'CREATION_FAILED',
+                        'domain': 'create_instances',
+                        'message': error_details,
+                    })
+                    _log_errors(errors, e, zone)
+                    return errors, names
                 for detail in error_details:
                     # To be consistent with error messages returned by operation
                     # wait.
