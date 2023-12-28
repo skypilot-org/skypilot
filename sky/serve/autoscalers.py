@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.serve import solvers
 from sky.serve.serve_utils import AcceleratorType
 
 if typing.TYPE_CHECKING:
@@ -255,9 +256,6 @@ class HeteroGPUAutoscaler(Autoscaler):
         print(f'autoscaler.collect_request_information(self.total_request_in_window): {self.total_request_in_window}')
         print(f'autoscaler.collect_request_information(self.request_distribution): {self.request_distribution}')        
 
-    def solver(self):
-        pass
-
     def _get_accelerator_override_dict(self,
                                        instance_type: AcceleratorType) -> Dict[str, Any]:
         return {'accelerators': f'{instance_type.value}:1'}
@@ -295,7 +293,7 @@ class HeteroGPUAutoscaler(Autoscaler):
         # the allocation to be a dictionary in a form of 
         # {replica_manager.AcceleratorType.A100: # of A100s needed,
         #  replica_manager.AcceleratorType.A10: # of A10s needed}
-        accel_allocation = self.solver(self.request_distribution)
+        accel_allocation = solvers.IlpSolver(self.request_distribution)
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
         for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
