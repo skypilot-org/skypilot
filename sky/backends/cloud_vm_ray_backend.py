@@ -2205,7 +2205,7 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
-                    self._requested_features)
+                    to_provision, self._requested_features)
 
                 config_dict = self._retry_zones(
                     to_provision,
@@ -3679,7 +3679,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         except filelock.Timeout as e:
             raise RuntimeError(
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
-                'Check to see if it is still being launched.') from e
+                'Check to see if it is still being launched') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -4278,6 +4278,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      down: bool = False,
                      stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
+
+            # Check if we're stopping spot
+            assert (handle.launched_resources is not None and
+                    handle.launched_resources.cloud is not None), handle
+            if handle.launched_resources.use_spot:
+                # This can be triggered by, for example:
+                #   sky launch --cloud aws --use-spot --cpus 2+ -i0 -y
+                # The cluster will be UP, the launch exited with code 1, and
+                # any stage after PRE_EXEC is not executed.
+                cloud = handle.launched_resources.cloud
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
+
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,

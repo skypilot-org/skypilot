@@ -1940,6 +1940,7 @@ def check_can_clone_disk_and_override_task(
     new_task_resources = []
     original_cloud = handle.launched_resources.cloud
     original_cloud.check_features_are_supported(
+        handle.launched_resources,
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
     assert original_cloud is not None, handle.launched_resources
