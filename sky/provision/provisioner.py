@@ -328,7 +328,7 @@ def _post_provision_setup(
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
 
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
@@ -350,13 +350,6 @@ def _post_provision_setup(
     # TODO(suquark): Move wheel build here in future PRs.
     ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-
-    # TODO(suquark): Handle TPU VMs when dealing with GCP later.
-    # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-    #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-    #                 f'{style.RESET_ALL}')
-    #     RetryingVmProvisioner._tpu_pod_setup(
-    #         None, handle.cluster_yaml, handle)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
