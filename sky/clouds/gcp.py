@@ -808,7 +808,6 @@ class GCP(clouds.Cloud):
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
-        # pylint: disable=import-outside-toplevel
         return tpu_utils.is_tpu_vm(resources)
 
     @classmethod
