@@ -65,8 +65,7 @@ html_theme = 'sphinx_book_theme'
 html_theme_options = {
     # 'show_toc_level': 2,
     'logo': {
-        'image_light': 'images/skypilot-wide-light-1k.png',
-        'image_dark': 'images/skypilot-wide-dark-1k.png',
+        'image_dark': '_static/SkyPilot_wide_dark.svg',
     },
     'repository_url': 'https://github.com/skypilot-org/skypilot',
     'use_repository_button': True,
@@ -90,7 +89,7 @@ html_show_sourcelink = False
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = 'images/skypilot-wide-light-1k.png'
+html_logo = '_static/SkyPilot_wide_light.svg'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs. This file should be a Windows icon file (.ico), 16x16 or 32x32 pixels.
