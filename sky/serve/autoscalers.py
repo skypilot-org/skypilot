@@ -43,7 +43,6 @@ class AutoscalerDecision:
     def __repr__(self) -> str:
         return f'AutoscalerDecision({self.operator}, {self.target})'
 
-
 class Autoscaler:
     """Abstract class for autoscalers."""
 
@@ -77,6 +76,8 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
+    def get_ilp_decision(self) -> List[List[int]]:
+        raise NotImplementedError
 
 class RequestRateAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.

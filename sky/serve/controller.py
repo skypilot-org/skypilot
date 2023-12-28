@@ -97,6 +97,8 @@ class SkyServeController:
             return {
                 'ready_replica_urls':
                     self._replica_manager.get_ready_replica_urls()
+                'hetero_gpu_ilp_decision':
+                    self._autoscaler.get_ilp_decision()
             }
 
         @self._app.on_event('startup')

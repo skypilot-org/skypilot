@@ -19,6 +19,9 @@ class LoadBalancingPolicy:
 
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
+    
+    def update_policy_parameters(self, ilp_decision = None) -> None:
+        raise NotImplementedError
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
@@ -45,6 +48,45 @@ class RoundRobinPolicy(LoadBalancingPolicy):
     def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         if not self.ready_replicas:
             return None
+        ready_replica_url = self.ready_replicas[self.index]
+        self.index = (self.index + 1) % len(self.ready_replicas)
+        request_repr = ('<Request '
+                        f'method="{request.method}" '
+                        f'url="{request.url}" '
+                        f'headers={dict(request.headers)} '
+                        f'query_params={dict(request.query_params)}'
+                        '>')
+        logger.info(f'Selected replica {ready_replica_url} '
+                    f'for request {request_repr}')
+        return ready_replica_url
+
+class HeteroGPUPolicy(LoadBalancingPolicy):
+    """LB policy for heterogeneous GPU backends."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.index = 0
+
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(ready_replicas) != set(self.ready_replicas):
+            # If the autoscaler keeps scaling up and down the replicas,
+            # we need this shuffle to not let the first replica have the
+            # most of the load.
+            random.shuffle(ready_replicas)
+            self.ready_replicas = ready_replicas
+            self.index = 0
+
+    def update_policy_parameters(self, ilp_decision = None) -> None:
+        raise NotImplementedError
+
+    def select_replica(self, request: 'fastapi.Request', input_token_length: int) -> Optional[str]:
+        if not self.ready_replicas:
+            return None
+
+        # Based on input_token_length 
+
+
+
         ready_replica_url = self.ready_replicas[self.index]
         self.index = (self.index + 1) % len(self.ready_replicas)
         request_repr = ('<Request '
