@@ -1007,7 +1007,8 @@ class FailoverCloudErrorHandlerV2:
             elif code in [
                     'ZONE_RESOURCE_POOL_EXHAUSTED',
                     'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
-                    'UNSUPPORTED_OPERATION'
+                    'UNSUPPORTED_OPERATION',
+                    'insufficientCapacity',
             ]:  # Per zone.
                 # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
                 # However, UNSUPPORTED_OPERATION is observed empirically
