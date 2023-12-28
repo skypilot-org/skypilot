@@ -59,6 +59,7 @@ class Azure(clouds.Cloud):
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
     _BEST_DISK_TIER = resources_utils.DiskTier.MEDIUM
+    _DEFAULT_DISK_TIER = resources_utils.DiskTier.BEST
 
     _INDENT_PREFIX = ' ' * 4
 
@@ -313,13 +314,16 @@ class Azure(clouds.Cloud):
                 specified configuration is not a valid combination, and should
                 not be used for launching a VM.
             """
-            if (disk_tier is not None and
-                    disk_tier != resources_utils.DiskTier.BEST):
+            if disk_tier is None:
+                # Translate first since azure's default disk tier is BEST.
+                disk_tier = Azure._translate_disk_tier(disk_tier)
+            if disk_tier != resources_utils.DiskTier.BEST:
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
                 return (True, disk_tier) if ok else (False, None)
             # All tiers in reversed order, i.e. from best to worst.
             # We will failover along this order.
             all_tiers = list(reversed(resources_utils.DiskTier))
+            # Translate to real disk tier.
             start_index = all_tiers.index(Azure._translate_disk_tier(disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
