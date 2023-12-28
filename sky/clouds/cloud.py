@@ -448,9 +448,14 @@ class Cloud:
         """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support stop, so
-        Lambda.check_features_are_supported({
+        Lambda.check_features_are_supported(to_provision, {
             CloudImplementationFeatures.STOP
         }) raises the exception.
+
+        Resources are also passed as some features may depend on the resources
+        requested. For example, some clouds support stopping normal instances,
+        but not spot instances, e.g., AWS; or, GCP supports stopping TPU VMs but
+        not TPU VM pods.
 
         Raises:
             exceptions.NotSupportedError: If the cloud does not support all the
