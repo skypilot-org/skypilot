@@ -633,7 +633,9 @@ def _add_to_blocked_resources(blocked_resources: Set['resources_lib.Resources'],
 class FailoverCloudErrorHandlerV1:
     """Handles errors during provisioning and updates the blocked_resources.
 
-    Deprecated: Newly added cloud should use the FailoverCloudErrorHandlerV2.
+    Deprecated: Newly added cloud should use the FailoverCloudErrorHandlerV2,
+    which is more robust by parsing the errors raised by the cloud's API in a
+    more structured way, instead of directly based on the stdout and stderr.
     """
 
     @staticmethod
@@ -995,15 +997,14 @@ class FailoverCloudErrorHandlerV2:
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
-        errors = []
-        if isinstance(err, provision_common.ProvisionError):
-            errors = err.errors
-        else:
-            logger.debug(f'Got an unparsed error: {err}; blocking resources by '
-                         f'its zone {zone.name}')
+        if not isinstance(err, provision_common.ProvisionError):
+            logger.warning(f'{colorama.Style.DIM}Got an unparsed error: {err}; '
+                           f'blocking resources by its zone {zone.name}'
+                           f'{colorama.Style.RESET_ALL}')
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
             return
+        errors = err.errors
 
         for e in errors:
             code = e['code']
