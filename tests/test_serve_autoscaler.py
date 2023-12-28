@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--port", type=int, help="The port number to use.")
     parser.add_argument(
         "--frequency",
-        type=int,
+        type=float,
         default=5,
         help="Sending frequency in seconds (default is 5 seconds).")
 
