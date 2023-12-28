@@ -1256,7 +1256,8 @@ class Resources:
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
-        add_if_not_none('disk_tier', self.disk_tier)
+        if self.disk_tier is not None:
+            config['disk_tier'] = self.disk_tier.value
         add_if_not_none('ports', self.ports)
         add_if_not_none('_docker_login_config', self._docker_login_config)
         if self._is_image_managed is not None:
