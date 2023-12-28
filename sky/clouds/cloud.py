@@ -65,9 +65,9 @@ class Zone(collections.namedtuple('Zone', ['name'])):
 class ProvisionerVersion(enum.Enum):
     """The version of the provisioner.
 
-    1: ray node provider based implementation
-    2: ray node provider for provisioning and SkyPilot provisioner for
-    stopping and termination
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
     3: SkyPilot provisioner for both provisioning and stopping
     """
     RAY_AUTOSCALER = 1
@@ -81,7 +81,7 @@ class ProvisionerVersion(enum.Enum):
 class StatusVersion(enum.Enum):
     """The version of the status query.
 
-    1: cloud-CLI based implementation
+    1: [Deprecated] cloud-CLI based implementation
     2: SkyPilot provisioner based implementation
     """
     CLOUD_CLI = 1
@@ -97,6 +97,9 @@ class Cloud:
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
     PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
     STATUS_VERSION = StatusVersion.CLOUD_CLI
 
