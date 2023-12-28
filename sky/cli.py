@@ -223,8 +223,8 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
-    tpuvm_option = click.option('--tpu-vm',
-                                default=False,
+    tpuvm_option = click.option('--tpu-vm/--no-tpu-vm',
+                                default=True,
                                 is_flag=True,
                                 help='If true, use TPU VMs.')
 
@@ -3318,6 +3318,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if tpu_vm:
         accelerator_args['tpu_vm'] = True
         accelerator_args['runtime_version'] = 'tpu-vm-base'
+    else:
+        accelerator_args['tpu_vm'] = False
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
