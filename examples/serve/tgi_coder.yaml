@@ -1,0 +1,19 @@
+# SkyServe YAML to run HuggingFace TGI with WizardLM/WizardCoder-15B-V1.0.
+#
+# Usage:
+#   sky serve up -n tgi examples/serve/tgi_coder.yaml
+# Then visit the endpoint printed in the console. You could also
+# check the endpoint by running:
+#   sky serve status --endpoint tgi
+
+service:
+  readiness_probe: /health
+  replicas: 2
+
+resources:
+  ports: 8082
+  accelerators: A100:1
+
+# TODO(tian): Maybe use some small model like 3b.
+run: |
+  docker run --gpus all --shm-size 1g -p 8082:80 -v ~/data:/data ghcr.io/huggingface/text-generation-inference --model-id WizardLM/WizardCoder-15B-V1.0

@@ -1,0 +1,48 @@
+# Usage:
+#
+#  Unmanaged spot (no auto-recovery; for debugging):
+#   HF_TOKEN=abc BUCKET=<unique-name> sky launch -c axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET -i30 --down
+#
+#  Managed spot (auto-recovery; for full runs):
+#   HF_TOKEN=abc BUCKET=<unique-name> sky spot launch -n axolotl-spot axolotl-spot.yaml --env HF_TOKEN --env BUCKET
+
+name: axolotl
+
+resources:
+  accelerators: A100:1
+  cloud: gcp # optional
+  use_spot: True
+
+workdir: mistral
+
+file_mounts:
+  /sky-notebook:
+    name: ${BUCKET}
+    mode: MOUNT
+
+setup: |
+  docker pull winglian/axolotl:main-py3.10-cu118-2.0.1
+
+run: |
+  docker run --gpus all \
+    -v ~/sky_workdir:/sky_workdir \
+    -v /root/.cache:/root/.cache \
+    winglian/axolotl:main-py3.10-cu118-2.0.1 \
+    huggingface-cli login --token ${HF_TOKEN}
+  
+  docker run --gpus all \
+    -v ~/sky_workdir:/sky_workdir \
+    -v /root/.cache:/root/.cache \
+    -v /sky-notebook:/sky-notebook \
+    winglian/axolotl:main-py3.10-cu118-2.0.1 \
+    accelerate launch -m axolotl.cli.train /sky_workdir/qlora-checkpoint.yaml
+
+envs:
+  HF_TOKEN: <your-huggingface-token> # TODO: Replace with huggingface token
+  BUCKET: <a-unique-bucket-name-to-use>
+  
+  
+
+
+  
+

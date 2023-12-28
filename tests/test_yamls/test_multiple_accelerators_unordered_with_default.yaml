@@ -1,0 +1,11 @@
+name: multi-accelerators-unordered
+
+resources:
+  use_spot: true
+  accelerators: {'A100:1', 'T4:1', 'V100:1'}
+  any_of:
+    - cloud: aws
+    - cloud: gcp
+
+run: |
+  nvidia-smi

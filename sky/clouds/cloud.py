@@ -1,4 +1,12 @@
-"""Interfaces: clouds, regions, and zones."""
+"""Interfaces: clouds, regions, and zones.
+
+clouds.Cloud is lightweight stateless objects. SkyPilot may create multiple such
+objects; therefore, subclasses should take care to make methods inexpensive to
+call, and should not store heavy state. If state needs to be queried from the
+cloud provider and cached, create a module in sky/clouds/utils/ and probably add
+caches for the return value (e.g., sky/clouds/utils/gcp_utils), so they can be
+reused across cloud object creation.
+"""
 import collections
 import enum
 import re
@@ -294,6 +302,7 @@ class Cloud:
         if num_nodes > 1:
             resources_required_features.add(
                 CloudImplementationFeatures.MULTI_NODE)
+
         try:
             self.check_features_are_supported(resources_required_features)
         except exceptions.NotSupportedError:
@@ -410,8 +419,17 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        """Validates the region and zone."""
+    def validate_region_zone(
+            self, region: Optional[str],
+            zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Validates whether region and zone exist in the catalog.
+
+        Returns:
+            A tuple of region and zone, if validated.
+
+        Raises:
+            ValueError: If region or zone is invalid or not supported.
+        """
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds=self._REPR.lower())

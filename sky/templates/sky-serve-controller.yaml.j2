@@ -1,0 +1,32 @@
+# The template for the sky serve controller
+
+name: {{service_name}}
+
+setup: |
+  # Install all cloud dependencies.
+  # This is for multicloud support. To allow controller launch on all clouds,
+  # we need to install all cloud dependencies.
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
+
+  # Install serve dependencies.
+  pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+  pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+
+file_mounts:
+  {{remote_task_yaml_path}}: {{local_task_yaml_path}}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
+
+run: |
+  # Start sky serve service.
+  python -u -m sky.serve.service \
+    --service-name {{service_name}} \
+    --task-yaml {{remote_task_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    >> {{controller_log_file}} 2>&1
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}
