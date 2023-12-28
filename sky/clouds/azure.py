@@ -320,13 +320,7 @@ class Azure(clouds.Cloud):
             # All tiers in reversed order, i.e. from best to worst.
             # We will failover along this order.
             all_tiers = list(reversed(resources_utils.DiskTier))
-            if disk_tier is None:
-                # Start failover from the default disk tier.
-                start_index = all_tiers.index(clouds.Cloud._DEFAULT_DISK_TIER)
-            else:
-                # Start failover from the best disk tier.
-                start_index = all_tiers.index(
-                    Azure._translate_disk_tier(disk_tier))
+            start_index = all_tiers.index(Azure._translate_disk_tier(disk_tier))
             while start_index < len(all_tiers):
                 disk_tier = all_tiers[start_index]
                 ok, _ = Azure.check_disk_tier(instance_type, disk_tier)
