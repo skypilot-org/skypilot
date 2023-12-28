@@ -176,12 +176,12 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=['STOPPING'],
+            status_filters=resource.STOPPING_STATES,
         )
         if not instances:
             break
-        logger.info(
-            f'Waiting for {len(instances)} instances in STOPPING status')
+        logger.info(f'run_instances: Waiting for {len(instances)} instances in '
+                    'STOPPING status')
         time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = resource.filter(
@@ -212,8 +212,9 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
                                               '%Y-%m-%dT%H:%M:%S.%f%z')
         return node['id']
 
+    logger.info(str(exist_instances))
     for inst in exist_instances:
-        state = inst['status']
+        state = inst[resource.STATUS_FIELD]
         if state in resource.PENDING_STATES:
             pending_instances.append(inst)
         elif state == resource.RUNNING_STATE:
@@ -305,13 +306,16 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         )
         if not instances:
             break
+        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
+                     'in PENDING status.')
+        time.sleep(constants.POLL_INTERVAL)
 
     # Check if the number of running instances is the same as the requested.
     instances = resource.filter(
         project_id=project_id,
         zone=availability_zone,
         label_filters=filter_labels,
-        status_filters=['RUNNING'],
+        status_filters=[resource.RUNNING_STATE],
     )
     if len(instances) != config.count:
         logger.warning('The number of running instances is different from '
@@ -339,14 +343,21 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     except gcp.http_error_exception() as e:
         error_details = getattr(e, 'error_details')
         errors = []
-        if error_details is None:
-            raise
-        for detail in error_details:
+        if isinstance(error_details, list):
+            for detail in error_details:
+                errors.append({
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message', str(e)),
+                })
+        elif isinstance(error_details, str):
             errors.append({
-                'code': detail.get('reason'),
-                'domain': detail.get('domain'),
-                'message': detail.get('message'),
+                'code': None,
+                'domain': 'run_instances',
+                'message': error_details,
             })
+        else:
+            raise
         error = common.ProvisionError('Failed to launch instances.')
         error.errors = errors
         raise error from e
@@ -383,9 +394,9 @@ def get_cluster_info(
         project_id,
         zone,
         label_filters,
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
-    instances: Dict[str, common.InstanceInfo] = {}
+    instances: Dict[str, List[common.InstanceInfo]] = {}
     for res, insts in handler_to_instances.items():
         with pool.ThreadPool() as p:
             inst_info = p.starmap(res.get_instance_info,
@@ -399,7 +410,7 @@ def get_cluster_info(
         {
             **label_filters, TAG_RAY_NODE_KIND: 'head'
         },
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
     head_instance_id = None
     for insts in head_instances.values():

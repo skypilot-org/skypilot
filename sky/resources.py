@@ -19,7 +19,6 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -515,8 +514,6 @@ class Resources:
                 if accelerator_args is None:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
-                if use_tpu_vm:
-                    tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
                         with ux_utils.print_exception_no_traceback():

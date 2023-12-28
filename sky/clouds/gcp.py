@@ -18,7 +18,6 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -486,7 +485,7 @@ class GCP(clouds.Cloud):
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
-        use_tpu_vm = tpu_utils.is_tpu_vm(resources)
+        use_tpu_vm = gcp_utils.is_tpu_vm(resources)
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
@@ -810,7 +809,7 @@ class GCP(clouds.Cloud):
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
-        return tpu_utils.is_tpu_vm(resources)
+        return gcp_utils.is_tpu_vm(resources)
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

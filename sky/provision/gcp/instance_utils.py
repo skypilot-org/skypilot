@@ -257,11 +257,26 @@ class GCPInstance:
                         availability_zone: str,
                         target_instance_id: str,
                         is_head: bool = True) -> str:
-        raise NotImplementedError
+        if is_head:
+            node_tag = {
+                TAG_SKYPILOT_HEAD_NODE: '1',
+                TAG_RAY_NODE_KIND: 'head',
+            }
+        else:
+            node_tag = {
+                TAG_SKYPILOT_HEAD_NODE: '0',
+                TAG_RAY_NODE_KIND: 'worker',
+            }
+        cls.set_labels(project_id=project_id,
+                       availability_zone=availability_zone,
+                       node_id=target_instance_id,
+                       labels=node_tag)
+
+        return target_instance_id
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
-                          instance_id: str) -> common.InstanceInfo:
+                          instance_id: str) -> List[common.InstanceInfo]:
         raise NotImplementedError
 
     @classmethod
@@ -544,31 +559,7 @@ class GCPComputeInstance(GCPInstance):
 
         result = cls.wait_for_operation(operation, project_id,
                                         availability_zone)
-
         return result
-
-    @classmethod
-    def create_node_tag(cls,
-                        project_id: str,
-                        availability_zone: str,
-                        target_instance_id: str,
-                        is_head: bool = True) -> str:
-        if is_head:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '1',
-                TAG_RAY_NODE_KIND: 'head',
-            }
-        else:
-            node_tag = {
-                TAG_SKYPILOT_HEAD_NODE: '0',
-                TAG_RAY_NODE_KIND: 'worker',
-            }
-        cls.set_labels(project_id=project_id,
-                       availability_zone=availability_zone,
-                       node_id=target_instance_id,
-                       labels=node_tag)
-
-        return target_instance_id
 
     @classmethod
     def create_instances(
@@ -723,12 +714,12 @@ class GCPComputeInstance(GCPInstance):
             # }
             error_details = getattr(e, 'error_details', [])
             errors = []
-            for e in error_details:
+            for detail in error_details:
                 # To be consistent with error messages returned by operation wait.
                 errors.append({
-                    'code': e.get('reason'),
-                    'domain': e.get('domain'),
-                    'message': e.get('message'),
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message', str(e)),
                 })
             logger.debug(
                 f'create_instances: googleapiclient.errors.HttpError: {e}')
@@ -813,7 +804,7 @@ class GCPComputeInstance(GCPInstance):
 
     @classmethod
     def get_instance_info(cls, project_id: str, availability_zone: str,
-                          instance_id: str) -> common.InstanceInfo:
+                          instance_id: str) -> List[common.InstanceInfo]:
         result = cls.load_resource().instances().get(
             project=project_id,
             zone=availability_zone,
@@ -824,12 +815,14 @@ class GCPComputeInstance(GCPInstance):
                                                [{}])[0].get('natIP', None))
         internal_ip = result.get('networkInterfaces', [{}])[0].get('networkIP')
 
-        return common.InstanceInfo(
-            instance_id=instance_id,
-            internal_ip=internal_ip,
-            external_ip=external_ip,
-            tags=result.get('labels', {}),
-        )
+        return [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                internal_ip=internal_ip,
+                external_ip=external_ip,
+                tags=result.get('labels', {}),
+            )
+        ]
 
     @classmethod
     def resize_disk(cls, project_id: str, availability_zone: str,
@@ -871,7 +864,7 @@ class GCPComputeInstance(GCPInstance):
 
 
 class GCPTPUVMInstance(GCPInstance):
-    """Instance handler for GCP TPU node."""
+    """Instance handler for GCP TPU VM."""
     PENDING_STATES = ['CREATING', 'STARTING', 'RESTARTING', 'REPAIRING']
     RUNNING_STATE = 'READY'
     STOPPING_STATES = ['STOPPING']
@@ -896,7 +889,7 @@ class GCPTPUVMInstance(GCPInstance):
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
         result = (cls.load_resource().projects().locations().operations().get(
-            name=str(operation['name'])).execute())
+            name=str(operation['name'])).execute(num_retries=GCP_MAX_RETRIES))
         if 'error' in result:
             raise Exception(result['error'])
 
@@ -968,7 +961,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def stop(cls, project_id: str, zone: str, instance: str) -> dict:
-        """Stop a TPU node."""
+        """Stop a TPU VM."""
         del project_id, zone  # unused
         operation = cls.load_resource().projects().locations().nodes().stop(
             name=instance).execute()
@@ -976,7 +969,7 @@ class GCPTPUVMInstance(GCPInstance):
 
     @classmethod
     def terminate(cls, project_id: str, zone: str, instance: str) -> dict:
-        """Terminate a TPU node."""
+        """Terminate a TPU VM."""
         del project_id, zone  # unused
         operation = cls.load_resource().projects().locations().nodes().delete(
             name=instance).execute()
@@ -1035,8 +1028,25 @@ class GCPTPUVMInstance(GCPInstance):
     @_retry_on_http_exception('unable to queue the operation')
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
                    labels: dict) -> bool:
-        node = cls.load_resource().projects().locations().nodes().get(
-            name=node_id)
+        while True:
+            # wait until the instance become ready before setting labels
+            # as Cloud TPU API does not allow setting labels on pending
+            # instances
+            instances = cls.filter(
+                project_id=project_id,
+                zone=availability_zone,
+                label_filters=None,
+                status_filters=cls.PENDING_STATES,
+                included_instances=[node_id],
+            )
+            if not instances:
+                break
+            logger.debug(f'set_labels: Waiting for instance {node_id} to be '
+                         'ready...')
+            time.sleep(constants.POLL_INTERVAL)
+
+        node = (cls.load_resource().projects().locations().nodes().get(
+            name=node_id).execute(num_retries=GCP_CREATE_MAX_RETRIES))
         body = {
             'labels': dict(node['labels'], **labels),
         }
@@ -1046,7 +1056,7 @@ class GCPTPUVMInstance(GCPInstance):
             name=node_id,
             updateMask=update_mask,
             body=body,
-        ).execute())
+        ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
         result = cls.wait_for_operation(operation, project_id,
                                         availability_zone)
@@ -1064,7 +1074,167 @@ class GCPTPUVMInstance(GCPInstance):
         count: int,
         include_head_node: bool,
     ) -> Tuple[Optional[List], List[str]]:
-        raise NotImplementedError
+        config = copy.deepcopy(node_config)
+        # removing Compute-specific default key set in config.py
+        config.pop('networkInterfaces', None)
+
+        head_tag_needed = [False] * count
+        if include_head_node:
+            head_tag_needed[0] = True
+
+        names = []
+        for i in range(count):
+            names.append(
+                _generate_node_name(cluster_name,
+                                    GCPNodeType.TPU.value,
+                                    is_head=head_tag_needed[i]))
+
+        labels = dict(config.get('labels', {}), **labels)
+
+        config.update({
+            'labels': dict(
+                labels, **{
+                    TAG_RAY_CLUSTER_NAME: cluster_name,
+                    TAG_SKYPILOT_CLUSTER_NAME: cluster_name
+                }),
+        })
+
+        if 'reservationAffinity' in config:
+            raise NotImplementedError(
+                'TPU VMs do not support reservations yet.')
+
+        # Allow Google Compute Engine instance templates.
+        #
+        # Config example:
+        #
+        #     ...
+        #     node_config:
+        #         sourceInstanceTemplate: global/instanceTemplates/worker-16
+        #         machineType: e2-standard-16
+        #     ...
+        #
+        # node_config parameters override matching template parameters, if any.
+        #
+        # https://cloud.google.com/compute/docs/instance-templates
+        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+        operations = []
+        for i, name in enumerate(names):
+            node_config = config.copy()
+            if i == 0:
+                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '1'
+                node_config['labels'][TAG_RAY_NODE_KIND] = 'head'
+            else:
+                node_config['labels'][TAG_SKYPILOT_HEAD_NODE] = '0'
+                node_config['labels'][TAG_RAY_NODE_KIND] = 'worker'
+            try:
+                logger.debug('Launching GCP TPU VM ...')
+                request = (
+                    cls.load_resource().projects().locations().nodes().create(
+                        parent=f'projects/{project_id}/locations/{zone}',
+                        body=node_config,
+                        nodeId=name,
+                    ))
+                operation = request.execute(num_retries=0)
+                operations.append(operation)
+            except gcp.http_error_exception() as e:
+                # NOTE: Error example:
+                # {
+                #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
+                #   'domain': 'usageLimits',
+                #   'reason': 'quotaExceeded'
+                # }
+                error_details = getattr(e, 'error_details', [])
+                logger.warning(
+                    f'create_instances: googleapiclient.errors.HttpError: {e}')
+                errors = []
+                for detail in error_details:
+                    # To be consistent with error messages returned by operation
+                    # wait.
+                    viloations = detail.get('violations', [])
+                    if not viloations:
+                        errors.append({
+                            'code': detail.get('reason'),
+                            'domain': detail.get('domain'),
+                            'message': detail.get('message', str(e)),
+                        })
+                    else:
+                        for violation in viloations:
+                            errors.append({
+                                'code': detail.get('@type'),
+                                'domain': violation.get('subject'),
+                                'message': violation.get('description'),
+                            })
+                return errors, names
+        errors = []
+        logger.info(str(operations))
+        for operation in operations:
+            error = operation.get('error', {}).get('details')
+            if error:
+                errors.extend(error)
+        if errors:
+            logger.warning('create_instances: Failed to create instances. '
+                           f'Reason: {errors}')
+            return errors, names
+
+        logger.debug('Waiting GCP instances to be ready ...')
+        wait_start = time.time()
+        success = [False] * len(operations)
+        results: List[dict] = [{} for _ in range(len(operations))]
+        while time.time() - wait_start < GCP_TIMEOUT:
+            # Retry the wait() call until it succeeds or times out.
+            # This is because the wait() call is only best effort, and does not
+            # guarantee that the operation is done when it returns.
+            # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
+            for i, operation in enumerate(operations):
+                if success[i]:
+                    continue
+                request = (
+                    cls.load_resource().projects().locations().operations().get(
+                        name=operation['name'],))
+                request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+                result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+                results[i] = result
+                success[i] = result['done']
+            if all(success):
+                logger.debug(f'create_instances: Finished {results}')
+                break
+            logger.debug('create_instances: Retry waiting for TPU operations '
+                         f'to finish: {results}...')
+        else:
+            logger.warning('create_instances: Timeout waiting for TPU creation '
+                           'operation, cancelling the operation ...')
+            for i, operation in enumerate(operations):
+                if success[i]:
+                    continue
+                request = cls.load_resource().projects().locations().operations(
+                ).cancel(name=operation['name'],)
+            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
+            request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            return [{
+                'code': 'TIMEOUT',
+                'message': 'Timeout waiting for creation operation',
+                'domain': 'create_instances'
+            }], names
+
+        # NOTE: Error example:
+        # {
+        #    'code': 8,
+        #    'message': 'There is no more capacity in the zone ...
+        # }
+        errors = []
+        for result in results:
+            error = result.get('error', {})
+            if error:
+                errors.append(error)
+        if errors:
+            logger.warning(
+                'create_instances: Failed to create instances. Reason: '
+                f'{errors}')
+            return errors, names
+        assert all(success), (
+            'Failed to create instances, but there is no error. '
+            f'Instance status: {results}')
+        return None, names
 
     @classmethod
     def start_instance(cls, node_id: str, project_id: str, zone: str) -> bool:
@@ -1086,6 +1256,29 @@ class GCPTPUVMInstance(GCPInstance):
         persistent disk to expand disk capacity. Related issue: #2387
         """
         return False
+
+    @classmethod
+    def get_instance_info(cls, project_id: str, availability_zone: str,
+                          instance_id: str) -> List[common.InstanceInfo]:
+        del project_id, availability_zone  # unused
+        result = cls.load_resource().projects().locations().nodes().get(
+            name=instance_id).execute()
+        network_endpoints = result.get('networkEndpoints', [{}])
+        external_ips = []
+        internal_ips = []
+        for endpoint in network_endpoints:
+            external_ips.append(
+                endpoint.get('accessConfig', {}).get('externalIp', None))
+            internal_ips.append(endpoint.get('ipAddress', None))
+
+        return [
+            common.InstanceInfo(
+                instance_id=instance_id,
+                internal_ip=internal_ip,
+                external_ip=external_ip,
+                tags=result.get('labels', {}),
+            ) for internal_ip, external_ip in zip(internal_ips, external_ips)
+        ]
 
 
 class GCPNodeType(enum.Enum):

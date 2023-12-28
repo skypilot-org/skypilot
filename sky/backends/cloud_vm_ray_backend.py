@@ -1,5 +1,4 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
-import ast
 import copy
 import enum
 import getpass
@@ -39,6 +38,7 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
@@ -58,7 +58,6 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -628,180 +627,6 @@ class FailoverCloudErrorHandlerV1:
     """
 
     @staticmethod
-    def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        style = colorama.Style
-        assert zones and len(zones) == 1, zones
-        zone = zones[0]
-        splits = stderr.split('\n')
-        exception_list = [s for s in splits if s.startswith('Exception: ')]
-        httperror_str = [
-            s for s in splits
-            # GCP API errors
-            if s.startswith('googleapiclient.errors.HttpError: ') or
-            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': skypilot's changes to the
-            # underlying provisioner provider; for errors prior to provisioning
-            # like VPC setup.
-            'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' in s
-        ]
-        if len(exception_list) == 1:
-            # Parse structured response {'errors': [...]}.
-            exception_str = exception_list[0][len('Exception: '):]
-            try:
-                exception_dict = ast.literal_eval(exception_str)
-            except Exception as e:
-                if 'wait_ready timeout exceeded' in exception_str:
-                    # This error seems to occur when the provisioning process
-                    # went through partially (e.g., for spot, initial
-                    # provisioning succeeded, but while waiting for ssh/setting
-                    # up it got preempted).
-                    logger.error('Got the following exception, continuing: '
-                                 f'{exception_list[0]}')
-                    blocked_resources.add(
-                        launchable_resources.copy(zone=zone.name))
-                    return
-                raise RuntimeError(
-                    f'Failed to parse exception: {exception_str}') from e
-            # TPU VM returns a different structured response.
-            if 'errors' not in exception_dict:
-                exception_dict = {'errors': [exception_dict]}
-            for error in exception_dict['errors']:
-                code = error['code']
-                message = error['message']
-                if code == 'QUOTA_EXCEEDED':
-                    if '\'GPUS_ALL_REGIONS\' exceeded' in message:
-                        # Global quota.  All regions in GCP will fail.  Ex:
-                        # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
-                        # globally.
-                        # This skip is only correct if we implement "first
-                        # retry the region/zone of an existing cluster with the
-                        # same name" correctly.
-                        blocked_resources.add(
-                            launchable_resources.copy(region=None, zone=None))
-                    else:
-                        # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
-                        # in region us-west1.
-                        blocked_resources.add(
-                            launchable_resources.copy(zone=None))
-                elif code in [
-                        'ZONE_RESOURCE_POOL_EXHAUSTED',
-                        'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
-                        'UNSUPPORTED_OPERATION'
-                ]:  # Per zone.
-                    # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
-                    # However, UNSUPPORTED_OPERATION is observed empirically
-                    # when VM is preempted during creation.  This seems to be
-                    # not documented by GCP.
-                    blocked_resources.add(
-                        launchable_resources.copy(zone=zone.name))
-                elif code in ['RESOURCE_NOT_READY']:
-                    # This code is returned when the VM is still STOPPING.
-                    blocked_resources.add(
-                        launchable_resources.copy(zone=zone.name))
-                elif code in [3, 8, 9]:
-                    # Error code 3 means TPU is preempted during creation.
-                    # Example:
-                    # {'code': 3, 'message': 'Cloud TPU received a bad request. update is not supported while in state PREEMPTED [EID: 0x73013519f5b7feb2]'} # pylint: disable=line-too-long
-                    # Error code 8 means TPU resources is out of
-                    # capacity. Example:
-                    # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
-                    # Error code 9 means TPU resources is insufficient reserved
-                    # capacity. Example:
-                    # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
-                    blocked_resources.add(
-                        launchable_resources.copy(zone=zone.name))
-                elif code == 'RESOURCE_NOT_FOUND':
-                    # https://github.com/skypilot-org/skypilot/issues/1797
-                    # In the inner provision loop we have used retries to
-                    # recover but failed. This indicates this zone is most
-                    # likely out of capacity. The provision loop will terminate
-                    # any potentially live VMs before moving onto the next
-                    # zone.
-                    blocked_resources.add(
-                        launchable_resources.copy(zone=zone.name))
-                else:
-                    assert False, error
-        elif len(httperror_str) >= 1:
-            messages = '\n\t'.join(httperror_str)
-            logger.warning(
-                f'Got error(s):\n\t{style.DIM}{messages}{style.RESET_ALL}')
-            if ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No VPC with name '
-                    in stderr):
-                # User has specified a VPC that does not exist. On GCP, VPC is
-                # global. So we skip the entire cloud.
-                blocked_resources.add(
-                    launchable_resources.copy(region=None, zone=None))
-            elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
-                  in stderr):
-                if (region.name == 'us-central2' and
-                        launchable_resources.accelerators is not None and
-                        any(acc.lower().startswith('tpu-v4')
-                            for acc in launchable_resources.accelerators)):
-                    # us-central2 is a TPU v4 only region. The subnet for
-                    # this region may not exist when the user does not have
-                    # the TPU v4 quota. We should skip this region.
-                    logger.warning('Please check if you have TPU v4 quotas '
-                                   f'in {region.name}.')
-                blocked_resources.add(
-                    launchable_resources.copy(region=region.name, zone=None))
-            elif ('Requested disk size cannot be smaller than the image size'
-                  in httperror_str[0]):
-                logger.info('Skipping all regions due to disk size issue.')
-                blocked_resources.add(
-                    launchable_resources.copy(region=None, zone=None))
-            elif ('Policy update access denied.' in httperror_str[0] or
-                  'IAM_PERMISSION_DENIED' in httperror_str[0]):
-                logger.info(
-                    'Skipping all regions due to service account not '
-                    'having the required permissions and the user '
-                    'account does not have enough permission to '
-                    'update it. Please contact your administrator and '
-                    'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
-                    f'Details: {httperror_str[0]}')
-                blocked_resources.add(
-                    launchable_resources.copy(region=None, zone=None))
-            else:
-                # Parse HttpError for unauthorized regions. Example:
-                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
-                # Details: "Location us-east1-d is not found or access is
-                # unauthorized.">
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
-        else:
-            # No such structured error response found.
-            assert not exception_list, stderr
-            if 'Head node fetch timed out' in stderr:
-                # Example: click.exceptions.ClickException: Head node fetch
-                # timed out. Failed to create head node.
-                # This is a transient error, but we have retried in need_ray_up
-                # and failed.  So we skip this zone.
-                logger.info('Got \'Head node fetch timed out\' in '
-                            f'{zone.name}.')
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
-            elif 'was not found' in stderr:
-                # Example: The resource
-                # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
-                # was not found.
-                logger.warning(f'Got \'resource not found\' in {zone.name}.')
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
-            elif 'rsync: command not found' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(_RSYNC_NOT_FOUND_MESSAGE)
-            else:
-                logger.info('====== stdout ======')
-                for s in stdout.split('\n'):
-                    print(s)
-                logger.info('====== stderr ======')
-                for s in splits:
-                    print(s)
-
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Errors occurred during provision; '
-                                       'check logs above.')
-
-    @staticmethod
     def _azure_handler(blocked_resources: Set['resources_lib.Resources'],
                        launchable_resources: 'resources_lib.Resources',
                        region: 'clouds.Region',
@@ -1109,7 +934,8 @@ class FailoverCloudErrorHandlerV1:
         if handler is None:
             raise NotImplementedError(
                 f'Cloud {cloud} unknown, or has not added '
-                'support for parsing and handling provision failures.')
+                'support for parsing and handling provision failures with '
+                'V1 handlers.')
         handler(blocked_resources, launchable_resources, region, zones, stdout,
                 stderr)
 
@@ -1140,9 +966,6 @@ class FailoverCloudErrorHandlerV2:
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources, region, zones, err):
-        # TODO: Handle TPU VMs when we have TPU VM integrated.
-        assert not tpu_utils.is_tpu_vm(
-            launchable_resources), launchable_resources
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
@@ -1229,6 +1052,22 @@ class FailoverCloudErrorHandlerV2:
                                    f'in {region.name}.')
                 blocked_resources.add(
                     launchable_resources.copy(region=region.name, zone=None))
+            elif code == 'type.googleapis.com/google.rpc.QuotaFailure':
+                # TPU VM pod specific error.
+                if 'in region' in message:
+                    # Example:
+                    # "Quota 'TPUV2sPreemptiblePodPerProjectPerRegionForTPUAPI'
+                    # exhausted. Limit 32 in region europe-west4"
+                    blocked_resources.add(
+                        launchable_resources.copy(region=region.name,
+                                                  zone=None))
+                elif 'in zone' in message:
+                    # Example:
+                    # "Quota 'TPUV2sPreemptiblePodPerProjectPerZoneForTPUAPI'
+                    # exhausted. Limit 32 in zone europe-west4-a"
+                    blocked_resources.add(
+                        launchable_resources.copy(zone=zone.name))
+
             elif 'Requested disk size cannot be smaller than the image size' in message:
                 logger.info('Skipping all regions due to disk size issue.')
                 blocked_resources.add(
@@ -1694,9 +1533,8 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
-            if (to_provision.cloud.PROVISIONER_VERSION
-                    == clouds.ProvisionerVersion.SKYPILOT and
-                    not tpu_utils.is_tpu_vm(to_provision)):
+            if (to_provision.cloud.PROVISIONER_VERSION ==
+                    clouds.ProvisionerVersion.SKYPILOT):
                 # TODO (suquark): Gradually move the other clouds to
                 #  the new provisioner once they are ready.
                 assert to_provision.region == region.name, (to_provision,
@@ -1880,49 +1718,6 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=is_prev_cluster_healthy)
 
-    def _tpu_vm_pod_setup(self, cluster_yaml: str,
-                          cluster_handle: 'backends.CloudVmRayResourceHandle'):
-        """Completes setup and start Ray cluster on TPU VM Pod nodes.
-
-        This is a workaround for Ray Autoscaler where `ray up` does not
-        run setup or launch ray cluster on TPU VM Pod nodes.
-        """
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            cluster_yaml, cluster_handle.docker_user)
-        # Always fetch the latest IPs, since GCP may change them without notice
-        cluster_handle.update_cluster_ips()
-        all_ips = cluster_handle.external_ips()
-        num_tpu_devices = tpu_utils.get_num_tpu_devices(
-            cluster_handle.launched_resources)
-        if all_ips is None or len(all_ips) != num_tpu_devices:
-            raise RuntimeError(
-                f'Nodes IPs: {all_ips} does not'
-                f'match number of TPU devices: {num_tpu_devices}.')
-
-        # Get the private IP of head node for connecting Ray cluster.
-        head_runner = command_runner.SSHCommandRunner(
-            all_ips[0], port=cluster_handle.head_ssh_port, **ssh_credentials)
-        cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
-        rc, stdout, stderr = head_runner.run(cmd_str,
-                                             require_outputs=True,
-                                             stream_logs=False)
-        subprocess_utils.handle_returncode(
-            rc,
-            cmd_str,
-            'Failed to get private IP from head node.',
-            stderr=stdout + stderr)
-        head_ip_private = stdout.strip()
-
-        ray_config = common_utils.read_yaml(cluster_yaml)
-        worker_start_ray_commands = [f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
-        worker_start_ray_commands += ray_config['worker_start_ray_commands']
-
-        # Setup TPU VM Pod workers and launch Ray cluster.
-        onprem_utils.do_filemounts_and_setup_on_local_workers(
-            cluster_yaml,
-            worker_ips=all_ips[1:],
-            extra_setup_cmds=worker_start_ray_commands)
-
     # TODO(suquark): Deprecate this method
     # once the `provision_utils` is adopted for all the clouds.
     @timeline.event
@@ -2036,43 +1831,6 @@ class RetryingVmProvisioner(object):
                         'timeout.')
                     return True
 
-            if isinstance(to_provision_cloud, clouds.GCP):
-                if ('Quota exceeded for quota metric \'List requests\' and '
-                        'limit \'List requests per minute\'' in stderr):
-                    logger.info(
-                        'Retrying due to list request rate limit exceeded.')
-                    return True
-
-                # https://github.com/skypilot-org/skypilot/issues/2666
-                if ('Head node fetch timed out. Failed to create head node.'
-                        in stderr):
-                    logger.info(
-                        'Retrying head node provisioning due to head fetching '
-                        'timeout.')
-                    return True
-
-                # https://github.com/skypilot-org/skypilot/issues/1797
-                # "The resource 'projects/xxx/zones/us-central1-b/instances/ray-yyy-head-<hash>-compute' was not found" # pylint: disable=line-too-long
-                pattern = (r'\'code\': \'RESOURCE_NOT_FOUND\'.*The resource'
-                           r'.*instances\/.*-compute\' was not found')
-                result = re.search(pattern, stderr)
-                if result is not None:
-                    # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info('Retrying due to the possibly transient '
-                                'RESOURCE_NOT_FOUND error.')
-                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
-                    return True
-
-                # "The resource 'projects/skypilot-375900/regions/us-central1/subnetworks/default' is not ready". Details: "[{'message': "The resource 'projects/xxx/regions/us-central1/subnetworks/default' is not ready", 'domain': 'global', 'reason': 'resourceNotReady'}]"> # pylint: disable=line-too-long
-                pattern = (r'is not ready(.*)\'reason\': \'resourceNotReady\'')
-                result = re.search(pattern, stderr)
-                if result is not None:
-                    # Retry. Unlikely will succeed if it's due to no capacity.
-                    logger.info('Retrying due to the possibly transient '
-                                'resourceNotReady error.')
-                    logger.debug(f'-- Stderr --\n{stderr}\n ----')
-                    return True
-
             if isinstance(to_provision_cloud, clouds.Lambda):
                 if 'Your API requests are being rate limited.' in stderr:
                     logger.info(
@@ -2120,12 +1878,6 @@ class RetryingVmProvisioner(object):
                      f'{retry_cnt} retries.')
         if returncode != 0:
             return GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None, None
-
-        resources = cluster_handle.launched_resources
-        if tpu_utils.is_tpu_vm_pod(resources):
-            logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-                        f'{style.RESET_ALL}')
-            self._tpu_vm_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
@@ -2412,7 +2164,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     """
     # Bump if any fields get added/removed/changed, and add backward
     # compaitibility logic in __setstate__.
-    _VERSION = 6
+    _VERSION = 7
 
     def __init__(self,
                  *,
@@ -2538,7 +2290,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         del max_attempts  # Unused.
         head_ssh_port = 22
         self.stable_ssh_ports = ([head_ssh_port] + [22] *
-                                 (self.num_node_ips - 1))
+                                 (self.num_node_ips * self.launched_nodes - 1))
 
     def update_cluster_ips(
             self,
@@ -2575,7 +2327,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
 
         def is_provided_ips_valid(ips: Optional[List[Optional[str]]]) -> bool:
-            return (ips is not None and len(ips) == self.num_node_ips and
+            return (ips is not None and
+                    len(ips) == self.num_node_ips * self.launched_nodes and
                     all(ip is not None for ip in ips))
 
         use_internal_ips = self._use_internal_ips()
@@ -2726,9 +2479,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     @property
     def num_node_ips(self) -> int:
         """Returns number of IPs of the cluster, correctly handling TPU Pod."""
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(self.launched_resources)
+        is_tpu_vm_pod = gcp_utils.is_tpu_vm_pod(self.launched_resources)
         if is_tpu_vm_pod:
-            num_ips = tpu_utils.get_num_tpu_devices(self.launched_resources)
+            num_ips = gcp_utils.get_num_tpu_devices(self.launched_resources)
         else:
             num_ips = self.launched_nodes
         return num_ips
@@ -2753,6 +2506,19 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if version < 6:
             state['cluster_name_on_cloud'] = state['cluster_name']
+
+        if version < 7:
+            launched_resources = state['launched_resources']
+
+            # Backward compatibility: we change the default value for TPU VM to
+            # True in version 7 (#1758), so we need to explicitly set it to
+            # False when loading the old handle.
+            if gcp_utils.is_tpu(launched_resources):
+                accelerator_args = launched_resources.accelerator_args
+                accelerator_args['tpu_vm'] = accelerator_args.get(
+                    'tpu_vm', False)
+                state['launched_resources'] = launched_resources.copy(
+                    accelerator_args=accelerator_args)
 
         self.__dict__.update(state)
 
@@ -3658,9 +3424,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        num_actual_nodes = task.num_nodes * handle.num_node_ips
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
-        if task_copy.num_nodes > 1 or is_tpu_vm_pod:
+        if num_actual_nodes > 1:
             self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
@@ -4995,14 +4761,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         internal_ips = handle.internal_ips()
         assert internal_ips is not None, 'internal_ips is not cached in handle'
 
-        # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
-        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
-        if is_tpu_vm_pod:
-            num_actual_nodes = tpu_utils.get_num_tpu_devices(
-                handle.launched_resources)
-        else:
-            num_actual_nodes = task.num_nodes
-        assert isinstance(num_actual_nodes, int), num_actual_nodes
+        # If TPU VM Pods is used, #num_nodes should be num_nodes * num_node_ips
+        num_actual_nodes = task.num_nodes * handle.num_node_ips
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)

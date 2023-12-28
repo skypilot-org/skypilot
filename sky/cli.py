@@ -1143,13 +1143,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     task.update_envs(env)
-    # TODO(wei-lin): move this validation into Python API.
-    for resource in task.resources:
-        if resource.accelerators is not None:
-            acc, _ = list(resource.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
-                                 f'Got num_nodes={task.num_nodes}.')
     return task
 
 
