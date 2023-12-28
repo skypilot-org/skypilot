@@ -2343,8 +2343,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         """
         del max_attempts  # Unused.
         head_ssh_port = 22
-        self.stable_ssh_ports = ([head_ssh_port] + [22] *
-                                 (self.num_ips_per_node * self.launched_nodes - 1))
+        self.stable_ssh_ports = (
+            [head_ssh_port] + [22] *
+            (self.num_ips_per_node * self.launched_nodes - 1))
 
     def update_cluster_ips(
             self,
