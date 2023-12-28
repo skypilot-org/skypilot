@@ -620,8 +620,16 @@ class GangSchedulingStatus(enum.Enum):
     HEAD_FAILED = 2
 
 
+def _add_to_blocked_resources(blocked_resources: Set['resources_lib.Resources'],
+                              resources: 'resources_lib.Resources') -> None:
+    # If the resources is already in the blocked_resources, we don't need to
+    # add it again to avoid duplicated entries.
+    if not resources.should_be_blocked_by(blocked_resources):
+        blocked_resources.add(resources)
+
+
 class FailoverCloudErrorHandlerV1:
-    """Handles errors during provisioning and updates the blocked_resources
+    """Handles errors during provisioning and updates the blocked_resources.
 
     Deprecated: Newly added cloud should use the FailoverCloudErrorHandlerV2.
     """
@@ -651,7 +659,8 @@ class FailoverCloudErrorHandlerV1:
                 # and failed.  So we skip this region.
                 logger.info('Got \'Head node fetch timed out\' in '
                             f'{region.name}.')
-                blocked_resources.add(
+                _add_to_blocked_resources(
+                    blocked_resources,
                     launchable_resources.copy(region=region.name))
             elif 'rsync: command not found' in stderr:
                 with ux_utils.print_exception_no_traceback():
@@ -670,9 +679,12 @@ class FailoverCloudErrorHandlerV1:
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
-            blocked_resources.add(resources_lib.Resources(cloud=clouds.Azure()))
+            _add_to_blocked_resources(
+                blocked_resources,
+                resources_lib.Resources(cloud=clouds.Azure()))
         else:
-            blocked_resources.add(launchable_resources.copy(zone=None))
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=None))
 
     @staticmethod
     def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -706,14 +718,16 @@ class FailoverCloudErrorHandlerV1:
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        blocked_resources.add(launchable_resources.copy(zone=None))
+        _add_to_blocked_resources(blocked_resources,
+                                  launchable_resources.copy(zone=None))
 
         # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
                 for r in clouds.Lambda.regions():
                     if e.find(r.name) == -1:
-                        blocked_resources.add(
+                        _add_to_blocked_resources(
+                            blocked_resources,
                             launchable_resources.copy(region=r.name, zone=None))
 
     @staticmethod
@@ -743,7 +757,8 @@ class FailoverCloudErrorHandlerV1:
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        blocked_resources.add(launchable_resources.copy(zone=None))
+        _add_to_blocked_resources(blocked_resources,
+                                  launchable_resources.copy(zone=None))
 
     @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -775,14 +790,16 @@ class FailoverCloudErrorHandlerV1:
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        blocked_resources.add(launchable_resources.copy(zone=None))
+        _add_to_blocked_resources(blocked_resources,
+                                  launchable_resources.copy(zone=None))
 
         # Sometimes, SCPError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
                 for r in clouds.SCP.regions():
                     if e.find(r.name) == -1:
-                        blocked_resources.add(
+                        _add_to_blocked_resources(
+                            blocked_resources,
                             launchable_resources.copy(region=r.name, zone=None))
 
     @staticmethod
@@ -818,7 +835,8 @@ class FailoverCloudErrorHandlerV1:
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
 
         for zone in zones:  # type: ignore[union-attr]
-            blocked_resources.add(launchable_resources.copy(zone=zone.name))
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def _local_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -852,7 +870,8 @@ class FailoverCloudErrorHandlerV1:
         logger.warning('Got error(s) on local cluster:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        blocked_resources.add(
+        _add_to_blocked_resources(
+            blocked_resources,
             launchable_resources.copy(region=region.name, zone=None))
 
     # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
@@ -895,7 +914,9 @@ class FailoverCloudErrorHandlerV1:
 
         if zones is not None:
             for zone in zones:
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -922,7 +943,8 @@ class FailoverCloudErrorHandlerV1:
             assert stderr is None, stderr
             if zones is not None:
                 for zone in zones:
-                    blocked_resources.add(
+                    _add_to_blocked_resources(
+                        blocked_resources,
                         launchable_resources.copy(zone=zone.name))
             return False  # definitely_no_nodes_launched
         assert stdout is not None and stderr is not None, (stdout, stderr)
@@ -965,7 +987,9 @@ class FailoverCloudErrorHandlerV2:
 
     @staticmethod
     def _gcp_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources, region, zones, err):
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region', zones: List['clouds.Zone'],
+                     err: Exception):
         assert zones and len(zones) == 1, zones
         zone = zones[0]
 
@@ -975,22 +999,15 @@ class FailoverCloudErrorHandlerV2:
         else:
             logger.debug(f'Got an unparsed error: {err}; blocking resources by '
                          f'its zone {zone.name}')
-            blocked_resources.add(launchable_resources.copy(zone=zone.name))
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=zone.name))
             return
 
         for e in errors:
             code = e['code']
             message = e['message']
 
-            if 'wait_ready timeout exceeded' in message:
-                # This error seems to occur when the provisioning process
-                # went through partially (e.g., for spot, initial
-                # provisioning succeeded, but while waiting for ssh/setting
-                # up it got preempted).
-                logger.error('Got the following exception, continuing: '
-                             f'{message}')
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
-            elif code in ('QUOTA_EXCEEDED', 'quotaExceeded'):
+            if code in ('QUOTA_EXCEEDED', 'quotaExceeded'):
                 if '\'GPUS_ALL_REGIONS\' exceeded' in message:
                     # Global quota.  All regions in GCP will fail.  Ex:
                     # Quota 'GPUS_ALL_REGIONS' exceeded.  Limit: 1.0
@@ -998,12 +1015,14 @@ class FailoverCloudErrorHandlerV2:
                     # This skip is only correct if we implement "first
                     # retry the region/zone of an existing cluster with the
                     # same name" correctly.
-                    blocked_resources.add(
+                    _add_to_blocked_resources(
+                        blocked_resources,
                         launchable_resources.copy(region=None, zone=None))
                 else:
                     # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
                     # in region us-west1.
-                    blocked_resources.add(launchable_resources.copy(zone=None))
+                    _add_to_blocked_resources(
+                        blocked_resources, launchable_resources.copy(zone=None))
             elif code in [
                     'ZONE_RESOURCE_POOL_EXHAUSTED',
                     'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS',
@@ -1014,10 +1033,14 @@ class FailoverCloudErrorHandlerV2:
                 # However, UNSUPPORTED_OPERATION is observed empirically
                 # when VM is preempted during creation.  This seems to be
                 # not documented by GCP.
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             elif code in ['RESOURCE_NOT_READY']:
                 # This code is returned when the VM is still STOPPING.
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             elif code in [3, 8, 9]:
                 # Error code 3 means TPU is preempted during creation.
                 # Example:
@@ -1028,7 +1051,9 @@ class FailoverCloudErrorHandlerV2:
                 # Error code 9 means TPU resources is insufficient reserved
                 # capacity. Example:
                 # {'code': 9, 'message': 'Insufficient reserved capacity. Contact customer support to increase your reservation. [EID: 0x2f8bc266e74261a]'} # pylint: disable=line-too-long
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             elif code == 'RESOURCE_NOT_FOUND':
                 # https://github.com/skypilot-org/skypilot/issues/1797
                 # In the inner provision loop we have used retries to
@@ -1036,11 +1061,14 @@ class FailoverCloudErrorHandlerV2:
                 # likely out of capacity. The provision loop will terminate
                 # any potentially live VMs before moving onto the next
                 # zone.
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             elif code == 'VPC_NOT_FOUND':
                 # User has specified a VPC that does not exist. On GCP, VPC is
                 # global. So we skip the entire cloud.
-                blocked_resources.add(
+                _add_to_blocked_resources(
+                    blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif code == 'SUBNET_NOT_FOUND_FOR_VPC':
                 if (any(acc.lower().startswith('tpu-v4')
@@ -1051,7 +1079,8 @@ class FailoverCloudErrorHandlerV2:
                     # the TPU v4 quota. We should skip this region.
                     logger.warning('Please check if you have TPU v4 quotas '
                                    f'in {region.name}.')
-                blocked_resources.add(
+                _add_to_blocked_resources(
+                    blocked_resources,
                     launchable_resources.copy(region=region.name, zone=None))
             elif code == 'type.googleapis.com/google.rpc.QuotaFailure':
                 # TPU VM pod specific error.
@@ -1059,19 +1088,22 @@ class FailoverCloudErrorHandlerV2:
                     # Example:
                     # "Quota 'TPUV2sPreemptiblePodPerProjectPerRegionForTPUAPI'
                     # exhausted. Limit 32 in region europe-west4"
-                    blocked_resources.add(
+                    _add_to_blocked_resources(
+                        blocked_resources,
                         launchable_resources.copy(region=region.name,
                                                   zone=None))
                 elif 'in zone' in message:
                     # Example:
                     # "Quota 'TPUV2sPreemptiblePodPerProjectPerZoneForTPUAPI'
                     # exhausted. Limit 32 in zone europe-west4-a"
-                    blocked_resources.add(
+                    _add_to_blocked_resources(
+                        blocked_resources,
                         launchable_resources.copy(zone=zone.name))
 
             elif 'Requested disk size cannot be smaller than the image size' in message:
                 logger.info('Skipping all regions due to disk size issue.')
-                blocked_resources.add(
+                _add_to_blocked_resources(
+                    blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif 'Policy update access denied.' in message or code == 'IAM_PERMISSION_DENIED':
                 logger.info(
@@ -1081,18 +1113,23 @@ class FailoverCloudErrorHandlerV2:
                     'update it. Please contact your administrator and '
                     'check out: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html\n'  # pylint: disable=line-too-long
                     f'Details: {message}')
-                blocked_resources.add(
+                _add_to_blocked_resources(
+                    blocked_resources,
                     launchable_resources.copy(region=None, zone=None))
             elif 'is not found or access is unauthorized' in message:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
             else:
                 logger.warning(f'Got an unknown error: {message}; blocking '
                                f'resources by its zone {zone.name}')
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1106,10 +1143,13 @@ class FailoverCloudErrorHandlerV2:
             f'Got error(s) in {launchable_resources.cloud}:'
             f'{common_utils.format_exception(error, use_bracket=True)}')
         if zones is None:
-            blocked_resources.add(launchable_resources.copy(zone=None))
+            _add_to_blocked_resources(blocked_resources,
+                                      launchable_resources.copy(zone=None))
         else:
             for zone in zones:
-                blocked_resources.add(launchable_resources.copy(zone=zone.name))
+                _add_to_blocked_resources(
+                    blocked_resources,
+                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -2073,7 +2113,8 @@ class RetryingVmProvisioner(object):
                 # The exceptions above should be applicable to the whole
                 # cloud, so we do add the cloud to the blocked resources.
                 logger.warning(common_utils.format_exception(e))
-                self._blocked_resources.add(
+                _add_to_blocked_resources(
+                    self._blocked_resources,
                     resources_lib.Resources(cloud=to_provision.cloud))
                 failover_history.append(e)
             except exceptions.ResourcesUnavailableError as e:
@@ -2103,7 +2144,7 @@ class RetryingVmProvisioner(object):
             if prev_cluster_status is None:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
-                self._blocked_resources.add(to_provision)
+                _add_to_blocked_resources(self._blocked_resources, to_provision)
             else:
                 # If we reach here, it means that the existing cluster must have
                 # a previous status of INIT, because other statuses (UP,
