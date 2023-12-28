@@ -13,6 +13,12 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
+class SpotZoneType(enum.Enum):
+    """Spot Zone Type."""
+    ACTIVE = 'ACTIVE'
+    PREEMPTED = 'PREEMPTED'
+
+
 class SpotPlacer:
     """Spot Placement specification."""
     NAME: Optional[str] = None
@@ -21,6 +27,9 @@ class SpotPlacer:
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         assert spec.spot_zones is not None
         self.zones = list(spec.spot_zones)
+        self.zone2type: Dict[str, SpotZoneType] = {
+            zone: SpotZoneType.ACTIVE for zone in self.zones
+        }
 
     def __init_subclass__(cls) -> None:
         if cls.NAME is None:
@@ -37,58 +46,6 @@ class SpotPlacer:
                current_considered_zones: List[str]) -> str:
         """Select next zone to place spot instance."""
         raise NotImplementedError
-
-    def handle_active(self, zone: str) -> None:
-        """Handle active of spot instance in given zone."""
-        del zone  # Unused.
-
-    def handle_preemption(self, zone: str) -> None:
-        """Handle preemption of spot instance in given zone."""
-        del zone  # Unused.
-
-    def __repr__(self) -> str:
-        return f'{self.NAME}SpotPlacer()'
-
-    @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
-        assert (spec.spot_placer is not None and
-                spec.spot_placer in cls.REGISTRY)
-        return cls.REGISTRY[spec.spot_placer](spec)
-
-
-class EvenSpreadSpotPlacer(SpotPlacer):
-    """Evenly spread spot instances across zones."""
-    NAME: Optional[str] = 'EvenSpread'
-
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(spec)
-        self.current_zone_idx: int = 0
-
-    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               current_considered_zones: List[str]) -> str:
-        del existing_replicas  # Unused.
-        zone = self.zones[self.current_zone_idx % len(self.zones)]
-        logger.info(f'EvenSpreadSpotPlacer: {self.current_zone_idx}, {zone},'
-                    f'{self.zones}')
-        self.current_zone_idx += 1
-        return zone
-
-
-class SpotZoneType(enum.Enum):
-    """Spot Zone Type."""
-    ACTIVE = 'ACTIVE'
-    PREEMPTED = 'PREEMPTED'
-
-
-class HistoricalSpotPlacer(SpotPlacer):
-    """SpotPlacer with historical information."""
-    NAME: Optional[str] = None
-
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(spec)
-        self.zone2type: Dict[str, SpotZoneType] = {
-            zone: SpotZoneType.ACTIVE for zone in self.zones
-        }
 
     def move_zone_to_active(self, zone: str) -> None:
         assert zone in self.zone2type
@@ -120,14 +77,43 @@ class HistoricalSpotPlacer(SpotPlacer):
             if zone_type == SpotZoneType.PREEMPTED
         ]
 
+    def __repr__(self) -> str:
+        return f'{self.NAME}SpotPlacer()'
 
-class EagerFailoverSpotPlacer(HistoricalSpotPlacer):
+    @classmethod
+    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'SpotPlacer':
+        assert (spec.spot_placer is not None and
+                spec.spot_placer in cls.REGISTRY)
+        return cls.REGISTRY[spec.spot_placer](spec)
+
+
+class EvenSpreadSpotPlacer(SpotPlacer):
+    """Evenly spread spot instances across zones."""
+    NAME: Optional[str] = 'EvenSpread'
+
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(spec)
+        self.current_zone_idx: int = 0
+
+    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
+               current_considered_zones: List[str]) -> str:
+        del existing_replicas  # Unused.
+        del current_considered_zones  # Unused.
+        zone = self.zones[self.current_zone_idx % len(self.zones)]
+        logger.info(f'{self.NAME}: {self.current_zone_idx}, {zone},'
+                    f'{self.zones}')
+        self.current_zone_idx += 1
+        return zone
+
+
+class EagerFailoverSpotPlacer(SpotPlacer):
     """Eagerly failover to a different zone when preempted."""
     NAME: Optional[str] = 'EagerFailover'
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                current_considered_zones: List[str]) -> str:
         del existing_replicas  # Unused.
+        del current_considered_zones  # Unused.
         zone = random.choice(self.zones)
         while zone in self.preempted_zones():
             zone = random.choice(self.zones)
@@ -135,7 +121,7 @@ class EagerFailoverSpotPlacer(HistoricalSpotPlacer):
         return zone
 
 
-class DynamicFailoverSpotPlacer(HistoricalSpotPlacer):
+class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active zone when preempted."""
     NAME: Optional[str] = 'DynamicFailover'
 

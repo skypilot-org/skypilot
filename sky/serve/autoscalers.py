@@ -392,20 +392,22 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         scaling_options, all_replica_ids_to_scale_down = (
             self._scale_spot_instances(num_alive_spot, launched_replica_infos))
 
-        # OnDemand fallback.
         num_to_provision = (self.target_num_replicas + self.num_overprovision)
         num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
+        if num_alive_on_demand < self.min_on_demand_replicas:
+            num_demand_to_scale_up = (self.min_on_demand_replicas -
+                                      num_alive_on_demand)
         if num_ready_spot + num_alive_on_demand < num_to_provision:
-            # Enable OnDemand fallback.
             num_demand_to_scale_up = max(
-                self.min_on_demand_replicas,
-                min(self.target_num_replicas,
-                    num_to_provision - num_ready_spot)) - num_alive_on_demand
+                num_demand_to_scale_up,
+                (min(self.target_num_replicas,
+                     num_to_provision - num_ready_spot) - num_alive_on_demand))
 
-        elif num_ready_spot + num_alive_on_demand > num_to_provision:
-            # OnDemand fallback is not needed.
+        elif (num_ready_spot + num_alive_on_demand > num_to_provision and
+              num_alive_on_demand > self.min_on_demand_replicas):
             num_demand_to_scale_down = (num_ready_spot + num_alive_on_demand -
                                         num_to_provision)
+
         if num_demand_to_scale_up > 0:
             for _ in range(num_demand_to_scale_up):
                 scaling_options.append(
