@@ -96,6 +96,19 @@ def _generate_node_name(cluster_name: str, node_suffix: str,
     return node_name
 
 
+def _log_errors(errors: List[Dict[str, str]], e: Any, zone: str) -> None:
+    """Format errors into a string."""
+    if errors:
+        plural = 's' if len(errors) > 1 else ''
+        codes = ', '.join(e.get('code', 'NA') for e in errors)
+        messages = '; '.join(e.get('message', 'NA').strip('.') for e in errors)
+        logger.warning(
+            f'create_instances: Failed with return code{plural} {codes} in '
+            f'{zone}. (message{plural}: {messages})')
+    else:
+        logger.warning(f'create_instances: Failed with reason: {e}')
+
+
 def selflink_to_name(selflink: str) -> str:
     """Converts a selflink to a name.
 
@@ -709,8 +722,6 @@ class GCPComputeInstance(GCPInstance):
             #   'reason': 'quotaExceeded'
             # }
             error_details = getattr(e, 'error_details', [])
-            logger.warning(
-                f'create_instances: googleapiclient.errors.HttpError: {e}')
             errors = []
             for e in error_details:
                 # To be consistent with error messages returned by operation wait.
@@ -719,11 +730,15 @@ class GCPComputeInstance(GCPInstance):
                     'domain': e.get('domain'),
                     'message': e.get('message'),
                 })
+            logger.debug(
+                f'create_instances: googleapiclient.errors.HttpError: {e}')
+            _log_errors(errors, e, zone)
             return errors, names
         errors = operation.get('error', {}).get('errors')
         if errors:
-            logger.warning('create_instances: Failed to create instances. '
-                           f'Reason: {errors}')
+            logger.debug('create_instances: Failed to create instances. '
+                         f'Reason: {errors}')
+            _log_errors(errors, operation, zone)
             return errors, names
 
         logger.debug('Waiting GCP instances to be ready ...')
@@ -756,11 +771,13 @@ class GCPComputeInstance(GCPInstance):
             )
             request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
             request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
-            return [{
+            errors = [{
                 'code': 'TIMEOUT',
                 'message': 'Timeout waiting for creation operation',
                 'domain': 'create_instances'
-            }], names
+            }]
+            _log_errors(errors, None, zone)
+            return errors, names
 
         # NOTE: Error example:
         # {
@@ -769,9 +786,10 @@ class GCPComputeInstance(GCPInstance):
         # }
         errors = result.get('error', {}).get('errors')
         if errors:
-            logger.warning(
+            logger.debug(
                 'create_instances: Failed to create instances. Reason: '
                 f'{errors}')
+            _log_errors(errors, result, zone)
             return errors, names
         assert success, ('Failed to create instances, but there is no error. '
                          f'Instance status: {result}')
