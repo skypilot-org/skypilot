@@ -267,8 +267,7 @@ class RequestRateAutoscaler(Autoscaler):
 class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     """SpotRequestRateAutoscaler: Use spot to autoscale based on request rate.
 
-    This autoscaler uses spot instances to save cost while maintaining the
-    same performance as OnDemand instances.
+    This autoscaler uses spot instances to save cost.
     """
 
     NAME: Optional[str] = 'SpotRequestRateAutoscaler'

@@ -1063,4 +1063,5 @@ class SkyPilotReplicaManager(ReplicaManager):
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
+            # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
