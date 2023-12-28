@@ -1,14 +1,20 @@
 """Utility functions for resources."""
 import enum
 import itertools
+import re
+import typing
 from typing import List, Optional, Set
 
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import backends
 
 _PORT_RANGE_HINT_MSG = ('Invalid port range {}. Please use the format '
                         '"from-to", in which from <= to. e.g. "1-3".')
 _PORT_HINT_MSG = ('Invalid port {}. '
                   'Please use a port number between 1 and 65535.')
+_DEFAULT_MESSAGE_HANDLE_INITIALIZING = '<initializing>'
 
 
 class DiskTier(enum.Enum):
@@ -107,3 +113,31 @@ def simplify_ports(ports: List[str]) -> List[str]:
     For example, ['1-2', '3', '5-6', '7'] will be simplified to ['1-3', '5-7'].
     """
     return port_set_to_ranges(port_ranges_to_set(ports))
+
+
+def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
+                                simplify: bool = False) -> str:
+    if (handle.launched_nodes is not None and
+            handle.launched_resources is not None):
+        if simplify:
+            cloud = handle.launched_resources.cloud
+            if handle.launched_resources.accelerators is None:
+                vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
+                    handle.launched_resources.instance_type)
+                hardware = f'vCPU={int(vcpu)}'
+            else:
+                hardware = f'{handle.launched_resources.accelerators})'
+            spot = '[Spot]' if handle.launched_resources.use_spot else ''
+            return f'{handle.launched_nodes}x {cloud}({spot}{hardware})'
+        else:
+            launched_resource_str = str(handle.launched_resources)
+            # accelerator_args is way too long.
+            # Convert from:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
+            # to:
+            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+            pattern = ', accelerator_args={.*}'
+            launched_resource_str = re.sub(pattern, '...',
+                                           launched_resource_str)
+            return f'{handle.launched_nodes}x {launched_resource_str}'
+    return _DEFAULT_MESSAGE_HANDLE_INITIALIZING

@@ -11,7 +11,8 @@ setup: |
   fi
 
   # Install dependencies
-  pip install git+https://github.com/lm-sys/FastChat.git
+  pip install "fschat[model_worker,webui]==0.2.24"
+  pip install protobuf
 
 
 run: |

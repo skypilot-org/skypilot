@@ -136,9 +136,9 @@ def _merge_tag_specs(tag_specs: List[Dict[str, Any]],
             tag_specs += [user_tag_spec]
 
 
-def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
-                                                                          Any],
-                      tags: Dict[str, str], count: int) -> List:
+def _create_instances(ec2_fail_fast, cluster_name: str,
+                      node_config: Dict[str, Any], tags: Dict[str, str],
+                      count: int, associate_public_ip_address: bool) -> List:
     tags = {
         'Name': cluster_name,
         TAG_RAY_CLUSTER_NAME: cluster_name,
@@ -165,6 +165,13 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
         'TagSpecifications': tag_specs
     })
 
+    # We are adding 'NetworkInterfaces' in the inner loop and having both keys
+    # is considered invalid by the create_instances API.
+    security_group_ids = conf.pop('SecurityGroupIds', None)
+    # Guaranteed by config.py (the bootstrapping phase):
+    assert 'NetworkInterfaces' not in conf, conf
+    assert security_group_ids is not None, conf
+
     # NOTE: This ensures that we try ALL availability zones before
     # throwing an error.
     num_subnets = len(subnet_ids)
@@ -173,17 +180,17 @@ def _create_instances(ec2_fail_fast, cluster_name: str, node_config: Dict[str,
     per_subnet_tries = max_tries // num_subnets
     for i in range(max_tries):
         try:
-            if 'NetworkInterfaces' in conf:
-                logger.debug(
-                    'Attempting to create instances with NetworkInterfaces.'
-                    'Ignore SecurityGroupIds.')
-                # remove security group IDs previously copied from network
-                # interfaces (create_instances call fails otherwise)
-                conf.pop('SecurityGroupIds', None)
-            else:
-                # Try each subnet for per_subnet_tries times.
-                subnet_id = subnet_ids[i // per_subnet_tries]
-                conf['SubnetId'] = subnet_id
+            # Try each subnet for per_subnet_tries times.
+            subnet_id = subnet_ids[i // per_subnet_tries]
+
+            network_interfaces = [{
+                'SubnetId': subnet_id,
+                'DeviceIndex': 0,
+                # Whether the VM(s) should have a public IP.
+                'AssociatePublicIpAddress': associate_public_ip_address,
+                'Groups': security_group_ids,
+            }]
+            conf['NetworkInterfaces'] = network_interfaces
 
             # NOTE: We set retry=0 for fast failing when the resource is not
             # available. Here we have to handle 'RequestLimitExceeded'
@@ -242,7 +249,7 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name: str,
+def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
@@ -259,7 +266,7 @@ def run_instances(region: str, cluster_name: str,
         'Values': ['pending', 'running', 'stopping', 'stopped'],
     }, {
         'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-        'Values': [cluster_name],
+        'Values': [cluster_name_on_cloud],
     }]
     exist_instances = list(ec2.instances.filter(Filters=filters))
     exist_instances.sort(key=lambda x: x.id)
@@ -293,7 +300,7 @@ def run_instances(region: str, cluster_name: str,
                 'Value': 'head'
             }, {
                 'Key': 'Name',
-                'Value': f'sky-{cluster_name}-head'
+                'Value': f'sky-{cluster_name_on_cloud}-head'
             }]
         else:
             node_tag = [{
@@ -304,7 +311,7 @@ def run_instances(region: str, cluster_name: str,
                 'Value': 'worker'
             }, {
                 'Key': 'Name',
-                'Value': f'sky-{cluster_name}-worker'
+                'Value': f'sky-{cluster_name_on_cloud}-worker'
             }]
         ec2.meta.client.create_tags(
             Resources=[target_instance.id],
@@ -321,12 +328,13 @@ def run_instances(region: str, cluster_name: str,
     # TODO(suquark): Maybe in the future, users could adjust the number
     #  of instances dynamically. Then this case would not be an error.
     if config.resume_stopped_nodes and len(exist_instances) > config.count:
-        raise RuntimeError('The number of running/stopped/stopping '
-                           f'instances combined ({len(exist_instances)}) in '
-                           f'cluster "{cluster_name}" is greater than the '
-                           f'number requested by the user ({config.count}). '
-                           'This is likely a resource leak. '
-                           'Use "sky down" to terminate the cluster.')
+        raise RuntimeError(
+            'The number of running/stopped/stopping '
+            f'instances combined ({len(exist_instances)}) in '
+            f'cluster "{cluster_name_on_cloud}" is greater than the '
+            f'number requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     to_start_count = (config.count - len(running_instances) -
                       len(pending_instances))
@@ -335,12 +343,13 @@ def run_instances(region: str, cluster_name: str,
         zone = running_instances[0].placement['AvailabilityZone']
 
     if to_start_count < 0:
-        raise RuntimeError('The number of running+pending instances '
-                           f'({config.count - to_start_count}) in cluster '
-                           f'"{cluster_name}" is greater than the number '
-                           f'requested by the user ({config.count}). '
-                           'This is likely a resource leak. '
-                           'Use "sky down" to terminate the cluster.')
+        raise RuntimeError(
+            'The number of running+pending instances '
+            f'({config.count - to_start_count}) in cluster '
+            f'"{cluster_name_on_cloud}" is greater than the number '
+            f'requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     # Try to reuse previously stopped nodes with compatible configs
     if config.resume_stopped_nodes and to_start_count > 0 and (
@@ -381,9 +390,14 @@ def run_instances(region: str, cluster_name: str,
         #  This is a known issue before.
         ec2_fail_fast = aws.resource('ec2', region_name=region, max_attempts=0)
 
-        created_instances = _create_instances(ec2_fail_fast, cluster_name,
-                                              config.node_config, tags,
-                                              to_start_count)
+        created_instances = _create_instances(
+            ec2_fail_fast,
+            cluster_name_on_cloud,
+            config.node_config,
+            tags,
+            to_start_count,
+            associate_public_ip_address=(
+                not config.provider_config['use_internal_ips']))
         created_instances.sort(key=lambda x: x.id)
 
         created_instance_ids = [n.id for n in created_instances]
@@ -410,7 +424,7 @@ def run_instances(region: str, cluster_name: str,
     return common.ProvisionRecord(provider_name='aws',
                                   region=region,
                                   zone=zone,
-                                  cluster_name=cluster_name,
+                                  cluster_name=cluster_name_on_cloud,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
@@ -438,6 +452,7 @@ def _filter_instances(ec2, filters: List[Dict[str, Any]],
 # non_terminated_only=True?
 # Will there be callers who would want this to be False?
 # stop() and terminate() for example already implicitly assume non-terminated.
+@common_utils.retry
 def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
@@ -694,7 +709,8 @@ def cleanup_ports(
             sg.delete()
         except aws.botocore_exceptions().ClientError as e:
             if _DEPENDENCY_VIOLATION_PATTERN.findall(str(e)):
-                logger.info(f'Security group {sg_name} is still in use. Retry.')
+                logger.debug(
+                    f'Security group {sg_name} is still in use. Retry.')
                 time.sleep(backoff.current_backoff())
                 continue
             raise
@@ -704,7 +720,7 @@ def cleanup_ports(
         f'{BOTO_DELETE_MAX_ATTEMPTS} attempts. Please delete it manually.')
 
 
-def wait_instances(region: str, cluster_name: str,
+def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
     # TODO(suquark): unify state for different clouds
@@ -715,7 +731,7 @@ def wait_instances(region: str, cluster_name: str,
     filters = [
         {
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
+            'Values': [cluster_name_on_cloud],
         },
     ]
 
@@ -738,7 +754,8 @@ def wait_instances(region: str, cluster_name: str,
     instances = list(ec2.instances.filter(Filters=filters))
     logger.debug(instances)
     if not instances:
-        raise RuntimeError(f'No instances found for cluster {cluster_name}.')
+        raise RuntimeError(
+            f'No instances found for cluster {cluster_name_on_cloud}.')
 
     if state == status_lib.ClusterStatus.UP:
         waiter = client.get_waiter('instance_running')
@@ -752,7 +769,8 @@ def wait_instances(region: str, cluster_name: str,
     waiter.wait(WaiterConfig={'Delay': 5, 'MaxAttempts': 120}, Filters=filters)
 
 
-def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
+def get_cluster_info(region: str,
+                     cluster_name_on_cloud: str) -> common.ClusterInfo:
     """See sky/provision/__init__.py"""
     ec2 = _default_ec2_resource(region)
     filters = [
@@ -762,7 +780,7 @@ def get_cluster_info(region: str, cluster_name: str) -> common.ClusterInfo:
         },
         {
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
-            'Values': [cluster_name],
+            'Values': [cluster_name_on_cloud],
         },
     ]
     running_instances = list(ec2.instances.filter(Filters=filters))

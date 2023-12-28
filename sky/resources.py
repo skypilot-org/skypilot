@@ -1,7 +1,7 @@
 """Resources: compute requirements of Tasks."""
 import functools
 import textwrap
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -10,11 +10,11 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky import spot
-from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
+from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -877,6 +877,18 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
+    def get_accelerators_str(self) -> str:
+        accelerators = self.accelerators
+        if accelerators is None:
+            accelerators = '-'
+        elif isinstance(accelerators, dict) and len(accelerators) == 1:
+            accelerators, count = list(accelerators.items())[0]
+            accelerators = f'{accelerators}:{count}'
+        return accelerators
+
+    def get_spot_str(self) -> str:
+        return '[Spot]' if self.use_spot else ''
+
     def make_deploy_variables(
             self, cluster_name_on_cloud: str, region: clouds.Region,
             zones: Optional[List[clouds.Zone]]) -> Dict[str, Optional[str]]:
@@ -1103,12 +1115,89 @@ class Resources:
         return features
 
     @classmethod
-    def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
+    def from_yaml_config(
+        cls, config: Optional[Dict[str, Any]]
+    ) -> Union[Set['Resources'], List['Resources']]:
         if config is None:
-            return Resources()
+            return {Resources()}
+        common_utils.validate_schema(config, schemas.get_resources_schema(),
+                                     'Invalid resources YAML: ')
 
-        backend_utils.validate_schema(config, schemas.get_resources_schema(),
-                                      'Invalid resources YAML: ')
+        def _override_resources(
+                base_resource_config: Dict[str, Any],
+                override_configs: List[Dict[str, Any]]) -> List[Resources]:
+            resources_list = []
+            for override_config in override_configs:
+                new_resource_config = base_resource_config.copy()
+                new_resource_config.update(override_config)
+                # Call from_yaml_config again instead of
+                # _from_yaml_config_single to handle the case, where both
+                # multiple accelerators and `any_of` is specified.
+                # This will not cause infinite recursion because we have made
+                # sure that `any_of` and `ordered` cannot be specified in the
+                # resource candidates in `any_of` or `ordered`, by the schema
+                # validation above.
+                resources_list.extend(
+                    list(Resources.from_yaml_config(new_resource_config)))
+            return resources_list
+
+        config = config.copy()
+        any_of_configs = config.pop('any_of', None)
+        ordered_configs = config.pop('ordered', None)
+        if any_of_configs is not None and ordered_configs is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both "any_of" and "ordered" in resources.')
+
+        # Parse resources.accelerators field.
+        accelerators = config.get('accelerators')
+        if config and accelerators is not None:
+            if isinstance(accelerators, str):
+                accelerators = {accelerators}
+            elif isinstance(accelerators, dict):
+                accelerators = [
+                    f'{k}:{v}' if v is not None else f'{k}'
+                    for k, v in accelerators.items()
+                ]
+                accelerators = set(accelerators)
+            if len(accelerators) > 1 and ordered_configs:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify multiple "accelerators" with "ordered" '
+                        'in resources.')
+            if (len(accelerators) > 1 and any_of_configs and
+                    not isinstance(accelerators, set)):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify multiple "accelerators" with prefered '
+                        'order (i.e., list of accelerators) with "any_of" '
+                        'in resources.')
+
+        if any_of_configs:
+            resources_list = _override_resources(config, any_of_configs)
+            return set(resources_list)
+        if ordered_configs:
+            resources_list = _override_resources(config, ordered_configs)
+            return resources_list
+        # Translate accelerators field to potential multiple resources.
+        if accelerators:
+            # In yaml file, we store accelerators as a list.
+            # In Task, we store a list of resources, each with 1 accelerator.
+            # This for loop is for format conversion.
+            tmp_resources_list = []
+            for acc in accelerators:
+                tmp_resource = config.copy()
+                tmp_resource['accelerators'] = acc
+                tmp_resources_list.append(
+                    Resources._from_yaml_config_single(tmp_resource))
+
+            assert isinstance(accelerators, (list, set)), accelerators
+            return type(accelerators)(tmp_resources_list)
+
+        return {Resources._from_yaml_config_single(config)}
+
+    @classmethod
+    def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
         resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
@@ -1162,8 +1251,8 @@ class Resources:
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
-        config['spot_recovery'] = self.spot_recovery
-        config['disk_size'] = self.disk_size
+            add_if_not_none('spot_recovery', self.spot_recovery)
+        add_if_not_none('disk_size', self.disk_size)
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)

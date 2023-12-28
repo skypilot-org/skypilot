@@ -11,12 +11,13 @@ import psutil
 import yaml
 
 from sky import sky_logging
-from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import ux_utils
 
 # Seconds of sleep between the processing of skylet events.
@@ -72,6 +73,18 @@ class SpotJobUpdateEvent(SkyletEvent):
         spot_utils.update_spot_job_status()
 
 
+class ServiceUpdateEvent(SkyletEvent):
+    """Skylet event for updating sky serve service status.
+
+    This is needed to handle the case that controller process is somehow
+    terminated and the service status is not updated.
+    """
+    EVENT_INTERVAL_SECONDS = 300
+
+    def _run(self):
+        serve_utils.update_service_status()
+
+
 class AutostopEvent(SkyletEvent):
     """Skylet event for autostop.
 
@@ -91,8 +104,8 @@ class AutostopEvent(SkyletEvent):
     def __init__(self):
         super().__init__()
         autostop_lib.set_last_active_time_to_now()
-        self._ray_yaml_path = os.path.abspath(
-            os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
+        self._ray_yaml_path = (
+            remote_cluster_yaml_utils.get_cluster_yaml_absolute_path())
 
     def _run(self):
         autostop_config = autostop_lib.get_autostop_config()
@@ -126,18 +139,16 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()
 
-            config = common_utils.read_yaml(self._ray_yaml_path)
+            config = remote_cluster_yaml_utils.load_cluster_yaml()
+            provider_name = remote_cluster_yaml_utils.get_provider_name(config)
 
-            provider_module = config['provider']['module']
-            provider_search = re.search(r'(?:providers|provision)\.(.*)(\.)?',
-                                        provider_module)
-            assert provider_search is not None, config
-            provider_name = provider_search.group(1).lower()
-
-            if provider_name in ['aws', 'gcp']:
+            if provider_name in ('aws', 'gcp'):
+                logger.info('Using new provisioner to stop the cluster.')
                 self._stop_cluster_with_new_provisioner(autostop_config, config,
                                                         provider_name)
                 return
+            logger.info('Not using new provisioner to stop the cluster. '
+                        f'Cloud of this cluster: {provider_name}')
 
             is_cluster_multinode = config['max_workers'] > 0
 

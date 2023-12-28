@@ -7,6 +7,7 @@ from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -94,18 +95,31 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
 
 def fill_default_spot_config_in_dag_for_spot_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
-        assert len(task_.resources) == 1, task_
-        resources = list(task_.resources)[0]
 
-        change_default_value: Dict[str, Any] = {}
-        if resources.use_spot_specified and not resources.use_spot:
-            logger.info(
-                'Field `use_spot` is set to false but a managed spot job is '
-                'being launched. Ignoring the field and proceeding to use spot '
-                'instance(s).')
-        change_default_value['use_spot'] = True
-        if resources.spot_recovery is None:
-            change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+        new_resources_list = []
+        for resources in list(task_.resources):
+            change_default_value: Dict[str, Any] = {}
+            if resources.use_spot_specified and not resources.use_spot:
+                logger.info(
+                    'Field `use_spot` is set to false but a managed spot job is '  # pylint: disable=line-too-long
+                    'being launched. Ignoring the field and proceeding to use spot '  # pylint: disable=line-too-long
+                    'instance(s).')
+            change_default_value['use_spot'] = True
+            if resources.spot_recovery is None:
+                change_default_value[
+                    'spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
-        new_resources = resources.copy(**change_default_value)
-        task_.set_resources({new_resources})
+            new_resources = resources.copy(**change_default_value)
+            new_resources_list.append(new_resources)
+
+        spot_recovery_strategy = new_resources_list[0].spot_recovery
+        for resource in new_resources_list:
+            if resource.spot_recovery != spot_recovery_strategy:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('All resources in the task must have'
+                                     'the same spot recovery strategy.')
+
+        if isinstance(task_.resources, list):
+            task_.set_resources(new_resources_list)
+        else:
+            task_.set_resources(set(new_resources_list))

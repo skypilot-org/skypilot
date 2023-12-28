@@ -2,6 +2,7 @@
 import enum
 import os
 import re
+import shlex
 import subprocess
 import time
 import typing
@@ -20,12 +21,12 @@ from sky.adaptors import aws
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.backends import backend_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
+from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -215,7 +216,8 @@ class AbstractStore:
             sync_on_reconstruction: bool; Whether to sync data if the storage
               object is found in the global_user_state and reconstructed from
               there. This is set to false when the Storage object is created not
-              for direct use, e.g. for sky storage delete.
+              for direct use, e.g. for 'sky storage delete', or the storage is
+              being re-used, e.g., for `sky start` on a stopped cluster.
 
         Raises:
             StorageBucketCreateError: If bucket creation fails
@@ -356,6 +358,7 @@ class Storage(object):
 
         - (required) Storage name.
         - (required) Source
+        - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
 
@@ -364,11 +367,13 @@ class Storage(object):
             *,
             storage_name: Optional[str],
             source: Optional[SourceType],
+            mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
+            self.mode = mode
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
@@ -377,6 +382,7 @@ class Storage(object):
             return (f'StorageMetadata('
                     f'\n\tstorage_name={self.storage_name},'
                     f'\n\tsource={self.source},'
+                    f'\n\tmode={self.mode},'
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
@@ -430,7 +436,8 @@ class Storage(object):
           sync_on_reconstruction: bool; Whether to sync the data if the storage
             object is found in the global_user_state and reconstructed from
             there. This is set to false when the Storage object is created not
-            for direct use, e.g. for sky storage delete.
+            for direct use, e.g. for 'sky storage delete', or the storage is
+            being re-used, e.g., for `sky start` on a stopped cluster.
         """
         self.name: str
         self.source = source
@@ -458,34 +465,7 @@ class Storage(object):
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
-            for s_type, s_metadata in self.handle.sky_stores.items():
-                # When initializing from global_user_state, we override the
-                # source from the YAML
-                if s_type == StoreType.S3:
-                    store = S3Store.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.GCS:
-                    store = GcsStore.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.R2:
-                    store = R2Store.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                elif s_type == StoreType.IBM:
-                    store = IBMCosStore.from_metadata(
-                        s_metadata,
-                        source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Unknown store type: {s_type}')
-
-                self._add_store(store, is_reconstructed=True)
+            self._add_store_from_metadata(self.handle.sky_stores)
 
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
@@ -507,6 +487,7 @@ class Storage(object):
             }
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
+                                               mode=self.mode,
                                                sky_stores=sky_managed_stores)
 
             if self.source is not None:
@@ -713,6 +694,79 @@ class Storage(object):
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
 
+    def _add_store_from_metadata(
+            self, sky_stores: Dict[StoreType,
+                                   AbstractStore.StoreMetadata]) -> None:
+        """Reconstructs Storage.stores from sky_stores.
+
+        Reconstruct AbstractStore objects from sky_store's metadata and
+        adds them into Storage.stores
+        """
+        for s_type, s_metadata in sky_stores.items():
+            # When initializing from global_user_state, we override the
+            # source from the YAML
+            try:
+                if s_type == StoreType.S3:
+                    store = S3Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.GCS:
+                    store = GcsStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.R2:
+                    store = R2Store.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                elif s_type == StoreType.IBM:
+                    store = IBMCosStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction)
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unknown store type: {s_type}')
+            # Following error is raised from _get_bucket and caught only when
+            # an externally removed storage is attempted to be fetched.
+            except exceptions.StorageExternalDeletionError:
+                logger.debug(f'Storage object {self.name!r} was attempted to '
+                             'be reconstructed while the corresponding bucket'
+                             ' was externally deleted.')
+                continue
+
+            self._add_store(store, is_reconstructed=True)
+
+    @classmethod
+    def from_metadata(cls, metadata: StorageMetadata,
+                      **override_args) -> 'Storage':
+        """Create Storage from StorageMetadata object.
+
+        Used when reconstructing Storage object and AbstractStore objects from
+        global_user_state.
+        """
+        # Name should not be specified if the source is a cloud store URL.
+        source = override_args.get('source', metadata.source)
+        name = override_args.get('name', metadata.storage_name)
+        # If the source is a list, it consists of local paths
+        if not isinstance(source,
+                          list) and data_utils.is_cloud_store_url(source):
+            name = None
+
+        storage_obj = cls(name=name,
+                          source=source,
+                          sync_on_reconstruction=override_args.get(
+                              'sync_on_reconstruction', True))
+
+        # For backward compatibility
+        if hasattr(metadata, 'mode'):
+            if metadata.mode:
+                storage_obj.mode = override_args.get('mode', metadata.mode)
+
+        return storage_obj
+
     def add_store(self, store_type: Union[str, StoreType]) -> AbstractStore:
         """Initializes and adds a new store to the storage.
 
@@ -852,8 +906,8 @@ class Storage(object):
                         warn_for_git_dir(source)
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Could not upload {self.source} to store '
-                         f'name {store.name}.')
+            logger.error(f'Could not upload {self.source!r} to store '
+                         f'name {store.name!r}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
                     self.name, StorageStatus.UPLOAD_FAILED)
@@ -865,8 +919,8 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
-        backend_utils.validate_schema(config, schemas.get_storage_schema(),
-                                      'Invalid storage YAML: ')
+        common_utils.validate_schema(config, schemas.get_storage_schema(),
+                                     'Invalid storage YAML: ')
 
         name = config.pop('name', None)
         source = config.pop('source', None)
@@ -1125,8 +1179,11 @@ class S3Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}')
@@ -1137,8 +1194,11 @@ class S3Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
@@ -1169,7 +1229,7 @@ class S3Store(AbstractStore):
         elif self.source.startswith('r2://'):
             data_transfer.r2_to_s3(self.name, self.name)
 
-    def _get_bucket(self) -> Tuple[Optional[StorageHandle], bool]:
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
         """Obtains the S3 bucket.
 
         If the bucket exists, this method will return the bucket.
@@ -1182,6 +1242,9 @@ class S3Store(AbstractStore):
         Raises:
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
@@ -1207,18 +1270,24 @@ class S3Store(AbstractStore):
         if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using `aws s3 ls '
                     f'{self.source}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if
-        # Store object is being reconstructed for deletion.
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
             bucket = self._create_s3_bucket(self.name)
             return bucket, True
         else:
-            return None, False
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -1322,7 +1391,9 @@ class GcsStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
-    GCSFUSE_VERSION = '1.0.1'
+
+    # https://github.com/GoogleCloudPlatform/gcsfuse/releases
+    _GCSFUSE_VERSION = '1.3.0'
 
     def __init__(self,
                  name: str,
@@ -1564,6 +1635,7 @@ class GcsStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}')
@@ -1576,6 +1648,7 @@ class GcsStore(AbstractStore):
             excluded_list.append(r'^\.git/.*$')
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
@@ -1618,6 +1691,9 @@ class GcsStore(AbstractStore):
         Raises:
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         try:
             bucket = self.client.get_bucket(self.name)
@@ -1626,18 +1702,23 @@ class GcsStore(AbstractStore):
             if isinstance(self.source, str) and self.source.startswith('gs://'):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        'Attempted to connect to a non-existent bucket: '
+                        'Attempted to use a non-existent bucket as a source: '
                         f'{self.source}') from e
             else:
-
                 # If bucket cannot be found (i.e., does not exist), it is to be
                 # created by Sky. However, creation is skipped if Store object
-                # is being reconstructed for deletion.
+                # is being reconstructed for deletion or re-mount with
+                # sky start, and error is raised instead.
                 if self.sync_on_reconstruction:
                     bucket = self._create_gcs_bucket(self.name)
                     return bucket, True
                 else:
-                    return None, False
+                    # This is raised when Storage object is reconstructed for
+                    # sky storage delete or to re-mount Storages with sky start
+                    # but the storage is already removed externally.
+                    raise exceptions.StorageExternalDeletionError(
+                        'Attempted to fetch a non-existent bucket: '
+                        f'{self.name}') from e
         except gcp.forbidden_exception():
             # Try public bucket to see if bucket exists
             logger.info(
@@ -1664,8 +1745,8 @@ class GcsStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       f'/releases/download/v{self.GCSFUSE_VERSION}/'
-                       f'gcsfuse_{self.GCSFUSE_VERSION}_amd64.deb '
+                       f'/releases/download/v{self._GCSFUSE_VERSION}/'
+                       f'gcsfuse_{self._GCSFUSE_VERSION}_amd64.deb '
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '
@@ -1676,7 +1757,7 @@ class GcsStore(AbstractStore):
                      f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
                      f'{self.bucket.name} {mount_path}')
         version_check_cmd = (
-            f'gcsfuse --version | grep -q {self.GCSFUSE_VERSION}')
+            f'gcsfuse --version | grep -q {self._GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
 
@@ -1876,7 +1957,7 @@ class R2Store(AbstractStore):
     def batch_aws_rsync(self,
                         source_path_list: List[Path],
                         create_dirs: bool = False) -> None:
-        """Invokes aws s3 sync to batch upload a list of local paths to S3
+        """Invokes aws s3 sync to batch upload a list of local paths to R2
 
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
         increase parallelism, modify max_concurrent_requests in your aws config
@@ -1895,9 +1976,12 @@ class R2Store(AbstractStore):
         """
 
         def get_file_sync_command(base_dir_path, file_names):
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
             endpoint_url = cloudflare.create_endpoint()
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -1912,10 +1996,12 @@ class R2Store(AbstractStore):
             excluded_list = storage_utils.get_excluded_files_from_gitignore(
                 src_dir_path)
             excluded_list.append('.git/*')
-            excludes = ' '.join(
-                [f'--exclude "{file_name}"' for file_name in excluded_list])
+            excludes = ' '.join([
+                f'--exclude {shlex.quote(file_name)}'
+                for file_name in excluded_list
+            ])
             endpoint_url = cloudflare.create_endpoint()
-
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -1963,6 +2049,9 @@ class R2Store(AbstractStore):
         Raises:
             StorageBucketCreateError: If creating the bucket fails
             StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
         r2 = cloudflare.resource('s3')
         bucket = r2.Bucket(self.name)
@@ -1992,7 +2081,7 @@ class R2Store(AbstractStore):
         if isinstance(self.source, str) and self.source.startswith('r2://'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using '
                     '`AWS_SHARED_CREDENTIALS_FILE='
                     f'{cloudflare.R2_CREDENTIALS_PATH} aws s3 ls '
@@ -2002,13 +2091,19 @@ class R2Store(AbstractStore):
                     'to debug.')
 
         # If bucket cannot be found in both private and public settings,
-        # the bucket is to be created by Sky. However, skip creation if
-        # Store object is being reconstructed for deletion.
+        # the bucket is to be created by Sky. However, creation is skipped if
+        # Store object is being reconstructed for deletion or re-mount with
+        # sky start, and error is raised instead.
         if self.sync_on_reconstruction:
             bucket = self._create_r2_bucket(self.name)
             return bucket, True
         else:
-            return None, False
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on r2 bucket
@@ -2309,9 +2404,10 @@ class IBMCosStore(AbstractStore):
 
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
+            src_dir_path = shlex.quote(src_dir_path)
             sync_command = (
                 'rclone copy --exclude ".git/*" '
-                f'"{src_dir_path}" '
+                f'{src_dir_path} '
                 f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -2333,10 +2429,13 @@ class IBMCosStore(AbstractStore):
             """
 
             # wrapping file_name with "" to support spaces
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
+            includes = ' '.join([
+                f'--include {shlex.quote(file_name)}'
+                for file_name in file_names
+            ])
+            base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('rclone copy '
-                            f'{includes} "{base_dir_path}" '
+                            f'{includes} {base_dir_path} '
                             f'{self.bucket_rclone_profile}:{self.name}')
             return sync_command
 
@@ -2365,6 +2464,13 @@ class IBMCosStore(AbstractStore):
         Returns:
           StorageHandle(str): bucket name
           bool: indicates whether a new bucket was created.
+
+        Raises:
+            StorageBucketCreateError: If bucket creation fails.
+            StorageBucketGetError: If fetching a bucket fails
+            StorageExternalDeletionError: If externally deleted storage is
+                attempted to be fetched while reconstructing the storage for
+                'sky storage delete' or 'sky start'
         """
 
         bucket_profile_name = Rclone.RcloneClouds.IBM.value + self.name
@@ -2397,7 +2503,7 @@ class IBMCosStore(AbstractStore):
             # bucket doesn't exist but source is a bucket URI
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
+                    'Attempted to use a non-existent bucket as a source: '
                     f'{self.name} by providing URI. Consider using '
                     '`rclone lsd <remote>` on relevant remotes returned '
                     'via `rclone listremotes` to debug.')
@@ -2410,6 +2516,13 @@ class IBMCosStore(AbstractStore):
         if not bucket_region and self.sync_on_reconstruction:
             # bucket doesn't exist
             return self._create_cos_bucket(self.name, self.region), True
+        elif not bucket_region and not self.sync_on_reconstruction:
+            # Raised when Storage object is reconstructed for sky storage
+            # delete or to re-mount Storages with sky start but the storage
+            # is already removed externally.
+            raise exceptions.StorageExternalDeletionError(
+                'Attempted to fetch a non-existent bucket: '
+                f'{self.name}')
         else:
             # bucket exists
             return self.s3_resource.Bucket(self.name), False
