@@ -2854,7 +2854,7 @@ def test_skyserve_spot_user_bug():
 @pytest.mark.gcp
 @pytest.mark.sky_serve
 def test_skyserve_load_balancer():
-    """Test skyserve load balancer round-robin"""
+    """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
     test = Test(
         f'test-skyserve-load-balancer',
