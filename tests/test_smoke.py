@@ -1403,6 +1403,7 @@ def test_scp_huggingface(generic_cloud: str):
 
 # ---------- TPU. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu():
     name = _get_cluster_name()
     test = Test(
@@ -1421,6 +1422,7 @@ def test_tpu():
 
 # ---------- TPU VM. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu_vm():
     name = _get_cluster_name()
     test = Test(
@@ -1446,6 +1448,7 @@ def test_tpu_vm():
 
 # ---------- TPU VM Pod. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
@@ -2417,6 +2420,7 @@ def test_spot_storage(generic_cloud: str):
 # ---------- Testing spot TPU ----------
 @pytest.mark.gcp
 @pytest.mark.managed_spot
+@pytest.mark.tpu
 def test_spot_tpu():
     """Test managed spot on TPU."""
     name = _get_cluster_name()

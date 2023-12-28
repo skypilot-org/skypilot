@@ -43,7 +43,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 14
+    _VERSION = 15
 
     def __init__(
         self,
@@ -515,7 +515,7 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                use_tpu_vm = accelerator_args.get('tpu_vm', False)
+                use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if use_tpu_vm:
                     tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
@@ -1339,6 +1339,19 @@ class Resources:
                     [str(port) for port in original_ports])
 
         if version < 14:
+            # Backward compatibility: we change the default value for TPU VM to
+            # True in version 14 (#1758), so we need to explicitly set it to
+            # False when loading the old handle.
+            accelerators = state.get('_accelerators', None)
+            if accelerators is not None:
+                for acc in accelerators.keys():
+                    if acc.startswith('tpu'):
+                        accelerator_args = state.get('_accelerator_args', {})
+                        accelerator_args['tpu_vm'] = accelerator_args.get(
+                            'tpu_vm', False)
+                        state['_accelerator_args'] = accelerator_args
+
+        if version < 15:
             original_disk_tier = state.get('_disk_tier', None)
             if original_disk_tier is not None:
                 state['_disk_tier'] = resources_utils.DiskTier(
