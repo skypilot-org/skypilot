@@ -1344,10 +1344,13 @@ class Resources:
             # Backward compatibility: we change the default value for TPU VM to
             # True in version 14 (#1758), so we need to explicitly set it to
             # False when loading the old handle.
-            if state.get('accelerators', '').startswith('tpu'):
-                accelerator_args = state.get('accelerator_args', {})
-                accelerator_args['tpu_vm'] = accelerator_args.get(
-                    'tpu_vm', False)
-                state['accelerator_args'] = accelerator_args
+            accelerators = state.get('_accelerators', None)
+            if accelerators is not None:
+                for acc in accelerators.keys():
+                    if acc.startswith('tpu'):
+                        accelerator_args = state.get('accelerator_args', {})
+                        accelerator_args['tpu_vm'] = accelerator_args.get(
+                            'tpu_vm', False)
+                        state['accelerator_args'] = accelerator_args
 
         self.__dict__.update(state)
