@@ -87,25 +87,6 @@ class SpotPlacer:
         return cls.REGISTRY[spec.spot_placer](spec)
 
 
-class EvenSpreadSpotPlacer(SpotPlacer):
-    """Evenly spread spot instances across zones."""
-    NAME: Optional[str] = 'EvenSpread'
-
-    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
-        super().__init__(spec)
-        self.current_zone_idx: int = 0
-
-    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               current_considered_zones: List[str]) -> str:
-        del existing_replicas  # Unused.
-        del current_considered_zones  # Unused.
-        zone = self.zones[self.current_zone_idx % len(self.zones)]
-        logger.info(f'{self.NAME}: {self.current_zone_idx}, {zone},'
-                    f'{self.zones}')
-        self.current_zone_idx += 1
-        return zone
-
-
 class EagerFailoverSpotPlacer(SpotPlacer):
     """Eagerly failover to a different zone when preempted."""
     NAME: Optional[str] = 'EagerFailover'
