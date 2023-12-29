@@ -128,8 +128,8 @@ def launch_cluster(task_yaml_path: str,
 # sky/spot/recovery_strategy.py::terminate_cluster
 # delay_in_seconds is useful to drain the node before node termination.
 def terminate_cluster(cluster_name: str,
-                      max_retry: int = 3,
-                      delay_in_seconds: int = 0) -> None:
+                      delay_in_seconds: int = 0,
+                      max_retry: int = 3) -> None:
     """Terminate the sky serve replica cluster."""
     time.sleep(delay_in_seconds)
     retry_cnt = 0
@@ -162,7 +162,7 @@ def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
-    assert len(task.resources) >= 1, task
+    # TODO(MaoZiming): assume multiple resources share the same port.
     task_resources = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
@@ -672,13 +672,12 @@ class SkyPilotReplicaManager(ReplicaManager):
                     f'replica_id: {replica_id}')
         log_file_name = serve_utils.generate_replica_down_log_file_name(
             self._service_name, replica_id)
-        max_retry = 3
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 terminate_cluster,
                 log_file_name,
             ).run,
-            args=(info.cluster_name, max_retry, delay_in_seconds),
+            args=(info.cluster_name, delay_in_seconds),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
