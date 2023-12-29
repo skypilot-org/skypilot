@@ -1,7 +1,7 @@
 .. _sky-serve:
 
 Serving Models
-==========================
+==============
 
 SkyServe is SkyPilot's model serving library. SkyServe (short for SkyPilot Serving) takes an existing serving
 framework and deploys it across one or more regions or clouds.
@@ -43,7 +43,7 @@ How it works:
   To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
 
 Quick tour: LLM serving
--------------------------------
+-----------------------
 
 Here is a simple example of serving a Vicuna-13B LLM model on TGI with SkyServe:
 
@@ -95,7 +95,7 @@ Simply ``curl -L`` the service endpoint --- for the above example, use
     {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
 Tutorial: Hello, SkyServe!
----------------------------
+--------------------------
 
 Here we will go through an example to deploy a simple HTTP server with SkyServe. To spin up a service, you can simply reuse your task YAML with the two following requirements:
 
@@ -345,6 +345,56 @@ You can also use a simple chatbot Python script to send requests:
             history.append({'role': 'assistant', 'content': tot})
     except KeyboardInterrupt:
         print('\nBye!')
+
+Tutorial: Using the fastest serving frameworks: vLLM!
+-----------------------------------------------------
+
+vLLM is a fast and easy-to-use library for LLM inference and serving. To use vLLM to serve
+a Llama 2 7b model in SkyServe, use the following YAML:
+
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        path: /v1/chat/completions
+        post_data: {"model": "meta-llama/Llama-2-7b-chat-hf", "messages": [{"role": "user", "content": "Who are you?"}]}
+        initial_delay_seconds: 1200
+      replicas: 2
+
+    resources:
+      ports: 8000
+      accelerators: A100
+
+    envs:
+      MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+      TOKENIZER: hf-internal-testing/llama-tokenizer
+      HF_TOKEN: <your-hf-token>
+
+    setup: |
+      conda activate vllm
+      if [ $? -ne 0 ]; then
+        conda create -n vllm python=3.9 -y
+        conda activate vllm
+      fi
+
+      # Install dependencies
+      pip install fschat==0.2.24 accelerate==0.24.1 vllm==0.2.2
+
+      # Login to huggingface hub
+      python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+
+    run: |
+      conda activate vllm
+      echo 'Starting vllm openai api server...'
+      python -m vllm.entrypoints.openai.api_server \
+        --model $MODEL_NAME --tokenizer $TOKENIZER \
+        --host 0.0.0.0 --port 8000
+
+
+.. tip::
+
+    This service configuration uses a **real compute workload** as readiness probe. This is useful when you want to make sure the service is ready to serve. In this example, we use the :code:`/v1/chat/completions` endpoint as the readiness probe, and send a request to it with a chat completion task. The service will be considered ready when it responds with a 200 status code.
 
 Useful CLIs
 -----------
