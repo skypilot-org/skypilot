@@ -363,7 +363,7 @@ a Llama 2 7b model in SkyServe, use the following YAML:
 
     resources:
       ports: 8000
-      accelerators: A100
+      accelerators: V100
 
     envs:
       MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
