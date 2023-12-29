@@ -346,8 +346,8 @@ You can also use a simple chatbot Python script to send requests:
     except KeyboardInterrupt:
         print('\nBye!')
 
-Tutorial: Using the fastest serving frameworks: vLLM!
------------------------------------------------------
+Tutorial: Using vLLM with SkyServe
+----------------------------------
 
 vLLM is a fast and easy-to-use library for LLM inference and serving. To use vLLM to serve
 a Llama 2 7b model in SkyServe, use the following YAML:
