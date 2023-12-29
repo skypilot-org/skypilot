@@ -4304,8 +4304,7 @@ def serve_up(
     with sky.Dag() as dag:
         dag.add(task)
 
-    service_spec = serve_lib.SkyServiceSpec.from_yaml(''.join(service_yaml))
-    if service_spec.spot_placer is not None:
+    if task.service.spot_placer is not None:
         for res in list(task.resources):
             if (res.zone is not None or res.region is not None):
                 with ux_utils.print_exception_no_traceback():

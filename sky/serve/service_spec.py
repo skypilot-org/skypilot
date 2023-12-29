@@ -8,7 +8,7 @@ import yaml
 
 from sky.serve import autoscalers
 from sky.serve import constants
-from sky.serve import spot_policy
+from sky.serve import spot_policy as spot_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -27,10 +27,11 @@ class SkyServiceSpec:
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         spot_placer: Optional[str] = None,
+        spot_policy: Optional[str] = None,
         autoscaler: Optional[str] = None,
         spot_zones: Optional[List[str]] = None,
         num_overprovision: Optional[int] = None,
-        num_init_replicas: Optional[int] = None,
+        init_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         # The following arguments are deprecated.
@@ -68,12 +69,26 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if spot_policy is not None:
+            if autoscaler is not None or spot_placer is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Cannot specify `spot_policy`, `autoscaler` and '
+                        '`spot_placer` at the same time.')
+            # TODO(MaoZiming): do not hardcode the name
+            if spot_policy == 'SpotHedge':
+                autoscaler = 'SpotOnDemandRequestRateAutoscaler'
+                spot_placer = 'DynamicFailover'
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unsupported spot policy: {spot_policy}.')
+
         if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
 
         if (spot_placer is not None and
-                spot_placer not in spot_policy.SpotPlacer.get_policy_names()):
+                spot_placer not in spot_policies.SpotPlacer.get_policy_names()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported spot placer: {spot_placer}.')
 
@@ -86,7 +101,7 @@ class SkyServiceSpec:
         self._spot_placer = spot_placer
         self._autoscaler = autoscaler
         self._num_overprovision = num_overprovision
-        self._num_init_replicas = num_init_replicas
+        self._init_replicas = init_replicas
         self._min_on_demand_replicas = min_on_demand_replicas
         self._spot_zones = spot_zones
         self._upscale_delay_seconds = (
@@ -169,10 +184,12 @@ class SkyServiceSpec:
                 'spot_zones', None)
             service_config['num_overprovision'] = policy_section.get(
                 'num_overprovision', None)
-            service_config['num_init_replicas'] = policy_section.get(
-                'num_init_replicas', None)
+            service_config['init_replicas'] = policy_section.get(
+                'init_replicas', None)
             service_config['min_on_demand_replicas'] = policy_section.get(
                 'min_on_demand_replicas', 0)
+            service_config['spot_policy'] = policy_section.get(
+                'spot_policy', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -223,8 +240,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         add_if_not_none('replica_policy', 'num_overprovision',
                         self._num_overprovision)
-        add_if_not_none('replica_policy', 'num_init_replicas',
-                        self._num_init_replicas)
+        add_if_not_none('replica_policy', 'init_replicas', self._init_replicas)
         add_if_not_none('replica_policy', 'min_on_demand_replicas',
                         self._min_on_demand_replicas)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
@@ -313,8 +329,8 @@ class SkyServiceSpec:
         return self._num_overprovision
 
     @property
-    def num_init_replicas(self) -> Optional[int]:
-        return self._num_init_replicas
+    def init_replicas(self) -> Optional[int]:
+        return self._init_replicas
 
     @property
     def min_on_demand_replicas(self) -> int:

@@ -340,6 +340,10 @@ def get_service_schema():
                     'autoscaler': {
                         'type': 'string',
                     },
+                    # Shortcut for spot_placer and autoscaler
+                    'spot_policy': {
+                        'type': 'string',
+                    },
                     'spot_zones': {
                         'type': 'array',
                         'minItems': 1,
@@ -350,7 +354,7 @@ def get_service_schema():
                     'num_overprovision': {
                         'type': 'integer',
                     },
-                    'num_init_replicas': {
+                    'init_replicas': {
                         'type': 'integer',
                     },
                     'min_on_demand_replicas': {

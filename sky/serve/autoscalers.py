@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -72,9 +72,10 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
         # Target number of replicas is initialized to min replicas.
-        self.target_num_replicas: int = (spec.num_init_replicas
-                                         if spec.num_init_replicas is not None
-                                         else spec.min_replicas)
+        # if no `init_replicas` specified.
+        self.target_num_replicas: int = (spec.init_replicas
+                                         if spec.init_replicas is not None else
+                                         spec.min_replicas)
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -100,7 +101,7 @@ class Autoscaler:
         return list(cls.REGISTRY.keys())
 
     @classmethod
-    def from_spec(cls, spec: 'service_spec.SkyServiceSpec'):
+    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         assert (spec.autoscaler is not None and spec.autoscaler in cls.REGISTRY)
         return cls.REGISTRY[spec.autoscaler](spec)
 
@@ -125,8 +126,8 @@ class RequestRateAutoscaler(Autoscaler):
             scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec)
-        assert spec.target_qps_per_replica is not None
-        self.target_qps_per_replica: float = spec.target_qps_per_replica
+        self.target_qps_per_replica: Optional[
+            float] = spec.target_qps_per_replica
         self.request_timestamps: List[float] = []
         self.num_overprovision: int = (
             spec.num_overprovision if spec.num_overprovision is not None else 0)
@@ -198,8 +199,9 @@ class RequestRateAutoscaler(Autoscaler):
             f'{self.scale_down_consecutive_periods}')
         return self.target_num_replicas
 
-    def _get_replica_ids_to_scale_down(
-        self, num_limit: int,
+    @classmethod
+    def get_replica_ids_to_scale_down(
+        cls, num_limit: int,
         launched_replica_infos: List['replica_managers.ReplicaInfo']
     ) -> List[int]:
 
@@ -251,8 +253,8 @@ class RequestRateAutoscaler(Autoscaler):
             num_replicas_to_scale_down = (num_launched_replicas -
                                           num_to_provision)
             all_replica_ids_to_scale_down.extend(
-                self._get_replica_ids_to_scale_down(num_replicas_to_scale_down,
-                                                    launched_replica_infos))
+                RequestRateAutoscaler.get_replica_ids_to_scale_down(
+                    num_replicas_to_scale_down, launched_replica_infos))
 
         for replica_id in all_replica_ids_to_scale_down:
             scaling_options.append(
@@ -291,7 +293,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
     def _scale_spot_instances(
         self, num_alive_spot: int,
         launched_replica_infos: List['replica_managers.ReplicaInfo']
-    ) -> Tuple[List[AutoscalerDecision], List[int]]:
+    ) -> List[AutoscalerDecision]:
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -316,11 +318,15 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             # Too many spot instances, scale down.
             num_spot_to_scale_down = num_alive_spot - num_to_provision
             all_replica_ids_to_scale_down.extend(
-                self._get_replica_ids_to_scale_down(
+                RequestRateAutoscaler.get_replica_ids_to_scale_down(
                     num_spot_to_scale_down,
                     [info for info in launched_replica_infos if info.is_spot]))
 
-        return scaling_options, all_replica_ids_to_scale_down
+        for replica_id in all_replica_ids_to_scale_down:
+            scaling_options.append(
+                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                   target=replica_id))
+        return scaling_options
 
     def evaluate_scaling(
         self,
@@ -338,13 +344,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         logger.info(f'Number of alive spot instances: {num_alive_spot}, '
                     f'Number of ready spot instances: {num_ready_spot}')
 
-        scaling_options, all_replica_ids_to_scale_down = (
-            self._scale_spot_instances(num_alive_spot, launched_replica_infos))
+        scaling_options = (self._scale_spot_instances(num_alive_spot,
+                                                      launched_replica_infos))
 
-        for replica_id in all_replica_ids_to_scale_down:
-            scaling_options.append(
-                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_id))
         return scaling_options
 
 
@@ -389,8 +391,8 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
             f'Number of alive on-demand instances: {num_alive_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
-        scaling_options, all_replica_ids_to_scale_down = (
-            self._scale_spot_instances(num_alive_spot, launched_replica_infos))
+        scaling_options = (self._scale_spot_instances(num_alive_spot,
+                                                      launched_replica_infos))
 
         num_to_provision = (self.target_num_replicas + self.num_overprovision)
         num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
@@ -415,13 +417,15 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
         elif num_demand_to_scale_down > 0:
-            all_replica_ids_to_scale_down.extend(
-                self._get_replica_ids_to_scale_down(num_demand_to_scale_down, [
-                    info for info in launched_replica_infos if not info.is_spot
-                ]))
+            all_replica_ids_to_scale_down = (
+                RequestRateAutoscaler.get_replica_ids_to_scale_down(
+                    num_demand_to_scale_down, [
+                        info for info in launched_replica_infos
+                        if not info.is_spot
+                    ]))
 
-        for replica_id in all_replica_ids_to_scale_down:
-            scaling_options.append(
-                AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
-                                   target=replica_id))
+            for replica_id in all_replica_ids_to_scale_down:
+                scaling_options.append(
+                    AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
+                                       target=replica_id))
         return scaling_options

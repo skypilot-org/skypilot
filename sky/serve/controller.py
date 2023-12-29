@@ -2,9 +2,7 @@
 
 Responsible for autoscaling and replica management.
 """
-import json
 import logging
-import os
 import threading
 import time
 import traceback
@@ -18,7 +16,6 @@ from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
-from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -52,9 +49,6 @@ class SkyServeController:
             autoscalers.Autoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
-        self.dump_path = os.path.expanduser(
-            serve_utils.generate_remote_service_dir_name(
-                self._service_name)) + '/dump_infos.jsonl'
 
     def _run_autoscaler(self):
         logger.info('Starting autoscaler.')
@@ -87,14 +81,6 @@ class SkyServeController:
                     for info in replica_info
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
-
-                dump_infos = {
-                    'time': time.time(),
-                    'replica_info': [info.json() for info in replica_info],
-                }
-                with open(self.dump_path, 'a') as f:
-                    f.write(json.dumps(dump_infos) + '\n')
-
                 scaling_options = self._autoscaler.evaluate_scaling(
                     replica_info)
                 for scaling_option in scaling_options:
@@ -109,6 +95,10 @@ class SkyServeController:
                         assert isinstance(scaling_option.target,
                                           int), scaling_option
                         self._replica_manager.scale_down(scaling_option.target)
+                    else:
+                        with ux_utils.enable_traceback():
+                            logger.error('Error in scaling_option.operator: '
+                                         f'{scaling_option.operator}')
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.

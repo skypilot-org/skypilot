@@ -28,6 +28,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import clouds
 
+logger = sky_logging.init_logger(__name__)
+
 
 @usage_lib.entrypoint
 def up(
@@ -59,6 +61,17 @@ def up(
     if task.service is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
+
+    if task.service.spot_placer is not None:
+        for res in list(task.resources):
+            if (res.zone is not None or res.region is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify zone or region'
+                                     'when spot placer is enabled.')
+
+            if (res.use_spot is not None and not res.use_spot):
+                logger.info(f'{res} use_spot will be override to True, '
+                            'because spot placer is enabled.')
 
     requested_cloud: Optional['clouds.Cloud'] = None
     service_port: Optional[int] = None

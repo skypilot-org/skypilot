@@ -5,7 +5,7 @@ service:
   replica_policy:
     min_replicas: 1
     max_replicas: 3
-    num_init_replicas: 2
+    init_replicas: 2
     num_overprovision: 1
     min_on_demand_replicas: 1
     target_qps_per_replica: 1

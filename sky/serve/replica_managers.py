@@ -126,11 +126,12 @@ def launch_cluster(task_yaml_path: str,
 
 # TODO(tian): Combine this with
 # sky/spot/recovery_strategy.py::terminate_cluster
+# delay_in_seconds is useful to drain the node before node termination.
 def terminate_cluster(cluster_name: str,
                       max_retry: int = 3,
-                      delay_in_s: int = 0) -> None:
+                      delay_in_seconds: int = 0) -> None:
     """Terminate the sky serve replica cluster."""
-    time.sleep(delay_in_s)
+    time.sleep(delay_in_seconds)
     retry_cnt = 0
     backoff = common_utils.Backoff()
     while True:
@@ -359,23 +360,11 @@ class ReplicaStatusProperty:
             # No readiness probe passed and sky.launch finished
             return serve_state.ReplicaStatus.STARTING
 
-    def json(self) -> Dict[str, Any]:
-        return {
-            'sky_launch_status': self.sky_launch_status.value if
-                                 self.sky_launch_status is not None else None,
-            'user_app_failed': self.user_app_failed,
-            'service_ready_now': self.service_ready_now,
-            'first_ready_time': self.first_ready_time,
-            'sky_down_status': self.sky_down_status.value
-                               if self.sky_down_status is not None else None,
-            'preempted': self.preempted,
-        }
-
 
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 2
+    _VERSION = 1
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
                  is_spot: bool, zone: Optional[str]) -> None:
@@ -442,19 +431,6 @@ class ReplicaInfo:
             info_dict['handle'] = self.handle(cluster_record)
         return info_dict
 
-    def json(self) -> Dict[str, Any]:
-        cluster_record = global_user_state.get_cluster_from_name(
-            self.cluster_name)
-        return {
-            'replica_id': self.replica_id,
-            'cluster_name': self.cluster_name,
-            'is_spot': self.is_spot,
-            'status': self.status.value,
-            'status_property': self.status_property.json(),
-            'launched_at': (cluster_record['launched_at']
-                            if cluster_record is not None else None),
-        }
-
     def probe(
         self,
         readiness_path: str,
@@ -509,7 +485,7 @@ class ReplicaInfo:
         if version is None:
             version = -1
 
-        if version < 2:
+        if version < 1:
             self.is_spot = False
             self.zone = None
 
@@ -635,7 +611,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     def _terminate_replica(self,
                            replica_id: int,
                            sync_down_logs: bool,
-                           delay_in_s: int = 0) -> None:
+                           delay_in_seconds: int = 0) -> None:
         if replica_id in self._down_process_pool:
             logger.warning(f'Terminate process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -702,7 +678,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 terminate_cluster,
                 log_file_name,
             ).run,
-            args=(info.cluster_name, max_retry, delay_in_s),
+            args=(info.cluster_name, max_retry, delay_in_seconds),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
@@ -712,7 +688,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     def scale_down(self, replica_id: int) -> None:
         self._terminate_replica(replica_id,
                                 sync_down_logs=False,
-                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
+                                delay_in_seconds=_DEFAULT_DRAIN_SECONDS)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
@@ -758,7 +734,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                                           info)
         self._terminate_replica(info.replica_id,
                                 sync_down_logs=False,
-                                delay_in_s=_DEFAULT_DRAIN_SECONDS)
+                                delay_in_seconds=_DEFAULT_DRAIN_SECONDS)
         return True
 
     #################################
