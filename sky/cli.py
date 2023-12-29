@@ -3427,8 +3427,8 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` or ``--all-regions`` is not specified, the price displayed 
-    for each instance type is the lowest across all regions for both on-demand 
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
     and spotinstances. There may be multiple regions with the same lowest price.
     """
     # validation for the --region flag
