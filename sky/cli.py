@@ -795,8 +795,7 @@ def _launch_with_confirm(
 
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
-        # Show the optimize log before the prompt if the cluster does not
-        # exist.
+        # Show the optimize log before the prompt if the cluster does not exist.
         try:
             backend_utils.check_public_cloud_enabled()
         except exceptions.NoCloudAccessError as e:
@@ -3391,10 +3390,13 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
-@click.option('--all-regions',
-              is_flag=True,
-              default=False,
-              help='Shows details for all regions.')
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help=
+    'Show pricing and instance details for a specified accelerator across all regions and clouds.'
+)
 @service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3426,19 +3428,24 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` is not specified, the price displayed for each instance
-    type is the lowest across all regions for both on-demand and spot
-    instances. There may be multiple regions with the same lowest price.
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed 
+    for each instance type is the lowest across all regions for both on-demand 
+    and spotinstances. There may be multiple regions with the same lowest price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
 
-    # validation for the --region flag
+    # validation for the --all-regions flag
     if all_regions and accelerator_str is None:
-        raise click.UsageError('The --all-region flag is only valid when an \
-            accelerator is specified.')
+        raise click.UsageError(
+            'The --all-regions flag is only valid when an accelerator is specified.'
+        )
+    if all_regions and region is not None:
+        raise click.UsageError(
+            'The --all-regions flag is incompatible with the --region flag.')
+
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
@@ -4294,8 +4301,7 @@ def serve_up(
                     'will use the port specified as application ingress port.')
         service_port_str = requested_resources.ports[0]
         if not service_port_str.isdigit():
-            # For the case when the user specified a port range like
-            # 10000-10010
+            # For the case when the user specified a port range like 10000-10010
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Port {service_port_str!r} is not a valid '
                                  'port number. Please specify a single port '
