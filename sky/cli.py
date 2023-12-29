@@ -3394,10 +3394,8 @@ def check(verbose: bool):
     '--all-regions',
     is_flag=True,
     default=False,
-    help=
-    'Show pricing and instance details for a specified accelerator across '
-    'all regions and clouds.'
-)
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
 @service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3441,9 +3439,8 @@ def show_gpus(
     # validation for the --all-regions flag
     if all_regions and accelerator_str is None:
         raise click.UsageError(
-            'The --all-regions flag is only valid when an accelerator ' 
-            'is specified.'
-        )
+            'The --all-regions flag is only valid when an accelerator '
+            'is specified.')
     if all_regions and region is not None:
         raise click.UsageError(
             'The --all-regions flag is incompatible with the --region flag.')
