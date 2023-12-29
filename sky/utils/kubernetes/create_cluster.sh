@@ -18,7 +18,7 @@ set -e
 if [ $exit_status -ne 0 ]; then
     # Check for 'permission denied' in docker output
     if echo "$docker_output" | grep -q "permission denied"; then
-        >&2 echo "Permission denied while trying to connect to the Docker daemon socket. Please ensure your user is added to the docker group or has appropriate permissions."
+        >&2 echo "Permission denied while trying to connect to the Docker daemon socket. Make sure your user is added to the docker group or has appropriate permissions. Instructions: https://docs.docker.com/engine/install/linux-postinstall/"
     else
         >&2 echo "Docker is not running. Please start Docker and try again."
     fi
