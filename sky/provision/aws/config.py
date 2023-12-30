@@ -218,7 +218,7 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
         rt for rt in all_route_tables
         # An RT can be associated with multiple subnets, i.e.,
         # rt['Associations'] is a list of associations.
-        # There may be no subnet associated in a association, we skip it.s
+        # There may be no subnet associated in an association.
         if any(
             assoc.get('SubnetId', '') == subnet_id
             for assoc in rt['Associations'])
