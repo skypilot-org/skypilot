@@ -960,8 +960,9 @@ class FailoverCloudErrorHandlerV1:
         if handler is None:
             raise NotImplementedError(
                 f'Cloud {cloud} unknown, or has not added '
-                'support for parsing and handling provision failures with '
-                'V1 handlers.')
+                'support for parsing and handling provision failures. '
+                'Please implement a handler in FailoverCloudErrorHandlerV1 when'
+                'ray-autoscaler-based provisioner is used for the cloud.')
         handler(blocked_resources, launchable_resources, region, zones, stdout,
                 stderr)
 
@@ -989,7 +990,7 @@ class FailoverCloudErrorHandlerV1:
 class FailoverCloudErrorHandlerV2:
     """Handles errors during provisioning and updates the blocked_resources.
 
-    This is a more robust version of FailoverCloudErrorHandlerV1, which parses
+    This is a more robust version of FailoverCloudErrorHandlerV1. V2 parses
     the errors raised by the cloud's API using the exception, instead of the
     stdout and stderr.
     """
@@ -1133,8 +1134,6 @@ class FailoverCloudErrorHandlerV2:
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
             else:
-                logger.warning(f'Got an unknown error: {message}; blocking '
-                               f'resources by its zone {zone.name}')
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))

@@ -100,9 +100,9 @@ def _log_errors(errors: List[Dict[str, str]], e: Any, zone: str) -> None:
     """Format errors into a string."""
     if errors:
         plural = 's' if len(errors) > 1 else ''
-        codes = ', '.join(repr(e.get('code', 'NA')) for e in errors)
+        codes = ', '.join(repr(e.get('code', 'N/A')) for e in errors)
         messages = '; '.join(
-            repr(e.get('message', 'NA').strip('.')) for e in errors)
+            repr(e.get('message', 'N/A').strip('.')) for e in errors)
         logger.warning(
             f'create_instances: Failed with return code{plural} {codes} in '
             f'{zone}. (message{plural}: {messages})')
