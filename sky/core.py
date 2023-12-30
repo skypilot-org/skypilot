@@ -17,7 +17,6 @@ from sky import spot
 from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
-from sky.clouds.utils import gcp_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
