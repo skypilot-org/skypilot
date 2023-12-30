@@ -2,9 +2,6 @@ name: tpuvm_mnist
 
 resources:
   accelerators: tpu-v2-8
-  accelerator_args:
-    runtime_version: tpu-vm-base
-    tpu_vm: True
 
 # The setup command.  Will be run under the working directory.
 setup: |

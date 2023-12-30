@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -25,7 +27,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -151,9 +152,11 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    else:
-        # We do not install azure dependencies for spot controller since our
-        # subscription does not support spot instances.
+    # TODO(tian): Make dependency installation command a method of cloud
+    # class and get all installation command for enabled clouds.
+    if any(
+            cloud.is_same_cloud(clouds.Azure())
+            for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
@@ -283,8 +286,15 @@ def get_controller_resources(
                     controller_type=controller_type,
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
-
-    return controller_resources
+    if len(controller_resources) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=f'Expected exactly one resource, got '
+                    f'{len(controller_resources)} resources: '
+                    f'{controller_resources}'))
+    return list(controller_resources)[0]
 
 
 def _setup_proxy_command_on_controller(

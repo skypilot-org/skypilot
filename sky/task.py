@@ -432,67 +432,9 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
+        # Parse resources field.
         resources_config = config.pop('resources', None)
-        if resources_config and resources_config.get(
-                'any_of') is not None and resources_config.get(
-                    'ordered') is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify both "any_of" and "ordered" in resources.')
-        if resources_config and resources_config.get('any_of') is not None:
-            # TODO(Ziming) In the future we can consider to allow
-            # additional field when any_of is specified,
-            # which means we override the fields in all the
-            # resources under any_of with the fields specified outsied any_of.
-            if len(resources_config) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify "any_of" with other resource fields.')
-            resources_set = set()
-            for resource in resources_config['any_of']:
-                resources_set.add(sky.Resources.from_yaml_config(resource))
-            task.set_resources(resources_set)
-        elif resources_config and resources_config.get('ordered') is not None:
-            if len(resources_config) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify "ordered" with other resource fields.')
-            resources_list = []
-            for resource in resources_config['ordered']:
-                resources_list.append(sky.Resources.from_yaml_config(resource))
-            task.set_resources(resources_list)
-        # Translate accelerators field to potential multiple resources.
-        elif resources_config and resources_config.get(
-                'accelerators') is not None:
-            accelerators = resources_config.get('accelerators')
-            if isinstance(accelerators, str):
-                accelerators = {accelerators}
-            elif isinstance(accelerators, dict):
-                accelerators = [
-                    f'{k}:{v}' if v is not None else f'{k}'
-                    for k, v in accelerators.items()
-                ]
-                accelerators = set(accelerators)
-
-            # In yaml file, we store accelerators as a list.
-            # In Task, we store a list of resources, each with 1 accelerator.
-            # This for loop is for format conversion.
-            tmp_resources_list = []
-            for acc in accelerators:
-                tmp_resource = resources_config.copy()
-                tmp_resource['accelerators'] = acc
-                tmp_resources_list.append(
-                    sky.Resources.from_yaml_config(tmp_resource))
-
-            if isinstance(accelerators, list):
-                task.set_resources(tmp_resources_list)
-            elif isinstance(accelerators, set):
-                task.set_resources(set(tmp_resources_list))
-            else:
-                raise RuntimeError('Accelerators must be a list or a set.')
-        else:
-            task.set_resources(
-                {sky.Resources.from_yaml_config(resources_config)})
+        task.set_resources(sky.Resources.from_yaml_config(resources_config))
 
         service = config.pop('service', None)
         if service is not None:

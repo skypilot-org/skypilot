@@ -22,9 +22,9 @@ Why SkyServe?
 
 How it works:
 
-- Each service gets an endpoint that automatically redirects requests to its underlying replicas.
-- The replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
-- SkyServe transparently handles the load balancing, recovery, and autoscaling of the replicas.
+- Each service gets an endpoint that automatically redirects requests to its replicas.
+- Replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
+- SkyServe handles the load balancing, recovery, and autoscaling of the replicas.
 
 .. GPU availability has become a critical bottleneck for many AI services. With Sky
 .. Serve, we offer a lightweight control plane that simplifies deployment across
@@ -74,9 +74,14 @@ Use :code:`sky serve status` to check the status of the service:
 
    <div style="height: 20px;"></div>
 
+.. tip::
+
+  Notice that the two replicas are launched in different regions/clouds for the lowest cost and highest GPU availability.
+  This is performed automatically, like a regular ``sky launch``.
+
 If you see the :code:`STATUS` column becomes :code:`READY`, then the service is ready to accept traffic!
 
-Simply ``curl`` the service endpoint --- for the above example, use
+Simply ``curl -L`` the service endpoint --- for the above example, use
 ``44.211.131.51:30001`` which automatically load-balances across the two replicas:
 
 .. code-block:: console
@@ -85,6 +90,7 @@ Simply ``curl`` the service endpoint --- for the above example, use
         -X POST \
         -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
         -H 'Content-Type: application/json'
+
     # Example output:
     {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
@@ -302,6 +308,7 @@ Send a request using the following cURL command:
         -X POST \
         -d '{"model":"vicuna-13b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
         -H 'Content-Type: application/json'
+
     # Example output:
     {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-13b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
 
