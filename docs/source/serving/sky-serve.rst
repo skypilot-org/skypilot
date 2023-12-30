@@ -45,30 +45,71 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving a Vicuna-13B LLM model on TGI with SkyServe:
+Here is a simple example of serving an LLM model on TGI with SkyServe:
 
-.. code-block:: yaml
+.. tab-set::
 
-    service:
-      readiness_probe: /health
-      replicas: 2
+    .. tab-item:: TGI
+        :sync: tgi-tab
 
-    # Fields below describe each replica.
-    resources:
-      ports: 8080
-      accelerators: A100:1
+        .. code-block:: yaml
 
-    run: |
-      docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
-        ghcr.io/huggingface/text-generation-inference \
-        --model-id lmsys/vicuna-13b-v1.5
+            service:
+              readiness_probe: /health
+              replicas: 2
+
+            # Fields below describe each replica.
+            resources:
+              ports: 8080
+              accelerators: A100:1
+
+            run: |
+              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
+                ghcr.io/huggingface/text-generation-inference \
+                --model-id lmsys/vicuna-13b-v1.5 \
+
+    .. tab-item:: vLLM
+        :sync: vllm-tab
+
+        .. code-block:: yaml
+
+            service:
+              readiness_probe:
+                path: /v1/chat/completions
+                post_data: {"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}
+                initial_delay_seconds: 1200
+              replicas: 2
+
+            resources:
+              ports: 8000
+              accelerators: A100-80GB:2
+
+            setup: pip install vllm
+
+            run: |
+              python -m vllm.entrypoints.openai.api_server \
+                --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
+                --host 0.0.0.0 --port 8000 --tensor-parallel-size 2
 
 Use :code:`sky serve status` to check the status of the service:
 
-.. image:: ../images/sky-serve-status-tgi.png
-    :width: 800
-    :align: center
-    :alt: sky-serve-status-tgi
+.. tab-set::
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. image:: ../images/sky-serve-status-tgi.png
+            :width: 800
+            :align: center
+            :alt: sky-serve-status-tgi
+
+    .. tab-item:: vLLM
+        :sync: vllm-tab
+
+        .. image:: ../images/sky-serve-status-tgi.png
+            :width: 800
+            :align: center
+            :alt: sky-serve-status-vllm
 
 .. raw:: html
 
@@ -81,18 +122,35 @@ Use :code:`sky serve status` to check the status of the service:
 
 If you see the :code:`STATUS` column becomes :code:`READY`, then the service is ready to accept traffic!
 
-Simply ``curl -L`` the service endpoint --- for the above example, use
-``44.211.131.51:30001`` which automatically load-balances across the two replicas:
+Simply ``curl -L`` the service endpoint --- which automatically load-balances across the two replicas:
 
-.. code-block:: console
+.. tab-set::
 
-    $ curl -L <endpoint-url>/generate \
-        -X POST \
-        -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
-        -H 'Content-Type: application/json'
+    .. tab-item:: TGI
+        :sync: tgi-tab
 
-    # Example output:
-    {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
+        .. code-block:: console
+
+            $ curl -L 44.211.131.51:30001/generate \
+                -X POST \
+                -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
+
+    .. tab-item:: vLLM
+        :sync: vllm-tab
+
+        .. code-block:: console
+
+            $ curl -L 44.201.121.241:30001/v1/chat/completions \
+                -X POST \
+                -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"id":"cmpl-47ca2e9b5a104cae984643f7309f33c6","object":"chat.completion","created":880,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful assistant here to provide information, answer questions, and engage in conversation to help make your life easier and more enjoyable. I can help you with a variety of tasks, such as setting reminders, providing weather updates, answering trivia, and much more. How can I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":77,"completion_tokens":64}}
 
 Tutorial: Hello, SkyServe!
 --------------------------
@@ -345,56 +403,6 @@ You can also use a simple chatbot Python script to send requests:
             history.append({'role': 'assistant', 'content': tot})
     except KeyboardInterrupt:
         print('\nBye!')
-
-Tutorial: Using the fastest serving frameworks: vLLM!
------------------------------------------------------
-
-vLLM is a fast and easy-to-use library for LLM inference and serving. To use vLLM to serve
-a Llama 2 7b model in SkyServe, use the following YAML:
-
-.. code-block:: yaml
-
-    service:
-      readiness_probe:
-        path: /v1/chat/completions
-        post_data: {"model": "meta-llama/Llama-2-7b-chat-hf", "messages": [{"role": "user", "content": "Who are you?"}]}
-        initial_delay_seconds: 1200
-      replicas: 2
-
-    resources:
-      ports: 8000
-      accelerators: A100
-
-    envs:
-      MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
-      TOKENIZER: hf-internal-testing/llama-tokenizer
-      HF_TOKEN: <your-hf-token>
-
-    setup: |
-      conda activate vllm
-      if [ $? -ne 0 ]; then
-        conda create -n vllm python=3.9 -y
-        conda activate vllm
-      fi
-
-      # Install dependencies
-      pip install fschat==0.2.24 accelerate==0.24.1 vllm==0.2.2
-
-      # Login to huggingface hub
-      python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
-
-
-    run: |
-      conda activate vllm
-      echo 'Starting vllm openai api server...'
-      python -m vllm.entrypoints.openai.api_server \
-        --model $MODEL_NAME --tokenizer $TOKENIZER \
-        --host 0.0.0.0 --port 8000
-
-
-.. tip::
-
-    This service configuration uses a **real compute workload** as readiness probe. This is useful when you want to make sure the service is ready to serve. In this example, we use the :code:`/v1/chat/completions` endpoint as the readiness probe, and send a request to it with a chat completion task. The service will be considered ready when it responds with a 200 status code.
 
 Useful CLIs
 -----------
