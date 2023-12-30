@@ -40,14 +40,14 @@ def _open_ports_using_loadbalancer(
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     content = network_utils.fill_loadbalancer_template(
-        namespace=provider_config['namespace'],
+        namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
         ports=ports,
         selector_key='skypilot-cluster',
         selector_value=cluster_name_on_cloud,
     )
     network_utils.create_or_replace_namespaced_service(
-        namespace=provider_config['namespace'],
+        namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
         service_spec=content['service_spec'])
 
@@ -61,7 +61,7 @@ def _open_ports_using_ingress(
         raise Exception(
             'Ingress controller not found.'
             'Please install ingress controller first.'
-            'See https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md for more details.'
+            'See https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md for more details.'  # pylint: disable=line-too-long
         )
 
     for port in ports:
@@ -71,7 +71,7 @@ def _open_ports_using_ingress(
             cluster_name_on_cloud=cluster_name_on_cloud, port=port)
 
         content = network_utils.fill_ingress_template(
-            namespace=provider_config['namespace'],
+            namespace=provider_config.get('namespace', 'default'),
             path_prefix=path_prefix,
             service_name=service_name,
             service_port=port,
@@ -80,12 +80,12 @@ def _open_ports_using_ingress(
             selector_value=cluster_name_on_cloud,
         )
         network_utils.create_or_replace_namespaced_service(
-            namespace=provider_config['namespace'],
+            namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
             service_spec=content['service_spec'],
         )
         network_utils.create_or_replace_namespaced_ingress(
-            namespace=provider_config['namespace'],
+            namespace=provider_config.get('namespace', 'default'),
             ingress_name=ingress_name,
             ingress_spec=content['ingress_spec'],
         )
@@ -118,7 +118,7 @@ def _cleanup_ports_for_loadbalancer(
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     network_utils.delete_namespaced_service(
-        namespace=provider_config['namespace'],
+        namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
     )
 
@@ -132,11 +132,11 @@ def _cleanup_ports_for_ingress(
         service_name = f'{cluster_name_on_cloud}-skypilot-service--{port}'
         ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress--{port}'
         network_utils.delete_namespaced_service(
-            namespace=provider_config['namespace'],
+            namespace=provider_config.get('namespace', 'default'),
             service_name=service_name,
         )
         network_utils.delete_namespaced_ingress(
-            namespace=provider_config['namespace'],
+            namespace=provider_config.get('namespace', 'default'),
             ingress_name=ingress_name,
         )
 
@@ -181,7 +181,8 @@ def _query_ports_for_loadbalancer(
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     external_ip = network_utils.get_loadbalancer_ip(
-        namespace=provider_config['namespace'], service_name=service_name)
+        namespace=provider_config.get('namespace', 'default'),
+        service_name=service_name)
 
     if external_ip is None:
         return {}
@@ -196,8 +197,9 @@ def _query_ports_for_ingress(
     cluster_name_on_cloud: str,
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
-    external_ip, external_ports = network_utils.get_external_ip_and_ports(
+    ingress_details = network_utils.get_ingress_external_ip_and_ports(
         'ingress-nginx')
+    external_ip, external_ports = ingress_details
     if external_ip is None:
         return {}
 

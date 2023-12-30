@@ -167,7 +167,7 @@ def ingress_controller_exists(ingress_class_name: str = 'nginx') -> bool:
             ingress_classes))
 
 
-def get_external_ip_and_ports(
+def get_ingress_external_ip_and_ports(
         namespace: str) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api()
