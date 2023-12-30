@@ -104,8 +104,8 @@ def _log_errors(errors: List[Dict[str, str]], e: Any, zone: str) -> None:
         messages = '; '.join(
             repr(e.get('message', 'N/A').strip('.')) for e in errors)
         logger.warning(
-            f'create_instances: Failed with return code{plural} {codes} in '
-            f'{zone}. (message{plural}: {messages})')
+            f'create_instances: Got return code{plural} {codes} in '
+            f'{zone}: {messages}')
     else:
         logger.warning(f'create_instances: Failed with reason: {e}')
 
