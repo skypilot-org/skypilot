@@ -3395,13 +3395,20 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
 @service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
-        region: Optional[str]):
+        region: Optional[str],
+        all_regions: Optional[bool]):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3415,6 +3422,9 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
+    To show all regions for a specified accelerator, use
+    ``sky show-gpus <accelerator> --all-regions``.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -3422,14 +3432,25 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` is not specified, the price displayed for each instance
-    type is the lowest across all regions for both on-demand and spot
-    instances. There may be multiple regions with the same lowest price.
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+
+    # validation for the --all-regions flag
+    if all_regions and accelerator_str is None:
+        raise click.UsageError(
+            'The --all-regions flag is only valid when an accelerator '
+            'is specified.')
+    if all_regions and region is not None:
+        raise click.UsageError(
+            '--all-regions and --region flags cannot be used simultaneously.')
+
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
@@ -3514,7 +3535,8 @@ def show_gpus(
                                                    quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud,
-                                                   case_sensitive=False)
+                                                   case_sensitive=False,
+                                                   all_regions=all_regions)
 
         if len(result) == 0:
             if cloud == 'kubernetes':
