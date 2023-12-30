@@ -54,8 +54,6 @@ class Kubernetes(clouds.Cloud):
         #  https://kubernetes.io/blog/2022/12/05/forensic-container-checkpointing-alpha/ # pylint: disable=line-too-long
         clouds.CloudImplementationFeatures.STOP: 'Kubernetes does not '
                                                  'support stopping VMs.',
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Kubernetes does not '
-                                                     'support stopping VMs.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
@@ -75,8 +73,9 @@ class Kubernetes(clouds.Cloud):
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod

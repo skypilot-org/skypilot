@@ -781,7 +781,7 @@ class Resources:
                                 'Docker image is not supported for TPU VM.')
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
-                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+                    self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
         if self.cloud is None:
@@ -864,7 +864,7 @@ class Resources:
                     'specified.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
-                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 

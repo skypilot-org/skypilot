@@ -164,8 +164,15 @@ class GCP(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if tpu_utils.is_tpu_vm_pod(resources):
+            return {
+                clouds.CloudImplementationFeatures.STOP: (
+                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                )
+            }
         return {}
 
     @classmethod
