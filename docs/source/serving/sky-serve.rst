@@ -45,7 +45,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model on TGI with SkyServe:
+Here is a simple example of serving an LLM model on TGI and vLLM with SkyServe:
 
 .. tab-set::
 
@@ -74,19 +74,21 @@ Here is a simple example of serving an LLM model on TGI with SkyServe:
         .. code-block:: yaml
 
             service:
-              readiness_probe:
-                path: /v1/chat/completions
-                post_data: {"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}
-                initial_delay_seconds: 1200
+              readiness_probe: /v1/models
               replicas: 2
 
+            # Fields below describe each replica.
             resources:
               ports: 8000
               accelerators: A100-80GB:2
 
-            setup: pip install vllm
+            setup: |
+              conda create -n vllm python=3.9 -y
+              conda activate vllm
+              pip install vllm
 
             run: |
+              conda activate vllm
               python -m vllm.entrypoints.openai.api_server \
                 --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
                 --host 0.0.0.0 --port 8000 --tensor-parallel-size 2
@@ -106,7 +108,7 @@ Use :code:`sky serve status` to check the status of the service:
     .. tab-item:: vLLM
         :sync: vllm-tab
 
-        .. image:: ../images/sky-serve-status-tgi.png
+        .. image:: ../images/sky-serve-status-vllm.png
             :width: 800
             :align: center
             :alt: sky-serve-status-vllm
