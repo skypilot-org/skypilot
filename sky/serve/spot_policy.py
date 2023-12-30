@@ -87,21 +87,6 @@ class SpotPlacer:
         return cls.REGISTRY[spec.spot_placer](spec)
 
 
-class EagerFailoverSpotPlacer(SpotPlacer):
-    """Eagerly failover to a different zone when preempted."""
-    NAME: Optional[str] = 'EagerFailover'
-
-    def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               current_considered_zones: List[str]) -> str:
-        del existing_replicas  # Unused.
-        del current_considered_zones  # Unused.
-        zone = random.choice(self.zones)
-        while zone in self.preempted_zones():
-            zone = random.choice(self.zones)
-        self.clear_preempted_zones()
-        return zone
-
-
 class DynamicFailoverSpotPlacer(SpotPlacer):
     """Dynamic failover to an active zone when preempted."""
     NAME: Optional[str] = 'DynamicFailover'
@@ -117,14 +102,14 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
                 continue
             if info.zone is not None:
                 existing_zones.add(info.zone)
+
+        if info is not None:
+            logger.info(f'Cannot find zone for replica '
+                        f'{info.replica_id}. Skipping adding '
+                        'to existing_zones.')
         else:
-            if info is not None:
-                logger.info(f'Cannot find zone for replica '
-                            f'{info.replica_id}. Skipping adding '
-                            'to existing_zones.')
-            else:
-                logger.info('existing_replicas is empty. '
-                            f'{existing_replicas}')
+            logger.info('existing_replicas is empty. '
+                        f'{existing_replicas}')
 
         unvisited_active_zones = [
             zone for zone in self.active_zones() if zone not in existing_zones

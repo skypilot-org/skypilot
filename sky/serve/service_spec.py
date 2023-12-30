@@ -23,7 +23,7 @@ class SkyServiceSpec:
         initial_delay_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
-        min_on_demand_replicas: int = 0,
+        min_on_demand_replicas: Optional[int] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         spot_placer: Optional[str] = None,
@@ -73,8 +73,8 @@ class SkyServiceSpec:
             if autoscaler is not None or spot_placer is not None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify `spot_policy`, `autoscaler` and '
-                        '`spot_placer` at the same time.')
+                        'Cannot specify `autoscaler` and `spot_placer`'
+                        'when `spot_policy` is specified.')
             # TODO(MaoZiming): do not hardcode the name
             if spot_policy == 'SpotHedge':
                 autoscaler = 'SpotOnDemandRequestRateAutoscaler'
@@ -187,7 +187,7 @@ class SkyServiceSpec:
             service_config['init_replicas'] = policy_section.get(
                 'init_replicas', None)
             service_config['min_on_demand_replicas'] = policy_section.get(
-                'min_on_demand_replicas', 0)
+                'min_on_demand_replicas', None)
             service_config['spot_policy'] = policy_section.get(
                 'spot_policy', None)
 
@@ -333,7 +333,7 @@ class SkyServiceSpec:
         return self._init_replicas
 
     @property
-    def min_on_demand_replicas(self) -> int:
+    def min_on_demand_replicas(self) -> Optional[int]:
         return self._min_on_demand_replicas
 
     @property

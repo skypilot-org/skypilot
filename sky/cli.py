@@ -4309,14 +4309,15 @@ def serve_up(
         dag.add(task)
 
     if task.service.spot_placer is not None:
-        for res in list(task.resources):
-            if (res.zone is not None or res.region is not None):
+        for resource in list(task.resources):
+            if (resource.zone is not None or resource.region is not None):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Cannot specify zone or region'
-                                     'when spot placer is enabled.')
+                    logger.info(
+                        f'In {resource}, use_spot=False will be ignored '
+                        'since SkyServe spot policy is enabled.')
 
-            if (res.use_spot is not None and not res.use_spot):
-                logger.info(f'{res} use_spot will be override to True, '
+            if (resource.use_spot is not None and not resource.use_spot):
+                logger.info(f'{resource} use_spot will be override to True, '
                             'because spot placer is enabled.')
 
     # TODO(tian): Limit zones to optimize if spot-zone is specified.
