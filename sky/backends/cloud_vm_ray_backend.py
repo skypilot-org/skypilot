@@ -1134,6 +1134,8 @@ class FailoverCloudErrorHandlerV2:
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
             else:
+                logger.debug('Got unparsed error blocking resources by zone: '
+                             f'{e}.')
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
