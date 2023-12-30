@@ -114,10 +114,8 @@ class SkyServeController:
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
             request_aggregator = request_data.get('request_aggregator')
-            # TODO(MaoZiming): make the logger messages more concise.
-            # logger.info(
-            #     f'Received inflight request
-            # information: {request_aggregator}')
+            timestamps = request_aggregator['timestamps']
+            logger.info(f'Received {len(timestamps)} inflight requests')
             self._autoscaler.collect_request_information(request_aggregator)
             return {
                 'ready_replica_urls':

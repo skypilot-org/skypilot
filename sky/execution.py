@@ -273,6 +273,8 @@ def execute(
                                               task)
 
     if not cluster_exists:
+        # If spot is launched by skyserve controller or managed spot controller,
+        # We don't need to print out the logger info.
         if (Stage.PROVISION in stages and task.use_spot and
                 not _is_launched_by_spot_controller and
                 not _is_launched_by_sky_serve_controller):

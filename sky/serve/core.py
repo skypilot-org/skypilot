@@ -75,6 +75,7 @@ def up(
 
     requested_cloud: Optional['clouds.Cloud'] = None
     service_port: Optional[int] = None
+    port_str: Optional[str] = None
     for requested_resources in task.resources:
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
@@ -83,6 +84,12 @@ def up(
                     'Must only specify one port in resources. Each replica '
                     'will use the port specified as application ingress port.')
         service_port_str = requested_resources.ports[0]
+        if port_str is not None and service_port_str != port_str:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify same port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        port_str = service_port_str
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
             raise ValueError(f'Port {service_port_str!r} is not a valid port '
