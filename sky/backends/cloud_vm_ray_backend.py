@@ -4277,21 +4277,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      idle_minutes_to_autostop: Optional[int],
                      down: bool = False,
                      stream_logs: bool = True) -> None:
+        # The core.autostop() function should have already checked that the
+        # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
 
             # Check if we're stopping spot
             assert (handle.launched_resources is not None and
                     handle.launched_resources.cloud is not None), handle
-            if handle.launched_resources.use_spot:
-                # This can be triggered by, for example:
-                #   sky launch --cloud aws --use-spot --cpus 2+ -i0 -y
-                # The cluster will be UP, the launch exited with code 1, and
-                # any stage after PRE_EXEC is not executed.
-                cloud = handle.launched_resources.cloud
-                cloud.check_features_are_supported(
-                    handle.launched_resources,
-                    {clouds.CloudImplementationFeatures.STOP})
-
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,
