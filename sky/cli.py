@@ -3429,7 +3429,7 @@ def show_gpus(
 
     If ``--region`` or ``--all-regions`` is not specified, the price displayed
     for each instance type is the lowest across all regions for both on-demand
-    and spotinstances. There may be multiple regions with the same lowest price.
+    and spot instances. There may be multiple regions with the same lowest price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
