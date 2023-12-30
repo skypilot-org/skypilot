@@ -3443,7 +3443,7 @@ def show_gpus(
             'is specified.')
     if all_regions and region is not None:
         raise click.UsageError(
-            'The --all-regions flag is incompatible with the --region flag.')
+            '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
