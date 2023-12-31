@@ -8,9 +8,20 @@ set -e
 PORT_RANGE_START=30000
 PORT_RANGE_END=30100
 
-# Check if docker is running
-if ! docker info > /dev/null 2>&1; then
-    >&2 echo "Docker is not running. Please start Docker and try again."
+# Temporarily disable 'exit on error' to capture docker info output
+set +e
+docker_output=$(docker info 2>&1)
+exit_status=$?
+set -e
+
+# Check if docker info command was successful
+if [ $exit_status -ne 0 ]; then
+    # Check for 'permission denied' in docker output
+    if echo "$docker_output" | grep -q "permission denied"; then
+        >&2 echo "Permission denied while trying to connect to the Docker daemon socket. Make sure your user is added to the docker group or has appropriate permissions. Instructions: https://docs.docker.com/engine/install/linux-postinstall/"
+    else
+        >&2 echo "Docker is not running. Please start Docker and try again."
+    fi
     exit 1
 fi
 

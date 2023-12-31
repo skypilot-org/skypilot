@@ -44,7 +44,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 13
+    _VERSION = 14
 
     def __init__(
         self,
@@ -514,7 +514,7 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                use_tpu_vm = accelerator_args.get('tpu_vm', False)
+                use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if use_tpu_vm:
                     tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
@@ -784,7 +784,7 @@ class Resources:
                                 'Docker image is not supported for TPU VM.')
             if self.cloud is not None:
                 self.cloud.check_features_are_supported(
-                    {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
+                    self, {clouds.CloudImplementationFeatures.DOCKER_IMAGE})
             return
 
         if self.cloud is None:
@@ -867,7 +867,7 @@ class Resources:
                     'specified.')
         if self.cloud is not None:
             self.cloud.check_features_are_supported(
-                {clouds.CloudImplementationFeatures.OPEN_PORTS})
+                self, {clouds.CloudImplementationFeatures.OPEN_PORTS})
         # We don't need to check the ports format since we already done it
         # in resources_utils.simplify_ports
 
@@ -1339,5 +1339,18 @@ class Resources:
             if original_ports is not None:
                 state['_ports'] = resources_utils.simplify_ports(
                     [str(port) for port in original_ports])
+
+        if version < 14:
+            # Backward compatibility: we change the default value for TPU VM to
+            # True in version 14 (#1758), so we need to explicitly set it to
+            # False when loading the old handle.
+            accelerators = state.get('_accelerators', None)
+            if accelerators is not None:
+                for acc in accelerators.keys():
+                    if acc.startswith('tpu'):
+                        accelerator_args = state.get('_accelerator_args', {})
+                        accelerator_args['tpu_vm'] = accelerator_args.get(
+                            'tpu_vm', False)
+                        state['_accelerator_args'] = accelerator_args
 
         self.__dict__.update(state)

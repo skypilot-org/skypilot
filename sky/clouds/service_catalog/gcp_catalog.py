@@ -369,11 +369,12 @@ def list_accelerators(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
                                             region_filter, quantity_filter,
-                                            case_sensitive)
+                                            case_sensitive, all_regions)
 
     # Remove GPUs that are unsupported by SkyPilot.
     new_results = {}

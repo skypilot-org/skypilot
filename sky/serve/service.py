@@ -139,7 +139,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name,
         controller_job_id=job_id,
         policy=service_spec.policy_str(),
-        auto_restart=service_spec.auto_restart,
         requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up

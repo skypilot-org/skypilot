@@ -686,9 +686,8 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     for info in service_record['replica_info']:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
-        # If auto restart enabled, not count FAILED replicas here.
-        if (not service_record['auto_restart'] or
-                info['status'] != serve_state.ReplicaStatus.FAILED):
+        # TODO(MaoZiming): add a column showing failed replicas number.
+        if info['status'] != serve_state.ReplicaStatus.FAILED:
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 

@@ -53,6 +53,7 @@ _MAX_NUM_LAUNCH = psutil.cpu_count()
 # sky/spot/recovery_strategy.py::StrategyExecutor::launch
 def launch_cluster(task_yaml_path: str,
                    cluster_name: str,
+                   resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -65,8 +66,12 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
-        task = sky.Task.from_yaml(task_yaml_path)
-        logger.info("lauch_cluster(task): ", task)
+        config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        if resources_override is not None:
+            resource_config = config.get('resources', {})
+            resource_config.update(resources_override)
+            config['resources'] = resource_config
+        task = sky.Task.from_yaml_config(config)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -240,8 +245,7 @@ class ReplicaStatusProperty:
     # The replica's spot instance was preempted.
     preempted: bool = False
 
-    def is_scale_down_succeeded(self, initial_delay_seconds: int,
-                                auto_restart: bool) -> bool:
+    def is_scale_down_succeeded(self, initial_delay_seconds: int) -> bool:
         """Whether to remove the replica record from the replica table.
 
         If not, the replica will stay in the replica table permanently to
@@ -251,7 +255,7 @@ class ReplicaStatusProperty:
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
             return False
-        if (auto_restart and self.first_ready_time is not None and
+        if (self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
             # If the service is up for more than `initial_delay_seconds`,
             # we assume there is no bug in the user code and the scale down
@@ -391,8 +395,8 @@ class ReplicaInfo:
         return handle
 
     @property
-    def is_alive(self) -> bool:
-        return self.status in serve_state.ReplicaStatus.alive_statuses()
+    def is_launched(self) -> bool:
+        return self.status in serve_state.ReplicaStatus.launched_statuses()
 
     @property
     def is_ready(self) -> bool:
@@ -481,7 +485,6 @@ class ReplicaManager:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
-        self._auto_restart = spec.auto_restart
         self._readiness_path: str = spec.readiness_path
         self._initial_delay_seconds: int = spec.initial_delay_seconds
         self._post_data: Optional[Dict[str, Any]] = spec.post_data
@@ -496,7 +499,11 @@ class ReplicaManager:
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
-        """Scale up the service by 1 replica with resources_override."""
+        """Scale up the service by 1 replica with resources_override.
+        resources_override is of the same format with resources section
+        in skypilot task yaml
+        """
+        raise NotImplementedError
 
     def scale_down(self, replica_id: int) -> None:
         """Scale down replica with replica_id."""
@@ -521,7 +528,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._task_yaml_path = task_yaml_path
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
-        # poll the Process (by join or is_alive), otherwise, it will never
+        # poll the Process (by join or is_launch), otherwise, it will never
         # finish and become a zombie process. Probably we could use
         # psutil.Process(p.pid).status() == psutil.STATUS_ZOMBIE to check
         # such cases.
@@ -583,8 +590,7 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def scale_up(
         self,
-        resources_override: Optional[Dict[str, Any]] = None,
-    ) -> int:
+        resources_override: Optional[Dict[str, Any]] = None,) -> int:
         replica_id = self._next_replica_id
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
@@ -764,7 +770,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
                 if info.status_property.is_scale_down_succeeded(
-                        self._initial_delay_seconds, self._auto_restart):
+                        self._initial_delay_seconds):
                     # This means the cluster is deleted due to
                     # a scale down or the cluster is recovering
                     # from preemption. Delete the replica info
