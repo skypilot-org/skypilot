@@ -135,7 +135,6 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestHeteroGPU())
 
-
     async def _redirect_handler(self, request: fastapi.Request):
         body_bytes = await request.body()
         body_str = body_bytes.decode("utf-8")
@@ -161,9 +160,10 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
         logger.info(f'Redirecting request to {path}')
         return fastapi.responses.RedirectResponse(url=path)
 
+
 def run_load_balancer(controller_addr: str, load_balancer_port: int):
     #load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
     #                                     load_balancer_port=load_balancer_port)
     load_balancer = HeteroGPULoadBalancer(controller_url=controller_addr,
-                                         load_balancer_port=load_balancer_port)   
+                                          load_balancer_port=load_balancer_port)
     load_balancer.run()

@@ -163,8 +163,35 @@ def _get_resources_ports(task_yaml: str) -> str:
     return task_resources.ports[0]
 
 
-def _get_accelerator_override(task_yaml: str,
-                           override: Optional[Dict[str, Any]]) -> bool:
+def _get_accelerator_override(
+        task_yaml: str, resources_override: Optional[Dict[str, Any]]) -> bool:
+    if resources_override is not None:
+        accelerators_override = resources_override.get('accelerators', None)
+        if accelerators_override is not None:
+            assert isinstance(accelerators_override, str)
+            return accelerators_override
+    task = sky.Task.from_yaml(task_yaml)
+    assert len(task.resources) == 1, task
+    task_resources = list(task.resources)[0]
+    return task_resources.accelerators
+
+
+def _get_replica_type(
+        resources_override: Optional[Dict[str, Any]]) -> Optional[Tuple[bool]]:
+    is_primary, is_fallback = None, None
+    if resources_override is not None:
+        is_primary = resources_override.get('is_primary', None)
+        is_fallback = resources_override.get('is_fallback', None)
+    return is_primary, is_fallback
+
+
+def _get_fallback_replica_id_list(
+        resources_override: Optional[Dict[str, Any]]) -> Optional[List[int]]:
+    fallback_replica_id_list = None
+    if resources_override is not None:
+        fallback_replica_id_list = resources_override.get(
+            'fallback_replica_id_list', None)
+    return fallback_replica_id_list
 
 
 def with_lock(func):
@@ -323,9 +350,14 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str,
+    def __init__(self,
+                 replica_id: int,
+                 cluster_name: str,
                  replica_port: str,
-                 accelerator: Optional[AcceleratorType] = None) -> None:
+                 accelerator: Optional[AcceleratorType] = None,
+                 is_primary: Optional[bool] = None,
+                 is_fallback: Optional[bool] = None,
+                 fallback_replica_id_list: Optional[List[int]] = []) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
         self.replica_port: str = replica_port
@@ -333,6 +365,9 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.accelerator = accelerator
+        self.is_primary = is_primary
+        self.is_fallback = is_fallback
+        self.fallback_replica_id_list = fallback_replica_id_list
 
     def handle(
         self,
@@ -357,6 +392,10 @@ class ReplicaInfo:
     @property
     def is_alive(self) -> bool:
         return self.status in serve_state.ReplicaStatus.alive_statuses()
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status == serve_state.ReplicaStatus.READY
 
     @property
     def url(self) -> Optional[str]:
@@ -531,16 +570,24 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         accelerator = _get_accelerator_override(self._task_yaml_path,
                                                 resources_override)
-        info = ReplicaInfo(replica_id, cluster_name, replica_port, accelerator)
+        is_primary, is_fallback = _get_replica_type(resources_override)
+        fallback_replica_id_list = _get_fallback_replica_id_list(
+            resources_override)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port, accelerator,
+                           is_primary, is_fallback, fallback_replica_id_list)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
         self._launch_process_pool[replica_id] = p
 
-    def scale_up(self,
-                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+    def scale_up(
+        self,
+        resources_override: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        replica_id = self._next_replica_id
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
+        return replica_id
 
     def _terminate_replica(self,
                            replica_id: int,
@@ -587,7 +634,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         info = serve_state.get_replica_info_from_id(self._service_name,
                                                     replica_id)
         assert info is not None
-        
+
         is_launching = False
         if replica_id in self._launch_process_pool:
             is_launching = True
@@ -632,7 +679,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert info is not None
         info.status_property.preempted = True
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
-        self._terminate_replica(replica_id, sync_down_logs=False,
+        self._terminate_replica(replica_id,
+                                sync_down_logs=False,
                                 delay_in_s=_DEFAULT_DRAIN_SECONDS)
 
     #################################
