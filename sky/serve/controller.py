@@ -50,7 +50,6 @@ class SkyServeController:
             autoscalers.HeteroGPUAutoscaler(
                 service_spec,
                 frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
-                cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
                 rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS))
         self._port = port
         self._app = fastapi.FastAPI()

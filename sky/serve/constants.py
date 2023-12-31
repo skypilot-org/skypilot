@@ -36,10 +36,6 @@ AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
 # Autoscaler scale frequency in seconds. We will try to scale up/down every
 # `scale_frequency`.
 AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
-# Autoscaler cooldown time in seconds. We will not scale up/down if the last
-# scale up/down is within this cooldown time.
-AUTOSCALER_COOLDOWN_SECONDS = 60
-
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of

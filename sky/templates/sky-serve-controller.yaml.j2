@@ -16,9 +16,7 @@ setup: |
 
 file_mounts:
   {{remote_task_yaml_path}}: {{local_task_yaml_path}}
-{% if user_config_path is not none %}
-  {{remote_user_config_path}}: {{user_config_path}}
-{% endif %}
+  {{remote_user_config_path}}: skypilot:local_skypilot_config_path
 
 run: |
   # Start sky serve service.

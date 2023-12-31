@@ -19,6 +19,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+_UPSCALE_DELAY_S = 300
+_DOWNSCALE_DELAY_S = 1200
+
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -87,25 +90,31 @@ class RequestRateAutoscaler(Autoscaler):
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+                 rps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
             upper_threshold: Upper threshold for scale up. If None, no scale up.
             lower_threshold: Lower threshold for scale down. If None, no scale
                 down.
-            cooldown: Cooldown between two scaling operations in seconds.
             rps_window_size: Window size for rps calculating.
-            last_scale_operation: Time of last scale operation.
             request_timestamps: All request timestamps within the window.
+            upscale_counter: counter for upscale number of replicas.
+            downscale_counter: counter for downscale number of replicas.
+            scale_up_consecutive_periods: period for scaling up.
+            scale_down_consecutive_periods: period for scaling down.
         """
         super().__init__(spec, frequency)
         self.upper_threshold: Optional[float] = spec.qps_upper_threshold
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
-        self.cooldown: int = cooldown
         self.rps_window_size: int = rps_window_size
-        self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
+        self.upscale_counter: int = 0
+        self.downscale_counter: int = 0
+        self.scale_up_consecutive_periods: int = int(_UPSCALE_DELAY_S /
+                                                     self.frequency)
+        self.scale_down_consecutive_periods: int = int(_DOWNSCALE_DELAY_S /
+                                                       self.frequency)
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -128,21 +137,8 @@ class RequestRateAutoscaler(Autoscaler):
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> AutoscalerDecision:
-        current_time = time.time()
-        num_replicas = len(replica_infos)
 
-        # Check if cooldown period has passed since the last scaling operation.
-        # Only cooldown if bootstrapping is done.
-        if num_replicas >= self.min_replicas:
-            if current_time - self.last_scale_operation < self.cooldown:
-                logger.info(
-                    f'Current time: {current_time}, '
-                    f'last scale operation: {self.last_scale_operation}, '
-                    f'cooldown: {self.cooldown}')
-                logger.info('Cooldown period has not passed since last scaling '
-                            'operation. Skipping scaling.')
-                return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,
-                                          target=None)
+        num_replicas = len(replica_infos)
 
         # Convert to requests per second.
         num_requests_per_second = len(
@@ -151,9 +147,11 @@ class RequestRateAutoscaler(Autoscaler):
         requests_per_replica = (num_requests_per_second / num_replicas
                                 if num_replicas else num_requests_per_second)
 
-        logger.info(f'Requests per replica: {requests_per_replica}')
-
+        logger.info(f'Requests per replica: {requests_per_replica}, '
+                    f'upper_threshold: {self.upper_threshold}, '
+                    f'lower_threshold: {self.lower_threshold}')
         logger.info(f'Number of replicas: {num_replicas}')
+
         target_num_replicas = num_replicas
         if num_replicas < self.min_replicas:
             target_num_replicas = self.min_replicas
@@ -168,7 +166,37 @@ class RequestRateAutoscaler(Autoscaler):
 
         target_num_replicas = max(self.min_replicas,
                                   min(self.max_replicas, target_num_replicas))
-        num_replicas_delta = target_num_replicas - num_replicas
+
+        logger.info(f'Target number of replicas: {target_num_replicas}, '
+                    f'min_replicas: {self.min_replicas}, '
+                    f'max_replicas: {self.max_replicas}')
+
+        num_replicas_delta = 0
+        if num_replicas < self.min_replicas:
+            num_replicas_delta = self.min_replicas - num_replicas
+            self.upscale_counter = 0
+        elif num_replicas > self.max_replicas:
+            num_replicas_delta = self.max_replicas - num_replicas
+            self.downscale_counter = 0
+        elif target_num_replicas > num_replicas:
+            self.upscale_counter += 1
+            self.downscale_counter = 0
+            if self.upscale_counter >= self.scale_up_consecutive_periods:
+                self.upscale_counter = 0
+                num_replicas_delta = target_num_replicas - num_replicas
+        elif target_num_replicas < num_replicas:
+            self.downscale_counter += 1
+            self.upscale_counter = 0
+            if self.downscale_counter >= self.scale_down_consecutive_periods:
+                self.downscale_counter = 0
+                num_replicas_delta = target_num_replicas - num_replicas
+        else:
+            self.upscale_counter = self.downscale_counter = 0
+        logger.info(f'Upscale counter: {self.upscale_counter}/'
+                    f'{self.scale_up_consecutive_periods}. '
+                    f'Downscale counter: {self.downscale_counter}/'
+                    f'{self.scale_down_consecutive_periods}')
+
         if num_replicas_delta == 0:
             logger.info('No scaling needed.')
             return AutoscalerDecision(AutoscalerDecisionOperator.NO_OP,

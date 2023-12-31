@@ -28,7 +28,7 @@ USER sky
 # Install SkyPilot pip dependencies
 RUN pip install wheel Click colorama cryptography jinja2 jsonschema && \
     pip install networkx oauth2client pandas pendulum PrettyTable && \
-    pip install ray==2.4.0 rich tabulate filelock && \
+    pip install ray[default]==2.4.0 rich tabulate filelock && \
     pip install packaging 'protobuf<4.0.0' pulp && \
     pip install awscli boto3 pycryptodome==3.12.0 && \
     pip install docker kubernetes
