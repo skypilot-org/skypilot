@@ -1491,8 +1491,8 @@ def test_gcp_http_server_with_custom_ports():
         'gcp_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            f'curl `sky status --endpoint 33828 {name}` | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); curl $ip | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -1507,8 +1507,8 @@ def test_aws_http_server_with_custom_ports():
         'aws_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            f'curl `sky status --endpoint 33828 {name}` | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); curl $ip | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
@@ -1523,8 +1523,24 @@ def test_azure_http_server_with_custom_ports():
         'azure_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            f'curl `sky status --endpoint 33828 {name}` | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); curl $ip | grep "<h1>This is a demo HTML page.</h1>"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on Kubernetes. ----------
+@pytest.mark.kubernetes
+def test_kubernetes_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'kubernetes_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud kubernetes examples/http_server_with_custom_ports/task.yaml',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); curl $ip | grep "<h1>This is a demo HTML page.</h1>"',
         ],
         f'sky down -y {name}',
     )
