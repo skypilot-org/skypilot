@@ -323,9 +323,10 @@ class AbstractStore:
 
     def _validate_existing_bucket(self):
         """Validates the storage fields for existing buckets."""
-        # Check if 'source' is None, indicating Storage is in MOUNT mode.
-        # Note: In COPY mode, a 'source' being None is already handled
-        # as an error in _validate_storage_spec.
+        # Check if 'source' is None, this is only allowed when Storage is in
+        # either MOUNT mode or COPY mode with sky-managed storage.
+        # Note: In COPY mode, a 'source' being None with non-sky-managed
+        # storage is already handled as an error in _validate_storage_spec.
         if self.source is None:
             # Retrieve a handle associated with the storage name.
             # This handle links to sky managed storage if it exists.
