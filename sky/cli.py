@@ -1809,8 +1809,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
     If --endpoints is specified, show all exposed endpoints in the cluster.
     Only available when CLUSTERS contains exactly one cluster, e.g.
-    ``sky status --endpoints mycluster``. To query a single endpoint, you can use
-    ``sky status mycluster --endpoint 8888``.
+    ``sky status --endpoints mycluster``. To query a single endpoint, you
+    can use ``sky status mycluster --endpoint 8888``.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1888,20 +1888,21 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if ip or show_endpoints:
             if refresh:
                 raise click.UsageError(
-                    'Using --ip or --endpoint(s) with --refresh is not supported for now. '
-                    'To fix, refresh first, then query the IP or endpoint.')
+                    'Using --ip or --endpoint(s) with --refresh is not'
+                    'supported for now. To fix, refresh first, '
+                    'then query the IP or endpoint.')
 
             if ip and show_endpoints:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify both --ip and --endpoint(s) at the same time.'
-                    )
+                        'Cannot specify both --ip and --endpoint(s) '
+                        'at the same time.')
 
             if endpoint is not None and endpoints:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Cannot specify both --endpoint and --endpoints at the same time.'
-                    )
+                        'Cannot specify both --endpoint and --endpoints '
+                        'at the same time.')
 
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
@@ -1915,8 +1916,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             verb='specified',
                             property='IP address' if ip else 'endpoint(s)',
                             flag='ip' if ip else
-                            f'endpoint{" port" if show_single_endpoint else "s"}'
-                        ))
+                            ('endpoint port'
+                             if show_single_endpoint else 'endpoints')))
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -1938,8 +1939,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                             verb='found',
                             property='IP address' if ip else 'endpoint(s)',
                             flag='ip' if ip else
-                            f'endpoint{" port" if show_single_endpoint else "s"}'
-                        ))
+                            ('endpoint port'
+                             if show_single_endpoint else 'endpoints')))
 
             cluster_record = cluster_records[0]
             if cluster_record['status'] != status_lib.ClusterStatus.UP:
@@ -1970,22 +1971,22 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 f'Port {endpoint} not exposed yet.\n'
-                                'If the cluster was recently started, please retry after a while.'
-                            )
+                                'If the cluster was recently started, '
+                                'please retry after a while.')
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
                     return
 
                 if not port_details:
-                    click.echo(
-                        'No endpoints exposed yet.\n'
-                        'If the cluster was recently started, please retry after a while.'
-                    )
+                    click.echo('No endpoints exposed yet.\n'
+                               'If the cluster was recently started, '
+                               'please retry after a while.')
 
                 for port, urls in port_details.items():
                     click.echo(
-                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}{colorama.Style.RESET_ALL}: '
-                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}'
-                    )
+                        f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                        f'{colorama.Style.RESET_ALL}: '
+                        f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'{urls[0].url(ip=head_ip)}{colorama.Style.RESET_ALL}')
                 return
 
             click.echo(head_ip)
