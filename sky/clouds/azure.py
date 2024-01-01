@@ -60,6 +60,8 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.RAY_AUTOSCALER
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources.Resources'
