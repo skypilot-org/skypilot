@@ -594,8 +594,6 @@ def get_config_schema():
                         'items': {
                             'type': 'string',
                         },
-                        'minItems': 1,
-                        'maxItems': 1,
                     },
                     **_NETWORK_CONFIG_SCHEMA,
                 }

@@ -456,7 +456,7 @@ def autostop(
             f'{backend.__class__.__name__!r} is not supported.')
     # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
-    if not down and idle_minutes >= 0:
+    if not down and not is_cancel:
         try:
             cloud.check_features_are_supported(
                 handle.launched_resources,
