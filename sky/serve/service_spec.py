@@ -29,7 +29,6 @@ class SkyServiceSpec:
         spot_placer: Optional[str] = None,
         spot_policy: Optional[str] = None,
         autoscaler: Optional[str] = None,
-        spot_zones: Optional[List[str]] = None,
         num_overprovision: Optional[int] = None,
         init_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
@@ -92,22 +91,23 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unsupported spot placer: {spot_placer}.')
 
-        self._readiness_path = readiness_path
-        self._initial_delay_seconds = initial_delay_seconds
-        self._min_replicas = min_replicas
-        self._max_replicas = max_replicas
-        self._target_qps_per_replica = target_qps_per_replica
-        self._post_data = post_data
-        self._spot_placer = spot_placer
-        self._autoscaler = autoscaler
-        self._num_overprovision = num_overprovision
-        self._init_replicas = init_replicas
-        self._min_on_demand_replicas = min_on_demand_replicas
-        self._spot_zones = spot_zones
-        self._upscale_delay_seconds = (
+        self._readiness_path: str = readiness_path
+        self._initial_delay_seconds: int = initial_delay_seconds
+        self._min_replicas: int = min_replicas
+        self._max_replicas: Optional[int] = max_replicas
+        self._target_qps_per_replica: Optional[float] = target_qps_per_replica
+        self._post_data: Optional[Dict[str, Any]] = post_data
+        self._spot_placer: Optional[str] = spot_placer
+        self._autoscaler: str = autoscaler
+        self._num_overprovision: Optional[int] = num_overprovision
+        self._init_replicas: Optional[int] = init_replicas
+        self._min_on_demand_replicas: Optional[int] = min_on_demand_replicas
+        # _spot_zones will be set by set_spot_zones from resource config.
+        self._spot_zones: Optional[List[str]] = None
+        self._upscale_delay_seconds: int = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
             constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
-        self._downscale_delay_seconds = (
+        self._downscale_delay_seconds: int = (
             downscale_delay_seconds if downscale_delay_seconds is not None else
             constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
 
@@ -180,8 +180,6 @@ class SkyServiceSpec:
                 'spot_placer', None)
             service_config['autoscaler'] = policy_section.get(
                 'autoscaler', None)
-            service_config['spot_zones'] = policy_section.get(
-                'spot_zones', None)
             service_config['num_overprovision'] = policy_section.get(
                 'num_overprovision', None)
             service_config['init_replicas'] = policy_section.get(
@@ -237,7 +235,6 @@ class SkyServiceSpec:
                         self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'spot_placer', self._spot_placer)
         add_if_not_none('replica_policy', 'autoscaler', self._autoscaler)
-        add_if_not_none('replica_policy', 'spot_zones', self._spot_zones)
         add_if_not_none('replica_policy', 'num_overprovision',
                         self._num_overprovision)
         add_if_not_none('replica_policy', 'init_replicas', self._init_replicas)

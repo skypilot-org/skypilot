@@ -12,6 +12,9 @@ service:
     spot_policy: SpotHedge
 
 resources:
+  any_of:
+  - region: us-central1
+  - region: us-east1
   ports: 8081
   cloud: gcp
   cpus: 2+

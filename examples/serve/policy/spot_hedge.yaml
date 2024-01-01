@@ -9,9 +9,6 @@ service:
     num_overprovision: 1
     target_qps_per_replica: 1
     spot_policy: SpotHedge
-    spot_zones:
-      - us-central1-a
-      - us-central1-b
 
 resources:
   ports: 8081

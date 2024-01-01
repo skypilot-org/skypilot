@@ -632,11 +632,7 @@ class Task:
           self: The current task, with resources set.
         """
 
-        if (service and service.spot_zones is None and
-                service.spot_placer is not None):
-
-            logger.info('service.spot_zones is not specified, '
-                        'use all available zones')
+        if (service and service.spot_placer is not None):
 
             launchable_resources, _, _ = (
                 optimizer.fill_in_launchable_resources(
@@ -646,13 +642,15 @@ class Task:
                     quiet=True))
 
             launchable_zones = set()
-            for res in launchable_resources[list(self.resources)[0]]:
-                regions = res.get_valid_regions_for_launchable()
-                for region in regions:
-                    if region.zones is not None:
-                        for zone in region.zones:
-                            launchable_zones.add(zone.name)
+            for resource in list(self.resources):
+                for res in launchable_resources[resource]:
+                    regions = res.get_valid_regions_for_launchable()
+                    for region in regions:
+                        if region.zones is not None:
+                            for zone in region.zones:
+                                launchable_zones.add(zone.name)
 
+            logger.info(f'launchable_zones: {launchable_zones}')
             service.set_spot_zones(list(launchable_zones))
 
         self._service = service

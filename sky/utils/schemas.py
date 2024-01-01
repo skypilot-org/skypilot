@@ -344,13 +344,6 @@ def get_service_schema():
                     'spot_policy': {
                         'type': 'string',
                     },
-                    'spot_zones': {
-                        'type': 'array',
-                        'minItems': 1,
-                        'items': {
-                            'type': 'string'
-                        },
-                    },
                     'num_overprovision': {
                         'type': 'integer',
                     },

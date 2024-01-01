@@ -64,12 +64,31 @@ def launch_cluster(task_yaml_path: str,
             or some error happened before provisioning and will happen again
             if retry.
     """
+
+    def delete_if_not_none(config: Dict[str, Any], key: str) -> None:
+        if key in config:
+            del config[key]
+
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         if resources_override is not None:
             resource_config = config.get('resources', {})
+            # Overwrite zone from spot_placer.
+            if 'zone' in resources_override:
+                delete_if_not_none(resource_config, 'region')
+                delete_if_not_none(resource_config, 'zone')
+                if 'any_of' in resource_config:
+                    for any_of_config in resource_config['any_of']:
+                        delete_if_not_none(any_of_config, 'region')
+                        delete_if_not_none(any_of_config, 'zone')
+                if 'ordered' in resource_config:
+                    for ordered_config in resource_config['ordered']:
+                        delete_if_not_none(ordered_config, 'region')
+                        delete_if_not_none(ordered_config, 'zone')
             resource_config.update(resources_override)
             config['resources'] = resource_config
+        logger.info(f'Launching replica cluster {cluster_name} with '
+                    f'config: {config}')
         task = sky.Task.from_yaml_config(config)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
