@@ -249,6 +249,8 @@ class HeteroGPUAutoscaler(Autoscaler):
     the threshold.
     """
 
+    SCALE_UP_COOL_DOWN_INTERVAL_SECONDS = 300
+
     def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
                  cooldown: int, rps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
@@ -266,7 +268,7 @@ class HeteroGPUAutoscaler(Autoscaler):
         self.upper_threshold: Optional[float] = spec.qps_upper_threshold
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
         self.cooldown: int = cooldown
-        self.rps_window_size: int = 300
+        self.rps_window_size: int = self.AUTOSCALER_SCALE_UP_INTERVAL_SECONDS
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
         self.request_timestamps_distribution: List[List[float]] = [[], [], [],
@@ -274,7 +276,9 @@ class HeteroGPUAutoscaler(Autoscaler):
                                                                    []]
         self.request_distribution: List[int] = [0, 0, 0, 0, 0, 0, 0]
         self.request_rate_dist: List[float] = [0, 0, 0, 0, 0, 0, 0]
-        self.total_request_in_window = 0
+        self.total_request_in_window: int = 0
+        self.last_scale_time: float = 0.
+        self.scale_down_candidates: List['replica_managers.ReplicaInfo'] = []
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -377,16 +381,22 @@ class HeteroGPUAutoscaler(Autoscaler):
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
-    ) -> List[AutoscalerDecision]:
-        # get replica infos and retrieve number of GPU types currently running
-        launched_replica_infos = [
-            info for info in replica_infos if info.is_launched
-        ]
+    ) -> List[Union[AutoscalerDecision, List[AutoscalerDecision]]]:
 
         all_replica_infos_to_scale_down: List[
             'replica_managers.ReplicaInfo'] = []
         scaling_decisions: (List[Union[AutoscalerDecision,
                                        List[AutoscalerDecision]]]) = []
+        
+        # Return if the cool down interval has not passed. 
+        if (time.time()- self.last_scale_time < 
+            self.SCALE_UP_COOL_DOWN_INTERVAL_SECONDS):
+            return scaling_decisions
+
+        self.last_scale_time = time.time()
+        launched_replica_infos = [
+            info for info in replica_infos if info.is_launched
+        ]
 
         def _get_replica_infos_to_scale_down(
             info_filter: Callable[['replica_managers.ReplicaInfo'], bool],
@@ -464,10 +474,14 @@ class HeteroGPUAutoscaler(Autoscaler):
                             scale_down_decision_order(),
                             num_limit=diff_accel_num,
                         ))
-
+   
         # Need to make sure to put down the fallback replicas
         # if the primary replica is set to be down.
-        for info in all_replica_infos_to_scale_down:
+        # Note: We scale down the replica candidates from the previous
+        # call the evaluate_scaling. This allows a delayed scale down
+        # operation mitigating the time discrepancy occurring by the time taken
+        # to launch with scale up operation.
+        for info in self.scale_down_candidates:
             decision = self._get_autoscaler_decision(
                 AutoscalerDecisionOperator.SCALE_DOWN,
                 replica_id=info.replica_id)
@@ -478,6 +492,8 @@ class HeteroGPUAutoscaler(Autoscaler):
                     replica_id=replica_id)
                 scaling_decisions.append(decision)
 
+        self.scale_down_candidates = all_replica_infos_to_scale_down[:]
+        
         if not scaling_decisions:
             logger.info('No scaling needed.')
 
