@@ -13,16 +13,23 @@ from sky.provision.gcp import instance_utils
 logger = logging.getLogger(__name__)
 
 if typing.TYPE_CHECKING:
-    import google
+    import google.cloud
 
 
-def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
+def _skypilot_log_error_and_exit_for_failover(error_code: str,
+                                              error_msg: str) -> None:
     """Logs an message then raises a specific RuntimeError to trigger failover.
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
     prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
-    raise RuntimeError(prefix + error)
+    error = common.ProvisionError(prefix + error_msg)
+    error.errors = [{
+        'code': error_code,
+        'domain': 'bootstrap_instance',
+        'message': error_msg,
+    }]
+    raise error
 
 
 def wait_for_crm_operation(operation, crm):
@@ -343,8 +350,8 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
         'scopes': ['https://www.googleapis.com/auth/cloud-platform'],
     }
     iam_role: Dict[str, Any]
-    if instance_utils.get_node_type(
-            config.node_config) == instance_utils.GCPNodeType.TPU:
+    if (instance_utils.get_node_type(
+            config.node_config) == instance_utils.GCPNodeType.TPU):
         # SKY: The API for TPU VM is slightly different from normal compute
         # instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node # pylint: disable=line-too-long
@@ -552,9 +559,10 @@ def get_usable_vpc_and_subnet(
             subnets = _list_subnets(project_id,
                                     region,
                                     compute,
-                                    filter=f'(name="{specific_vpc_to_use}")')
+                                    network=specific_vpc_to_use)
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
+                    'SUBNET_NOT_FOUND_FOR_VPC',
                     f'No subnet for region {region} found for specified VPC '
                     f'{specific_vpc_to_use!r}. '
                     f'Check the subnets of VPC {specific_vpc_to_use!r} at '
@@ -563,6 +571,7 @@ def get_usable_vpc_and_subnet(
         else:
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
+                'VPC_NOT_FOUND',
                 f'No VPC with name {specific_vpc_to_use!r} is found. '
                 'To fix: specify a correct VPC name.')
             # Should not reach here.
@@ -604,9 +613,10 @@ def get_usable_vpc_and_subnet(
     subnets = _list_subnets(project_id,
                             region,
                             compute,
-                            filter=f'(name="{usable_vpc_name}")')
+                            network=usable_vpc_name)
     if not subnets:
         _skypilot_log_error_and_exit_for_failover(
+            'SUBNET_NOT_FOUND_FOR_VPC',
             f'No subnet for region {region} found for generated VPC '
             f'{usable_vpc_name!r}. This is probably due to the region being '
             'disabled in the account/project_id.')
@@ -637,6 +647,9 @@ def _configure_subnet(region: str, cluster_name: str,
             'type': 'ONE_TO_ONE_NAT',
         }],
     }]
+    if config.provider_config.get('use_internal_ips', False):
+        # Removing this key means the VM will not be assigned an external IP.
+        default_interfaces[0].pop('accessConfigs')
 
     # The not applicable key will be removed during node creation
 
@@ -646,7 +659,12 @@ def _configure_subnet(region: str, cluster_name: str,
     # TPU
     if 'networkConfig' not in node_config:
         node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
-        node_config['networkConfig'].pop('accessConfigs')
+        # TPU doesn't have accessConfigs
+        node_config['networkConfig'].pop('accessConfigs', None)
+        if config.provider_config.get('use_internal_ips', False):
+            node_config['networkConfig']['enableExternalIps'] = False
+        else:
+            node_config['networkConfig']['enableExternalIps'] = True
 
     return config
 
@@ -685,19 +703,31 @@ def _list_vpcnets(project_id: str, compute, filter=None):  # pylint: disable=red
 
 
 def _list_subnets(
-    project_id: str,
-    region: str,
-    compute,
-    # pylint: disable=redefined-builtin
-    filter=None
+        project_id: str,
+        region: str,
+        compute,
+        network=None
 ) -> List['google.cloud.compute_v1.types.compute.Subnetwork']:
     response = (compute.subnetworks().list(
         project=project_id,
         region=region,
-        filter=filter,
     ).execute())
 
-    return response['items'] if 'items' in response else []
+    items = response['items'] if 'items' in response else []
+    if network is None:
+        return items
+
+    # Filter by network (VPC) name.
+    #
+    # Note we do not directly use the filter (network=<...>) arg of the list()
+    # call above, because it'd involve constructing a long URL of the following
+    # format and passing it as the filter value:
+    # 'https://www.googleapis.com/compute/v1/projects/<project_id>/global/networks/<network_name>' # pylint: disable=line-too-long
+    matched_items = []
+    for item in items:
+        if network == _network_interface_to_vpc_name(item):
+            matched_items.append(item)
+    return matched_items
 
 
 def _get_project(project_id: str, crm):

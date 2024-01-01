@@ -67,7 +67,9 @@ def _auto_retry(func):
                 if retry_cnt >= _MAX_RETRY - 1:
                     raise e
                 sleep = backoff.current_backoff()
-                logger.info(f'Retrying in {sleep:.1f} seconds.')
+                logger.info(
+                    f'{func.__name__}: Retrying in {sleep:.1f} seconds, '
+                    f'due to {e}')
                 time.sleep(sleep)
 
     return retry
@@ -88,7 +90,7 @@ def _log_start_end(func):
 
 def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
                           stage_name: str):
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         worker_log_path = metadata_utils.get_instance_log_dir(
             cluster_name, '*') / (stage_name + '.log')
         logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
@@ -100,21 +102,22 @@ def _parallel_ssh_with_cache(func, cluster_name: str, stage_name: str,
                              ssh_credentials: Dict[str, Any]) -> List[Any]:
     with futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = []
-        for instance_id, metadata in cluster_info.instances.items():
-            runner = command_runner.SSHCommandRunner(metadata.get_feasible_ip(),
-                                                     port=metadata.ssh_port,
-                                                     **ssh_credentials)
-            wrapper = metadata_utils.cache_func(cluster_name, instance_id,
-                                                stage_name, digest)
-            if cluster_info.head_instance_id == instance_id:
-                # Log the head node's output to the provision.log
-                log_path_abs = str(provision_logging.get_log_path())
-            else:
-                log_dir_abs = metadata_utils.get_instance_log_dir(
-                    cluster_name, instance_id)
-                log_path_abs = str(log_dir_abs / (stage_name + '.log'))
-            results.append(
-                pool.submit(wrapper(func), runner, metadata, log_path_abs))
+        for instance_id, metadatas in cluster_info.instances.items():
+            for i, metadata in enumerate(metadatas):
+                cache_id = f'{instance_id}-{i}'
+                runner = command_runner.SSHCommandRunner(
+                    metadata.get_feasible_ip(), port=metadata.ssh_port, **ssh_credentials)
+                wrapper = metadata_utils.cache_func(cluster_name, cache_id,
+                                                    stage_name, digest)
+                if (cluster_info.head_instance_id == instance_id and i == 0):
+                    # Log the head node's output to the provision.log
+                    log_path_abs = str(provision_logging.get_log_path())
+                else:
+                    log_dir_abs = metadata_utils.get_instance_log_dir(
+                        cluster_name, cache_id)
+                    log_path_abs = str(log_dir_abs / (stage_name + '.log'))
+                results.append(
+                    pool.submit(wrapper(func), runner, metadata, log_path_abs))
 
         return [future.result() for future in results]
 
@@ -247,18 +250,23 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                               cluster_info: common.ClusterInfo,
                               ssh_credentials: Dict[str, Any]) -> None:
     """Start Ray on the worker nodes."""
-    if len(cluster_info.instances) <= 1:
+    if cluster_info.num_instances <= 1:
         return
     _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
     ip_list = cluster_info.get_feasible_ips()
     ssh_runners = command_runner.SSHCommandRunner.make_runner_list(
-        ip_list[1:],
-        port_list=cluster_info.get_ssh_ports()[1:],
-        **ssh_credentials)
-    worker_ids = [
-        instance_id for instance_id in cluster_info.instances
-        if instance_id != cluster_info.head_instance_id
-    ]
+        ip_list[1:], port_list=cluster_info.get_ssh_ports()[1:], **ssh_credentials)
+    worker_instances = cluster_info.get_worker_instances()
+    cache_ids = []
+    prev_instance_id = None
+    cnt = 0
+    for instance in worker_instances:
+        if instance.instance_id != prev_instance_id:
+            cnt = 0
+            prev_instance_id = instance.instance_id
+        cache_ids.append(f'{prev_instance_id}-{cnt}')
+        cnt += 1
+
     head_instance = cluster_info.get_head_instance()
     assert head_instance is not None, cluster_info
     head_private_ip = head_instance.internal_ip
@@ -303,7 +311,7 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                           log_path=log_path_abs)
 
     results = subprocess_utils.run_in_parallel(
-        _setup_ray_worker, list(zip(ssh_runners, worker_ids)))
+        _setup_ray_worker, list(zip(ssh_runners, cache_ids)))
     for returncode, stdout, stderr in results:
         if returncode:
             with ux_utils.print_exception_no_traceback():

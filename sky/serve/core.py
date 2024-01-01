@@ -1,6 +1,7 @@
 """SkyServe core APIs."""
 import re
 import tempfile
+import typing
 from typing import Any, Dict, List, Optional, Union
 
 import colorama
@@ -23,6 +24,9 @@ from sky.utils import controller_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import clouds
 
 
 @usage_lib.entrypoint
@@ -56,13 +60,34 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    assert len(task.resources) == 1, task
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
+    requested_cloud: Optional['clouds.Cloud'] = None
+    service_port: Optional[int] = None
+    for requested_resources in task.resources:
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            raise ValueError(f'Port {service_port_str!r} is not a valid port '
+                             'number. Please specify a single port instead. '
+                             f'Got: {service_port_str!r}')
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
             raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+                f'Got multiple ports: {service_port} and {resource_port} '
+                'in different resources. Please specify single port instead.')
+        if requested_cloud is None:
+            requested_cloud = requested_resources.cloud
+        if requested_cloud != requested_resources.cloud:
+            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
+                             f'{requested_resources.cloud} in different '
+                             'resources. Please specify single cloud instead.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -93,7 +118,10 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
-            **controller_utils.shared_controller_vars_to_fill('serve'),
+            **controller_utils.shared_controller_vars_to_fill(
+                'serve',
+                remote_user_config_path=remote_config_yaml_path,
+            ),
         }
         backend_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                     vars_to_fill,
@@ -102,9 +130,9 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
-        controller_cloud = (
-            requested_resources.cloud if not controller_exist and
-            controller_resources.cloud is None else controller_resources.cloud)
+        controller_cloud = (requested_cloud if not controller_exist and
+                            controller_resources.cloud is None else
+                            controller_resources.cloud)
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
@@ -326,10 +354,10 @@ def status(
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
             'policy': (Optional[str]) load balancer policy description,
-            'auto_restart': (bool) whether the service replica will be
-              auto-restarted,
             'requested_resources': (sky.Resources) requested resources
-              for replica,
+              for replica (deprecated),
+            'requested_resources_str': (str) str representation of
+              requested resources,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
 

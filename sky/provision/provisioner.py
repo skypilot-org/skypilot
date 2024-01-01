@@ -121,8 +121,9 @@ def _bulk_provision(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
 
-    logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
-                 f'seconds.')
+    logger.debug(
+        f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
+        f'seconds.')
 
     return provision_record
 
@@ -136,7 +137,7 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Optional[provision_common.ProvisionRecord]:
+) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
     original_config = common_utils.read_yaml(cluster_yaml)
     head_node_type = original_config['head_node_type']
@@ -180,7 +181,7 @@ def bulk_provision(
                              cluster_name,
                              terminate=terminate,
                              provider_config=original_config['provider'])
-            return None
+            raise
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
@@ -335,7 +336,7 @@ def _post_provision_setup(
                                               cluster_name.name_on_cloud,
                                               provider_config=provider_config)
 
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
@@ -358,13 +359,6 @@ def _post_provision_setup(
     ip_list = cluster_info.get_feasible_ips()
     port_list = cluster_info.get_ssh_ports()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-
-    # TODO(suquark): Handle TPU VMs when dealing with GCP later.
-    # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-    #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-    #                 f'{style.RESET_ALL}')
-    #     RetryingVmProvisioner._tpu_pod_setup(
-    #         None, handle.cluster_yaml, handle)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
@@ -465,7 +459,7 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
-                # Pass the ray_port to worker nodes for backward compatibilirt
+                # Pass the ray_port to worker nodes for backward compatibility
                 # as in some existing clusters the ray_port is not dumped with
                 # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
                 # from the head node for worker nodes.

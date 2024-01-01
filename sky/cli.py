@@ -223,8 +223,8 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
-    tpuvm_option = click.option('--tpu-vm',
-                                default=False,
+    tpuvm_option = click.option('--tpu-vm/--no-tpu-vm',
+                                default=True,
                                 is_flag=True,
                                 help='If true, use TPU VMs.')
 
@@ -233,13 +233,14 @@ def _interactive_node_cli_command(cli_func):
                              type=int,
                              required=False,
                              help=('OS disk size in GBs.'))
-    disk_tier = click.option('--disk-tier',
-                             default=None,
-                             type=click.Choice(['low', 'medium', 'high'],
-                                               case_sensitive=False),
-                             required=False,
-                             help=('OS disk tier. Could be one of "low", '
-                                   '"medium", "high". Default: medium'))
+    disk_tier = click.option(
+        '--disk-tier',
+        default=None,
+        type=click.Choice(['low', 'medium', 'high', 'none'],
+                          case_sensitive=False),
+        required=False,
+        help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+              '("none" for using the default value). Default: medium'))
     ports = click.option(
         '--ports',
         required=False,
@@ -697,7 +698,10 @@ def _parse_override_params(
     if disk_size is not None:
         override_params['disk_size'] = disk_size
     if disk_tier is not None:
-        override_params['disk_tier'] = disk_tier
+        if disk_tier.lower() == 'none':
+            override_params['disk_tier'] = None
+        else:
+            override_params['disk_tier'] = disk_tier
     if ports:
         override_params['ports'] = ports
     return override_params
@@ -709,7 +713,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
+    return f'sky-{node_type}-{common_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -1143,13 +1147,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if name is not None:
         task.name = name
     task.update_envs(env)
-    # TODO(wei-lin): move this validation into Python API.
-    for resource in task.resources:
-        if resource.accelerators is not None:
-            acc, _ = list(resource.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
-                                 f'Got num_nodes={task.num_nodes}.')
     return task
 
 
@@ -1303,11 +1300,10 @@ def cli():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1412,15 +1408,6 @@ def launch(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
-
-    # A basic check. Programmatic calls will have a proper (but less
-    # informative) error from optimizer.
-    if (cloud is not None and cloud.lower() == 'azure' and
-            use_spot is not None and use_spot):
-        raise click.UsageError(
-            'SkyPilot currently has not implemented '
-            'support for spot instances on Azure. Please file '
-            'an issue if you need this feature.')
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -3327,6 +3314,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if tpu_vm:
         accelerator_args['tpu_vm'] = True
         accelerator_args['runtime_version'] = 'tpu-vm-base'
+    else:
+        accelerator_args['tpu_vm'] = False
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
@@ -3399,13 +3388,20 @@ def check(verbose: bool):
     ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
 @service_catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
         accelerator_str: Optional[str],
         all: bool,  # pylint: disable=redefined-builtin
         cloud: Optional[str],
-        region: Optional[str]):
+        region: Optional[str],
+        all_regions: Optional[bool]):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3419,6 +3415,9 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
+    To show all regions for a specified accelerator, use
+    ``sky show-gpus <accelerator> --all-regions``.
+
     Definitions of certain fields:
 
     * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
@@ -3426,14 +3425,25 @@ def show_gpus(
 
     * ``HOST_MEM``: Memory of the host instance (VM).
 
-    If ``--region`` is not specified, the price displayed for each instance
-    type is the lowest across all regions for both on-demand and spot
-    instances. There may be multiple regions with the same lowest price.
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
     """
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
+
+    # validation for the --all-regions flag
+    if all_regions and accelerator_str is None:
+        raise click.UsageError(
+            'The --all-regions flag is only valid when an accelerator '
+            'is specified.')
+    if all_regions and region is not None:
+        raise click.UsageError(
+            '--all-regions and --region flags cannot be used simultaneously.')
+
     # This will validate 'cloud' and raise if not found.
     clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
@@ -3518,7 +3528,8 @@ def show_gpus(
                                                    quantity_filter=quantity,
                                                    region_filter=region,
                                                    clouds=cloud,
-                                                   case_sensitive=False)
+                                                   case_sensitive=False,
+                                                   all_regions=all_regions)
 
         if len(result) == 0:
             if cloud == 'kubernetes':
@@ -3806,11 +3817,10 @@ def spot():
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--detach-run',
     '-d',
@@ -4278,13 +4288,32 @@ def serve_up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    assert len(task.resources) == 1
-    requested_resources = list(task.resources)[0]
-    if requested_resources.ports is None or len(requested_resources.ports) != 1:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Must only specify one port in resources. Each replica '
-                'will use the port specified as application ingress port.')
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
 
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
@@ -4641,11 +4670,10 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 @click.option(
     '--disk-tier',
     default=None,
-    type=click.Choice(['low', 'medium', 'high'], case_sensitive=False),
+    type=click.Choice(['low', 'medium', 'high', 'none'], case_sensitive=False),
     required=False,
-    help=(
-        'OS disk tier. Could be one of "low", "medium", "high". Default: medium'
-    ))
+    help=('OS disk tier. Could be one of "low", "medium", "high" or "none" '
+          '("none" for using the default value). Default: medium'))
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',

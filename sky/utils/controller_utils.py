@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import colorama
 
+from sky import clouds
 from sky import exceptions
+from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
@@ -25,7 +27,6 @@ from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
 
@@ -151,9 +152,11 @@ def _get_cloud_dependencies_installation_commands(
         # dependencies for sky serve controller.
         commands.append('pip list | grep oci > /dev/null 2>&1 || '
                         'pip install oci > /dev/null 2>&1')
-    else:
-        # We do not install azure dependencies for spot controller since our
-        # subscription does not support spot instances.
+    # TODO(tian): Make dependency installation command a method of cloud
+    # class and get all installation command for enabled clouds.
+    if any(
+            cloud.is_same_cloud(clouds.Azure())
+            for cloud in global_user_state.get_enabled_clouds()):
         commands.append(
             'pip list | grep azure-cli > /dev/null 2>&1 || '
             'pip install azure-cli>=2.31.0 azure-core azure-identity>=1.13.0 '
@@ -225,7 +228,8 @@ def download_and_stream_latest_job_log(
     return log_file
 
 
-def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
+def shared_controller_vars_to_fill(
+        controller_type: str, remote_user_config_path: str) -> Dict[str, str]:
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(controller_type)
@@ -241,6 +245,10 @@ def shared_controller_vars_to_fill(controller_type: str) -> Dict[str, str]:
         # Skip cloud identity check to avoid the overhead.
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
     })
+    if skypilot_config.loaded():
+        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
+        env_vars[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 
@@ -278,8 +286,15 @@ def get_controller_resources(
                     controller_type=controller_type,
                     err=common_utils.format_exception(e,
                                                       use_bracket=True))) from e
-
-    return controller_resources
+    if len(controller_resources) != 1:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                CONTROLLER_RESOURCES_NOT_VALID_MESSAGE.format(
+                    controller_type=controller_type,
+                    err=f'Expected exactly one resource, got '
+                    f'{len(controller_resources)} resources: '
+                    f'{controller_resources}'))
+    return list(controller_resources)[0]
 
 
 def _setup_proxy_command_on_controller(
@@ -342,17 +357,25 @@ def replace_skypilot_config_path_in_file_mounts(
     # is provisioned, e.g., we may need to decide which cloud to create a bucket
     # to be mounted to the cluster based on the cloud the cluster is actually
     # launched on (after failover).
-    if file_mounts is None or not skypilot_config.loaded():
+    if file_mounts is None:
         return
     replaced = False
+    to_replace = True
     with tempfile.NamedTemporaryFile('w', delete=False) as f:
-        new_skypilot_config = _setup_proxy_command_on_controller(cloud)
-        if new_skypilot_config is not None:
+        if skypilot_config.loaded():
+            new_skypilot_config = _setup_proxy_command_on_controller(cloud)
             common_utils.dump_yaml(f.name, new_skypilot_config)
-            for remote_path, local_path in file_mounts.items():
-                if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+            to_replace = True
+        else:
+            # Empty config. Remove the placeholder below.
+            to_replace = False
+        for remote_path, local_path in list(file_mounts.items()):
+            if local_path == LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER:
+                if to_replace:
                     file_mounts[remote_path] = f.name
                     replaced = True
+                else:
+                    del file_mounts[remote_path]
     if replaced:
         logger.debug(f'Replaced {LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER} with '
                      f'the real path in file mounts: {file_mounts}')
@@ -398,7 +421,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     new_storage_mounts = {}
     if task.workdir is not None:
         bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=getpass.getuser(), id=run_id)
+            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -432,7 +455,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             copy_mounts_with_file_in_src[dst] = src
             continue
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=getpass.getuser(),
+            username=common_utils.get_cleaned_username(),
             id=f'{run_id}-{i}',
         )
         new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
@@ -452,7 +475,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
     file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=getpass.getuser(), id=run_id)
+        username=common_utils.get_cleaned_username(), id=run_id)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
         path)
     if copy_mounts_with_file_in_src:

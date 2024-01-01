@@ -42,18 +42,24 @@ class OCI(clouds.Cloud):
     _INDENT_PREFIX = '    '
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return {
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is not supported in {cls._REPR}.'),
+                (f'Migrating disk is currently not supported on {cls._REPR}.'),
             clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-                (f'Docker image is not supported in {cls._REPR}. '
+                (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is not supported in {cls._REPR}.'),
+                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
+        if resources.use_spot:
+            features[clouds.CloudImplementationFeatures.STOP] = (
+                f'Stopping spot instances is currently not supported on '
+                f'{cls._REPR}.')
+        return features
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:

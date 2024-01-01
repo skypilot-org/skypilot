@@ -65,11 +65,11 @@ Available fields and semantics:
     # Set to true to use private IPs to communicate between the local client and
     # any SkyPilot nodes. This requires the networking stack be properly set up.
     #
-    # Specifically, setting this flag means SkyPilot will only use subnets that
-    # satisfy *both* of the following to launch nodes:
-    #   1. Subnets with name tags containing the substring "private"
-    #   2. Subnets that are configured to not assign public IPs (the
-    #      `map_public_ip_on_launch` attribute is False)
+    # When set to true, SkyPilot will only use private subnets to launch nodes.
+    # Private subnets are defined as those satisfying both of these properties:
+    #   1. Subnets whose route tables have no routes to an internet gateway (IGW);
+    #   2. Subnets that are configured to not assign public IPs by default
+    #       (the `map_public_ip_on_launch` attribute is False).
     #
     # This flag is typically set together with 'vpc_name' above and
     # 'ssh_proxy_command' below.
@@ -153,9 +153,8 @@ Available fields and semantics:
     # zero cost) if the requested resources matches the reservation.
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
-      # Only one element is allowed in this list, as GCP disallows multiple
-      # specific_reservations in a single request.
-      - projects/my-project/reservations/my-reservation
+      - projects/my-project/reservations/my-reservation1
+      - projects/my-project/reservations/my-reservation2
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:

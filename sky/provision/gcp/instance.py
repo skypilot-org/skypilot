@@ -10,14 +10,11 @@ from sky import sky_logging
 from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
+from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
-
-MAX_POLLS = 12
-# Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_STOP = MAX_POLLS * 8
-POLL_INTERVAL = 5
 
 TAG_SKYPILOT_HEAD_NODE = 'skypilot-head-node'
 # Tag uniquely identifying all nodes of a cluster
@@ -55,6 +52,63 @@ def _filter_instances(
     return handler_to_instances
 
 
+# TODO(suquark): Does it make sense to not expose this and always assume
+# non_terminated_only=True?
+# Will there be callers who would want this to be False?
+# stop() and terminate() for example already implicitly assume non-terminated.
+@common_utils.retry
+def query_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """See sky/provision/__init__.py"""
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    zone = provider_config['availability_zone']
+    project_id = provider_config['project_id']
+    label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
+
+    handler: Type[
+        instance_utils.GCPInstance] = instance_utils.GCPComputeInstance
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+    if use_tpu_vms:
+        handler = instance_utils.GCPTPUVMInstance
+
+    instances = handler.filter(
+        project_id,
+        zone,
+        label_filters,
+        status_filters=None,
+    )
+
+    raw_statuses = {}
+    statuses = {}
+    for inst_id, instance in instances.items():
+        raw_status = instance[handler.STATUS_FIELD]
+        raw_statuses[inst_id] = raw_status
+        if raw_status in handler.PENDING_STATES:
+            status = status_lib.ClusterStatus.INIT
+        elif raw_status in handler.STOPPING_STATES + handler.STOPPED_STATES:
+            status = status_lib.ClusterStatus.STOPPED
+        elif raw_status == handler.RUNNING_STATE:
+            status = status_lib.ClusterStatus.UP
+        else:
+            status = None
+        if non_terminated_only and status is None:
+            continue
+        statuses[inst_id] = status
+
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    if handler == instance_utils.GCPTPUVMInstance:
+        all_preempted = all(s == 'PREEMPTED' for s in raw_statuses.values())
+        if all_preempted:
+            logger.info(
+                f'Terminating preempted TPU VM cluster {cluster_name_on_cloud}')
+            terminate_instances(cluster_name_on_cloud, provider_config)
+    # TODO(zhwu): TPU node should check the status of the attached TPU as well.
+    return statuses
+
+
 def _wait_for_operations(
     handlers_to_operations: Dict[Type[instance_utils.GCPInstance], List[dict]],
     project_id: str,
@@ -71,10 +125,10 @@ def _wait_for_operations(
             logger.debug(
                 f'wait_for_compute_{op_type}_operation: '
                 f'Waiting for operation {operation["name"]} to finish...')
-            while total_polls < MAX_POLLS:
+            while total_polls < constants.MAX_POLLS:
                 if handler.wait_for_operation(operation, project_id, zone):
                     break
-                time.sleep(POLL_INTERVAL)
+                time.sleep(constants.POLL_INTERVAL)
                 total_polls += 1
 
 
@@ -89,8 +143,8 @@ def _get_head_instance_id(instances: List) -> Optional[str]:
     return head_instance_id
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
-                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+def _run_instances(region: str, cluster_name_on_cloud: str,
+                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """See sky/provision/__init__.py"""
     # NOTE: although google cloud instances have IDs, but they are
     #  not used for indexing. Instead, we use the instance name.
@@ -109,14 +163,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resource: Type[instance_utils.GCPInstance]
     if node_type == instance_utils.GCPNodeType.COMPUTE:
         resource = instance_utils.GCPComputeInstance
-        stopped_status = 'TERMINATED'
     elif node_type == instance_utils.GCPNodeType.TPU:
         resource = instance_utils.GCPTPUVMInstance
-        stopped_status = 'STOPPED'
     else:
         raise ValueError(f'Unknown node type {node_type}')
 
-    pending_status = ['PROVISIONING', 'STAGING']
     filter_labels = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     # wait until all stopping instances are stopped/terminated
@@ -125,13 +176,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=['STOPPING'],
+            status_filters=resource.STOPPING_STATES,
         )
         if not instances:
             break
-        logger.info(
-            f'Waiting for {len(instances)} instances in STOPPING status')
-        time.sleep(POLL_INTERVAL)
+        logger.info(f'run_instances: Waiting for {len(instances)} instances in '
+                    'STOPPING status')
+        time.sleep(constants.POLL_INTERVAL)
 
     exist_instances = resource.filter(
         project_id=project_id,
@@ -161,15 +212,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                               '%Y-%m-%dT%H:%M:%S.%f%z')
         return node['id']
 
+    logger.info(str(exist_instances))
     for inst in exist_instances:
-        state = inst['status']
-        if state in pending_status:
+        state = inst[resource.STATUS_FIELD]
+        if state in resource.PENDING_STATES:
             pending_instances.append(inst)
-        elif state == 'RUNNING':
+        elif state == resource.RUNNING_STATE:
             running_instances.append(inst)
-        elif state == 'STOPPING':
+        elif state in resource.STOPPING_STATES:
             stopping_instances.append(inst)
-        elif state == stopped_status:
+        elif state in resource.STOPPED_STATES:
             stopped_instances.append(inst)
         else:
             raise RuntimeError(f'Unsupported state "{state}".')
@@ -187,7 +239,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     if head_instance_id is None:
         if running_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 running_instances[0]['name'],
@@ -195,7 +246,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             )
         elif pending_instances:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 pending_instances[0]['name'],
@@ -228,7 +278,6 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
         if head_instance_id is None:
             head_instance_id = resource.create_node_tag(
-                cluster_name_on_cloud,
                 project_id,
                 availability_zone,
                 resumed_instance_ids[0],
@@ -236,12 +285,14 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             )
 
     if to_start_count > 0:
-        success, created_instance_ids = resource.create_instances(
+        errors, created_instance_ids = resource.create_instances(
             cluster_name_on_cloud, project_id, availability_zone,
             config.node_config, labels, to_start_count,
             head_instance_id is None)
-        if not success:
-            raise RuntimeError('Failed to launch instances.')
+        if errors:
+            error = common.ProvisionError('Failed to launch instances.')
+            error.errors = errors
+            raise error
         if head_instance_id is None:
             head_instance_id = created_instance_ids[0]
 
@@ -251,17 +302,20 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             project_id=project_id,
             zone=availability_zone,
             label_filters=filter_labels,
-            status_filters=pending_status,
+            status_filters=resource.PENDING_STATES,
         )
         if not instances:
             break
+        logger.debug(f'run_instances: Waiting for {len(instances)} instances '
+                     'in PENDING status.')
+        time.sleep(constants.POLL_INTERVAL)
 
     # Check if the number of running instances is the same as the requested.
     instances = resource.filter(
         project_id=project_id,
         zone=availability_zone,
         label_filters=filter_labels,
-        status_filters=['RUNNING'],
+        status_filters=[resource.RUNNING_STATE],
     )
     if len(instances) != config.count:
         logger.warning('The number of running instances is different from '
@@ -279,6 +333,34 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=resumed_instance_ids,
                                   created_instance_ids=created_instance_ids)
+
+
+def run_instances(region: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
+    """See sky/provision/__init__.py"""
+    try:
+        return _run_instances(region, cluster_name_on_cloud, config)
+    except gcp.http_error_exception() as e:
+        error_details = getattr(e, 'error_details')
+        errors = []
+        if isinstance(error_details, list):
+            for detail in error_details:
+                errors.append({
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message', str(e)),
+                })
+        elif isinstance(error_details, str):
+            errors.append({
+                'code': None,
+                'domain': 'run_instances',
+                'message': error_details,
+            })
+        else:
+            raise
+        error = common.ProvisionError('Failed to launch instances.')
+        error.errors = errors
+        raise error from e
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -312,9 +394,9 @@ def get_cluster_info(
         project_id,
         zone,
         label_filters,
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
-    instances: Dict[str, common.InstanceInfo] = {}
+    instances: Dict[str, List[common.InstanceInfo]] = {}
     for res, insts in handler_to_instances.items():
         with pool.ThreadPool() as p:
             inst_info = p.starmap(res.get_instance_info,
@@ -328,7 +410,7 @@ def get_cluster_info(
         {
             **label_filters, TAG_RAY_NODE_KIND: 'head'
         },
-        lambda _: ['RUNNING'],
+        lambda h: [h.RUNNING_STATE],
     )
     head_instance_id = None
     for insts in head_instances.values():
@@ -380,7 +462,7 @@ def stop_instances(
     # Check if the instance is actually stopped.
     # GCP does not fully stop an instance even after
     # the stop operation is finished.
-    for _ in range(MAX_POLLS_STOP):
+    for _ in range(constants.MAX_POLLS_STOP):
         handler_to_instances = _filter_instances(
             handler_to_instances.keys(),
             project_id,
@@ -391,10 +473,10 @@ def stop_instances(
         )
         if not handler_to_instances:
             break
-        time.sleep(POLL_INTERVAL)
+        time.sleep(constants.POLL_INTERVAL)
     else:
         raise RuntimeError(f'Maximum number of polls: '
-                           f'{MAX_POLLS_STOP} reached. '
+                           f'{constants.MAX_POLLS_STOP} reached. '
                            f'Instance {all_instances} is still not in '
                            'STOPPED status.')
 
@@ -427,6 +509,7 @@ def terminate_instances(
     for handler, instances in handler_to_instances.items():
         for instance in instances:
             try:
+                logger.debug(f'Terminating instance: {instance}.')
                 operations[handler].append(
                     handler.terminate(project_id, zone, instance))
             except gcp.http_error_exception() as e:

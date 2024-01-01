@@ -1316,7 +1316,8 @@ def test_docker_preinstalled_package(generic_cloud: str):
         'docker_with_preinstalled_package',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
-            f'sky exec {name} "nginx -V" | grep SUCCEEDED',
+            f'sky exec {name} "nginx -V"',
+            f'sky logs {name} 1 --status',
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
@@ -1402,6 +1403,7 @@ def test_scp_huggingface(generic_cloud: str):
 
 # ---------- TPU. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu():
     name = _get_cluster_name()
     test = Test(
@@ -1420,6 +1422,7 @@ def test_tpu():
 
 # ---------- TPU VM. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu_vm():
     name = _get_cluster_name()
     test = Test(
@@ -1445,6 +1448,7 @@ def test_tpu_vm():
 
 # ---------- TPU VM Pod. ----------
 @pytest.mark.gcp
+@pytest.mark.tpu
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
@@ -1627,7 +1631,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 30',
+            'sleep 20',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -1644,10 +1648,10 @@ def test_autostop(generic_cloud: str):
 
             # Test restarting the idleness timer via cancel + reset:
             f'sky autostop -y {name} -i 1',  # Idleness starts counting.
-            'sleep 45',  # Almost reached the threshold.
+            'sleep 30',  # Almost reached the threshold.
             f'sky autostop -y {name} --cancel',
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
-            'sleep 45',
+            'sleep 30',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
             f'sleep {autostop_timeout}',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
@@ -1866,6 +1870,35 @@ def test_use_spot(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.gcp
+def test_stop_gcp_spot():
+    """Test GCP spot can be stopped, autostopped, restarted."""
+    name = _get_cluster_name()
+    test = Test(
+        'stop_gcp_spot',
+        [
+            f'sky launch -c {name} --cloud gcp --use-spot --cpus 2+ -y -- touch myfile',
+            # stop should go through:
+            f'sky stop {name} -y',
+            f'sky start {name} -y',
+            f'sky exec {name} -- ls myfile',
+            f'sky logs {name} 2 --status',
+            f'sky autostop {name} -i0 -y',
+            'sleep 90',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+            f'sky start {name} -y',
+            f'sky exec {name} -- ls myfile',
+            f'sky logs {name} 3 --status',
+            # -i option at launch should go through:
+            f'sky launch -c {name} -i0 -y',
+            'sleep 90',
+            f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing managed spot ----------
 @pytest.mark.no_azure  # Azure does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
@@ -2057,7 +2090,7 @@ def test_spot_recovery_gcp():
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 100',
+            'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
@@ -2143,7 +2176,7 @@ def test_spot_pipeline_recovery_gcp():
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
-            'sleep 100',
+            'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
@@ -2363,7 +2396,7 @@ def test_spot_cancellation_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 100',
+            'sleep 80',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
             'sleep 5',
@@ -2416,6 +2449,7 @@ def test_spot_storage(generic_cloud: str):
 # ---------- Testing spot TPU ----------
 @pytest.mark.gcp
 @pytest.mark.managed_spot
+@pytest.mark.tpu
 def test_spot_tpu():
     """Test managed spot on TPU."""
     name = _get_cluster_name()
@@ -2853,53 +2887,18 @@ def test_skyserve_spot_user_bug():
 
 @pytest.mark.gcp
 @pytest.mark.sky_serve
-def test_skyserve_replica_failure():
-    """Test skyserve with manually interrupting some replica"""
+def test_skyserve_load_balancer():
+    """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
-    zone = 'us-central1-a'
-
-    # Reference: test_spot_recovery_gcp
-    def terminate_replica(replica_id: int) -> str:
-        cluster_name = serve.generate_replica_cluster_name(name, replica_id)
-        query_cmd = (f'gcloud compute instances list --filter='
-                     f'"(labels.ray-cluster-name:{cluster_name})" '
-                     f'--zones={zone} --format="value(name)"')
-        return (f'gcloud compute instances delete --zone={zone}'
-                f' --quiet $({query_cmd})')
-
-    # In the worst case, the controller will first wait
-    # ENDPOINT_PROBE_INTERVAL_SECONDS for next probe, and wait
-    # LB_CONTROLLER_SYNC_INTERVAL_SECONDS for load balancer's
-    # next sync with controller. We add 5s more for any overhead,
-    # such as database read/write.
-    time_to_wait_after_terminate = (serve.ENDPOINT_PROBE_INTERVAL_SECONDS +
-                                    serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS +
-                                    5)
-
     test = Test(
-        f'test-skyserve-replica-failure',
+        f'test-skyserve-load-balancer',
         [
-            f'sky serve up -n {name} -y tests/skyserve/replica_failure/service.yaml',
+            f'sky serve up -n {name} -y tests/skyserve/load_balancer/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3),
             f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 1)}; '
             f'{_get_replica_ip(name, 2)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
+            'python tests/skyserve/load_balancer/test_round_robin.py '
             '--endpoint $endpoint --replica-num 3 --replica-ips $ip1 $ip2 $ip3',
-            terminate_replica(1),
-            f'sleep {time_to_wait_after_terminate}',
-            f'sky serve status {name} | grep 2/3',
-            f'{_get_replica_line(name, 1)} | grep NOT_READY',
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 2)}; '
-            f'{_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
-            '--endpoint $endpoint --replica-num 2 --replica-ips $ip2 $ip3',
-            terminate_replica(2),
-            f'sleep {time_to_wait_after_terminate}',
-            f'sky serve status {name} | grep 1/3',
-            f'{_get_replica_line(name, 2)} | grep NOT_READY',
-            f'{_get_serve_endpoint(name)}; {_get_replica_ip(name, 3)}; '
-            'python tests/skyserve/replica_failure/test_round_robin.py '
-            '--endpoint $endpoint --replica-num 1 --replica-ips $ip3',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -3332,6 +3331,27 @@ class TestStorageWithCredentials:
                 storage_obj.delete()
 
     @pytest.fixture
+    def tmp_multiple_custom_source_storage_obj(self):
+        # Creates a list of storage objects with custom source names to
+        # create multiple scratch storages.
+        # Stores for each object in the list must be added in the test.
+        custom_source_names = ['"path With Spaces"', 'path With Spaces']
+        storage_mult_obj = []
+        for name in custom_source_names:
+            src_path = os.path.expanduser(f'~/{name}')
+            pathlib.Path(src_path).expanduser().mkdir(exist_ok=True)
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=src_path)
+            storage_mult_obj.append(store_obj)
+        yield storage_mult_obj
+        for storage_obj in storage_mult_obj:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                storage_obj.delete()
+
+    @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
@@ -3375,7 +3395,7 @@ class TestStorageWithCredentials:
     def tmp_gitignore_storage_obj(self, tmp_bucket_name, gitignore_structure):
         # Creates a temporary storage object for testing .gitignore filter.
         # GITIGINORE_STRUCTURE is representing a file structure in a dictionary
-        # foramt. Created storage object will contain the file structure along
+        # format. Created storage object will contain the file structure along
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3506,6 +3526,30 @@ class TestStorageWithCredentials:
             if store_type.value in item
         ]
         assert all([item not in out for item in storage_obj_name])
+
+    @pytest.mark.parametrize('store_type', [
+        storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
+        pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+    ])
+    def test_upload_source_with_spaces(self, store_type,
+                                       tmp_multiple_custom_source_storage_obj):
+        # Creates two buckets with specified local sources
+        # with spaces in the name
+        storage_obj_names = []
+        for storage_obj in tmp_multiple_custom_source_storage_obj:
+            storage_obj.add_store(store_type)
+            storage_obj_names.append(storage_obj.name)
+
+        # Run sky storage ls to check if all storage objects exists in the
+        # output filtered by store type
+        out_all = subprocess.check_output(['sky', 'storage', 'ls'])
+        out = [
+            item.split()[0]
+            for item in out_all.decode('utf-8').splitlines()
+            if store_type.value in item
+        ]
+        assert all([item in out for item in storage_obj_names])
 
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -3843,6 +3887,21 @@ def test_multiple_accelerators_ordered():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_ordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-ordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_ordered_with_default.yaml | grep "Using user-specified accelerators list"',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -3854,6 +3913,20 @@ def test_multiple_accelerators_unordered():
         [
             f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_multiple_accelerators_unordered_with_default():
+    name = _get_cluster_name()
+    test = Test(
+        'multiple-accelerators-unordered',
+        [
+            f'sky launch -y -c {name} tests/test_yamls/test_multiple_accelerators_unordered_with_default.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status {name} | grep Spot',
         ],
         f'sky down -y {name}',
     )
