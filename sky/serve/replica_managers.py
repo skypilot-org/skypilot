@@ -81,10 +81,6 @@ def launch_cluster(task_yaml_path: str,
                     for any_of_config in resource_config['any_of']:
                         delete_if_not_none(any_of_config, 'region')
                         delete_if_not_none(any_of_config, 'zone')
-                if 'ordered' in resource_config:
-                    for ordered_config in resource_config['ordered']:
-                        delete_if_not_none(ordered_config, 'region')
-                        delete_if_not_none(ordered_config, 'zone')
             resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
