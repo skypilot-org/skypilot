@@ -7,10 +7,14 @@ service:
     max_replicas: 3
     init_replicas: 2
     num_overprovision: 1
+    min_on_demand_replicas: 1
     target_qps_per_replica: 1
     spot_policy: SpotHedge
 
 resources:
+  any_of:
+  - zone: us-central1-a
+  - zone: us-east1-c
   ports: 8081
   cloud: gcp
   cpus: 2+
