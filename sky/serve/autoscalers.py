@@ -268,7 +268,7 @@ class HeteroGPUAutoscaler(Autoscaler):
         self.upper_threshold: Optional[float] = spec.qps_upper_threshold
         self.lower_threshold: Optional[float] = spec.qps_lower_threshold
         self.cooldown: int = cooldown
-        self.rps_window_size: int = self.AUTOSCALER_SCALE_UP_INTERVAL_SECONDS
+        self.rps_window_size: int = self.SCALE_UP_COOL_DOWN_INTERVAL_SECONDS
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
         self.request_timestamps_distribution: List[List[float]] = [[], [], [],
