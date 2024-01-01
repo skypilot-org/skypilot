@@ -169,10 +169,9 @@ class ClusterInfo:
 
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
-        head_node_port, other_ports = [], []
-        for instance in self.instances.values():
-            if instance.instance_id == self.head_instance_id:
-                head_node_port.append(instance.ssh_port)
-            else:
-                other_ports.append(instance.ssh_port)
-        return head_node_port + other_ports
+        head_node = self.get_head_instance()
+        head_node_port = [head_node.ssh_port]
+
+        worker_nodes = self.get_worker_instances()
+        worker_node_ports = [instance.ssh_port for instance in worker_nodes]
+        return head_node_port + worker_node_ports
