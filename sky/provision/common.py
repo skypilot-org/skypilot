@@ -124,16 +124,16 @@ class ClusterInfo:
         Returns:
             A list of tuples (internal_ip, external_ip) of all instances.
         """
-        head_node = self.get_head_instance()
-        if head_node is None:
-            head_node_ip = []
+        head_instance = self.get_head_instance()
+        if head_instance is None:
+            head_instance_ip = []
         else:
-            head_node_ip = [(head_node.internal_ip, head_node.external_ip)]
+            head_instance_ip = [(head_instance.internal_ip, head_instance.external_ip)]
         other_ips = []
         for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
             other_ips.append(pair)
-        return head_node_ip + other_ips
+        return head_instance_ip + other_ips
 
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""
@@ -169,9 +169,9 @@ class ClusterInfo:
 
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
-        head_node = self.get_head_instance()
-        head_node_port = [head_node.ssh_port]
+        head_instance = self.get_head_instance()
+        head_instance_port = [head_instance.ssh_port]
 
-        worker_nodes = self.get_worker_instances()
-        worker_node_ports = [instance.ssh_port for instance in worker_nodes]
-        return head_node_port + worker_node_ports
+        worker_instances = self.get_worker_instances()
+        worker_instance_ports = [instance.ssh_port for instance in worker_instances]
+        return head_instance_port + worker_instance_ports
