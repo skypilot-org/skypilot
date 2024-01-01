@@ -4443,7 +4443,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
             returncode = runner.run(cmd,
                                     log_path=os.path.join(
-                                        self.log_dir, 'tpu_setup.log'))
+                                        self.log_dir, 'tpu_setup.log'),
+                                    stream_logs=False)
             subprocess_utils.handle_returncode(
                 returncode, cmd, 'Failed to set TPU_NAME on node.')
 
