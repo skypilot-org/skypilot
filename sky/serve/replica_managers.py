@@ -497,7 +497,7 @@ class ReplicaManager:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
     
-    def get_ready_replica_urls_with_accelerator(self) -> List[tuple[str, AcceleratorType]]:
+    def get_ready_replica_urls_with_accelerator(self) -> List[Tuple[str, AcceleratorType]]:
         """Get all ready replica's IP addresses and accelerator type."""
         raise NotImplementedError
 
@@ -558,7 +558,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
     
-    def get_ready_replica_urls_with_accelerator(self) -> List[tuple[str, AcceleratorType]]:
+    def get_ready_replica_urls_with_accelerator(self) -> List[Tuple[str, AcceleratorType]]:
         """Get all ready replica's IP addresses and accelerator types."""
         ready_replica_urls_accels = []
         infos = serve_state.get_replica_infos(self._service_name)

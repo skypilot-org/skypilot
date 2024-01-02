@@ -1,7 +1,7 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
 import random
 import typing
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 
 from sky import sky_logging
 from sky.serve.serve_utils import AcceleratorType
@@ -67,16 +67,16 @@ class HeteroGPUPolicy(LoadBalancingPolicy):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         # Ready replicas by accelerator type.
-        self.ready_replicas = dict[AcceleratorType, List[str]]
+        self.ready_replicas = Dict[AcceleratorType, List[str]]
         # Round robin index tracking per accelerator type.
-        self.indexes = dict[AcceleratorType, int]
+        self.indexes = Dict[AcceleratorType, int]
         # Request size bucket boundaries.
         self.bucket_size = [(0, 25), (25, 100), (100, 250), (250, 500),
                             (500, 1000), (1000, 2000), (2000, 4000)]
         # ILP solution's mapping from request size bucket to accelerator type.
         self.ilp_assigment_vector : List[AcceleratorType] = [None] * len(self.bucket_size)
 
-    def set_ready_replicas(self, ready_replica_urls_accels: List[tuple[str, AcceleratorType]]) -> None:
+    def set_ready_replicas(self, ready_replica_urls_accels: List[Tuple[str, AcceleratorType]]) -> None:
         # Separate the new ready replicas by accelerator type.
         new_ready_replicas = dict()
         for ip, accelerator in ready_replica_urls_accels:
