@@ -530,8 +530,9 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.price, info.
-                                   spot_price, info.region))
+        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
+                                   if not pd.isna(info.cpu_count) else 0, info.
+                                   price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
