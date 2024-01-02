@@ -23,7 +23,6 @@ class RunPod(clouds.Cloud):
     """
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTOSTOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as runpod API does not implement spot .'),

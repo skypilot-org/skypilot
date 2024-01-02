@@ -128,7 +128,8 @@ class ClusterInfo:
         if head_instance is None:
             head_instance_ip = []
         else:
-            head_instance_ip = [(head_instance.internal_ip, head_instance.external_ip)]
+            head_instance_ip = [(head_instance.internal_ip,
+                                 head_instance.external_ip)]
         other_ips = []
         for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
@@ -170,8 +171,11 @@ class ClusterInfo:
     def get_ssh_ports(self) -> List[int]:
         """Get the SSH port of all the instances."""
         head_instance = self.get_head_instance()
+        assert head_instance is not None, self
         head_instance_port = [head_instance.ssh_port]
 
         worker_instances = self.get_worker_instances()
-        worker_instance_ports = [instance.ssh_port for instance in worker_instances]
+        worker_instance_ports = [
+            instance.ssh_port for instance in worker_instances
+        ]
         return head_instance_port + worker_instance_ports
