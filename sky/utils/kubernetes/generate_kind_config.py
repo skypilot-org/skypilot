@@ -30,6 +30,10 @@ def generate_kind_config(path: str,
           "service-node-port-range": {port_start}-{port_end}
     nodes:
     - role: control-plane
+      extraMounts:
+        - hostPath: /dev/null
+          containerPath: /var/run/nvidia-container-devices/all
+
       extraPortMappings:""")
     suffix = ''
     if num_nodes > 1:
