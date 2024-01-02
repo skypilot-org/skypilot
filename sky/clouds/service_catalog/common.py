@@ -530,7 +530,8 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
+        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count,
+                                   info.price, info.spot_price
                                    if info.cpu_count is not None else 0))
         return ret
 
