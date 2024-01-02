@@ -17,7 +17,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -33,7 +33,6 @@ from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import status_lib
 from sky import task as task_lib
@@ -88,7 +87,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
-_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
+_RETRY_UNTIL_UP_INIT_GAP_SECONDS = 30
 
 # The maximum retry count for fetching IP address.
 _FETCH_IP_MAX_ATTEMPTS = 3
@@ -773,9 +772,10 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(region=None, zone=None))
             elif ('SKYPILOT_ERROR_NO_NODES_LAUNCHED: No subnet for region '
                   in stderr):
-                if (any(acc.lower().startswith('tpu-v4')
-                        for acc in launchable_resources.accelerators.keys()) and
-                        region.name == 'us-central2'):
+                if (region.name == 'us-central2' and
+                        launchable_resources.accelerators is not None and
+                        any(acc.lower().startswith('tpu-v4')
+                            for acc in launchable_resources.accelerators)):
                     # us-central2 is a TPU v4 only region. The subnet for
                     # this region may not exist when the user does not have
                     # the TPU v4 quota. We should skip this region.
@@ -1460,7 +1460,7 @@ class RetryingVmProvisioner(object):
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
-    ):
+    ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -2180,7 +2180,7 @@ class RetryingVmProvisioner(object):
         to_provision_config: ToProvisionConfig,
         dryrun: bool,
         stream_logs: bool,
-    ):
+    ) -> Dict[str, Any]:
         """Provision with retries for all launchable resources."""
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
@@ -2205,7 +2205,7 @@ class RetryingVmProvisioner(object):
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
-                    self._requested_features)
+                    to_provision, self._requested_features)
 
                 config_dict = self._retry_zones(
                     to_provision,
@@ -2218,7 +2218,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_status=prev_cluster_status,
                     prev_handle=prev_handle)
                 if dryrun:
-                    return
+                    return config_dict
             except (exceptions.InvalidClusterNameError,
                     exceptions.NotSupportedError,
                     exceptions.CloudUserIdentityError) as e:
@@ -2343,8 +2343,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.cluster_name_on_cloud = cluster_name_on_cloud
         self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~',
                                                   1)
-        # List of (internal_ip, external_ip) tuples for all the nodes
-        # in the cluster, sorted by the external ips.
+        # List of (internal_ip, feasible_ip) tuples for all the nodes in the
+        # cluster, sorted by the feasible ips. The feasible ips can be either
+        # internal or external ips, depending on the use_internal_ips flag.
         self.stable_internal_external_ips = stable_internal_external_ips
         self.stable_ssh_ports = stable_ssh_ports
         self.launched_nodes = launched_nodes
@@ -2373,6 +2374,14 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
     def get_cluster_name(self):
         return self.cluster_name
+
+    def _use_internal_ips(self):
+        """Returns whether to use internal IPs for SSH connections."""
+        # Directly load the `use_internal_ips` flag from the cluster yaml
+        # instead of `skypilot_config` as the latter can be changed after the
+        # cluster is UP.
+        return common_utils.read_yaml(self.cluster_yaml).get(
+            'provider', {}).get('use_internal_ips', False)
 
     def _maybe_make_local_handle(self):
         """Adds local handle for the local cloud case.
@@ -2481,40 +2490,43 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             return (ips is not None and len(ips) == self.num_node_ips and
                     all(ip is not None for ip in ips))
 
+        use_internal_ips = self._use_internal_ips()
+
+        # cluster_feasible_ips is the list of IPs of the nodes in the cluster
+        # which can be used to connect to the cluster. It is a list of external
+        # IPs if the cluster is assigned public IPs, otherwise it is a list of
+        # internal IPs.
+        cluster_feasible_ips: List[str]
         if is_provided_ips_valid(external_ips):
             logger.debug(f'Using provided external IPs: {external_ips}')
-            cluster_external_ips = typing.cast(List[str], external_ips)
+            cluster_feasible_ips = typing.cast(List[str], external_ips)
         else:
-            cluster_external_ips = backend_utils.get_node_ips(
+            cluster_feasible_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
                 self.launched_nodes,
                 handle=self,
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
-                get_internal_ips=False)
+                get_internal_ips=use_internal_ips)
 
-        if self.cached_external_ips == cluster_external_ips:
+        if self.cached_external_ips == cluster_feasible_ips:
             logger.debug('Skipping the fetching of internal IPs as the cached '
                          'external IPs matches the newly fetched ones.')
             # Optimization: If the cached external IPs are the same as the
-            # retrieved external IPs, then we can skip retrieving internal
+            # retrieved feasible IPs, then we can skip retrieving internal
             # IPs since the cached IPs are up-to-date.
             return
         logger.debug(
             'Cached external IPs do not match with the newly fetched ones: '
-            f'cached ({self.cached_external_ips}), new ({cluster_external_ips})'
+            f'cached ({self.cached_external_ips}), new ({cluster_feasible_ips})'
         )
 
-        is_cluster_aws = (self.launched_resources is not None and
-                          isinstance(self.launched_resources.cloud, clouds.AWS))
-        if is_cluster_aws and skypilot_config.get_nested(
-                keys=('aws', 'use_internal_ips'), default_value=False):
+        if use_internal_ips:
             # Optimization: if we know use_internal_ips is True (currently
-            # only exposed for AWS), then our AWS NodeProvider is
-            # guaranteed to pick subnets that will not assign public IPs,
-            # thus the first list of IPs returned above are already private
-            # IPs. So skip the second query.
-            cluster_internal_ips = list(cluster_external_ips)
+            # only exposed for AWS and GCP), then our provisioner is guaranteed
+            # to not assign public IPs, thus the first list of IPs returned
+            # above are already private IPs. So skip the second query.
+            cluster_internal_ips = list(cluster_feasible_ips)
         elif is_provided_ips_valid(internal_ips):
             logger.debug(f'Using provided internal IPs: {internal_ips}')
             cluster_internal_ips = typing.cast(List[str], internal_ips)
@@ -2527,13 +2539,16 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 worker_ip_max_attempts=max_attempts,
                 get_internal_ips=True)
 
-        assert len(cluster_external_ips) == len(cluster_internal_ips), (
+        assert len(cluster_feasible_ips) == len(cluster_internal_ips), (
             f'Cluster {self.cluster_name!r}:'
             f'Expected same number of internal IPs {cluster_internal_ips}'
-            f' and external IPs {cluster_external_ips}.')
+            f' and external IPs {cluster_feasible_ips}.')
 
+        # List of (internal_ip, feasible_ip) tuples for all the nodes in the
+        # cluster, sorted by the feasible ips. The feasible ips can be either
+        # internal or external ips, depending on the use_internal_ips flag.
         internal_external_ips: List[Tuple[str, str]] = list(
-            zip(cluster_internal_ips, cluster_external_ips))
+            zip(cluster_internal_ips, cluster_feasible_ips))
 
         # Ensure head node is the first element, then sort based on the
         # external IPs for stableness
@@ -2859,7 +2874,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
                 local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
-            backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
+                # The most frequent reason for the failure of a provision
+                # request is resource unavailability instead of rate
+                # limiting; to make users wait shorter, we do not make
+                # backoffs exponential.
+                backoff = common_utils.Backoff(
+                    initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
+                    max_backoff_factor=1)
             attempt_cnt = 1
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
@@ -2913,7 +2934,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{colorama.Style.BRIGHT}=== Retry until up ==='
                             f'{colorama.Style.RESET_ALL}\n'
                             f'Retrying provisioning after {gap_seconds:.0f}s '
-                            '(exponential backoff with random jittering). '
+                            '(backoff with random jittering). '
                             f'Already tried {attempt_cnt} attempt{plural}.')
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
@@ -3204,6 +3225,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
         """Mounts all user files to the remote nodes."""
+        controller_utils.replace_skypilot_config_path_in_file_mounts(
+            handle.launched_resources.cloud, all_file_mounts)
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
         self._set_storage_mounts_metadata(handle.cluster_name, storage_mounts)
@@ -3656,7 +3679,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         except filelock.Timeout as e:
             raise RuntimeError(
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
-                'Check to see if it is still being launched.') from e
+                'Check to see if it is still being launched') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 
@@ -4254,7 +4277,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      idle_minutes_to_autostop: Optional[int],
                      down: bool = False,
                      stream_logs: bool = True) -> None:
+        # The core.autostop() function should have already checked that the
+        # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
+
+            # Check if we're stopping spot
+            assert (handle.launched_resources is not None and
+                    handle.launched_resources.cloud is not None), handle
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,

@@ -1,7 +1,6 @@
 """Util constants/functions for the backends."""
 from datetime import datetime
 import enum
-import getpass
 import json
 import os
 import pathlib
@@ -48,6 +47,7 @@ from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import remote_cluster_yaml_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -64,7 +64,6 @@ logger = sky_logging.init_logger(__name__)
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
-SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 # Exclude subnet mask from IP address regex.
 IP_ADDR_REGEX = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?!/\d{1,2})\b'
 SKY_REMOTE_PATH = '~/.sky/wheels'
@@ -1013,18 +1012,17 @@ def write_cluster_config(
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see
-                # execution.py::_shared_controller_env_vars).
-                'user': get_cleaned_username(
+                # controller_utils.shared_controller_vars_to_fill().
+                'user': common_utils.get_cleaned_username(
                     os.environ.get(constants.USER_ENV_VAR, '')),
 
-                # AWS only:
-                'aws_vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
-                                                           None),
+                # Networking configs
                 'use_internal_ips': skypilot_config.get_nested(
-                    ('aws', 'use_internal_ips'), False),
-                # Not exactly AWS only, but we only test it's supported on AWS
-                # for now:
+                    (str(cloud).lower(), 'use_internal_ips'), False),
                 'ssh_proxy_command': ssh_proxy_command,
+                'vpc_name': skypilot_config.get_nested(
+                    (str(cloud).lower(), 'vpc_name'), None),
+
                 # User-supplied instance tags.
                 'instance_tags': instance_tags,
 
@@ -1033,8 +1031,6 @@ def write_cluster_config(
                 'resource_group': f'{cluster_name}-{region_name}',
 
                 # GCP only:
-                'gcp_vpc_name': skypilot_config.get_nested(('gcp', 'vpc_name'),
-                                                           None),
                 'gcp_project_id': gcp_project_id,
                 'specific_reservations': filtered_specific_reservations,
                 'num_specific_reserved_workers': num_specific_reserved_workers,
@@ -1057,7 +1053,8 @@ def write_cluster_config(
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 # Add yaml file path to the template variables.
-                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+                'sky_ray_yaml_remote_path':
+                    remote_cluster_yaml_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
                 'sky_ray_yaml_local_path':
                     tmp_yaml_path
                     if not isinstance(cloud, clouds.Local) else yaml_path,
@@ -1115,8 +1112,7 @@ def write_cluster_config(
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
 
     # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if (resources_vars.get('tpu_type') is not None and
-            resources_vars.get('tpu_vm') is None):
+    if tpu_utils.is_tpu(to_provision) and not tpu_utils.is_tpu_vm(to_provision):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name
@@ -1491,30 +1487,7 @@ def check_local_gpus() -> bool:
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
-
-
-def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username to be used as part of a cluster name.
-
-    Clean up includes:
-     1. Making all characters lowercase
-     2. Removing any non-alphanumeric characters (excluding hyphens)
-     3. Removing any numbers and/or hyphens at the start of the username.
-     4. Removing any hyphens at the end of the username
-
-    e.g. 1SkY-PiLot2- becomes sky-pilot2.
-
-    Returns:
-      A cleaned username that will pass the regex in
-      check_cluster_name_is_valid().
-    """
-    username = username or getpass.getuser()
-    username = username.lower()
-    username = re.sub(r'[^a-z0-9-]', '', username)
-    username = re.sub(r'^[0-9-]+', '', username)
-    username = re.sub(r'-$', '', username)
-    return username
+    return f'sky-{uuid.uuid4().hex[:4]}-{common_utils.get_cleaned_username()}'
 
 
 def _query_head_ip_with_retries(cluster_yaml: str,
@@ -1967,6 +1940,7 @@ def check_can_clone_disk_and_override_task(
     new_task_resources = []
     original_cloud = handle.launched_resources.cloud
     original_cloud.check_features_are_supported(
+        handle.launched_resources,
         {clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER})
 
     assert original_cloud is not None, handle.launched_resources

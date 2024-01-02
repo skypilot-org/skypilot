@@ -12,14 +12,12 @@ import traceback
 from typing import Dict, List
 
 import filelock
-import yaml
 
 from sky import authentication
 from sky import exceptions
-from sky import resources
-from sky import serve
 from sky import sky_logging
 from sky import task as task_lib
+from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.serve import constants
 from sky.serve import controller
@@ -129,13 +127,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     authentication.get_or_generate_keys()
 
     # Initialize database record for the service.
-    service_spec = serve.SkyServiceSpec.from_yaml(tmp_task_yaml)
-    with open(tmp_task_yaml, 'r') as f:
-        config = yaml.safe_load(f)
-    resources_config = None
-    if isinstance(config, dict):
-        resources_config = config.get('resources')
-    requested_resources = resources.Resources.from_yaml_config(resources_config)
+    task = task_lib.Task.from_yaml(tmp_task_yaml)
+    # Already checked before submit to controller.
+    assert task.service is not None, task
+    service_spec = task.service
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
         _cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
@@ -144,8 +139,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name,
         controller_job_id=job_id,
         policy=service_spec.policy_str(),
-        auto_restart=service_spec.auto_restart,
-        requested_resources=requested_resources,
+        requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
@@ -180,8 +174,14 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             controller_port = common_utils.find_free_port(
                 constants.CONTROLLER_PORT_START)
             # Start the controller.
+            #controller_process = multiprocessing.Process(
+            #    target=controller.run_controller,
+            #    args=(service_name, service_spec, task_yaml, controller_port))
+            controller_log_file = os.path.expanduser(
+                '~/.sky/serve/test_serve/controller.log')
             controller_process = multiprocessing.Process(
-                target=controller.run_controller,
+                target=ux_utils.RedirectOutputForProcess(
+                    controller.run_controller, controller_log_file).run,
                 args=(service_name, service_spec, task_yaml, controller_port))
             controller_process.start()
             serve_state.set_service_controller_port(service_name,

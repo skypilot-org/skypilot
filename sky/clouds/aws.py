@@ -106,7 +106,6 @@ class AWS(clouds.Cloud):
     _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
@@ -114,9 +113,16 @@ class AWS(clouds.Cloud):
     )
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if resources.use_spot:
+            return {
+                clouds.CloudImplementationFeatures.STOP:
+                    ('Stopping spot instances is currently not supported on'
+                     f' {cls._REPR}.'),
+            }
+        return {}
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -463,7 +469,7 @@ class AWS(clouds.Cloud):
                 'AWS CLI is not installed properly. '
                 'Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
                 f'{cls._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
@@ -793,7 +799,7 @@ class AWS(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(suquark): deprecate this method
-        assert False, 'This could path should not be used.'
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,

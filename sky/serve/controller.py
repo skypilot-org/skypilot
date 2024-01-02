@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import traceback
+from typing import List
 
 import fastapi
 import uvicorn
@@ -46,11 +47,9 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.RequestRateAutoscaler(
+            autoscalers.HeteroGPUAutoscaler(
                 service_spec,
-                frequency=constants.AUTOSCALER_SCALE_FREQUENCY_SECONDS,
-                cooldown=constants.AUTOSCALER_COOLDOWN_SECONDS,
-                rps_window_size=constants.AUTOSCALER_RPS_WINDOW_SIZE_SECONDS))
+                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -65,17 +64,94 @@ class SkyServeController:
                     for info in replica_info
                 ]
                 logger.info(f'All replica info: {replica_info_dicts}')
-                scaling_option = self._autoscaler.evaluate_scaling(replica_info)
-                if (scaling_option.operator ==
-                        autoscalers.AutoscalerDecisionOperator.SCALE_UP):
-                    assert isinstance(scaling_option.target,
-                                      int), scaling_option
-                    self._replica_manager.scale_up(scaling_option.target)
-                elif (scaling_option.operator ==
-                      autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
-                    assert isinstance(scaling_option.target,
-                                      list), scaling_option
-                    self._replica_manager.scale_down(scaling_option.target)
+                scaling_options = self._autoscaler.evaluate_scaling(
+                    replica_info)
+                for scaling_option in scaling_options:
+                    logger.info(f'Scaling option received: {scaling_option}')
+                    if (scaling_option.operator ==
+                            autoscalers.AutoscalerDecisionOperator.SCALE_UP):
+                        assert (scaling_option.target is None or isinstance(
+                            scaling_option.target, dict)), scaling_option
+                        self._replica_manager.scale_up(scaling_option.target)
+                    elif (scaling_option.operator ==
+                          autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                        assert isinstance(scaling_option.target,
+                                          int), scaling_option
+                        self._replica_manager.scale_down(scaling_option.target)
+                    else:
+                        with ux_utils.enable_traceback():
+                            logger.error('Error in scaling_option.operator: '
+                                         f'{scaling_option.operator}')
+            except Exception as e:  # pylint: disable=broad-except
+                # No matter what error happens, we should keep the
+                # monitor running.
+                logger.error('Error in autoscaler: '
+                             f'{common_utils.format_exception(e)}')
+                with ux_utils.enable_traceback():
+                    logger.error(f'  Traceback: {traceback.format_exc()}')
+            time.sleep(constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+
+    def _run_heteroGPU_autoscaler(self):
+        logger.info('Starting autoscaler.')
+        while True:
+            try:
+                # If the primary replica successfully launched to ReplicaStatus.READY,
+                # then we terminate the corresponding fallback replicas. Returns a list
+                # of SCALE_DOWN decisions
+                self._autoscaler.fallback_scale_down_sync(
+                    self._service_name, self._replica_manager)
+                # Making autoscaling decisions based on the allocation
+                # of the solver
+                replica_info = serve_state.get_replica_infos(self._service_name)
+                replica_info_dicts = [
+                    info.to_info_dict(
+                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+                    for info in replica_info
+                ]
+                logger.info(
+                    f'All replica info after fallback sync: {replica_info_dicts}'
+                )
+                scaling_decisions = self._autoscaler.evaluate_scaling(
+                    replica_info)
+
+                for scaling_decision in scaling_decisions:
+                    # When we want to launch multiple fallback replicas with
+                    # the primary replica.
+                    if isinstance(scaling_decision, list):
+                        # Distinguish fallback decisions and primary decision
+                        primary_decision: autoscalers.AutoscalerDecision
+                        fallback_decisions: List[
+                            autoscalers.AutoscalerDecision] = []
+                        for decision in scaling_decision:
+                            if decision.target['is_fallback']:
+                                fallback_decisions.append(decision)
+                            else:
+                                primary_decision = decision
+                        # launch all the fallback decision first and get a list of replica id
+                        fallback_replica_id_list: List[int] = []
+                        for fallback_decision in fallback_decisions:
+                            assert (fallback_decision.operator == autoscalers.
+                                    AutoscalerDecisionOperator.SCALE_UP,
+                                    fallback_decision.operator)
+                            replica_id = self._replica_manager.scale_up(
+                                fallback_decision.target)
+                            fallback_replica_id_list.append(replica_id)
+                        # launch primary decision with fallback replica id list
+                        primary_decision.target.update({
+                            'fallback_replica_id_list': fallback_replica_id_list
+                        })
+                        self._replica_manager.scale_up(primary_decision.target)
+                    elif (scaling_decision.operator ==
+                          autoscalers.AutoscalerDecisionOperator.SCALE_UP):
+                        assert isinstance(scaling_decision.target,
+                                          dict), scaling_decision
+                        self._replica_manager.scale_up(scaling_decision.target)
+                    elif (scaling_decision.operator ==
+                          autoscalers.AutoscalerDecisionOperator.SCALE_DOWN):
+                        assert isinstance(scaling_decision.target,
+                                          int), scaling_decision
+                        self._replica_manager.scale_down(
+                            scaling_decision.target)
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
@@ -107,7 +183,8 @@ class SkyServeController:
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
 
-        threading.Thread(target=self._run_autoscaler).start()
+        #threading.Thread(target=self._run_autoscaler).start()
+        threading.Thread(target=self._run_heteroGPU_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
                     f'http://localhost:{self._port}')

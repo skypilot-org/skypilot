@@ -56,6 +56,11 @@ class ServiceComponent(enum.Enum):
     REPLICA = 'replica'
 
 
+class AcceleratorType(enum.Enum):
+    A100 = 'A100'
+    A10 = 'A10'
+
+
 class UserSignal(enum.Enum):
     """User signal to send to controller.
 
@@ -160,6 +165,51 @@ class RequestTimestamp(RequestsAggregator):
     def to_dict(self) -> Dict[str, Any]:
         """Convert the aggregator to a dict."""
         return {'timestamps': self.timestamps}
+
+    def __repr__(self) -> str:
+        return f'RequestTimestamp(timestamps={self.timestamps})'
+
+
+class RequestHeteroGPU(RequestsAggregator):
+    """RequestTimestamp: Aggregates request timestamps.
+
+    This is useful for HeteroGPU-autoscaling.
+    """
+
+    def __init__(self) -> None:
+        self.total_requests = 0
+        self.bucket_size = [(0, 25), (25, 100), (100, 250), (250, 500),
+                            (500, 1000), (1000, 2000), (2000, 4000)]
+        self.request_timestamp_distribution = [[], [], [], [], [], [], []]
+        self.timestamps = []
+
+    def add(self, request: 'fastapi.Request',
+            input_token_length: float) -> None:
+        """Add a request to the request aggregator."""
+        del request  # unused
+        self.total_requests += 1
+        for idx, (lower, upper) in enumerate(self.bucket_size):
+            if lower == 2000 and lower <= input_token_length:
+                self.request_timestamp_distribution[idx].append(time.time())
+                break
+            elif lower <= input_token_length < upper:
+                self.request_timestamp_distribution[idx].append(time.time())
+                break
+
+        print(
+            f'RequestTimeStamp.add(self.request_timestamp_distribution): {self.request_timestamp_distribution}'
+        )
+        self.timestamps.append(time.time())
+
+    def clear(self) -> None:
+        """Clear all current request aggregator."""
+        self.total_requests = 0
+        self.request_timestamp_distribution = [[], [], [], [], [], [], []]
+        self.timestamps = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the aggregator to a dict."""
+        return {'timestamps': self.request_timestamp_distribution}
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'
@@ -636,9 +686,8 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     for info in service_record['replica_info']:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
-        # If auto restart enabled, not count FAILED replicas here.
-        if (not service_record['auto_restart'] or
-                info['status'] != serve_state.ReplicaStatus.FAILED):
+        # TODO(MaoZiming): add a column showing failed replicas number.
+        if info['status'] != serve_state.ReplicaStatus.FAILED:
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 
@@ -680,7 +729,12 @@ def format_service_table(service_records: List[Dict[str, Any]],
         replicas = _get_replicas(record)
         endpoint = get_endpoint(record)
         policy = record['policy']
-        requested_resources = record['requested_resources']
+        # TODO(tian): Backward compatibility.
+        # Remove `requested_resources` field after 2 minor release, 0.6.0.
+        if record.get('requested_resources_str') is None:
+            requested_resources_str = str(record['requested_resources'])
+        else:
+            requested_resources_str = record['requested_resources_str']
 
         service_values = [
             service_name,
@@ -690,7 +744,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources])
+            service_values.extend([policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
