@@ -295,15 +295,22 @@ class HeteroGPUAutoscaler(Autoscaler):
         for idx, lst in enumerate(self.request_timestamps_distribution):
             lst.extend(timestamps_from_loadbalancer[idx])
             index = bisect.bisect_left(lst, current_time - self.rps_window_size)
-            lst = lst[index:]
-            self.total_request_in_window += len(lst)
+            self.request_timestamps_distribution[idx] = lst[index:]
+            self.total_request_in_window += len(self.request_timestamps_distribution[idx])
 
-        if self.total_request_in_window != 0:
+        if self.total_request_in_window == 0:
+            for idx, lst in enumerate(self.request_timestamps_distribution):
+                self.request_distribution[idx] = 0
+                self.request_rate_dist[idx] = 0
+        else:
             for idx, lst in enumerate(self.request_timestamps_distribution):
                 self.request_distribution[idx] = len(
                     lst) / self.total_request_in_window
+                print(f'autoscaler.collect_request_information(len(lst)): {len(lst)}')
+                print(f'autoscaler.collect_request_information(self.total_request_in_window): {self.total_request_in_window}')
                 self.request_rate_dist[idx] = len(lst) / self.rps_window_size
 
+                
         print(
             f'autoscaler.collect_request_information(timestamps_from_loadbalancer): {timestamps_from_loadbalancer}'
         )
@@ -315,6 +322,9 @@ class HeteroGPUAutoscaler(Autoscaler):
         )
         print(
             f'autoscaler.collect_request_information(self.request_distribution): {self.request_distribution}'
+        )
+        print(
+            f'autoscaler.collect_request_information(self.request_rate_dist): {self.request_rate_dist}'
         )
 
     def _get_accelerator_override_dict(
@@ -380,7 +390,12 @@ class HeteroGPUAutoscaler(Autoscaler):
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[Union[AutoscalerDecision, List[AutoscalerDecision]]]:
-
+        ##### Testing
+        accel_allocation = solvers.IlpSolver(self.request_rate_dist)
+        logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
+        logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
+        logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
+        #############
         all_replica_infos_to_scale_down: List[
             'replica_managers.ReplicaInfo'] = []
         scaling_decisions: (List[Union[AutoscalerDecision,
