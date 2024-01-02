@@ -503,18 +503,21 @@ def list_accelerators_impl(
     def make_list_from_df(rows):
         if all_regions:
             # Keep all regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB', 'Region'
-            ],
-                                dropna=False).aggregate('min').reset_index()
+            rows = rows.sort_values(
+                by=['Price', 'SpotPrice', 'Region']).drop_duplicates(
+                    subset=[
+                        'InstanceType', 'AcceleratorName', 'AcceleratorCount',
+                        'vCPUs', 'MemoryGiB', 'Region'
+                    ],
+                    keep='first')
         else:
             # Only keep the lowest prices across regions.
-            rows = rows.groupby([
-                'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
-                'MemoryGiB'
-            ],
-                                dropna=False).aggregate('min').reset_index()
+            rows = rows.sort_values(by=['Price', 'SpotPrice']).drop_duplicates(
+                subset=[
+                    'InstanceType', 'AcceleratorName', 'AcceleratorCount',
+                    'vCPUs', 'MemoryGiB'
+                ],
+                keep='first')
         ret = rows.apply(
             lambda row: InstanceTypeInfo(
                 cloud,
@@ -530,9 +533,16 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                   if not pd.isna(info.cpu_count) else 0, info.
-                                   price, info.spot_price, info.region))
+        if all_regions:
+            # Sort by price and region as well.
+            ret.sort(
+                key=lambda info: (info.accelerator_count, info.cpu_count
+                                  if not pd.isna(info.cpu_count) else 0, info.
+                                  price, info.spot_price, info.region))
+        else:
+            #Sort only by accelerator count and cpu count
+            ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
+                                       if not pd.isna(info.cpu_count) else 0))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
