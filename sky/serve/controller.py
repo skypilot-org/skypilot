@@ -197,4 +197,5 @@ def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
                    task_yaml: str, controller_port: int):
     controller = SkyServeController(service_name, service_spec, task_yaml,
                                     controller_port)
+    logger.info(f'controller port: {controller_port}')
     controller.run()
