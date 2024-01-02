@@ -66,10 +66,14 @@ class HeteroGPUPolicy(LoadBalancingPolicy):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        # Ready replicas by accelerator type.
         self.ready_replicas = dict[AcceleratorType, List[str]]
+        # Round robin index tracking per accelerator type.
         self.indexes = dict[AcceleratorType, int]
+        # Request size bucket boundaries.
         self.bucket_size = [(0, 25), (25, 100), (100, 250), (250, 500),
                             (500, 1000), (1000, 2000), (2000, 4000)]
+        # ILP solution's mapping from request size bucket to accelerator type.
         self.ilp_assigment_vector : List[AcceleratorType] = [None] * len(self.bucket_size)
 
     def set_ready_replicas(self, ready_replica_urls_accels: List[tuple[str, AcceleratorType]]) -> None:
@@ -96,7 +100,7 @@ class HeteroGPUPolicy(LoadBalancingPolicy):
                 self.ready_replicas[accelerator] = ips
                 self.indexes[accelerator] = 0
         
-        # Add ready replicas for new accelerators. 
+        # Add ready replicas for new accelerator types. 
         for accelerator in new_ready_replicas:
             if accelerator not in self.ready_replicas:
                 # Add a new accelerator type to the 
@@ -106,8 +110,9 @@ class HeteroGPUPolicy(LoadBalancingPolicy):
     def update_policy_parameters(self, ilp_assignment_vector = None) -> None:
         self.ilp_assigment_vector = ilp_assignment_vector
 
-    # TODO: tgriggs: need to redirect to fallback VMs to keep traffic balanced
-    # TODO: extend this to support bucket slices (instead of full buckets)
+    # TODO(tgriggs): Requests should be partially redirected to fallback VMs when primary 
+    # is still being provisioned.
+    # TODO(tgriggs): Extend this to support bucket slices (instead of full buckets).
     def select_replica(self, request: 'fastapi.Request', input_token_length: int) -> Optional[str]:
         if not self.ready_replicas:
             return None

@@ -280,8 +280,9 @@ class HeteroGPUAutoscaler(Autoscaler):
         self.total_request_in_window: int = 0
         self.last_scale_time: float = 0.
         self.scale_down_candidates: List['replica_managers.ReplicaInfo'] = []
-        # TODO: tgriggs add comment
+        # Saves the ILP solution's current mapping from request bucket to accelerator type.
         self.cur_ilp_assignment_vector: List[AcceleratorType]
+        # Save the mapping to be applied in the next interval (once scale-ups complete).
         self.next_ilp_assignment_vector: List[AcceleratorType]
 
     def collect_request_information(
@@ -429,6 +430,7 @@ class HeteroGPUAutoscaler(Autoscaler):
 
         # Exit early if ILP solver unexpectedly fails.
         if accel_allocation is None or assignment_vector is None:
+            logger.info(f'ILP failed to reach a solution. Request rate distribution: {self.request_rate_dist}')
             return scaling_decisions
 
         # Save the mapping of request size to GPU type for the current and next interval.

@@ -88,14 +88,13 @@ def IlpSolver(request_rate_histogram):
             solution_dict[gpu_types[i]] = decision_vector[i].value()
 
         # Holds mapping from request size to GPU type
-        assignment_vector = {}
+        assignment_vector = []
         for i in range(len(decision_matrix)):
             for j in range(len(decision_matrix[i])):
-                if decision_matrix[i][j] == 0:
-                    continue
-                assignment_vector.append(gpu_types[i])
-                break
-
+                if decision_matrix[i][j].value() == 1:
+                    assignment_vector.append(gpu_types[j])
+                    break
+        
         return solution_dict, assignment_vector
 
     return None, None
