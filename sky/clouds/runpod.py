@@ -37,8 +37,19 @@ class RunPod(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
