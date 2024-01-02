@@ -50,7 +50,17 @@ echo "Loading local skypilot image on to the cluster"
 docker pull us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 kind load docker-image --name skypilot us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
 
+# Apply patch for gpu support (if needed)
+echo "Applying patch for gpu support (if needed)"
+docker exec -ti skypilot-control-plane ln -s /sbin/ldconfig /sbin/ldconfig.real
+
 # Print CPUs available on the local cluster
 NUM_CPUS=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}')
 echo "Kubernetes cluster ready! Run `sky check` to setup Kubernetes access."
 echo "Number of CPUs available on the local cluster: $NUM_CPUS"
+
+# Print instructions for adding gpu support
+echo "For adding support for GPU, please follow instructions here:"
+echo "https://www.substratus.ai/blog/kind-with-gpus/"
+echo "----------------------------------------------"
+echo "Cluster has been set up accordingly."
