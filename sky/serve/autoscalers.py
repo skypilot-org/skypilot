@@ -251,8 +251,8 @@ class HeteroGPUAutoscaler(Autoscaler):
 
     SCALE_UP_COOL_DOWN_INTERVAL_SECONDS = 300
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec', frequency: int,
-                 cooldown: int, rps_window_size: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',
+                 frequency: int, rps_window_size: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -264,11 +264,9 @@ class HeteroGPUAutoscaler(Autoscaler):
             last_scale_operation: Time of last scale operation.
             request_timestamps: All request timestamps within the window.
         """
-        super().__init__(spec, frequency)
-        self.upper_threshold: Optional[float] = spec.qps_upper_threshold
-        self.lower_threshold: Optional[float] = spec.qps_lower_threshold
-        self.cooldown: int = cooldown
+        super().__init__(spec)
         self.rps_window_size: int = self.SCALE_UP_COOL_DOWN_INTERVAL_SECONDS
+        self.frequency = frequency
         self.last_scale_operation: float = 0.
         self.request_timestamps: List[float] = []
         self.request_timestamps_distribution: List[List[float]] = [[], [], [],
@@ -422,6 +420,11 @@ class HeteroGPUAutoscaler(Autoscaler):
         # {replica_manager.AcceleratorType.A100: # of A100s needed,
         #  replica_manager.AcceleratorType.A10: # of A10s needed}
         accel_allocation = solvers.IlpSolver(self.request_rate_dist)
+        logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
+        logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
+        logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
+
+        """
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
         for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
@@ -496,5 +499,5 @@ class HeteroGPUAutoscaler(Autoscaler):
         
         if not scaling_decisions:
             logger.info('No scaling needed.')
-
+        """
         return scaling_decisions

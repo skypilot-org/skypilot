@@ -129,7 +129,7 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
             controller_url: The URL of the controller.
             load_balancer_port: The port where the load balancer listens to.
         """
-        super.__init__(controller_url, load_balancer_port)
+        super().__init__(controller_url, load_balancer_port)
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (

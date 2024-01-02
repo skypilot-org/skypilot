@@ -49,7 +49,8 @@ class SkyServeController:
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.HeteroGPUAutoscaler(
                 service_spec,
-                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
+                frequency=constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS,
+                rps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -130,8 +131,8 @@ class SkyServeController:
                         # launch all the fallback decision first and get a list of replica id
                         fallback_replica_id_list: List[int] = []
                         for fallback_decision in fallback_decisions:
-                            assert (fallback_decision.operator == autoscalers.
-                                    AutoscalerDecisionOperator.SCALE_UP,
+                            assert ((isinstance(fallback_decision.operator, autoscalers.
+                                    AutoscalerDecisionOperator.SCALE_UP)),
                                     fallback_decision.operator)
                             replica_id = self._replica_manager.scale_up(
                                 fallback_decision.target)
