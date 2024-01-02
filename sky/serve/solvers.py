@@ -82,12 +82,23 @@ def IlpSolver(request_rate_histogram):
     # print(f'{[var.value() for var in decision_vector]}')
 
     if pulp.LpStatus[problem.status] == 'Optimal':
+        # Holds number of each GPU type needed
         solution_dict = {}
         for i in range(len(decision_vector)):
             solution_dict[gpu_types[i]] = decision_vector[i].value()
-        return solution_dict
 
-    return None
+        # Holds mapping from request size to GPU type
+        assignment_vector = {}
+        for i in range(len(decision_matrix)):
+            for j in range(len(decision_matrix[i])):
+                if decision_matrix[i][j] == 0:
+                    continue
+                assignment_vector.append(gpu_types[i])
+                break
+
+        return solution_dict, assignment_vector
+
+    return None, None
 
 
 # `request_distribution`: List[int], where integer r at index i corresponds to the

@@ -82,7 +82,7 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
-    def get_ilp_decision(self) -> List[List[int]]:
+    def get_ilp_assignment_vector(self) -> List[AcceleratorType]:
         raise NotImplementedError
 
 class RequestRateAutoscaler(Autoscaler):
@@ -280,6 +280,9 @@ class HeteroGPUAutoscaler(Autoscaler):
         self.total_request_in_window: int = 0
         self.last_scale_time: float = 0.
         self.scale_down_candidates: List['replica_managers.ReplicaInfo'] = []
+        # TODO: tgriggs add comment
+        self.cur_ilp_assignment_vector: List[AcceleratorType]
+        self.next_ilp_assignment_vector: List[AcceleratorType]
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -422,7 +425,16 @@ class HeteroGPUAutoscaler(Autoscaler):
         # the allocation to be a dictionary in a form of
         # {replica_manager.AcceleratorType.A100: # of A100s needed,
         #  replica_manager.AcceleratorType.A10: # of A10s needed}
-        accel_allocation = solvers.IlpSolver(self.request_rate_dist)
+        accel_allocation, assignment_vector = solvers.IlpSolver(self.request_rate_dist)
+
+        # Exit early if ILP solver unexpectedly fails.
+        if accel_allocation is None or assignment_vector is None:
+            return scaling_decisions
+
+        # Save the mapping of request size to GPU type for the current and next interval.
+        self.cur_ilp_assignment_vector = self.next_ilp_assignment_vector
+        self.next_ilp_assignment_vector = assignment_vector
+
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
         for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
@@ -499,3 +511,6 @@ class HeteroGPUAutoscaler(Autoscaler):
             logger.info('No scaling needed.')
 
         return scaling_decisions
+
+    def get_ilp_assignment_vector(self) -> List[AcceleratorType]:
+        return self.cur_ilp_assignment_vector

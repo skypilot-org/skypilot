@@ -171,10 +171,10 @@ class SkyServeController:
                 f'Received inflight request information: {request_aggregator}')
             self._autoscaler.collect_request_information(request_aggregator)
             return {
-                'ready_replica_urls':
-                    self._replica_manager.get_ready_replica_urls()
-                'hetero_gpu_ilp_decision':
-                    self._autoscaler.get_ilp_decision()
+                'ready_replica_urls_accels':
+                    self._replica_manager.get_ready_replica_urls_with_accelerator(),
+                'ilp_assignment_vector':
+                    self._autoscaler.get_ilp_assignment_vector()
             }
 
         @self._app.on_event('startup')

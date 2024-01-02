@@ -496,6 +496,10 @@ class ReplicaManager:
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
         raise NotImplementedError
+    
+    def get_ready_replica_urls_with_accelerator(self) -> List[tuple[str, AcceleratorType]]:
+        """Get all ready replica's IP addresses and accelerator type."""
+        raise NotImplementedError
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
@@ -553,6 +557,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 assert info.url is not None
                 ready_replica_urls.append(info.url)
         return ready_replica_urls
+    
+    def get_ready_replica_urls_with_accelerator(self) -> List[tuple[str, AcceleratorType]]:
+        """Get all ready replica's IP addresses and accelerator types."""
+        ready_replica_urls_accels = []
+        infos = serve_state.get_replica_infos(self._service_name)
+        for info in infos:
+            if info.status == serve_state.ReplicaStatus.READY:
+                assert info.url is not None
+                ready_replica_urls_accels.append((info.url, info.accelerator))
+        return ready_replica_urls_accels
 
     def _launch_replica(
         self,

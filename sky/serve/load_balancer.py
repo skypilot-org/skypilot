@@ -130,10 +130,51 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
             load_balancer_port: The port where the load balancer listens to.
         """
         super.__init__(controller_url, load_balancer_port)
-        self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
-            lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestHeteroGPU())
+        self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
+            lb_policies.HeteroGPUPolicy())
+        
+        
+    def _sync_with_controller(self):
+        """Sync with controller periodically.
+
+        Every `constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS` seconds, the
+        load balancer will sync with the controller to get the latest
+        information about available replicas; also, it report the request
+        information to the controller, so that the controller can make
+        autoscaling decisions.
+        """
+        # Sleep for a while to wait for the controller bootstrap.
+        time.sleep(5)
+
+        while True:
+            with requests.Session() as session:
+                try:
+                    # Send request information
+                    response = session.post(
+                        self._controller_url + '/controller/load_balancer_sync',
+                        json={
+                            'request_aggregator':
+                                self._request_aggregator.to_dict()
+                        },
+                        timeout=5)
+                    # Clean up after reporting request information to avoid OOM.
+                    self._request_aggregator.clear()
+                    response.raise_for_status()
+                    ready_replica_urls_accels = response.json().get(
+                        'ready_replica_urls_accels')
+                    ilp_assignment_vector = response.json().get(
+                        'ilp_assignment_vector')
+                except requests.RequestException as e:
+                    print(f'An error occurred: {e}')
+                else:
+                    logger.info(f'Available Replica URLs and Accelerators: {ready_replica_urls_accels}')
+                    self._load_balancing_policy.set_ready_replicas(
+                        ready_replica_urls_accels)
+                    logger.info(f'ILP assignment vector: {ilp_assignment_vector}')
+                    self._load_balancing_policy.update_policy_parameters(ilp_assignment_vector=ilp_assignment_vector)
+            time.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
 
     async def _redirect_handler(self, request: fastapi.Request):
         body_bytes = await request.body()
