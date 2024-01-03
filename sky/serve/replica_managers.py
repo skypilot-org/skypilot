@@ -6,7 +6,6 @@ import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
-import signal
 import threading
 import time
 import traceback
@@ -163,19 +162,6 @@ def _get_resources_ports(task_yaml: str) -> str:
     # Already checked the resources have and only have one port
     # before upload the task yaml.
     return task_resources.ports[0]
-
-
-def _interrupt_process_and_children(pid: int) -> None:
-    parent_process = psutil.Process(pid)
-    for child_process in parent_process.children(recursive=True):
-        try:
-            child_process.send_signal(signal.SIGINT)
-        except psutil.NoSuchProcess:
-            pass
-    try:
-        parent_process.send_signal(signal.SIGINT)
-    except psutil.NoSuchProcess:
-        pass
 
 
 def with_lock(func):
@@ -664,10 +650,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             # process_pool_refresher terminates
             if p.is_alive():
                 assert p.pid is not None
-                # Interrupt the launch process and its children. We use SIGINT
-                # here since sky.launch has great handling for it.
-                _interrupt_process_and_children(p.pid)
-                # p.terminate()
+                p.terminate()
                 p.join()
             logger.info(f'Interrupted launch process for replica {replica_id} '
                         'and deleted the cluster.')

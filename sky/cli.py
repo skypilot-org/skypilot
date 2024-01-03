@@ -4353,8 +4353,8 @@ def serve_up(
     is_flag=True,
     default=False,
     required=False,
-    help=('Separate replicas with different versions. If this flag is set to '
-          'False, SkyServe will still send traffic to previously ready '
+    help=('Mixing replicas with different versions. If this flag is set to '
+          'True, SkyServe will still send traffic to previously ready '
           'replicas; otherwise, SkyServe will only send traffic to replicas '
           'with same version, i.e. before the first replica with latest '
           'version become ready, direct traffic only to previous replicas '
