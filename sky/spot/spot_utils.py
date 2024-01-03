@@ -655,7 +655,7 @@ def format_job_table(
         f'{count} {status}' for status, count in sorted(status_counts.items())
     ])
     if status_str:
-        status_str = f'In progress jobs: {status_str}'
+        status_str = f'In progress tasks: {status_str}'
     else:
         status_str = 'No in progress jobs.'
     output = status_str
