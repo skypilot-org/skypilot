@@ -94,6 +94,8 @@ def _cleanup_storage_from_service_name(service_name: str,
     Returns:
         True if the storage is cleaned up successfully, False otherwise.
     """
+    # TODO(MaoZiming): storage from multiple versions might
+    # need to be cleaned up
     version = serve_state.get_service_version(service_name)
     if version is not None:
         task_yaml = serve_utils.generate_task_yaml_file_name(
