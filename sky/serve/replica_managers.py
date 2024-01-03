@@ -66,12 +66,29 @@ def launch_cluster(task_yaml_path: str,
             if retry.
     """
     try:
+        # TESTING: Confine A100 to be only from GCP and A10G from AWS
+        if 'accelerators' in resources_override:
+            if 'A10G' in resources_override['accelerators']:
+                resources_override.update({'cloud':'AWS'})
+            elif 'A100' in resources_override['accelerators']:
+                resources_override.update({'cloud':'GCP'})
+        ######
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         if resources_override is not None:
+            # TESTING
+            if 'is_primary' in resources_override:
+                resources_override.pop('is_primary')
+            if 'is_fallback' in resources_override:
+                resources_override.pop('is_fallback')
+            if 'fallback_replica_id_list' in resources_override:
+                resources_override.pop('fallback_replica_id_list')
+            ######
             resource_config = config.get('resources', {})
             resource_config.update(resources_override)
             config['resources'] = resource_config
         task = sky.Task.from_yaml_config(config)
+        ## TESTING:
+        logger.info(f'launch_cluster(resource): {resource_config}')
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
                      f'error {common_utils.format_exception(e)}')
@@ -170,15 +187,27 @@ def _get_resources_ports(task_yaml: str) -> str:
 
 
 def _get_accelerator_override(
-        task_yaml: str, resources_override: Optional[Dict[str, Any]]) -> bool:
+        task_yaml: str, resources_override: Optional[Dict[str, Any]]):
     if resources_override is not None:
         accelerators_override = resources_override.get('accelerators', None)
         if accelerators_override is not None:
             assert isinstance(accelerators_override, str)
+            ### TESTING
+            if 'A10' in accelerators_override:
+                return AcceleratorType.A10
+            elif 'A100' in accelerators_override:
+                return AcceleratorType.A100
+            ######
             return accelerators_override
     task = sky.Task.from_yaml(task_yaml)
     assert len(task.resources) == 1, task
     task_resources = list(task.resources)[0]
+    ### TESTING
+    if 'A10' in task_resources.accelerators:
+        return AcceleratorType.A10
+    elif 'A100' in task_resources.accelerators:
+        return AcceleratorType.A100
+    ######
     return task_resources.accelerators
 
 
@@ -562,7 +591,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
-            return
+            return        
         logger.info(f'Launching replica {replica_id}...')
         cluster_name = serve_utils.generate_replica_cluster_name(
             self._service_name, replica_id)

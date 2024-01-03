@@ -166,4 +166,5 @@ def run_load_balancer(controller_addr: str, load_balancer_port: int):
     #                                     load_balancer_port=load_balancer_port)
     load_balancer = HeteroGPULoadBalancer(controller_url=controller_addr,
                                           load_balancer_port=load_balancer_port)
+    logger.info(f'run_load_balancer(load_balancer_port): {load_balancer_port}')
     load_balancer.run()

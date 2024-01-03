@@ -329,6 +329,8 @@ class HeteroGPUAutoscaler(Autoscaler):
 
     def _get_accelerator_override_dict(
             self, instance_type: AcceleratorType) -> Dict[str, Any]:
+        if instance_type == AcceleratorType.A10:
+            return {'accelerators': 'A10G:1'}
         return {'accelerators': f'{instance_type.value}:1'}
 
     def _get_autoscaler_decision(
@@ -339,7 +341,6 @@ class HeteroGPUAutoscaler(Autoscaler):
             replica_id: Optional[int] = None) -> AutoscalerDecision:
         if operator == AutoscalerDecisionOperator.SCALE_UP:
             assert accelerator, accelerator
-            assert is_primary, is_primary
             operator_target = self._get_accelerator_override_dict(accelerator)
             operator_target.update({
                 'is_primary': True if is_primary else False,
@@ -395,6 +396,7 @@ class HeteroGPUAutoscaler(Autoscaler):
         logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
         logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
         logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
+        logger.info('TESTING solver output')
         #############
         all_replica_infos_to_scale_down: List[
             'replica_managers.ReplicaInfo'] = []
@@ -438,8 +440,8 @@ class HeteroGPUAutoscaler(Autoscaler):
         logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
         logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
         logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
+        logger.info(f'ACTUAL solver output after cooldown period')
 
-        """
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
         for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
@@ -447,11 +449,11 @@ class HeteroGPUAutoscaler(Autoscaler):
                 info for info in launched_replica_infos
                 if info.accelerator == accelerator
             ])
-            if accelerator in accel_allocation:
+            if accelerator in accel_allocation and accel_allocation[accelerator] > 0:
                 diff_accel_num = num_alive_accel - accel_allocation[accelerator]
                 # Need to scale up
                 if diff_accel_num < 0:
-                    num_to_scale_up = abs(diff_accel_num)
+                    num_to_scale_up = int(abs(diff_accel_num))
                     for _ in range(num_to_scale_up):
                         num, fallback_type = self._get_fallback_allocation(
                             accelerator)
@@ -514,5 +516,5 @@ class HeteroGPUAutoscaler(Autoscaler):
         
         if not scaling_decisions:
             logger.info('No scaling needed.')
-        """
+        logger.info(f'evaluate_scaling(scaling_decisions): {scaling_decisions}')
         return scaling_decisions

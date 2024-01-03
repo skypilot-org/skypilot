@@ -131,9 +131,9 @@ class SkyServeController:
                         # launch all the fallback decision first and get a list of replica id
                         fallback_replica_id_list: List[int] = []
                         for fallback_decision in fallback_decisions:
-                            assert ((isinstance(fallback_decision.operator, autoscalers.
-                                    AutoscalerDecisionOperator.SCALE_UP)),
-                                    fallback_decision.operator)
+                            # assert ((isinstance(fallback_decision.operator, autoscalers.
+                            #         AutoscalerDecisionOperator.SCALE_UP)),
+                            #         fallback_decision.operator)
                             replica_id = self._replica_manager.scale_up(
                                 fallback_decision.target)
                             fallback_replica_id_list.append(replica_id)
