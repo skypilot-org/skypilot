@@ -4386,6 +4386,9 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       down. This usually indicates resource leakages. If you see such status,
       please login to the cloud console and double-check
 
+    - ``NO_REPLICAS``: The service has no replicas. This usually happens when
+        min_replicas is set to 0.
+
     Each replica can have one of the following statuses:
 
     - ``PENDING``: The maximum number of simultaneous launches has been reached

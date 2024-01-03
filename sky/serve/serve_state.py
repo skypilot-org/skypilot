@@ -153,6 +153,9 @@ class ServiceStatus(enum.Enum):
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
+    # No replica
+    NO_REPLICA = 'NO_REPLICA'
+
     @classmethod
     def failed_statuses(cls) -> List['ServiceStatus']:
         return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP]
@@ -175,6 +178,8 @@ class ServiceStatus(enum.Enum):
         if sum(status2num[status]
                for status in ReplicaStatus.failed_statuses()) > 0:
             return cls.FAILED
+        if len(replica_statuses) == 0:
+            return cls.NO_REPLICA
         return cls.REPLICA_INIT
 
 
@@ -186,6 +191,7 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
+    ServiceStatus.NO_REPLICA: colorama.Fore.MAGENTA,
 }
 
 
