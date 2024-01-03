@@ -25,6 +25,7 @@ from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve import service
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -513,9 +514,13 @@ class SkyPilotReplicaManager(ReplicaManager):
         threading.Thread(target=self._replica_prober).start()
 
         self.latest_version: int = initial_version
+        self.oldest_version: int = initial_version
         self.version2spec: serve_utils.ThreadSafeDict[
             int, 'service_spec.SkyServiceSpec'] = serve_utils.ThreadSafeDict()
+        self.version2yaml: serve_utils.ThreadSafeDict[
+            int, str] = serve_utils.ThreadSafeDict()
         self.version2spec[initial_version] = spec
+        self.version2yaml[initial_version] = task_yaml_path
         self.mixed_replica_versions: bool = False
 
     ################################
@@ -973,12 +978,25 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.debug('Running replica prober.')
             try:
                 self._probe_all_replicas()
-                replica_statuses = [
-                    info.status for info in serve_state.get_replica_infos(
-                        self._service_name)
-                ]
+                replica_infos = serve_state.get_replica_infos(
+                    self._service_name)
+                replica_statuses = [info.status for info in replica_infos]
                 serve_utils.set_service_status_from_replica_statuses(
                     self._service_name, replica_statuses)
+
+                # Clean old version
+                oldest_version = min([
+                    info.version for info in replica_infos
+                ]) if replica_infos else self.oldest_version
+                if self.oldest_version < oldest_version:
+                    for version in range(self.oldest_version, oldest_version):
+                        # Delete old version metadata
+                        # Delete storage buckets of older versions.
+                        del self.version2spec[version]
+                        service.cleanup_storage(self.version2yaml[version])
+                        del self.version2yaml[version]
+                    # self.oldest_version will be cleaned in serve down
+                    self.oldest_version = oldest_version
 
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
@@ -997,6 +1015,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                        mixed_replica_versions: bool,
                        task_yaml_path: str) -> None:
         self.version2spec[version] = spec
+        self.version2yaml[version] = task_yaml_path
         self.latest_version = version
         self.mixed_replica_versions = mixed_replica_versions
         self._task_yaml_path = task_yaml_path

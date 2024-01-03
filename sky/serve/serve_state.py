@@ -309,6 +309,14 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_service_version(service_name: str) -> Optional[int]:
+    """Get the version of a service."""
+    service = get_service_from_name(service_name)
+    if service is None:
+        return None
+    return service['version']
+
+
 def get_glob_service_names(
         service_names: Optional[List[str]] = None) -> List[str]:
     """Get service names matching the glob patterns.
