@@ -478,7 +478,6 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
-        host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
         ip = ips[0]
@@ -531,25 +530,19 @@ class SSHConfigHelper(object):
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
         codegen = ''
-        # Add the nodes to the codegen 
+        # Add the nodes to the codegen
         for i, ip in enumerate(ips):
             docker_proxy_command = None
             port = ports[i]
-            if docker_user is not None:
+            if docker_proxy_command_generator is not None:
                 docker_proxy_command = docker_proxy_command_generator(ip)
                 ip = 'localhost'
                 port = constants.DEFAULT_DOCKER_PORT
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
             # TODO(romilb): Update port number when k8s supports multinode
             codegen += cls._get_generated_config(
-                sky_autogen_comment,
-                node_name,
-                ip,
-                username,
-                key_path,
-                proxy_command,
-                port,
-                docker_proxy_command) + '\n'
+                sky_autogen_comment, node_name, ip, username, key_path,
+                proxy_command, port, docker_proxy_command) + '\n'
 
         cluster_config_path = os.path.expanduser(
             cls.ssh_cluster_path.format(cluster_name))
