@@ -506,11 +506,12 @@ class HeteroGPUAutoscaler(Autoscaler):
                 AutoscalerDecisionOperator.SCALE_DOWN,
                 replica_id=info.replica_id)
             scaling_decisions.append(decision)
-            for replica_id in info.fallback_replica_id_list:
-                decision = self._get_autoscaler_decision(
-                    AutoscalerDecisionOperator.SCALE_DOWN,
-                    replica_id=replica_id)
-                scaling_decisions.append(decision)
+            if info.fallback_replica_id_list is not None:
+                for replica_id in info.fallback_replica_id_list:
+                    decision = self._get_autoscaler_decision(
+                        AutoscalerDecisionOperator.SCALE_DOWN,
+                        replica_id=replica_id)
+                    scaling_decisions.append(decision)
 
         self.scale_down_candidates = all_replica_infos_to_scale_down[:]
         
