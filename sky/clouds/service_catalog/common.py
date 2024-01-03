@@ -533,16 +533,11 @@ def list_accelerators_impl(
             ),
             axis='columns',
         ).tolist()
-        if all_regions:
-            # Sort by price and region as well.
-            ret.sort(
-                key=lambda info: (info.accelerator_count, info.cpu_count
-                                  if not pd.isna(info.cpu_count) else 0, info.
-                                  price, info.spot_price, info.region))
-        else:
-            #Sort only by accelerator count and cpu count
-            ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
-                                       if not pd.isna(info.cpu_count) else 0))
+        # Sort by price and region as well.
+        ret.sort(
+            key=lambda info: (info.accelerator_count, info.instance_type, info.
+                              cpu_count if not pd.isna(info.cpu_count) else 0,
+                              info.price, info.spot_price, info.region))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
