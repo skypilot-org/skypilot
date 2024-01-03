@@ -35,6 +35,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         status TEXT,
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
+        version INTEGER DEFAULT NULL,
         auto_restart INTEGER DEFAULT NULL,
         requested_resources BLOB DEFAULT NULL)""")
     cursor.execute("""\
@@ -189,7 +190,7 @@ _SERVICE_STATUS_TO_COLOR = {
 }
 
 
-def add_service(name: str, controller_job_id: int, policy: str,
+def add_service(name: str, controller_job_id: int, policy: str, version: int,
                 requested_resources_str: str, status: ServiceStatus) -> bool:
     """Add a service in the database.
 
@@ -201,10 +202,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
         _DB.cursor.execute(
             """\
             INSERT INTO services
-            (name, controller_job_id, status, policy,
+            (name, controller_job_id, status, policy, version,
             requested_resources_str)
-            VALUES (?, ?, ?, ?, ?)""", (name, controller_job_id, status.value,
-                                        policy, requested_resources_str))
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, controller_job_id, status.value, policy, version,
+             requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -238,6 +240,15 @@ def set_service_status(service_name: str, status: ServiceStatus) -> None:
     _DB.conn.commit()
 
 
+def set_service_version(service_name: str, version: int) -> None:
+    """Sets the service version."""
+    _DB.cursor.execute(
+        """\
+        UPDATE services SET
+        version=(?) WHERE name=(?)""", (version, service_name))
+    _DB.conn.commit()
+
+
 def set_service_controller_port(service_name: str,
                                 controller_port: int) -> None:
     """Sets the controller port of a service."""
@@ -261,7 +272,8 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, _, requested_resources, requested_resources_str) = row[:10]
+     uptime, policy, version, _, requested_resources,
+     requested_resources_str) = row[:11]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -270,6 +282,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
+        'version': version,
         # TODO(tian): Backward compatibility.
         # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)

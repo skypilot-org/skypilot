@@ -4332,6 +4332,107 @@ def serve_up(
     serve_lib.up(task, service_name)
 
 
+@serve.command('update', cls=_DocumentedCodeCommand)
+@click.argument('service_name', required=True, type=str)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+# Disabling quote check here, as there seems to be a bug in pylint,
+# which incorrectly recognizes the help string as a docstring.
+# pylint: disable=bad-docstring-quotes
+@click.option(
+    '--mixed-replica-version',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('Separate replicas with different versions. If this flag is set to '
+          'False, SkyServe will still send traffic to previously ready '
+          'replicas; otherwise, SkyServe will only send traffic to replicas '
+          'with same version, i.e. before the first replica with latest '
+          'version become ready, direct traffic only to previous replicas '
+          'with same version and after that, direct traffic only to the '
+          'new replicas.'))
+def serve_update(
+    service_name: str,
+    entrypoint: List[str],
+    yes: bool,
+    mixed_replica_version: bool,
+):
+    """Update a SkyServe service.
+
+    ENTRYPOINT must point to a valid YAML file.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky serve update sky-service-16aa new_service.yaml
+    """
+
+    task = _make_task_or_dag_from_entrypoint_with_overrides(
+        entrypoint, entrypoint_name='Service')
+    if isinstance(task, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the YAML file. '
+                             'To fix, add a valid `service` field.')
+
+    # Same as serve_up
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
+
+    click.secho('Service Spec:', fg='cyan')
+    click.echo(task.service)
+
+    click.secho('New replica will use the following resources (estimated):',
+                fg='cyan')
+    with sky.Dag() as dag:
+        dag.add(task)
+    sky.optimize(dag)
+
+    if not yes:
+        prompt = f'Updating service {service_name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    serve_lib.update(task, service_name, mixed_replica_version)
+
+
 @serve.command('status', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',

@@ -17,6 +17,7 @@ import uuid
 import colorama
 import filelock
 import psutil
+import requests
 
 from sky import backends
 from sky import exceptions
@@ -37,6 +38,7 @@ SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = _SYSTEM_MEMORY_GB // constants.SERVICES_MEMORY_USAGE_GB
+_CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 _SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
 _SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
@@ -180,10 +182,15 @@ def generate_remote_tmp_task_yaml_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'task.yaml.tmp')
 
 
-def generate_task_yaml_file_name(service_name: str) -> str:
+def generate_task_yaml_file_name(service_name: str,
+                                 version: int,
+                                 expand_user: bool = True) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, 'task.yaml')
+    if expand_user:
+        dir_name = os.path.expanduser(dir_name)
+    # Backward compatibility.
+    version_str = f'_v{version}' if version > 1 else ''
+    return os.path.join(dir_name, f'task{version_str}.yaml')
 
 
 def generate_remote_config_yaml_file_name(service_name: str) -> str:
@@ -260,6 +267,20 @@ def update_service_status() -> None:
             # If controller job is not running, set it as controller failed.
             serve_state.set_service_status(
                 record['name'], serve_state.ServiceStatus.CONTROLLER_FAILED)
+
+
+def update_service(controller_port: int, version: int,
+                   mixed_replica_versions: bool) -> str:
+    resp = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/update_service',
+        json={
+            'version': version,
+            'mixed_replica_versions': mixed_replica_versions
+        })
+    if resp.status_code != 200:
+        raise ValueError(f'Failed to update service: {resp.text}')
+    return resp.json()['message']
 
 
 def _get_service_status(
@@ -660,7 +681,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
     if not service_records:
         return 'No existing services.'
 
-    service_columns = ['NAME', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT']
+    service_columns = [
+        'NAME', 'LATEST_VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+    ]
     if show_all:
         service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
     service_table = log_utils.create_table(service_columns)
@@ -672,6 +695,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
             replica_infos.append(replica)
 
         service_name = record['name']
+        version = (record['version']
+                   if 'version' in record else constants.INITIAL_VERSION)
         uptime = log_utils.readable_time_duration(record['uptime'],
                                                   absolute=True)
         service_status = record['status']
@@ -688,6 +713,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
 
         service_values = [
             service_name,
+            version,
             uptime,
             status_str,
             replicas,
@@ -710,7 +736,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         return 'No existing replicas.'
 
     replica_columns = [
-        'SERVICE_NAME', 'ID', 'IP', 'LAUNCHED', 'RESOURCES', 'STATUS', 'REGION'
+        'SERVICE_NAME', 'ID', 'VERSION', 'IP', 'LAUNCHED', 'RESOURCES',
+        'STATUS', 'REGION'
     ]
     if show_all:
         replica_columns.append('ZONE')
@@ -725,6 +752,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
     for record in replica_records:
         service_name = record['service_name']
         replica_id = record['replica_id']
+        version = (record['version']
+                   if 'version' in record else constants.INITIAL_VERSION)
         replica_ip = '-'
         launched_at = log_utils.readable_time_duration(record['launched_at'])
         resources_str = '-'
@@ -747,6 +776,7 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_values = [
             service_name,
             replica_id,
+            version,
             replica_ip,
             launched_at,
             resources_str,
@@ -830,3 +860,13 @@ class ServeCodeGen:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
         return f'python3 -u -c {shlex.quote(generated_code)}'
+
+    @classmethod
+    def update_service(cls, controller_port: int, version: int,
+                       mixed_replica_versions: bool) -> str:
+        code = [
+            f'msg = serve_utils.update_service({controller_port}, '
+            f'{version}, {mixed_replica_versions})',
+            'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)

@@ -67,7 +67,17 @@ class Autoscaler:
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
+        # Target number of replicas is initialized to min replicas.
+        # TODO(MaoZiming): add init replica numbers in SkyServe spec.
         self.target_num_replicas: int = spec.min_replicas
+
+    def update_spec(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                    mixed_replica_versions: bool) -> None:
+        del version
+        del mixed_replica_versions
+        self.min_nodes = spec.min_replicas
+        self.max_nodes = spec.max_replicas or spec.min_replicas
+        self.target_num_replicas = spec.min_replicas
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -75,8 +85,7 @@ class Autoscaler:
         raise NotImplementedError
 
     def evaluate_scaling(
-        self,
-        replica_infos: List['replica_managers.ReplicaInfo'],
+        self, replica_infos: List['replica_managers.ReplicaInfo']
     ) -> List[AutoscalerDecision]:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
@@ -90,7 +99,7 @@ class RequestRateAutoscaler(Autoscaler):
     """
 
     def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 qps_window_size: int) -> None:
+                 qps_window_size: int, initial_version: int) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -101,6 +110,9 @@ class RequestRateAutoscaler(Autoscaler):
             downscale_counter: counter for downscale number of replicas.
             scale_up_consecutive_periods: period for scaling up.
             scale_down_consecutive_periods: period for scaling down.
+            bootstrap_done: whether bootstrap is done.
+            latest_version: latest version of the service.
+            mixed_replica_versions: whether mix replica versions.
         """
         super().__init__(spec)
         self.target_qps_per_replica: Optional[
@@ -115,10 +127,24 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods: int = int(
             spec.downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-        # Target number of replicas is initialized to min replicas.
-        # TODO(MaoZiming): add init replica numbers in SkyServe spec.
-        self.target_num_replicas: int = spec.min_replicas
+
         self.bootstrap_done: bool = False
+        self.latest_version: int = initial_version
+        self.mixed_replica_versions = True
+
+    def update_spec(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                    mixed_replica_versions: bool) -> None:
+        super().update_spec(version, spec, mixed_replica_versions)
+        self.target_qps_per_replica = spec.target_qps_per_replica
+        self.scale_up_consecutive_periods = int(
+            spec.upscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        self.scale_down_consecutive_periods = int(
+            spec.downscale_delay_seconds /
+            constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        self.target_num_replicas = spec.min_replicas
+        self.latest_version = version
+        self.mixed_replica_versions = mixed_replica_versions
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -186,10 +212,22 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        launched_replica_infos = [
-            info for info in replica_infos if info.is_launched
+        launched_new_replica_infos = [
+            info for info in replica_infos
+            if (info.is_launched and info.version == self.latest_version)
         ]
-        num_launched_replicas = len(launched_replica_infos)
+        ready_new_replica_infos = [
+            info for info in replica_infos
+            if (info.is_ready and info.version == self.latest_version)
+        ]
+        ready_old_replica_infos = [
+            info for info in replica_infos
+            if (info.is_ready and info.version != self.latest_version)
+        ]
+        not_ready_old_replica_infos = [
+            info for info in replica_infos
+            if (not info.is_ready and info.version != self.latest_version)
+        ]
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(
@@ -197,8 +235,7 @@ class RequestRateAutoscaler(Autoscaler):
             f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
-            f'{self.scale_down_consecutive_periods} '
-            f'Number of launched replicas: {num_launched_replicas}')
+            f'{self.scale_down_consecutive_periods} ')
 
         scaling_options = []
         all_replica_ids_to_scale_down: List[int] = []
@@ -207,24 +244,57 @@ class RequestRateAutoscaler(Autoscaler):
 
             status_order = serve_state.ReplicaStatus.scale_down_decision_order()
             launched_replica_infos_sorted = sorted(
-                launched_replica_infos,
+                launched_new_replica_infos,
                 key=lambda info: status_order.index(info.status)
                 if info.status in status_order else len(status_order))
 
             return [info.replica_id for info in launched_replica_infos_sorted
                    ][:num_limit]
 
-        if num_launched_replicas < self.target_num_replicas:
+        #   Case 1. We have ready new replicas, and
+        #   mixed_replica_versions is False.
+        #   In such case, since once there is a ready match replica,
+        #   we will direct all traffic to it, we can scale down all
+        #   old replicas.
+        if (not self.mixed_replica_versions and
+                len(ready_new_replica_infos) > 0):
+            for info in ready_old_replica_infos:
+                all_replica_ids_to_scale_down.append(info.replica_id)
+
+        # Case 2. We have mixed_replica_versions is True
+        #   In such case, we want to keep the old ready replicas,
+        #   until total number of ready replicas is greater than
+        #   target_num_replicas. Then we scale down the old replicas.
+        if (self.mixed_replica_versions and
+                len(ready_new_replica_infos) + len(ready_old_replica_infos) >
+                self.target_num_replicas):
+            num_old_replicas_to_scale_down = len(ready_new_replica_infos) + len(
+                ready_old_replica_infos) - self.target_num_replicas
+            for info in ready_old_replica_infos[:
+                                                num_old_replicas_to_scale_down]:
+                all_replica_ids_to_scale_down.append(info.replica_id)
+
+        # Case 3. We have some not ready old replicas.
+        #   In such case, we immediately scale down the replica with
+        #   mismatched version to reduce cost.
+        if len(not_ready_old_replica_infos) > 0:
+            for info in not_ready_old_replica_infos:
+                all_replica_ids_to_scale_down.append(info.replica_id)
+
+        # Case 4. when launched_new_replica_infos is less
+        # than target_num_replicas, we always scale up new replicas.
+        if len(launched_new_replica_infos) < self.target_num_replicas:
             num_replicas_to_scale_up = (self.target_num_replicas -
-                                        num_launched_replicas)
+                                        len(launched_new_replica_infos))
 
             for _ in range(num_replicas_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
                                        target=None))
-
-        elif num_launched_replicas > self.target_num_replicas:
-            num_replicas_to_scale_down = (num_launched_replicas -
+        # Case 5: when launched_new_replica_infos is more
+        # than target_num_replicas, we always scale down new replicas.
+        if len(launched_new_replica_infos) > self.target_num_replicas:
+            num_replicas_to_scale_down = (len(launched_new_replica_infos) -
                                           self.target_num_replicas)
             all_replica_ids_to_scale_down.extend(
                 _get_replica_ids_to_scale_down(

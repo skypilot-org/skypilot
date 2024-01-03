@@ -16,6 +16,7 @@ from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
+from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -260,6 +261,104 @@ def up(
             f'{style.RESET_ALL}'
             f'\n{fore.GREEN}The replicas should be ready within a '
             f'short time.{style.RESET_ALL}')
+
+
+@usage_lib.entrypoint
+def update(task: 'sky.Task',
+           service_name: str,
+           mixed_replica_versions: bool = False) -> None:
+
+    cluster_status, handle = backend_utils.is_controller_up(
+        controller_type=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
+        stopped_message='All services should have terminated.')
+
+    if handle is None or handle.head_ip is None:
+        # The error message is already printed in
+        # backend_utils.is_controller_up
+        # TODO(zhwu): Move the error message into the exception.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(message='',
+                                               cluster_status=cluster_status)
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend)
+
+    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+
+    try:
+        returncode, serve_status_payload, _ = backend.run_on_head(
+            handle, code, require_outputs=True, stream_logs=False)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_statuses = serve_utils.load_service_status(serve_status_payload)
+    if len(service_statuses) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cannot find service {service_name!r}.')
+
+    assert len(service_statuses) == 1
+    service_record = service_statuses[0]
+    prompt = None
+    if service_record is None:
+        prompt = (f'Service {service_name!r} not exist. '
+                  'To create a new service, use `sky serve up`.')
+    elif (service_record['status'] ==
+          serve_state.ServiceStatus.CONTROLLER_FAILED):
+        prompt = (f'Service {service_name!r} has a failed controller. '
+                  'Please clean up the service and try again.')
+    elif (service_record['status'] == serve_state.ServiceStatus.CONTROLLER_INIT
+         ):
+        prompt = (f'Service {service_name!r} is still initializing '
+                  'its controller. Please try again later.')
+    if prompt is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(prompt)
+
+    assert service_record is not None
+    controller_port = service_record['controller_port']
+    version = service_record['version']
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the task. ')
+
+    controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
+                                                                   path='serve')
+
+    with tempfile.NamedTemporaryFile(prefix=f'{service_name}-v{version}',
+                                     mode='w') as service_file:
+
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(service_file.name, task_config)
+        remote_task_yaml_path = (serve_utils.generate_task_yaml_file_name(
+            service_name, version + 1, False))
+
+        backend.sync_file_mounts(handle,
+                                 {remote_task_yaml_path: service_file.name},
+                                 task.storage_mounts)
+
+        code = serve_utils.ServeCodeGen.update_service(controller_port,
+                                                       version + 1,
+                                                       mixed_replica_versions)
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        returncode, _, stderr = backend.run_on_head(handle,
+                                                    code,
+                                                    require_outputs=True,
+                                                    stream_logs=False)
+        try:
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to update services',
+                                               stderr,
+                                               stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+    print(f'{colorama.Fore.GREEN}Service {service_name!r} update succeeded.'
+          f'{colorama.Style.RESET_ALL}\n'
+          f'Please use {backend_utils.BOLD}sky serve status {service_name} '
+          f'{backend_utils.RESET_BOLD}to check the latest status.')
 
 
 @usage_lib.entrypoint

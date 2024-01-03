@@ -2,6 +2,8 @@
 
 Responsible for autoscaling and replica management.
 """
+
+import asyncio
 import logging
 import threading
 import time
@@ -16,6 +18,7 @@ from sky.serve import autoscalers
 from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
+from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -42,13 +45,17 @@ class SkyServeController:
                  task_yaml: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.SkyPilotReplicaManager(service_name=service_name,
-                                                    spec=service_spec,
-                                                    task_yaml_path=task_yaml))
+            replica_managers.SkyPilotReplicaManager(
+                service_name=service_name,
+                spec=service_spec,
+                initial_version=constants.INITIAL_VERSION,
+                task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.RequestRateAutoscaler(
                 service_spec,
-                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
+                qps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS,
+                initial_version=constants.INITIAL_VERSION,
+            ))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -103,6 +110,28 @@ class SkyServeController:
                 'ready_replica_urls':
                     self._replica_manager.get_ready_replica_urls()
             }
+
+        @self._app.post('/controller/update_service')
+        def update_service(request: fastapi.Request):
+
+            request_data = asyncio.run(request.json())
+            version = request_data['version']
+            logger.info(f'Update to version: {version}')
+
+            mixed_replica_versions = request_data['mixed_replica_versions']
+
+            latest_task_yaml = serve_utils.generate_task_yaml_file_name(
+                self._service_name, version)
+            service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+            logger.info(f'Service spec: {service}')
+
+            self._replica_manager.update_version(version, service,
+                                                 mixed_replica_versions,
+                                                 latest_task_yaml)
+            self._autoscaler.update_spec(version, service,
+                                         mixed_replica_versions)
+            serve_state.set_service_version(self._service_name, version)
+            return {'message': 'Success'}
 
         @self._app.on_event('startup')
         def configure_logger():

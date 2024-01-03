@@ -1,10 +1,12 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
+import collections
 import dataclasses
 import enum
 import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
+import signal
 import threading
 import time
 import traceback
@@ -163,6 +165,19 @@ def _get_resources_ports(task_yaml: str) -> str:
     return task_resources.ports[0]
 
 
+def _interrupt_process_and_children(pid: int) -> None:
+    parent_process = psutil.Process(pid)
+    for child_process in parent_process.children(recursive=True):
+        try:
+            child_process.send_signal(signal.SIGINT)
+        except psutil.NoSuchProcess:
+            pass
+    try:
+        parent_process.send_signal(signal.SIGINT)
+    except psutil.NoSuchProcess:
+        pass
+
+
 def with_lock(func):
 
     @functools.wraps(func)
@@ -181,6 +196,9 @@ class ProcessStatus(enum.Enum):
 
     # The process is finished and succeeded
     SUCCEEDED = 'SUCCEEDED'
+
+    # The process is interrupted
+    INTERRUPTED = 'INTERRUPTED'
 
     # The process failed
     FAILED = 'FAILED'
@@ -214,6 +232,8 @@ class ReplicaStatusProperty:
         If not, the replica will stay in the replica table permanently to
         notify the user that something is wrong with the user code / setup.
         """
+        if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+            return True
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
@@ -273,6 +293,8 @@ class ReplicaStatusProperty:
             if self.sky_down_status == ProcessStatus.RUNNING:
                 # sky.down is running
                 return serve_state.ReplicaStatus.SHUTTING_DOWN
+            if self.sky_launch_status == ProcessStatus.INTERRUPTED:
+                return serve_state.ReplicaStatus.SHUTTING_DOWN
             if self.sky_down_status == ProcessStatus.FAILED:
                 # sky.down failed
                 return serve_state.ReplicaStatus.FAILED_CLEANUP
@@ -318,10 +340,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    def __init__(self, replica_id: int, cluster_name: str,
-                 replica_port: str) -> None:
+    def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
+                 version: int) -> None:
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
+        self.version: int = version
         self.replica_port: str = replica_port
         self.first_not_ready_time: Optional[float] = None
         self.consecutive_failure_times: List[float] = []
@@ -352,6 +375,10 @@ class ReplicaInfo:
         return self.status in serve_state.ReplicaStatus.launched_statuses()
 
     @property
+    def is_ready(self) -> bool:
+        return self.status == serve_state.ReplicaStatus.READY
+
+    @property
     def url(self) -> Optional[str]:
         handle = self.handle()
         if handle is None:
@@ -373,6 +400,7 @@ class ReplicaInfo:
             'replica_id': self.replica_id,
             'name': self.cluster_name,
             'status': self.status,
+            'version': self.version,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
@@ -434,13 +462,10 @@ class ReplicaManager:
         self.lock = threading.Lock()
         self._next_replica_id: int = 1
         self._service_name: str = service_name
-        self._readiness_path: str = spec.readiness_path
-        self._initial_delay_seconds: int = spec.initial_delay_seconds
-        self._post_data: Optional[Dict[str, Any]] = spec.post_data
         self._uptime: Optional[float] = None
-        logger.info(f'Readiness probe path: {self._readiness_path}\n'
-                    f'Initial delay seconds: {self._initial_delay_seconds}\n'
-                    f'Post data: {self._post_data}')
+        logger.info(f'Readiness probe path: {spec.readiness_path}\n'
+                    f'Initial delay seconds: {spec.initial_delay_seconds}\n'
+                    f'Post data: {spec.post_data}')
 
     def get_ready_replica_urls(self) -> List[str]:
         """Get all ready replica's IP addresses."""
@@ -458,6 +483,17 @@ class ReplicaManager:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
+    def set_mixed_replica_versions(self, mixed_replica_versions: bool) -> None:
+        raise NotImplementedError
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       mixed_replica_versions: bool,
+                       task_yaml_path: str) -> None:
+        raise NotImplementedError
+
+    def get_latest_version(self) -> int:
+        raise NotImplementedError
+
 
 class SkyPilotReplicaManager(ReplicaManager):
     """Replica Manager for SkyPilot clusters.
@@ -472,7 +508,7 @@ class SkyPilotReplicaManager(ReplicaManager):
     """
 
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
-                 task_yaml_path: str) -> None:
+                 initial_version: int, task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self._task_yaml_path = task_yaml_path
         # TODO(tian): Store launch/down pid in the replica table, to make the
@@ -490,17 +526,34 @@ class SkyPilotReplicaManager(ReplicaManager):
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
 
+        self.latest_version: int = initial_version
+        self.version2spec: serve_utils.ThreadSafeDict[
+            int, 'service_spec.SkyServiceSpec'] = serve_utils.ThreadSafeDict()
+        self.version2spec[initial_version] = spec
+        self.mixed_replica_versions: bool = False
+
     ################################
     # Replica management functions #
     ################################
 
     def get_ready_replica_urls(self) -> List[str]:
         ready_replica_urls = []
-        infos = serve_state.get_replica_infos(self._service_name)
-        for info in infos:
+        version2url = collections.defaultdict(list)
+        for info in serve_state.get_replica_infos(self._service_name):
             if info.status == serve_state.ReplicaStatus.READY:
                 assert info.url is not None
+                version2url[info.version].append(info.url)
                 ready_replica_urls.append(info.url)
+        if not self.mixed_replica_versions:
+            # Try all version in descending order. There is possibility that
+            # user consecutively update the service several times, and some
+            # version might not have any ready replicas.
+            version = self.latest_version
+            while version >= serve_constants.INITIAL_VERSION:
+                if version in version2url:
+                    return version2url[version]
+                version -= 1
+        # If not separate replicas, return all ready replicas.
         return ready_replica_urls
 
     def _launch_replica(
@@ -527,7 +580,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
 
-        info = ReplicaInfo(replica_id, cluster_name, replica_port)
+        info = ReplicaInfo(replica_id, cluster_name, replica_port,
+                           self.latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -601,7 +655,30 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_process_pool[replica_id] = p
 
     def scale_down(self, replica_id: int) -> None:
-        self._terminate_replica(replica_id, sync_down_logs=False)
+
+        if replica_id in self._launch_process_pool:
+            p = self._launch_process_pool[replica_id]
+            # Use keyboard interrupt here since sky.launch has great
+            # handling for it
+            # Edge case: sky.launched finished after the
+            # process_pool_refresher terminates
+            if p.is_alive():
+                assert p.pid is not None
+                # Interrupt the launch process and its children. We use SIGINT
+                # here since sky.launch has great handling for it.
+                _interrupt_process_and_children(p.pid)
+                # p.terminate()
+                p.join()
+            logger.info(f'Interrupted launch process for replica {replica_id} '
+                        'and deleted the cluster.')
+            self._terminate_replica(replica_id, sync_down_logs=False)
+            info = serve_state.get_replica_info_from_id(self._service_name,
+                                                        replica_id)
+            assert info is not None
+            info.status_property.sky_launch_status = ProcessStatus.INTERRUPTED
+            del self._launch_process_pool[replica_id]
+        else:
+            self._terminate_replica(replica_id, sync_down_logs=False)
 
     def _handle_preemption(self, replica_id: int) -> None:
         logger.info(f'Beginning handle for preempted replica {replica_id}.')
@@ -693,7 +770,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # initial_delay_seconds is not supported. We should add it
                 # later when we support `sky serve update`.
                 if info.status_property.is_scale_down_succeeded(
-                        self._initial_delay_seconds):
+                        self._get_initial_delay_seconds(info.version)):
                     # This means the cluster is deleted due to
                     # a scale down or the cluster is recovering
                     # from preemption. Delete the replica info
@@ -705,6 +782,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                         removal_reason = 'normally'
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
+                # Don't keep failed record for version mismatch replicas,
+                # since user should fixed the error before update.
+                elif info.version != self.latest_version:
+                    serve_state.remove_replica(self._service_name, replica_id)
+                    logger.info(
+                        f'Old replica {replica_id} (version {info.version}) '
+                        f'removed from the replica table.')
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -799,8 +883,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 replica_to_probe.append(
                     f'replica_{info.replica_id}(url={info.url})')
                 probe_futures.append(
-                    pool.apply_async(info.probe,
-                                     (self._readiness_path, self._post_data)))
+                    pool.apply_async(info.probe, (self._get_readiness_path(
+                        info.version), self._get_post_data(info.version))))
             logger.info(f'Replicas to probe: {", ".join(replica_to_probe)}')
 
             # Since futures.as_completed will return futures in the order of
@@ -877,9 +961,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                                 f'{_CONSECUTIVE_FAILURE_THRESHOLD_TIMEOUT}s). '
                                 'Skipping.')
                     else:
+                        initial_delay_seconds = self._get_initial_delay_seconds(
+                            info.version)
                         current_delay_seconds = (probe_time -
                                                  info.first_not_ready_time)
-                        if current_delay_seconds > self._initial_delay_seconds:
+                        if current_delay_seconds > initial_delay_seconds:
                             logger.info(
                                 f'Replica {info.replica_id} is not ready and '
                                 'exceeding initial delay seconds. Terminating '
@@ -890,7 +976,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                             logger.info(f'Replica {info.replica_id} is not '
                                         'ready but within initial delay '
                                         f'seconds ({current_delay_seconds}s '
-                                        f'/ {self._initial_delay_seconds}s). '
+                                        f'/ {initial_delay_seconds}s). '
                                         'Skipping.')
                 serve_state.add_or_update_replica(self._service_name,
                                                   info.replica_id, info)
@@ -918,3 +1004,27 @@ class SkyPilotReplicaManager(ReplicaManager):
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
+
+    #########################################
+    # SkyServe Update and replica versioning. #
+    #########################################
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       mixed_replica_versions: bool,
+                       task_yaml_path: str) -> None:
+        self.version2spec[version] = spec
+        self.latest_version = version
+        self.mixed_replica_versions = mixed_replica_versions
+        self._task_yaml_path = task_yaml_path
+
+    def get_latest_version(self) -> int:
+        return self.latest_version
+
+    def _get_readiness_path(self, version: int) -> str:
+        return self.version2spec[version].readiness_path
+
+    def _get_post_data(self, version: int) -> Optional[Dict[str, Any]]:
+        return self.version2spec[version].post_data
+
+    def _get_initial_delay_seconds(self, version: int) -> int:
+        return self.version2spec[version].initial_delay_seconds

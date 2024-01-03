@@ -139,6 +139,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         service_name,
         controller_job_id=job_id,
         policy=service_spec.policy_str(),
+        version=constants.INITIAL_VERSION,
         requested_resources_str=backend_utils.get_task_resources_str(task),
         status=serve_state.ServiceStatus.CONTROLLER_INIT)
     # Directly throw an error here. See sky/serve/api.py::up
@@ -159,7 +160,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # don't want the new file mounts to overwrite the old one, so we
     # sync to a tmp file first and then copy it to the final name
     # if there is no name conflict.
-    task_yaml = serve_utils.generate_task_yaml_file_name(service_name)
+    task_yaml = serve_utils.generate_task_yaml_file_name(
+        service_name, constants.INITIAL_VERSION)
     shutil.copy(tmp_task_yaml, task_yaml)
 
     # Generate load balancer log file name.
