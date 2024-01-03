@@ -61,7 +61,7 @@ def _handle_signal(service_name: str) -> None:
     raise error_type(f'User signal received: {user_signal.value}')
 
 
-def _cleanup_storage(task_yaml: str) -> bool:
+def cleanup_storage(task_yaml: str) -> bool:
     """Clean up the storage for the service.
 
     Args:
@@ -114,7 +114,7 @@ def _cleanup(service_name: str, task_yaml: str) -> bool:
                                               info)
             failed = True
             logger.error(f'Replica {info.replica_id} failed to terminate.')
-    success = _cleanup_storage(task_yaml)
+    success = cleanup_storage(task_yaml)
     if not success:
         failed = True
     return failed
@@ -132,7 +132,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     assert task.service is not None, task
     service_spec = task.service
     if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
-        _cleanup_storage(tmp_task_yaml)
+        cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Max number of services reached.')
     success = serve_state.add_service(
@@ -145,7 +145,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
-        _cleanup_storage(tmp_task_yaml)
+        cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Service {service_name} already exists.')
 
