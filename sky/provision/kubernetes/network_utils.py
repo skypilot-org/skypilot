@@ -168,13 +168,14 @@ def ingress_controller_exists(ingress_class_name: str = 'nginx') -> bool:
 
 
 def get_ingress_external_ip_and_ports(
-        namespace: str) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+    namespace: str = 'ingress-nginx'
+) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
     """Returns external ip and ports for the ingress controller."""
     core_api = kubernetes.core_api()
     ingress_services = [
         item for item in core_api.list_namespaced_service(
             namespace, _request_timeout=kubernetes.API_TIMEOUT).items
-        if item.spec.type == 'LoadBalancer'
+        if item.metadata.name == 'ingress-nginx-controller'
     ]
     if len(ingress_services) == 0:
         return (None, None)

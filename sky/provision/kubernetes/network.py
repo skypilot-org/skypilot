@@ -197,8 +197,7 @@ def _query_ports_for_ingress(
     cluster_name_on_cloud: str,
     ports: List[int],
 ) -> Dict[int, List[common.Endpoint]]:
-    ingress_details = network_utils.get_ingress_external_ip_and_ports(
-        'ingress-nginx')
+    ingress_details = network_utils.get_ingress_external_ip_and_ports()
     external_ip, external_ports = ingress_details
     if external_ip is None:
         return {}
