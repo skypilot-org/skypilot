@@ -1316,7 +1316,8 @@ def test_docker_preinstalled_package(generic_cloud: str):
         'docker_with_preinstalled_package',
         [
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id docker:nginx',
-            f'sky exec {name} "nginx -V" | grep SUCCEEDED',
+            f'sky exec {name} "nginx -V"',
+            f'sky logs {name} 1 --status',
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
@@ -1643,7 +1644,7 @@ def test_autostop(generic_cloud: str):
             f'sky status | grep {name} | grep "1m"',
 
             # Ensure the cluster is not stopped early.
-            'sleep 30',
+            'sleep 20',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
@@ -2102,7 +2103,7 @@ def test_spot_recovery_gcp():
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 100',
+            'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
@@ -2188,7 +2189,7 @@ def test_spot_pipeline_recovery_gcp():
             # separated by `-`.
             (f'SPOT_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'-\' -f2 | rev`;{terminate_cmd}'),
-            'sleep 100',
+            'sleep 60',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
@@ -2408,7 +2409,7 @@ def test_spot_cancellation_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             terminate_cmd,
-            'sleep 100',
+            'sleep 80',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             _SPOT_CANCEL_WAIT.format(job_name=f'{name}-3'),
             'sleep 5',

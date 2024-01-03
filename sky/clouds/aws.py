@@ -112,6 +112,9 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'

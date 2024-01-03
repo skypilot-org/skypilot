@@ -61,11 +61,46 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
+
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: [Deprecated] cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
+
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -696,3 +731,9 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
+        return state

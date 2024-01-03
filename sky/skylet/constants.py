@@ -44,7 +44,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # e.g., when we add new events to skylet, or we fix a bug in skylet.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '4'
+SKYLET_VERSION = '5'
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky spot dashboard`-related
