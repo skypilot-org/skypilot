@@ -991,7 +991,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                         del self.version2spec[version]
                         service.cleanup_storage(self.version2yaml[version])
                         del self.version2yaml[version]
-                    # self.oldest_version will be cleaned in serve down
+                    # newest version will be cleaned in serve down
                     self.oldest_version = oldest_version
 
             except Exception as e:  # pylint: disable=broad-except
