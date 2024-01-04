@@ -649,10 +649,6 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         if replica_id in self._launch_process_pool:
             p = self._launch_process_pool[replica_id]
-            # Use keyboard interrupt here since sky.launch has great
-            # handling for it
-            # Edge case: sky.launched finished after the
-            # process_pool_refresher terminates
             if p.is_alive():
                 assert p.pid is not None
                 p.terminate()
