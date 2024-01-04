@@ -95,7 +95,7 @@ Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`)
                 ghcr.io/huggingface/text-generation-inference \
                 --model-id lmsys/vicuna-13b-v1.5
 
-Running :code:`sky serve up service.yaml` will deploy the service to the cloud with the best price/performance ratio. Use :code:`sky serve status` to check the status of the service:
+Running :code:`sky serve up service.yaml` will deploy the service to the cloud with the best price/performance ratio. Once it is deployed, use :code:`sky serve status` to check the status of the service:
 
 .. tab-set::
 
@@ -135,7 +135,7 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
         .. code-block:: console
 
-            $ curl -L 44.201.121.241:30001/v1/chat/completions \
+            $ curl -L 3.83.159.229:30001/v1/chat/completions \
                 -X POST \
                 -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
                 -H 'Content-Type: application/json'
