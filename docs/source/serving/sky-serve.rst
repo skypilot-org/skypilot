@@ -124,7 +124,7 @@ Use :code:`sky serve status` to check the status of the service:
 
 If you see the :code:`STATUS` column becomes :code:`READY`, then the service is ready to accept traffic!
 
-Simply ``curl -L`` the service endpoint --- which automatically load-balances across the two replicas:
+Simply ``curl -L`` the service endpoint, which automatically load-balances across the two replicas:
 
 .. tab-set::
 
