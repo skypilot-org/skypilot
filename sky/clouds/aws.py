@@ -462,7 +462,7 @@ class AWS(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
 
         dependency_installation_hints = (
-            'AWS dependency is not installed properly. '
+            'AWS dependencies are not installed properly. '
             'Run the following commands:'
             f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
             f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
