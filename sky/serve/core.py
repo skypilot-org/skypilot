@@ -68,11 +68,16 @@ def up(
                 logger.info(f'{resource} use_spot will be override to True, '
                             'because spot placer is enabled.')
 
-    # TODO(MaoZiming): only support multiple zones and regions.
-    requested_cloud: Optional['clouds.Cloud'] = None
-    service_port: Optional[int] = None
-    port_str: Optional[str] = None
     for requested_resources in task.resources:
+        first_resource_dict = list(task.resources)[0].__dict__
+        requested_resources_dict = requested_resources.__dict__
+        for key in ['region', 'zone', 'cloud']:
+            first_resource_dict.pop(key)
+            requested_resources_dict.pop(key)
+        if first_resource_dict != requested_resources_dict:
+            raise ValueError(
+                'Require multiple resources to have the same fields '
+                'except zones/regions/clouds.')
         if requested_resources.ports is None or len(
                 requested_resources.ports) != 1:
             with ux_utils.print_exception_no_traceback():
@@ -80,30 +85,11 @@ def up(
                     'Must only specify one port in resources. Each replica '
                     'will use the port specified as application ingress port.')
         service_port_str = requested_resources.ports[0]
-        if port_str is not None and service_port_str != port_str:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify same port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        port_str = service_port_str
         if not service_port_str.isdigit():
             # For the case when the user specified a port range like 10000-10010
             raise ValueError(f'Port {service_port_str!r} is not a valid port '
                              'number. Please specify a single port instead. '
                              f'Got: {service_port_str!r}')
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            raise ValueError(
-                f'Got multiple ports: {service_port} and {resource_port} '
-                'in different resources. Please specify single port instead.')
-        if requested_cloud is None:
-            requested_cloud = requested_resources.cloud
-        if requested_cloud != requested_resources.cloud:
-            raise ValueError(f'Got multiple clouds: {requested_cloud} and '
-                             f'{requested_resources.cloud} in different '
-                             'resources. Please specify single cloud instead.')
 
     controller_utils.maybe_translate_local_file_mounts_and_sync_up(task,
                                                                    path='serve')
@@ -146,6 +132,7 @@ def up(
         controller_exist = (
             global_user_state.get_cluster_from_name(controller_name)
             is not None)
+        requested_cloud = list(task.resources)[0].cloud
         controller_cloud = (requested_cloud if not controller_exist and
                             controller_resources.cloud is None else
                             controller_resources.cloud)
