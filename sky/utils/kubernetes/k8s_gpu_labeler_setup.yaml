@@ -57,12 +57,6 @@ data:
     from kubernetes import client
     from kubernetes import config
     
-    allowed_gpu_names = [
-        'A100', 'A10G', 'K80', 'M60', 'T4', 'T4g', 'V100', 'A10', 'A100-80GB',
-        'P100', 'P40', 'P4', 'L4'
-    ]
-    
-    
     def get_gpu_name() -> Optional[str]:
         try:
             result = subprocess.run(
@@ -98,11 +92,9 @@ data:
     def main():
         gpu_name = get_gpu_name()
         if gpu_name:
-            for allowed_name in allowed_gpu_names:
-                if allowed_name.lower() in gpu_name.lower():
-                    label_node(allowed_name.lower())
+            label_node(allowed_name.lower())
         else:
-            print('No supported GPU detected.')
+            print('No GPU detected. Try running nvidia-smi in the container.')
     
     
     if __name__ == '__main__':

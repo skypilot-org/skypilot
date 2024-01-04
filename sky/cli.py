@@ -61,7 +61,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
-from sky.skylet import constants
+from sky.skylet import constants, log_lib
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
@@ -5220,41 +5220,57 @@ def local_up(gpus: bool):
     message_str = 'Creating local cluster{}...'
     message_str = message_str.format((' with GPU support (this may take up '
                                       'to 15 minutes)') if gpus else '')
-    # TODO(romilb): we should update the safe_status message based on what step
-    #  the create_cluster.sh script is on (e.g., "Creating Kind cluster",
-    #  "Setting up Nvidia container runtime", "Running GPU labelling", etc.)
-    with rich_utils.safe_status(message_str):
-        path_to_package = os.path.dirname(os.path.dirname(__file__))
-        up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                      'create_cluster.sh')
-        # Get directory of script and run it from there
-        cwd = os.path.dirname(os.path.abspath(up_script_path))
-        run_command = up_script_path + ' --gpus' if gpus else up_script_path
-        # Run script and don't print output
-        try:
-            subprocess_utils.run(run_command, cwd=cwd, capture_output=True)
-            cluster_created = True
-        except subprocess.CalledProcessError as e:
-            # Check if return code is 100
-            if e.returncode == 100:
-                click.echo('\nLocal cluster already exists. '
-                           'Run `sky local down` to delete it.')
-            else:
-                stderr = e.stderr.decode('utf-8')
-                # Kind always writes to stderr even if it succeeds.
-                # If the failure happens after the cluster is created, we need
-                # to strip all stderr of "No kind clusters found.", which is
-                # printed when querying with kind get clusters.
-                stderr = stderr.replace('No kind clusters found.\n', '')
-                click.echo(f'\nFailed to create local cluster.\n{stderr}')
-                if env_options.Options.SHOW_DEBUG_INFO.get():
-                    stdout = e.stdout.decode('utf-8')
-                    click.echo(f'Logs:\n{stdout}')
-                sys.exit(1)
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                  'create_cluster.sh')
+
+    # Get directory of script and run it from there
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+    run_command = up_script_path + ' --gpus' if gpus else up_script_path
+    run_command = shlex.split(run_command)
+
+    # Setup logging paths
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                            run_timestamp,
+                            'local_up.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    click.echo(message_str)
+    style = colorama.Style
+    click.echo('To view detailed progress: '
+               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+
+    returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
+                                                      log_path=log_path,
+                                                      require_outputs=True,
+                                                      stream_logs=False,
+                                                      line_processor=log_utils.SkyLocalUpLineProcessor(),
+                                                      cwd=cwd)
+
+    # Kind always writes to stderr even if it succeeds.
+    # If the failure happens after the cluster is created, we need
+    # to strip all stderr of "No kind clusters found.", which is
+    # printed when querying with kind get clusters.
+    stderr = stderr.replace('No kind clusters found.\n', '')
+
+    if returncode == 0:
+        cluster_created = True
+    elif returncode == 100:
+        click.echo('Local cluster already exists. '
+                   'Run `sky local down` to delete it.')
+    else:
+        click.echo('Failed to create local cluster. '
+                   f'Full log: {tail_cmd}'
+                   f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+        sys.exit(1)
     # Run sky check
-    with rich_utils.safe_status('Running sky check...'):
+    with rich_utils.safe_status('[bold cyan]Running sky check...'):
         sky_check.check(quiet=True)
     if cluster_created:
+        gpu_message = ' and GPU support' if gpus else ''
+        gpu_hint = ('\nHint: To see the list of GPUs in the cluster, '
+                    'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
         # Get number of CPUs
         p = subprocess_utils.run(
             'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
@@ -5264,10 +5280,12 @@ def local_up(gpus: bool):
             click.echo('Warning: Local cluster has less than 2 CPUs. '
                        'This may cause issues with running tasks.')
         click.echo(
-            'Local Kubernetes cluster created successfully with '
-            f'{num_cpus} CPUs. `sky launch` can now run tasks locally.'
+            f'{style.BRIGHT}Local Kubernetes cluster created successfully with '
+            f'{num_cpus} CPUs{gpu_message}. `sky launch` can now run tasks '
+            f'locally.{style.RESET_ALL}'
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
+            f'{gpu_hint}'
         )
 
 
