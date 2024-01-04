@@ -364,8 +364,8 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         super().__init__(spec)
         self.spot_placer: 'spot_policy.SpotPlacer' = (
             spot_policy.SpotPlacer.from_spec(spec))
-        self.min_on_demand_replicas: int = (
-            spec.min_on_demand_replicas if spec.min_on_demand_replicas
+        self.extra_on_demand_replicas: int = (
+            spec.extra_on_demand_replicas if spec.extra_on_demand_replicas
             is not None else constants.AUTOSCALER_DEFAULT_MIN_ON_DEMAND)
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
@@ -403,8 +403,8 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
 
         num_to_provision = (self.target_num_replicas + self.num_overprovision)
         num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
-        if num_alive_on_demand < self.min_on_demand_replicas:
-            num_demand_to_scale_up = (self.min_on_demand_replicas -
+        if num_alive_on_demand < self.extra_on_demand_replicas:
+            num_demand_to_scale_up = (self.extra_on_demand_replicas -
                                       num_alive_on_demand)
         if num_ready_spot + num_alive_on_demand < num_to_provision:
             num_demand_to_scale_up = max(
@@ -413,7 +413,7 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
                      num_to_provision - num_ready_spot) - num_alive_on_demand))
 
         elif (num_ready_spot + num_alive_on_demand > num_to_provision and
-              num_alive_on_demand > self.min_on_demand_replicas):
+              num_alive_on_demand > self.extra_on_demand_replicas):
             num_demand_to_scale_down = (num_ready_spot + num_alive_on_demand -
                                         num_to_provision)
 

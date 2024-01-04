@@ -49,7 +49,7 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
-# Autoscaler default values for min_on_demand_replicas
+# Autoscaler default values for extra_on_demand_replicas
 AUTOSCALER_DEFAULT_MIN_ON_DEMAND = 0
 # Autoscaler default values for num_overprovision
 AUTOSCALER_DEFAULT_NUM_OVERPROVISION = 0

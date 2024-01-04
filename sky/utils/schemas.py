@@ -350,7 +350,7 @@ def get_service_schema():
                     'init_replicas': {
                         'type': 'integer',
                     },
-                    'min_on_demand_replicas': {
+                    'extra_on_demand_replicas': {
                         'type': 'integer',
                     },
                     'upscale_delay_seconds': {
