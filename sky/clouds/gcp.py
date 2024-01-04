@@ -702,7 +702,7 @@ class GCP(clouds.Cloud):
         import google.auth
         import googleapiclient.discovery
 
-        from sky.skylet.providers.gcp import constants
+        from sky.provision.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
