@@ -1,4 +1,5 @@
 """Constants used by the GCP provisioner."""
+from sky import skypilot_config
 
 VERSION = 'v1'
 # Using v2 according to
@@ -180,6 +181,11 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.get',
     'resourcemanager.projects.getIamPolicy',
 ]
+# If specifying custom VPC, permissions to modify network are not necessary
+# unless opening ports (e.g., via `resources.ports`).
+if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
+    remove = ("compute.firewalls.create", "compute.firewalls.delete")
+    VM_MINIMAL_PERMISSIONS = [p for p in VM_MINIMAL_PERMISSIONS if p not in remove]
 
 TPU_MINIMAL_PERMISSIONS = [
     'tpu.nodes.create',
