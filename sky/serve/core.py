@@ -62,18 +62,14 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
-    if task.service.spot_placer is not None:
-        for resource in list(task.resources):
-            if resource.use_spot is not None and not resource.use_spot:
-                logger.info(f'{resource} use_spot will be override to True, '
-                            'because spot placer is enabled.')
-
     for requested_resources in task.resources:
         first_resource_dict = list(task.resources)[0].__dict__
         requested_resources_dict = requested_resources.__dict__
-        for key in ['region', 'zone', 'cloud']:
-            first_resource_dict.pop(key)
-            requested_resources_dict.pop(key)
+        for key in ['_region', '_zone', '_cloud']:
+            if key in first_resource_dict:
+                first_resource_dict.pop(key)
+            if key in requested_resources_dict:
+                requested_resources_dict.pop(key)
         if first_resource_dict != requested_resources_dict:
             raise ValueError(
                 'Require multiple resources to have the same fields '
