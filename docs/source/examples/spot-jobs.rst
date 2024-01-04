@@ -316,7 +316,7 @@ This is useful for running a sequence of jobs that depend on each other, e.g., t
 This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
 
 .. note::
-  A job is either a single task or a pipeline of tasks, submitted by :code:`sky spot launch`.
+  A spot job is either a single task or a pipeline of tasks. A spot job is submitted by :code:`sky spot launch`.
   
   All tasks in a pipeline will be run on spot instances.
 
