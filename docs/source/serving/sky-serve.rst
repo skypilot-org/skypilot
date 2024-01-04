@@ -54,6 +54,7 @@ Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`)
 
         .. code-block:: yaml
 
+            # service.yaml
             service:
               readiness_probe: /v1/models
               replicas: 2
@@ -79,6 +80,7 @@ Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`)
 
         .. code-block:: yaml
 
+            # service.yaml
             service:
               readiness_probe: /health
               replicas: 2
@@ -93,7 +95,7 @@ Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`)
                 ghcr.io/huggingface/text-generation-inference \
                 --model-id lmsys/vicuna-13b-v1.5
 
-Use :code:`sky serve status` to check the status of the service:
+Running :code:`sky serve up service.yaml` will deploy the service to the cloud with the best price/performance ratio. Use :code:`sky serve status` to check the status of the service:
 
 .. tab-set::
 
