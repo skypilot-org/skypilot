@@ -3,7 +3,7 @@
 Serving Models
 ==============
 
-SkyServe is SkyPilot's model serving library. SkyServe (short for SkyPilot Serving) takes an existing serving
+SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
