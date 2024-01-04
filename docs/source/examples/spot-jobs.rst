@@ -313,7 +313,12 @@ Spot Pipeline
 
 Spot Pipeline is a feature that allows you to submit a spot job that contains a sequence of spot tasks running one after another.
 This is useful for running a sequence of jobs that depend on each other, e.g., training a model and then running inference on it.
-This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keep the burden of managing the tasks off the user. 
+This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
+
+.. note::
+  A job is submitted by :code:`sky spot launch`, it can be a single task or a pipeline of tasks.
+  
+  All tasks in a pipeline will be run on spot instances. SkyPilot do not support using on-demand instances for pipelines yet.
 
 To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
 
@@ -322,6 +327,7 @@ To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here 
   name: pipeline
 
   ---
+  
   name: train
 
   resources:
