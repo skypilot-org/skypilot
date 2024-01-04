@@ -4359,7 +4359,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     - ``CONTROLLER_INIT``: The controller is initializing.
 
     - ``REPLICA_INIT``: The controller has finished initializing, and there are
-      no available replicas for now. This also indicates that no replica failure
+      no ready replicas for now. This also indicates that no replica failure
       has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or is in an abnormal
