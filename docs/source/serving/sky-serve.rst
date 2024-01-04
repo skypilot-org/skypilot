@@ -79,8 +79,8 @@ Here is a simple example of serving an LLM model on TGI and vLLM with SkyServe:
 
             # Fields below describe each replica.
             resources:
-              ports: 8000
-              accelerators: A100-80GB:2
+              ports: 8080
+              accelerators: A100:1
 
             setup: |
               conda create -n vllm python=3.9 -y
@@ -90,8 +90,8 @@ Here is a simple example of serving an LLM model on TGI and vLLM with SkyServe:
             run: |
               conda activate vllm
               python -m vllm.entrypoints.openai.api_server \
-                --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
-                --host 0.0.0.0 --port 8000 --tensor-parallel-size 2
+                --model lmsys/vicuna-13b-v1.5 \
+                --host 0.0.0.0 --port 8080
 
 Use :code:`sky serve status` to check the status of the service:
 
