@@ -35,7 +35,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         status TEXT,
         uptime INTEGER DEFAULT NULL,
         policy TEXT DEFAULT NULL,
-        version INTEGER DEFAULT NULL,
         auto_restart INTEGER DEFAULT NULL,
         requested_resources BLOB DEFAULT NULL)""")
     cursor.execute("""\
@@ -44,7 +43,13 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         replica_id INTEGER,
         replica_info BLOB,
         PRIMARY KEY (service_name, replica_id))""")
-
+    # For backward compatibility.
+    # TODO(MaoZiming): Remove this function after all users have migrated to
+    # the latest version of SkyServe.
+    # Add version column to services table
+    db_utils.add_column_to_table(
+        cursor, conn, 'services', 'version',
+        f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
     conn.commit()
 
 
@@ -272,7 +277,7 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, version, _, requested_resources,
+     uptime, policy, _, requested_resources, version,
      requested_resources_str) = row[:11]
     return {
         'name': name,
