@@ -22,6 +22,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -136,16 +137,17 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Optional[provision_common.ProvisionRecord]:
+) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
     original_config = common_utils.read_yaml(cluster_yaml)
+    head_node_type = original_config['head_node_type']
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         docker_config=original_config.get('docker', {}),
         # NOTE: (might be a legacy issue) we call it
         # 'ray_head_default' in 'gcp-ray.yaml'
-        node_config=original_config['available_node_types']['ray.head.default']
+        node_config=original_config['available_node_types'][head_node_type]
         ['node_config'],
         count=num_nodes,
         tags={},
@@ -179,7 +181,7 @@ def bulk_provision(
                              cluster_name,
                              terminate=terminate,
                              provider_config=original_config['provider'])
-            return None
+            raise
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
@@ -319,11 +321,14 @@ def _post_provision_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
+    config_from_yaml = common_utils.read_yaml(cluster_yaml)
+    provider_config = config_from_yaml.get('provider')
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
-                                              cluster_name.name_on_cloud)
+                                              cluster_name.name_on_cloud,
+                                              provider_config=provider_config)
 
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
@@ -343,16 +348,8 @@ def _post_provision_setup(
                            'Could not find any head instance.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    config_from_yaml = common_utils.read_yaml(cluster_yaml)
     ip_list = cluster_info.get_feasible_ips()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-
-    # TODO(suquark): Handle TPU VMs when dealing with GCP later.
-    # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-    #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-    #                 f'{style.RESET_ALL}')
-    #     RetryingVmProvisioner._tpu_pod_setup(
-    #         None, handle.cluster_yaml, handle)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
@@ -416,16 +413,19 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
+        ray_port = constants.SKY_REMOTE_RAY_PORT
         if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
             # Check if head node Ray is alive
-            returncode = head_runner.run(
+            returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                stream_logs=False)
+                stream_logs=False,
+                require_outputs=True)
             if returncode:
                 logger.info('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
+                ray_port = common_utils.decode_payload(stdout)['ray_port']
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:
@@ -450,6 +450,11 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
+                # Pass the ray_port to worker nodes for backward compatibility
+                # as in some existing clusters the ray_port is not dumped with
+                # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
+                # from the head node for worker nodes.
+                ray_port=ray_port,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
 

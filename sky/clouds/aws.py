@@ -106,17 +106,26 @@ class AWS(clouds.Cloud):
     _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if resources.use_spot:
+            return {
+                clouds.CloudImplementationFeatures.STOP:
+                    ('Stopping spot instances is currently not supported on'
+                     f' {cls._REPR}.'),
+            }
+        return {}
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -463,7 +472,7 @@ class AWS(clouds.Cloud):
                 'AWS CLI is not installed properly. '
                 'Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
+                f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
                 f'{cls._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
