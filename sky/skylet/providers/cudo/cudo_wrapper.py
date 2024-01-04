@@ -56,8 +56,9 @@ def set_tags(instance_id: str, tags: Dict):
         api = cudo_api.virtual_machines()
         api.update_vm_metadata(
             cudo_api.project_id(), instance_id,
-            UpdateVMMetadataBody(metadata=tags,
-                                 merge=True))  # TODO (skypilot team) merge or overwrite?
+            UpdateVMMetadataBody(
+                metadata=tags,
+                merge=True))  # TODO (skypilot team) merge or overwrite?
     except ApiException as e:
         raise e
 

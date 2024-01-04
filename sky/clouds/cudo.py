@@ -52,7 +52,7 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-            cls, resources: 'resources_lib.Resources'
+        cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         features = {
             clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
@@ -63,7 +63,7 @@ class Cudo(clouds.Cloud):
                  '`run` section in task.yaml.'),
             clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
                 (f'Custom disk tier is currently not supported on {cls._REPR}.'
-                 ),
+                ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
         }

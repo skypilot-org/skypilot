@@ -101,14 +101,14 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str] = None,
-        region_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        case_sensitive: bool = True,
-        all_regions: bool = False,
+    gpus_only: bool,
+    name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Cudo offering GPUs."""
     return common.list_accelerators_impl('Cudo', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive)
+                                         case_sensitive, all_regions)
