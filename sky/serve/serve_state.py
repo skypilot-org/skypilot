@@ -178,7 +178,8 @@ class ServiceStatus(enum.Enum):
         if sum(status2num[status]
                for status in ReplicaStatus.failed_statuses()) > 0:
             return cls.FAILED
-        if len(replica_statuses) == 0:
+        if (len(replica_statuses) - status2num[ReplicaStatus.FAILED] -
+                status2num[ReplicaStatus.FAILED_CLEANUP] == 0):
             return cls.NO_REPLICA
         return cls.REPLICA_INIT
 

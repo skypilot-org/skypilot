@@ -154,7 +154,7 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
-        if (not self.bootstrap_done or self.target_num_replicas == 0):
+        if not self.bootstrap_done or self.target_num_replicas == 0:
             self.bootstrap_done = True
             return target_num_replicas
         elif target_num_replicas > self.target_num_replicas:

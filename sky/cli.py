@@ -4387,7 +4387,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       please login to the cloud console and double-check
 
     - ``NO_REPLICAS``: The service has no replicas. This usually happens when
-        min_replicas is set to 0.
+        min_replicas is set to 0 and there is no traffic to the system.
 
     Each replica can have one of the following statuses:
 

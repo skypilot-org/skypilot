@@ -88,6 +88,8 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
+            # Reduce autoscaler interval when target_num_replicas = 0.
+            # This will happen when min_replicas = 0 and no traffic.
             if self._autoscaler.target_num_replicas == 0:
                 time.sleep(
                     constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS)
