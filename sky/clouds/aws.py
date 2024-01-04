@@ -478,7 +478,7 @@ class AWS(clouds.Cloud):
             return False, dependency_installation_hints
         try:
             # Checks if aws boto is installed properly
-            # pylint: disable=import-outside-toplevel
+            # pylint: disable=import-outside-toplevel, unused-import
             import boto3
             import botocore
         except ImportError:
