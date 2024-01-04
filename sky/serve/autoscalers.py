@@ -71,7 +71,7 @@ class Autoscaler:
         """
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = spec.max_replicas or spec.min_replicas
-        # Target number of replicas is initialized to min replicas.
+        # Target number of replicas is initialized to min replicas
         # if no `init_replicas` specified.
         self.target_num_replicas: int = (spec.init_replicas
                                          if spec.init_replicas is not None else
@@ -191,10 +191,12 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             self.upscale_counter = self.downscale_counter = 0
 
+        overprovision_str = (
+            f' ({self.target_num_replicas + self.num_overprovision} '
+            'with over-provision)' if self.num_overprovision > 0 else '')
         logger.info(
-            f'Final target number of replicas: {self.target_num_replicas} '
-            f'({self.target_num_replicas + self.num_overprovision} with '
-            f'over-provision), Upscale counter: {self.upscale_counter}/'
+            f'Final target number of replicas: {self.target_num_replicas}'
+            f'{overprovision_str}, Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_consecutive_periods}, '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_consecutive_periods}')
@@ -285,7 +287,14 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             self.spot_placer.handle_preemption(zone)
 
     def _get_spot_resources_override_dict(self) -> Dict[str, Any]:
-        return {'use_spot': True, 'spot_recovery': None}
+        # We have checked before any_of can only be used to
+        # specify multiple zones, regions and clouds.
+        return {
+            'use_spot': True,
+            'spot_recovery': None,
+            'region': None,
+            'any_of': None
+        }
 
     def _scale_spot_instances(
         self, num_launched_spot: int,
@@ -299,16 +308,16 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         num_to_provision = (self.target_num_replicas + self.num_overprovision)
 
         # Scale spot instances.
-        current_considered_zones: List[str] = []
         if num_launched_spot < num_to_provision:
             # Not enough spot instances, scale up.
             # Consult spot_placer for the zone to launch spot instance.
             num_spot_to_scale_up = num_to_provision - num_launched_spot
-            for _ in range(num_spot_to_scale_up):
+            zones = self.spot_placer.select(launched_replica_infos,
+                                            num_spot_to_scale_up)
+            assert len(zones) == num_spot_to_scale_up
+            for spot_idx in range(num_spot_to_scale_up):
                 spot_override = self._get_spot_resources_override_dict()
-                zone = self.spot_placer.select(launched_replica_infos,
-                                               current_considered_zones)
-                current_considered_zones.append(zone)
+                zone = zones[spot_idx]
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
@@ -366,7 +375,7 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
             spot_policy.SpotPlacer.from_spec(spec))
         self.extra_on_demand_replicas: int = (
             spec.extra_on_demand_replicas if spec.extra_on_demand_replicas
-            is not None else constants.AUTOSCALER_DEFAULT_MIN_ON_DEMAND)
+            is not None else constants.AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND)
 
     def _get_on_demand_resources_override_dict(self) -> Dict[str, Any]:
         return {'use_spot': False, 'spot_recovery': None}

@@ -12,7 +12,7 @@ service:
 resources:
   any_of:
   - zone: us-central1-a
-  - zone: us-east1-c
+  - region: us-east1
   ports: 8081
   cloud: gcp
   cpus: 2+

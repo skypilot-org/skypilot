@@ -629,7 +629,7 @@ class Task:
           service: a SkyServiceSpec object.
 
         Returns:
-          self: The current task, with resources set.
+          self: The current task, with service set.
         """
 
         if (service and service.spot_placer is not None):

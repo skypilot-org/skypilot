@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import traceback
+from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
@@ -113,8 +114,9 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
-            request_aggregator = request_data.get('request_aggregator')
-            timestamps = request_aggregator['timestamps']
+            request_aggregator: Dict[str, Any] = request_data.get(
+                'request_aggregator', {})
+            timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests')
             self._autoscaler.collect_request_information(request_aggregator)
             return {

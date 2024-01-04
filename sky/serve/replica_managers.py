@@ -64,23 +64,10 @@ def launch_cluster(task_yaml_path: str,
             or some error happened before provisioning and will happen again
             if retry.
     """
-
-    def delete_if_not_none(config: Dict[str, Any], key: str) -> None:
-        if key in config:
-            del config[key]
-
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         if resources_override is not None:
             resource_config = config.get('resources', {})
-            # Overwrite zone from spot_placer.
-            if 'zone' in resources_override:
-                delete_if_not_none(resource_config, 'region')
-                delete_if_not_none(resource_config, 'zone')
-                if 'any_of' in resource_config:
-                    for any_of_config in resource_config['any_of']:
-                        delete_if_not_none(any_of_config, 'region')
-                        delete_if_not_none(any_of_config, 'zone')
             resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
@@ -177,7 +164,6 @@ def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
-    # TODO(MaoZiming): assume multiple resources share the same port.
     task_resources = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
@@ -623,10 +609,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
 
-    def _terminate_replica(self,
-                           replica_id: int,
-                           sync_down_logs: bool,
-                           delay_in_seconds: int = 0) -> None:
+    def _terminate_replica(self, replica_id: int, sync_down_logs: bool,
+                           delay_in_seconds: int) -> None:
         if replica_id in self._down_process_pool:
             logger.warning(f'Terminate process for replica {replica_id} '
                            'already exists. Skipping.')
@@ -815,7 +799,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if error_in_sky_launch:
                     # Teardown after update replica info since
                     # _terminate_replica will update the replica info too.
-                    self._terminate_replica(replica_id, sync_down_logs=False)
+                    self._terminate_replica(replica_id,
+                                            sync_down_logs=False,
+                                            delay_in_seconds=0)
         for replica_id, p in list(self._down_process_pool.items()):
             if not p.is_alive():
                 logger.info(
@@ -922,7 +908,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.warning(
                     f'Service job for replica {info.replica_id} FAILED. '
                     'Terminating...')
-                self._terminate_replica(info.replica_id, sync_down_logs=True)
+                self._terminate_replica(info.replica_id,
+                                        sync_down_logs=True,
+                                        delay_in_seconds=0)
 
     def _job_status_fetcher(self) -> None:
         """Periodically fetch the service job status of all replicas."""
@@ -1032,7 +1020,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                   info.replica_id, info)
                 if should_teardown:
                     self._terminate_replica(info.replica_id,
-                                            sync_down_logs=True)
+                                            sync_down_logs=True,
+                                            delay_in_seconds=0)
 
     def _replica_prober(self) -> None:
         """Periodically probe replicas."""

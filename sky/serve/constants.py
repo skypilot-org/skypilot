@@ -50,9 +50,11 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
 # Autoscaler default values for extra_on_demand_replicas
-AUTOSCALER_DEFAULT_MIN_ON_DEMAND = 0
+AUTOSCALER_DEFAULT_EXTRA_ON_DEMAND = 0
 # Autoscaler default values for num_overprovision
 AUTOSCALER_DEFAULT_NUM_OVERPROVISION = 0
+# Default autoscaler
+DEFAULT_AUTOSCALER = 'RequestRateAutoscaler'
 
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 

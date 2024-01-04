@@ -63,11 +63,12 @@ def up(
             raise RuntimeError('Service section not found.')
 
     if task.service.spot_placer is not None:
-        for res in list(task.resources):
-            if (res.use_spot is not None and not res.use_spot):
-                logger.info(f'{res} use_spot will be override to True, '
+        for resource in list(task.resources):
+            if resource.use_spot is not None and not resource.use_spot:
+                logger.info(f'{resource} use_spot will be override to True, '
                             'because spot placer is enabled.')
 
+    # TODO(MaoZiming): only support multiple zones and regions.
     requested_cloud: Optional['clouds.Cloud'] = None
     service_port: Optional[int] = None
     port_str: Optional[str] = None

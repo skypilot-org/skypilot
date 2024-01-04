@@ -4323,19 +4323,25 @@ def serve_up(
     with sky.Dag() as dag:
         dag.add(task)
 
+    # task.service.spot_policy will be translated to spot_placer.
     if task.service.spot_placer is not None:
         for resource in list(task.resources):
-            if (resource.zone is not None or resource.region is not None):
-                with ux_utils.print_exception_no_traceback():
-                    logger.info(
-                        f'In {resource}, use_spot=False will be ignored '
-                        'since SkyServe spot policy is enabled.')
-
-            if (resource.use_spot is not None and not resource.use_spot):
+            if resource.use_spot is not None and not resource.use_spot:
                 logger.info(f'{resource} use_spot will be override to True, '
                             'because spot placer is enabled.')
+    if task.service.spot_placer is None:
+        use_spot = False
+        for resource in list(task.resources):
+            if resource.use_spot is not None and resource.use_spot:
+                use_spot = True
+                break
+        if use_spot:
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            logger.info(f'{yellow}SkyServe uses spot but spot_policy is not'
+                        f'specified.{reset}. Consider spot_policy to automate'
+                        'spot management.')
 
-    # TODO(tian): Limit zones to optimize if spot-zone is specified.
     sky.optimize(dag)
 
     if not yes:

@@ -43,7 +43,7 @@ class SpotPlacer:
         return list(cls.REGISTRY.keys())
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               current_considered_zones: List[str]) -> str:
+               num_zones: int) -> List[str]:
         """Select next zone to place spot instance."""
         raise NotImplementedError
 
@@ -102,14 +102,8 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
                 continue
             if info.zone is not None:
                 existing_zones.add(info.zone)
-
-        if info is not None:
-            logger.info(f'Cannot find zone for replica '
-                        f'{info.replica_id}. Skipping adding '
-                        'to existing_zones.')
-        else:
-            logger.info('existing_replicas is empty. '
-                        f'{existing_replicas}')
+            else:
+                logger.error(f'Zone is None for replica {info}')
 
         unvisited_active_zones = [
             zone for zone in self.active_zones() if zone not in existing_zones
@@ -120,16 +114,19 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
         return unvisited_active_zones
 
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
-               current_considered_zones: List[str]) -> str:
+               num_zones: int) -> List[str]:
         # Prevent the case with only one active zones.
+        selected_zones = []
         if (len(self.active_zones()) <= 1 and len(self.preempted_zones()) > 0):
             self.clear_preempted_zones()
         unvisited_active_zones = self._filter_unvisited_active_zones(
             existing_replicas)
-        unvisited_active_zones = [
-            zone for zone in unvisited_active_zones
-            if zone not in current_considered_zones
-        ]
         if unvisited_active_zones:
-            return random.choice(unvisited_active_zones)
-        return random.choice(self.active_zones())
+            selected_zones.extend(
+                random.sample(unvisited_active_zones,
+                              min(num_zones, len(unvisited_active_zones))))
+            num_zones -= len(selected_zones)
+        if num_zones > 0:
+            selected_zones.extend(
+                random.choices(self.active_zones(), k=num_zones))
+        return selected_zones
