@@ -45,28 +45,9 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (`lmsys/vicuna-13b-v1.5`) on vLLM or TGI with SkyServe:
+Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`) on vLLM or TGI with SkyServe:
 
 .. tab-set::
-
-    .. tab-item:: TGI
-        :sync: tgi-tab
-
-        .. code-block:: yaml
-
-            service:
-              readiness_probe: /health
-              replicas: 2
-
-            # Fields below describe each replica.
-            resources:
-              ports: 8080
-              accelerators: A100:1
-
-            run: |
-              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
-                ghcr.io/huggingface/text-generation-inference \
-                --model-id lmsys/vicuna-13b-v1.5 \
 
     .. tab-item:: vLLM
         :sync: vllm-tab
@@ -93,17 +74,28 @@ Here is a simple example of serving an LLM model (`lmsys/vicuna-13b-v1.5`) on vL
                 --model lmsys/vicuna-13b-v1.5 \
                 --host 0.0.0.0 --port 8080
 
-Use :code:`sky serve status` to check the status of the service:
-
-.. tab-set::
-
     .. tab-item:: TGI
         :sync: tgi-tab
 
-        .. image:: ../images/sky-serve-status-tgi.png
-            :width: 800
-            :align: center
-            :alt: sky-serve-status-tgi
+        .. code-block:: yaml
+
+            service:
+              readiness_probe: /health
+              replicas: 2
+
+            # Fields below describe each replica.
+            resources:
+              ports: 8080
+              accelerators: A100:1
+
+            run: |
+              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
+                ghcr.io/huggingface/text-generation-inference \
+                --model-id lmsys/vicuna-13b-v1.5
+
+Use :code:`sky serve status` to check the status of the service:
+
+.. tab-set::
 
     .. tab-item:: vLLM
         :sync: vllm-tab
@@ -112,6 +104,14 @@ Use :code:`sky serve status` to check the status of the service:
             :width: 800
             :align: center
             :alt: sky-serve-status-vllm
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. image:: ../images/sky-serve-status-tgi.png
+            :width: 800
+            :align: center
+            :alt: sky-serve-status-tgi
 
 .. raw:: html
 
@@ -128,19 +128,6 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
 .. tab-set::
 
-    .. tab-item:: TGI
-        :sync: tgi-tab
-
-        .. code-block:: console
-
-            $ curl -L 44.211.131.51:30001/generate \
-                -X POST \
-                -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
-                -H 'Content-Type: application/json'
-
-            # Example output:
-            {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
-
     .. tab-item:: vLLM
         :sync: vllm-tab
 
@@ -153,6 +140,19 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
             # Example output:
             {"id":"cmpl-47ca2e9b5a104cae984643f7309f33c6","object":"chat.completion","created":880,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful assistant here to provide information, answer questions, and engage in conversation to help make your life easier and more enjoyable. I can help you with a variety of tasks, such as setting reminders, providing weather updates, answering trivia, and much more. How can I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":77,"completion_tokens":64}}
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. code-block:: console
+
+            $ curl -L 44.211.131.51:30001/generate \
+                -X POST \
+                -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
 Tutorial: Hello, SkyServe!
 --------------------------
