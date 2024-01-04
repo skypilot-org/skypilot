@@ -185,7 +185,9 @@ VM_MINIMAL_PERMISSIONS = [
 # unless opening ports (e.g., via `resources.ports`).
 if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
     remove = ("compute.firewalls.create", "compute.firewalls.delete")
-    VM_MINIMAL_PERMISSIONS = [p for p in VM_MINIMAL_PERMISSIONS if p not in remove]
+    VM_MINIMAL_PERMISSIONS = [
+        p for p in VM_MINIMAL_PERMISSIONS if p not in remove
+    ]
 
 TPU_MINIMAL_PERMISSIONS = [
     'tpu.nodes.create',

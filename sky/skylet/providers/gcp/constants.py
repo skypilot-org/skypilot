@@ -1,4 +1,5 @@
 from sky import skypilot_config
+
 SKYPILOT_VPC_NAME = "skypilot-vpc"
 
 # Below parameters are from the default VPC on GCP.
