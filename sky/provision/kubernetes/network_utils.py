@@ -193,15 +193,18 @@ def get_ingress_external_ip_and_ports(
     return external_ip, None
 
 
-def get_loadbalancer_ip(namespace: str, service_name: str) -> Optional[str]:
+def get_loadbalancer_ip_and_ports(
+        namespace: str,
+        service_name: str) -> Tuple[Optional[str], Optional[Dict[int, int]]]:
     """Returns the IP address of the load balancer."""
     core_api = kubernetes.core_api()
     service = core_api.read_namespaced_service(
         service_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
 
     if service.status.load_balancer.ingress is None:
-        return None
+        node_ports = {p.port: p.node_port for p in service.spec.ports}
+        return 'localhost', node_ports
 
     ip = service.status.load_balancer.ingress[
         0].ip or service.status.load_balancer.ingress[0].hostname
-    return ip if ip is not None else None
+    return (ip, None) if ip is not None else (None, None)
