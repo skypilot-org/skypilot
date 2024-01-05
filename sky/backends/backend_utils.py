@@ -475,7 +475,6 @@ class SSHConfigHelper(object):
             docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']
-        print("In add cluster")
         if docker_user is not None:
             username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
