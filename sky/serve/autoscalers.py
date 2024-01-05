@@ -379,13 +379,16 @@ class HeteroGPUAutoscaler(Autoscaler):
             info for info in replica_infos if info.is_primary and
             info.is_ready and info.fallback_replica_id_list
         ]
+        logger.info(f'fallback_scale_down_sync(ready_primary_replica_infos): {ready_primary_replica_infos}')
         for info in ready_primary_replica_infos:
             fallback_replica_id_to_terminate = info.fallback_replica_id_list
+            logger.info(f'fallback_scale_down_sync(fallback_replica_id_to_terminate): {fallback_replica_id_to_terminate}')
             for replica_id in fallback_replica_id_to_terminate:
                 replica_manager.scale_down(replica_id)
                 info.fallback_replica_id_list.remove(replica_id)
                 serve_state.add_or_update_replica(service_name, info.replica_id,
                                                   info)
+                logger.info(f'fallback_scale_down_sync(replica_id): {replica_id}')
 
     def evaluate_scaling(
         self,
@@ -393,7 +396,7 @@ class HeteroGPUAutoscaler(Autoscaler):
     ) -> List[Union[AutoscalerDecision, List[AutoscalerDecision]]]:
         ##### Testing
         accel_allocation = solvers.IlpSolver(self.request_rate_dist)
-        logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
+        logger.info(f'evaluate_scaling(self.request_rate_dist): {self.request_rate_dist}')
         logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
         logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
         logger.info('TESTING solver output')
@@ -412,7 +415,7 @@ class HeteroGPUAutoscaler(Autoscaler):
         launched_replica_infos = [
             info for info in replica_infos if info.is_launched
         ]
-
+        logger.info(f'evaluate_scaling(launched_replica_infos): {launched_replica_infos}')
         def _get_replica_infos_to_scale_down(
             info_filter: Callable[['replica_managers.ReplicaInfo'], bool],
             status_order: List['serve_state.ReplicaStatus'],
@@ -437,18 +440,26 @@ class HeteroGPUAutoscaler(Autoscaler):
         # {replica_manager.AcceleratorType.A100: # of A100s needed,
         #  replica_manager.AcceleratorType.A10: # of A10s needed}
         accel_allocation = solvers.IlpSolver(self.request_rate_dist)
-        logger.info('evaluate_scaling(self.request_rate_dist): ', self.request_rate_dist)
+        logger.info(f'evaluate_scaling(self.request_rate_dist): {self.request_rate_dist}')
         logger.info(f'evaluate_scaling(accel_allocation): A10:{accel_allocation[AcceleratorType.A10]}')
         logger.info(f'evaluate_scaling(accel_allocation): A100:{accel_allocation[AcceleratorType.A100]}')
-        logger.info(f'ACTUAL solver output after cooldown period')
+        logger.info('ACTUAL solver output after cooldown period')
 
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
         for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
             num_alive_accel = len([
                 info for info in launched_replica_infos
-                if info.accelerator == accelerator
+                if info.accelerator == accelerator and info.is_primary
             ])
+            
+            num_alive_accel_dict = [
+                info.to_info_dict(
+                    with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+                for info in num_alive_accel
+            ]
+            logger.info(f'evaluate_scaling(num_alive_accel_dict): {num_alive_accel_dict}')
+            
             if accelerator in accel_allocation and accel_allocation[accelerator] > 0:
                 diff_accel_num = num_alive_accel - accel_allocation[accelerator]
                 # Need to scale up
@@ -494,13 +505,25 @@ class HeteroGPUAutoscaler(Autoscaler):
                             scale_down_decision_order(),
                             num_limit=diff_accel_num,
                         ))
-   
+                all_replica_infos_to_scale_down_dicts = [
+                    info.to_info_dict(
+                        with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+                    for info in all_replica_infos_to_scale_down
+                ]
+        logger.info(f'evaluate_scaling(all_replica_infos_to_scale_down_dicts): {all_replica_infos_to_scale_down_dicts}')
+
         # Need to make sure to put down the fallback replicas
         # if the primary replica is set to be down.
         # Note: We scale down the replica candidates from the previous
         # call the evaluate_scaling. This allows a delayed scale down
         # operation mitigating the time discrepancy occurring by the time taken
         # to launch with scale up operation.
+        scale_down_candidates_dicts = [
+            info.to_info_dict(
+                with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+            for info in self.scale_down_candidates
+        ]
+        logger.info(f'Before evaluate_scaling(scale_down_candidates_dicts): {scale_down_candidates_dicts}')
         for info in self.scale_down_candidates:
             decision = self._get_autoscaler_decision(
                 AutoscalerDecisionOperator.SCALE_DOWN,
@@ -511,9 +534,33 @@ class HeteroGPUAutoscaler(Autoscaler):
                     decision = self._get_autoscaler_decision(
                         AutoscalerDecisionOperator.SCALE_DOWN,
                         replica_id=replica_id)
+                    logger.info(f'evaluate_scaling(info): {info}')
+                    logger.info(f'evaluate_scaling(info.fallback_replica_id_list): {info.fallback_replica_id_list}')
                     scaling_decisions.append(decision)
 
-        self.scale_down_candidates = all_replica_infos_to_scale_down[:]
+        # The replicas being terminated this interval should not be added
+        # to the scale down candidate list. This sifting is necessary as the
+        # solver may output the same GPU allocation as the previous interval
+        # which results into a same output to all_replica_infos_to_scale_down
+        # from the previous interval.
+        down_set = set()
+        for decision in scaling_decisions:
+            if (not isinstance(decision, list) and
+                decision.operator == AutoscalerDecisionOperator.SCALE_DOWN):
+                down_set.add(decision.target)
+        logger.info(f'evaluate_scaling(down_set): {down_set}')
+        self.scale_down_candidates = []
+        for info in all_replica_infos_to_scale_down:
+            if info.replica_id not in down_set:
+                self.scale_down_candidates.append(info)
+
+        #self.scale_down_candidates = all_replica_infos_to_scale_down[:]
+        scale_down_candidates_dicts = [
+            info.to_info_dict(
+                with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+            for info in self.scale_down_candidates
+        ]
+        logger.info(f'After evaluate_scaling(scale_down_candidates_dicts): {scale_down_candidates_dicts}')
         
         if not scaling_decisions:
             logger.info('No scaling needed.')

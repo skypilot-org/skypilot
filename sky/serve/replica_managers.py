@@ -150,7 +150,7 @@ def terminate_cluster(cluster_name: str,
     time.sleep(delay_in_s)
     retry_cnt = 0
     backoff = common_utils.Backoff()
-    logger.info("terminate_cluster(cluster_name): ", cluster_name)
+    logger.info(f"terminate_cluster(cluster_name): {cluster_name}")
     while True:
         retry_cnt += 1
         try:
@@ -188,6 +188,7 @@ def _get_resources_ports(task_yaml: str) -> str:
 
 def _get_accelerator_override(
         task_yaml: str, resources_override: Optional[Dict[str, Any]]):
+    logger.info(f'_get_accelerator_override(resources_override): {resources_override}')
     if resources_override is not None:
         accelerators_override = resources_override.get('accelerators', None)
         if accelerators_override is not None:
@@ -202,6 +203,7 @@ def _get_accelerator_override(
     task = sky.Task.from_yaml(task_yaml)
     assert len(task.resources) == 1, task
     task_resources = list(task.resources)[0]
+    logger.info(f'_get_accelerator_override(task_resources.accelerators): {task_resources.accelerators}')
     ### TESTING
     if 'A10' in task_resources.accelerators:
         return AcceleratorType.A10
@@ -455,6 +457,10 @@ class ReplicaInfo:
             'status': self.status,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
+            'accelerator': self.accelerator,
+            'is_primary' : self.is_primary,
+            'is_fallback': self.is_fallback,
+            'fallback_replica_id_list':self.fallback_replica_id_list
         }
         if with_handle:
             info_dict['handle'] = self.handle(cluster_record)
@@ -597,12 +603,14 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        ### Testing for heteroGPU
+        max_retry = 30
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
-            args=(self._task_yaml_path, cluster_name, resources_override),
+            args=(self._task_yaml_path, cluster_name, resources_override, max_retry),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         accelerator = _get_accelerator_override(self._task_yaml_path,
@@ -612,6 +620,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             resources_override)
         info = ReplicaInfo(replica_id, cluster_name, replica_port, accelerator,
                            is_primary, is_fallback, fallback_replica_id_list)
+        logger.info(f'_launch_replica(info): {info}')
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -621,6 +630,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         self,
         resources_override: Optional[Dict[str, Any]] = None,) -> int:
         replica_id = self._next_replica_id
+        logger.info(f'scale_up(replica_id):{replica_id}')
+        logger.info(f'scale_up(resources_override):{resources_override}')
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
         return replica_id
