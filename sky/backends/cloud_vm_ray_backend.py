@@ -4038,29 +4038,35 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # TODO (zhwu): Remove this after 0.6.0.
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
-            with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
-                tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                    ['bash', handle.tpu_delete_script],
-                    log_abs_path,
-                    stream_logs=False,
-                    require_outputs=True)
-            if tpu_rc != 0:
-                if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                    logger.info('TPU not found. '
-                                'It should have been deleted already.')
-                elif purge:
-                    logger.warning(
-                        _TEARDOWN_PURGE_WARNING.format(
-                            reason='stopping/terminating TPU',
-                            details=tpu_stderr))
-                else:
-                    raise RuntimeError(
-                        _TEARDOWN_FAILURE_MESSAGE.format(
-                            extra_reason='It is caused by TPU failure.',
-                            cluster_name=common_utils.cluster_name_in_hint(
-                                handle.cluster_name, cluster_name_on_cloud),
-                            stdout=tpu_stdout,
-                            stderr=tpu_stderr))
+            # Only call the deletion script if the cluster config does not
+            # contain TPU node config. Otherwise, the deletion should
+            # already be handled by the new provisioner.
+            config = common_utils.read_yaml(handle.cluster_yaml)
+            tpu_node_config = config['provider'].get('tpu_node')
+            if tpu_node_config is None:
+                with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
+                    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
+                        ['bash', handle.tpu_delete_script],
+                        log_abs_path,
+                        stream_logs=False,
+                        require_outputs=True)
+                if tpu_rc != 0:
+                    if _TPU_NOT_FOUND_ERROR in tpu_stderr:
+                        logger.info('TPU not found. '
+                                    'It should have been deleted already.')
+                    elif purge:
+                        logger.warning(
+                            _TEARDOWN_PURGE_WARNING.format(
+                                reason='stopping/terminating TPU',
+                                details=tpu_stderr))
+                    else:
+                        raise RuntimeError(
+                            _TEARDOWN_FAILURE_MESSAGE.format(
+                                extra_reason='It is caused by TPU failure.',
+                                cluster_name=common_utils.cluster_name_in_hint(
+                                    handle.cluster_name, cluster_name_on_cloud),
+                                stdout=tpu_stdout,
+                                stderr=tpu_stderr))
 
         if (terminate and handle.launched_resources.is_image_managed is True):
             # Delete the image when terminating a "cloned" cluster, i.e.,
