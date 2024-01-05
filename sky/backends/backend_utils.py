@@ -1112,11 +1112,10 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
 
-        # We do not import the module under sky.skylet.providers globally as we
-        # need to avoid importing ray module (extras like skypilot[aws] has
-        # removed the Ray dependency).
+        # Import here to reduce the overhead of importing gcp.config,
+        # when TPU is not requested.
         # pylint: disable=import-outside-toplevel
-        from sky.skylet.providers.gcp import config as gcp_config
+        from sky.provision.gcp import config as gcp_config
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = None
         try:
