@@ -96,7 +96,7 @@ User
 
 .. note::
     
-    For custom VPC users `compute.firewalls.create` and `compute.firewalls.delete` are not necessary unless opening ports via `resources.ports`.
+    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
 
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
