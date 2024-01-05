@@ -1328,8 +1328,8 @@ def get_node_type(node: dict) -> GCPNodeType:
     return GCPNodeType.COMPUTE
 
 
-def create_tpu_node(project_id: str, zone: str,
-                    tpu_node_config: Dict[str, str], vpc_name: str):
+def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
+                    vpc_name: str):
     # Create TPU node.
     # TODO(suquark, zhwu): move this to GCPTPUNodeInstance.
     tpu_name = tpu_node_config['name']
@@ -1407,8 +1407,8 @@ def create_tpu_node(project_id: str, zone: str,
             raise provisioner_err from e
 
 
-def delete_tpu_node(project_id: str, zone: str,
-                    tpu_node_config: Dict[str, str]):
+def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
+                                                                      str]):
     # Delete TPU node.
     tpu_name = tpu_node_config['name']
     try:
