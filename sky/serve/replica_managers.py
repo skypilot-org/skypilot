@@ -30,6 +30,7 @@ from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -194,20 +195,21 @@ def _get_accelerator_override(
         if accelerators_override is not None:
             assert isinstance(accelerators_override, str)
             ### TESTING
-            if 'A10' in accelerators_override:
+            if 'A10G:1' in accelerators_override:
                 return AcceleratorType.A10
-            elif 'A100' in accelerators_override:
+            elif 'A100:1' in accelerators_override:
                 return AcceleratorType.A100
             ######
+            logger.info('_get_accelerator_override(BUGBUGBUG)')
             return accelerators_override
     task = sky.Task.from_yaml(task_yaml)
     assert len(task.resources) == 1, task
     task_resources = list(task.resources)[0]
     logger.info(f'_get_accelerator_override(task_resources.accelerators): {task_resources.accelerators}')
     ### TESTING
-    if 'A10' in task_resources.accelerators:
+    if 'A10G:1' in task_resources.accelerators:
         return AcceleratorType.A10
-    elif 'A100' in task_resources.accelerators:
+    elif 'A100:1' in task_resources.accelerators:
         return AcceleratorType.A100
     ######
     return task_resources.accelerators
@@ -282,12 +284,17 @@ class ReplicaStatusProperty:
         If not, the replica will stay in the replica table permanently to
         notify the user that something is wrong with the user code / setup.
         """
+        logger.info('is_scale_down_succeeded(1)')
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
+            logger.info('is_scale_down_succeeded(2)')
             return False
         if self.sky_down_status != ProcessStatus.SUCCEEDED:
+            logger.info('is_scale_down_succeeded(3)')
             return False
         if (self.first_ready_time is not None and
                 time.time() - self.first_ready_time > initial_delay_seconds):
+            logger.info(f'is_scale_down_succeeded(4)(self.first_ready_time): {self.first_ready_time}')
+            logger.info(f'is_scale_down_succeeded(4)(initial_delay_seconds): {initial_delay_seconds}')
             # If the service is up for more than `initial_delay_seconds`,
             # we assume there is no bug in the user code and the scale down
             # is successful, thus enabling the controller to remove the
@@ -302,11 +309,15 @@ class ReplicaStatusProperty:
             # otherwise we will have a resource leak.
             return True
         if self.user_app_failed:
+            logger.info('is_scale_down_succeeded(5)')
             return False
         if self.preempted:
+            logger.info('is_scale_down_succeeded(6)')
             return True
         if not self.service_ready_now:
+            logger.info('is_scale_down_succeeded(7)')
             return False
+        logger.info(f'is_scale_down_succeeded(8): {self.first_ready_time}')
         return self.first_ready_time is not None
 
     def should_track_service_status(self) -> bool:
@@ -615,12 +626,14 @@ class SkyPilotReplicaManager(ReplicaManager):
         replica_port = _get_resources_ports(self._task_yaml_path)
         accelerator = _get_accelerator_override(self._task_yaml_path,
                                                 resources_override)
+        logger.info(f'_launch_replica(accelerator):{accelerator}')
         is_primary, is_fallback = _get_replica_type(resources_override)
         fallback_replica_id_list = _get_fallback_replica_id_list(
             resources_override)
         info = ReplicaInfo(replica_id, cluster_name, replica_port, accelerator,
                            is_primary, is_fallback, fallback_replica_id_list)
-        logger.info(f'_launch_replica(info): {info}')
+        info_dict = info.to_info_dict(with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+        logger.info(f'_launch_replica(info_dict): {info_dict}')
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -712,6 +725,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
         self._down_process_pool[replica_id] = p
+        logger.info(f'_terminate_replica(self._down_process_pool):{self._down_process_pool}')
 
     def scale_down(self, replica_id: int) -> None:
         self._terminate_replica(replica_id,
@@ -783,6 +797,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # _terminate_replica will update the replica info too.
                     self._terminate_replica(replica_id, sync_down_logs=True)
         for replica_id, p in list(self._down_process_pool.items()):
+            logger.info(f'_refresh_process_pool(replica_id): {replica_id}')
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')

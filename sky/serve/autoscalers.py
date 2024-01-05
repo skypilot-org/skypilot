@@ -311,12 +311,12 @@ class HeteroGPUAutoscaler(Autoscaler):
                 self.request_rate_dist[idx] = len(lst) / self.rps_window_size
 
                 
-        print(
-            f'autoscaler.collect_request_information(timestamps_from_loadbalancer): {timestamps_from_loadbalancer}'
-        )
-        print(
-            f'autoscaler.collect_request_information(self.request_timestamps_distribution): {self.request_timestamps_distribution}'
-        )
+        # print(
+        #     f'autoscaler.collect_request_information(timestamps_from_loadbalancer): {timestamps_from_loadbalancer}'
+        # )
+        #print(
+        #    f'autoscaler.collect_request_information(self.request_timestamps_distribution): {self.request_timestamps_distribution}'
+        #)
         print(
             f'autoscaler.collect_request_information(self.total_request_in_window): {self.total_request_in_window}'
         )
@@ -453,15 +453,25 @@ class HeteroGPUAutoscaler(Autoscaler):
                 if info.accelerator == accelerator and info.is_primary
             ])
             
-            num_alive_accel_dict = [
+            alive_accel = [
+                info for info in launched_replica_infos
+                if info.accelerator == accelerator and info.is_primary
+            ]
+            alive_accel_dict = [
                 info.to_info_dict(
                     with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
-                for info in num_alive_accel
+                for info in alive_accel
             ]
-            logger.info(f'evaluate_scaling(num_alive_accel_dict): {num_alive_accel_dict}')
+            logger.info(f'evaluate_scaling(alive_accel_dict): {alive_accel_dict}')
             
-            if accelerator in accel_allocation and accel_allocation[accelerator] > 0:
-                diff_accel_num = num_alive_accel - accel_allocation[accelerator]
+            num_scale_down_candidate = len([
+                info for info in self.scale_down_candidates
+                if info.accelerator == accelerator
+            ])
+            logger.info(f'evaluate_scaling(num_scale_down_candidate): {num_scale_down_candidate}')
+            if accelerator in accel_allocation: # and accel_allocation[accelerator] > 0: Setting this > 0 condition made impossible to enther this condition when accelerator was allocated to 0.
+                diff_accel_num = num_alive_accel - accel_allocation[accelerator] - num_scale_down_candidate
+                logger.info(f'evaluate_scaling(diff_accel_num): {diff_accel_num}')
                 # Need to scale up
                 if diff_accel_num < 0:
                     num_to_scale_up = int(abs(diff_accel_num))
