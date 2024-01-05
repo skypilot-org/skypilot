@@ -385,7 +385,7 @@ def list_accelerators(
             new_results[acc_name] = acc_info
     results = new_results
 
-    # If we can figure out which instances are to be used then we 
+    # If we can figure out which instances are to be used then we
     # can attach them here.
     accs = list(results.keys())
     acc_infos: List[common.InstanceTypeInfo] = sum(
