@@ -1352,11 +1352,12 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
         logger.debug(stdout)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode('ascii')
+        logger.debug(stderr)
         if 'ALREADY_EXISTS' in stderr:
             # FIXME: should use 'start' on stopped TPUs, replacing
             # 'create'. Or it can be in a "deleting" state. Investigate the
             # right thing to do (force kill + re-provision?).
-            logger.info(f'TPU {tpu_name} already exists; skipped creation.')
+            logger.warning(f'TPU {tpu_name} already exists; skipped creation.')
 
         if 'RESOURCE_EXHAUSTED' in stderr:
             provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
@@ -1428,7 +1429,7 @@ def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
         stdout = e.stdout.decode('ascii')
         stderr = e.stderr.decode('ascii')
         if 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND' in stderr:
-            logger.info(f'TPU {tpu_name} does not exist; skipped deletion.')
+            logger.warning(f'TPU {tpu_name} does not exist; skipped deletion.')
         else:
             raise RuntimeError(f'\nFailed to terminate TPU node {tpu_name} for '
                                'cluster {cluster_name}:\n'
