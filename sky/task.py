@@ -14,7 +14,6 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky.backends import backend_utils
 import sky.dag
@@ -635,21 +634,24 @@ class Task:
 
         if (service and service.spot_placer is not None):
 
-            launchable_resources, _, _ = (
-                optimizer.fill_in_launchable_resources(
-                    task=self,
-                    blocked_resources=None,
-                    try_fix_with_sky_check=True,
-                    quiet=True))
-
+            enabled_clouds = global_user_state.get_enabled_clouds()
             launchable_zones = set()
-            for resource in list(self.resources):
-                for res in launchable_resources[resource]:
-                    regions = res.get_valid_regions_for_launchable()
-                    for region in regions:
-                        if region.zones is not None:
-                            for zone in region.zones:
-                                launchable_zones.add(zone.name)
+
+            for resources in self.resources:
+                clouds_list = ([resources.cloud] if resources.cloud is not None
+                               else enabled_clouds)
+                for cloud in clouds_list:
+                    feasible_resources, _ = (
+                        cloud.get_feasible_launchable_resources(
+                            resources, num_nodes=self.num_nodes))
+
+                    for feasible_resource in feasible_resources:
+                        regions = (feasible_resource.
+                                   get_valid_regions_for_launchable())
+                        for region in regions:
+                            if region.zones is not None:
+                                for zone in region.zones:
+                                    launchable_zones.add(zone.name)
 
             logger.info(f'launchable_zones: {launchable_zones}')
             service.set_spot_zones(list(launchable_zones))
