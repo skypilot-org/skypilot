@@ -306,3 +306,78 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress spot jobs to finish or be canceled.
+
+
+Spot Pipeline
+-------------------------
+
+Spot Pipeline is a feature that allows you to submit a spot job that contains a sequence of spot tasks running one after another.
+This is useful for running a sequence of jobs that depend on each other, e.g., training a model and then running inference on it.
+This allows the multiple tasks to have different resource requirements to fully utilize the resources and save cost, while keeping the burden of managing the tasks off the user. 
+
+.. note::
+  A spot job is either a single task or a pipeline of tasks. A spot job is submitted by :code:`sky spot launch`.
+  
+  All tasks in a pipeline will be run on spot instances.
+
+To use Spot Pipeline, you can specify the sequence of jobs in a YAML file. Here is an example:
+
+.. code-block:: yaml
+
+  name: pipeline
+
+  ---
+  
+  name: train
+
+  resources:
+    accelerators: V100:8
+
+  file_mounts:
+    /checkpoint:
+      name: train-eval # NOTE: Fill in your bucket name
+      mode: MOUNT
+
+  setup: |
+    echo setup for training
+
+  run: |
+    echo run for training
+    echo save checkpoints to /checkpoint
+
+  ---
+
+  name: eval
+
+  resources:
+    accelerators: T4:1
+
+  file_mounts:
+    /checkpoint:
+      name: train-eval # NOTE: Fill in your bucket name
+      mode: MOUNT
+
+  setup: |
+    echo setup for eval
+
+  run: |
+    echo load trained model from /checkpoint
+    echo eval model on test set
+
+
+The above YAML file defines a pipeline with two tasks. The first :code:`name: pipeline` names the pipeline. The first task has name :code:`train` and the second task has name :code:`eval`. The tasks are separated by a line with three dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and :code:`run` sections. The :code:`setup` and :code:`run` sections are executed sequentially.
+
+To submit the pipeline, the same command :code:`sky spot launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky spot queue` or :code:`sky spot dashboard`.
+
+.. code-block:: console
+
+  $ sky spot launch -n pipeline pipeline.yaml
+  $ sky spot queue
+  Fetching managed spot job statuses...
+  Managed spot jobs
+  In progress tasks: 1 PENDING, 1 RECOVERING
+  ID  TASK  NAME           RESOURCES        SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS     
+  8         pipeline       -                50 mins ago  47m 45s        -             1            RECOVERING   
+   ↳  0     train          1x [V100:8]      50 mins ago  47m 45s        -             1            RECOVERING 
+   ↳  1     eval           1x [T4:1]        -            -              -             0            PENDING 
+

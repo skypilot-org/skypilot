@@ -94,6 +94,10 @@ User
     resourcemanager.projects.get
     resourcemanager.projects.getIamPolicy
 
+.. note::
+    
+    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
+
 4. **Optional**: If the user needs to access GCS buckets, you can additionally add the following permissions:
 
 .. code-block:: text
@@ -102,6 +106,7 @@ User
     storage.buckets.get
     storage.buckets.delete
     storage.objects.create
+    storage.objects.update
     storage.objects.delete
     storage.objects.get
     storage.objects.list
