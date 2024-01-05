@@ -45,7 +45,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`) on vLLM or TGI with SkyServe:
+Here is a simple example of serving an LLM model (:code:`lmsys/vicuna-13b-v1.5`) on vLLM or TGI:
 
 .. tab-set::
 
