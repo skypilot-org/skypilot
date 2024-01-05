@@ -173,6 +173,14 @@ class RequestRateAutoscaler(Autoscaler):
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
 
+    def return_autoscaler_decision_interval(self) -> int:
+        # Reduce autoscaler interval when target_num_replicas = 0.
+        # This will happen when min_replicas = 0 and no traffic.
+        if self.target_num_replicas == 0:
+            return constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS
+        else:
+            return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
+
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
