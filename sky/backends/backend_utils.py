@@ -994,8 +994,8 @@ def write_cluster_config(
     )
 
     # For TPU nodes. TPU VMs do not need TPU_NAME.
+    tpu_node_name = resources_vars.get('tpu_name')
     if gcp_utils.is_tpu(to_provision) and not gcp_utils.is_tpu_vm(to_provision):
-        tpu_node_name = resources_vars.get('tpu_name')
         if tpu_node_name is None:
             tpu_node_name = cluster_name
 

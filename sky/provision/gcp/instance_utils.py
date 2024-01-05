@@ -1412,12 +1412,12 @@ def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
     # Delete TPU node.
     tpu_name = tpu_node_config['name']
     try:
-        cmd = (f'yes | gcloud compute tpus delete {tpu_name} '
+        cmd = (f'gcloud compute tpus delete {tpu_name} '
                f'--project={project_id} '
                f'--zone={zone}')
         logger.info(f'Deleting TPU {tpu_name} with cmd:\n{cmd}')
         proc = subprocess.run(
-            cmd,
+            f'yes | {cmd}',
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
