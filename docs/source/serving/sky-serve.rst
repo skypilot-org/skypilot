@@ -45,7 +45,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1`) on vLLM or TGI:
+Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM or :code:`lmsys/vicuna-13b-v1.5` on TGI):
 
 .. tab-set::
 
@@ -72,6 +72,7 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
             run: |
               conda activate vllm
               python -m vllm.entrypoints.openai.api_server \
+                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
                 --host 0.0.0.0 --port 8080 \
                 --model mistralai/Mixtral-8x7B-Instruct-v0.1
 
@@ -88,12 +89,12 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
             # Fields below describe each replica.
             resources:
               ports: 8080
-              accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+              accelerators: A100
 
             run: |
               docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
                 ghcr.io/huggingface/text-generation-inference \
-                --model-id mistralai/Mixtral-8x7B-Instruct-v0.1
+                --model-id lmsys/vicuna-13b-v1.5
 
 Run :code:`sky serve up service.yaml` to deploy the service with automatic price and capacity optimization. Once it is deployed, use :code:`sky serve status` to check the status of the service:
 
