@@ -45,7 +45,7 @@ How it works:
 Quick tour: LLM serving
 -----------------------
 
-Here is a simple example of serving an LLM model (:code:`Mistral-7B-Instruct-v0.1`) on vLLM or TGI:
+Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1`) on vLLM or TGI:
 
 .. tab-set::
 
@@ -62,7 +62,7 @@ Here is a simple example of serving an LLM model (:code:`Mistral-7B-Instruct-v0.
             # Fields below describe each replica.
             resources:
               ports: 8080
-              accelerators: {A100, L4, T4}
+              accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 
             setup: |
               conda create -n vllm python=3.9 -y
@@ -73,7 +73,7 @@ Here is a simple example of serving an LLM model (:code:`Mistral-7B-Instruct-v0.
               conda activate vllm
               python -m vllm.entrypoints.openai.api_server \
                 --host 0.0.0.0 --port 8080 \
-                --model mistralai/Mistral-7B-Instruct-v0.1
+                --model mistralai/Mixtral-8x7B-Instruct-v0.1
 
     .. tab-item:: TGI
         :sync: tgi-tab
@@ -88,12 +88,12 @@ Here is a simple example of serving an LLM model (:code:`Mistral-7B-Instruct-v0.
             # Fields below describe each replica.
             resources:
               ports: 8080
-              accelerators: {A100, L4, T4}
+              accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 
             run: |
               docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
                 ghcr.io/huggingface/text-generation-inference \
-                --model-id mistralai/Mistral-7B-Instruct-v0.1
+                --model-id mistralai/Mixtral-8x7B-Instruct-v0.1
 
 Run :code:`sky serve up service.yaml` to deploy the service with automatic price and capacity optimization. Once it is deployed, use :code:`sky serve status` to check the status of the service:
 
@@ -137,11 +137,11 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
             $ curl -L 3.83.159.229:30001/v1/chat/completions \
                 -X POST \
-                -d '{"model": "mistralai/Mistral-7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
+                -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
                 -H 'Content-Type: application/json'
 
             # Example output:
-            {"id":"cmpl-47ca2e9b5a104cae984643f7309f33c6","object":"chat.completion","created":880,"model":"mistralai/Mistral-7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful assistant here to provide information, answer questions, and engage in conversation to help make your life easier and more enjoyable. I can help you with a variety of tasks, such as setting reminders, providing weather updates, answering trivia, and much more. How can I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":77,"completion_tokens":64}}
+            {"id":"cmpl-47ca2e9b5a104cae984643f7309f33c6","object":"chat.completion","created":880,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful assistant here to provide information, answer questions, and engage in conversation to help make your life easier and more enjoyable. I can help you with a variety of tasks, such as setting reminders, providing weather updates, answering trivia, and much more. How can I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":77,"completion_tokens":64}}
 
     .. tab-item:: TGI
         :sync: tgi-tab
