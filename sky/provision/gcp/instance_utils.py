@@ -1178,7 +1178,6 @@ class GCPTPUVMInstance(GCPInstance):
                 _log_errors(errors, e, zone)
                 return errors, names
         errors = []
-        logger.info(str(operations))
         for operation in operations:
             error = operation.get('error', {}).get('details')
             if error:
@@ -1341,7 +1340,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                f'--version={tpu_node_config["runtimeVersion"]} '
                f'--accelerator-type={tpu_type} '
                f'--network={vpc_name}')
-        logger.info(f'Creating TPU {tpu_name} with command:\n{cmd}')
+        logger.debug(f'Creating TPU {tpu_name} with command:\n{cmd}')
         proc = subprocess.run(
             f'yes | {cmd}',
             stdout=subprocess.PIPE,
@@ -1350,14 +1349,14 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             check=True,
         )
         stdout = proc.stdout.decode('ascii')
-        logger.info(stdout)
+        logger.debug(stdout)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode('ascii')
         if 'ALREADY_EXISTS' in stderr:
             # FIXME: should use 'start' on stopped TPUs, replacing
             # 'create'. Or it can be in a "deleting" state. Investigate the
             # right thing to do (force kill + re-provision?).
-            logger.info(f'  TPU {tpu_name} already exists; skipped creation.')
+            logger.info(f'TPU {tpu_name} already exists; skipped creation.')
 
         if 'RESOURCE_EXHAUSTED' in stderr:
             provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
@@ -1415,7 +1414,7 @@ def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
         cmd = (f'gcloud compute tpus delete {tpu_name} '
                f'--project={project_id} '
                f'--zone={zone}')
-        logger.info(f'Deleting TPU {tpu_name} with cmd:\n{cmd}')
+        logger.debug(f'Deleting TPU {tpu_name} with cmd:\n{cmd}')
         proc = subprocess.run(
             f'yes | {cmd}',
             stdout=subprocess.PIPE,
@@ -1424,7 +1423,7 @@ def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
             check=True,
         )
         stdout = proc.stdout.decode('ascii')
-        logger.info(stdout)
+        logger.debug(stdout)
     except subprocess.CalledProcessError as e:
         stdout = e.stdout.decode('ascii')
         stderr = e.stderr.decode('ascii')
