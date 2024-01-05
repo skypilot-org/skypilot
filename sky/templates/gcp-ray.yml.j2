@@ -50,6 +50,12 @@ provider:
 {%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
+{%- if tpu_node_name %}
+  tpu_node:
+    name: {{tpu_node_name}}
+    acceleratorType: {{tpu_type}}
+    runtimeVersion: {{runtime_version}}
+{%- endif %}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
   # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
@@ -76,12 +82,6 @@ available_node_types:
         key: compute.googleapis.com/reservation-name
         values: {{ specific_reservations }}
       {%- endif %}
-{%- if tpu_node_name %}
-      tpu_node:
-        name: {{tpu_node_name}}
-        acceleratorType: {{tpu_type}}
-        runtimeVersion: {{runtime_version}}
-{%- endif %}
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}

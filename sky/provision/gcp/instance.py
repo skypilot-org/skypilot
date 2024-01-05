@@ -153,8 +153,6 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids: List[str] = []
     created_instance_ids: List[str] = []
 
-    tpu_node = config.node_config.pop('tpu_node', {})
-
     node_type = instance_utils.get_node_type(config.node_config)
     project_id = config.provider_config['project_id']
     availability_zone = config.provider_config['availability_zone']
@@ -329,7 +327,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
 
     assert head_instance_id is not None, 'head_instance_id is None'
 
-    if tpu_node:
+    tpu_node = config.provider_config.get('tpu_node')
+    if tpu_node is not None:
         vpc_name = resource.get_vpc_name(project_id, availability_zone,
                                          head_instance_id)
         instance_utils.create_tpu_node(
@@ -446,8 +445,8 @@ def stop_instances(
     project_id = provider_config['project_id']
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
-    tpu_node = provider_config.pop('tpu_node', {})
-    if tpu_node:
+    tpu_node = provider_config.get('tpu_node')
+    if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     if worker_only:
@@ -509,8 +508,8 @@ def terminate_instances(
     project_id = provider_config['project_id']
     use_tpu_vms = provider_config.get('_has_tpus', False)
 
-    tpu_node = provider_config.pop('tpu_node', {})
-    if tpu_node:
+    tpu_node = provider_config.get('tpu_node')
+    if tpu_node is not None:
         instance_utils.delete_tpu_node(project_id, zone, tpu_node)
 
     label_filters = {TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}

@@ -28,7 +28,6 @@ TAG_RAY_NODE_KIND = 'ray-node-type'
 
 TPU_NODE_CREATION_FAILURE = 'Failed to provision TPU node.'
 
-
 # This is the maximum number of times we will retry a GCP API call.
 # The number is identical to those we use for AWS boto3.
 GCP_MAX_RETRIES = 12
@@ -1337,11 +1336,11 @@ def create_tpu_node(project_id: str, availability_zone: str,
     tpu_type = tpu_node_config['acceleratorType']
     try:
         cmd = (f'gcloud compute tpus create {tpu_name} '
-            f'--project={project_id} '
-            f'--zone={availability_zone} '
-            f'--version={tpu_node_config["runtimeVersion"]} '
-            f'--accelerator-type={tpu_type} '
-            f'--network={vpc_name}')
+               f'--project={project_id} '
+               f'--zone={availability_zone} '
+               f'--version={tpu_node_config["runtimeVersion"]} '
+               f'--accelerator-type={tpu_type} '
+               f'--network={vpc_name}')
         logger.info(f'Creating TPU {tpu_name} with command:\n{cmd}')
         proc = subprocess.run(
             f'yes | {cmd}',
@@ -1410,10 +1409,11 @@ def delete_tpu_node(project_id: str, availability_zone: str,
     tpu_name = tpu_node_config['name']
     try:
         cmd = (f'gcloud compute tpus delete {tpu_name} '
-            f'--project={project_id} '
-            f'--zone={availability_zone}')
+               f'--project={project_id} '
+               f'--zone={availability_zone}')
         logger.info(f'Deleting TPU {tpu_name} with cmd:\n{cmd}')
-        proc = subprocess.run(cmd,
+        proc = subprocess.run(
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,

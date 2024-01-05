@@ -144,9 +144,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
+    ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
-    ('available_node_types', 'ray_head_default', 'node_config', 'tpu_node'),
     ('available_node_types', 'ray.worker.default', 'node_config', 'UserData'),
 ]
 
