@@ -1374,57 +1374,6 @@ class RetryingVmProvisioner(object):
                     zones = [clouds.Zone(name=to_provision.zone)]
                 yield zones
 
-    def _try_provision_tpu(self, to_provision: resources_lib.Resources,
-                           config_dict: Dict[str, str]) -> bool:
-        """Returns whether the provision is successful."""
-        tpu_name = config_dict['tpu_name']
-        assert 'tpu-create-script' in config_dict, \
-            'Expect TPU provisioning with gcloud.'
-        try:
-            with rich_utils.safe_status('[bold cyan]Provisioning TPU '
-                                        f'[green]{tpu_name}[/]'):
-                subprocess_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                                     stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE)
-            return True
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode('ascii')
-            if 'ALREADY_EXISTS' in stderr:
-                # FIXME: should use 'start' on stopped TPUs, replacing
-                # 'create'. Or it can be in a "deleting" state. Investigate the
-                # right thing to do (force kill + re-provision?).
-                logger.info(
-                    f'  TPU {tpu_name} already exists; skipped creation.')
-                return True
-
-            if 'RESOURCE_EXHAUSTED' in stderr:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(
-                        f'TPU {tpu_name} creation failed due to quota '
-                        'exhaustion. Please visit '
-                        'https://console.cloud.google.com/iam-admin/quotas '
-                        'for more information.')
-
-            if 'PERMISSION_DENIED' in stderr:
-                logger.info('  TPUs are not available in this zone.')
-                return False
-
-            if 'no more capacity in the zone' in stderr:
-                logger.info('  No more capacity in this zone.')
-                return False
-
-            if 'CloudTpu received an invalid AcceleratorType' in stderr:
-                # INVALID_ARGUMENT: CloudTpu received an invalid
-                # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
-                # values are "v2-8, ".
-                tpu_type = list(to_provision.accelerators.keys())[0]
-                logger.info(
-                    f'  TPU type {tpu_type} is not available in this zone.')
-                return False
-
-            logger.error(stderr)
-            raise e
-
     def _retry_zones(
         self,
         to_provision: resources_lib.Resources,
@@ -1566,8 +1515,6 @@ class RetryingVmProvisioner(object):
                 launched_nodes=num_nodes,
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=launched_resources,
-                tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'),
                 # Use the previous cluster's IPs and ports if available to
                 # optimize the case where the cluster is restarted, i.e., no
                 # need to query IPs and ports from the cloud provider.
@@ -1614,20 +1561,7 @@ class RetryingVmProvisioner(object):
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
-                    tpu_name = config_dict.get('tpu_name')
-                    if tpu_name is None:
-                        return config_dict
-                    # tpu_name will only be set when TPU node (not TPU VM)
-                    # is required.
-                    logger.info(
-                        f'{colorama.Style.BRIGHT}Provisioning TPU node on '
-                        f'{to_provision.cloud} '
-                        f'{region.name}{colorama.Style.RESET_ALL}{zone_str}')
-
-                    success = self._try_provision_tpu(to_provision, config_dict)
-                    if success:
-                        return config_dict
-                    raise RuntimeError('Failed to provision TPU node.')
+                    return config_dict
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at
@@ -2221,18 +2155,23 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
     # compaitibility logic in __setstate__.
     _VERSION = 6
 
-    def __init__(self,
-                 *,
-                 cluster_name: str,
-                 cluster_name_on_cloud: str,
-                 cluster_yaml: str,
-                 launched_nodes: int,
-                 launched_resources: resources_lib.Resources,
-                 stable_internal_external_ips: Optional[List[Tuple[
-                     str, str]]] = None,
-                 stable_ssh_ports: Optional[List[int]] = None,
-                 tpu_create_script: Optional[str] = None,
-                 tpu_delete_script: Optional[str] = None) -> None:
+    def __init__(
+            self,
+            *,
+            cluster_name: str,
+            cluster_name_on_cloud: str,
+            cluster_yaml: str,
+            launched_nodes: int,
+            launched_resources: resources_lib.Resources,
+            stable_internal_external_ips: Optional[List[Tuple[str,
+                                                              str]]] = None,
+            stable_ssh_ports: Optional[List[int]] = None,
+            # Deprecated. SkyPilot new provisioner API handles the TPU node
+            # creation/deletion.
+            # Backward compatibility for TPU nodes created before #2943.
+            # TODO (zhwu): Remove this after 0.6.0.
+            tpu_create_script: Optional[str] = None,
+            tpu_delete_script: Optional[str] = None) -> None:
         self._version = self._VERSION
         self.cluster_name = cluster_name
         self.cluster_name_on_cloud = cluster_name_on_cloud
@@ -2246,6 +2185,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         self.launched_nodes = launched_nodes
         self.launched_resources = launched_resources
         self.docker_user: Optional[str] = None
+        # Deprecated. SkyPilot new provisioner API handles the TPU node
+        # creation/deletion.
+        # Backward compatibility for TPU nodes created before #2943.
+        # TODO (zhwu): Remove this after 0.6.0.
         self.tpu_create_script = tpu_create_script
         self.tpu_delete_script = tpu_delete_script
         self._maybe_make_local_handle()
@@ -2264,6 +2207,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 f'\n\tlaunched_resources={self.launched_nodes}x '
                 f'{self.launched_resources}, '
                 f'\n\tdocker_user={self.docker_user},'
+                # TODO (zhwu): Remove this after 0.6.0.
                 f'\n\ttpu_create_script={self.tpu_create_script}, '
                 f'\n\ttpu_delete_script={self.tpu_delete_script})')
 
@@ -2887,9 +2831,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
 
-                if 'tpu_name' in config_dict:
-                    self._set_tpu_name(handle, config_dict['tpu_name'])
-
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, handle.external_ips(),
@@ -3502,7 +3443,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     '\nTo teardown the cluster:'
                     f'\t{backend_utils.BOLD}sky down {name}'
                     f'{backend_utils.RESET_BOLD}')
-        if handle.tpu_delete_script is not None:
+        if (gcp_utils.is_tpu(handle.launched_resources) and
+                not gcp_utils.is_tpu_vm(handle.launched_resources)):
             logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
     def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
@@ -4091,6 +4033,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_abs_path = os.path.abspath(log_path)
         cluster_name_on_cloud = handle.cluster_name_on_cloud
 
+        # Backward compatibility for TPU nodes created before #2943.
+        # Deletion of TPU is done in SkyPilot's new GCP provisioner API
+        # TODO (zhwu): Remove this after 0.6.0.
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
             with rich_utils.safe_status('[bold cyan]Terminating TPU...'):
@@ -4116,6 +4061,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 handle.cluster_name, cluster_name_on_cloud),
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
+
         if (terminate and handle.launched_resources.is_image_managed is True):
             # Delete the image when terminating a "cloned" cluster, i.e.,
             # whose image is created by SkyPilot (--clone-disk-from)
@@ -4164,6 +4110,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # where we need to cleanup the cluster profile.
             metadata_utils.remove_cluster_metadata(handle.cluster_name)
             # Clean up TPU creation/deletion scripts
+            # Backward compatibility for TPU nodes created before #2943.
+            # TODO (zhwu): Remove this after 0.6.0.
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None
                 common_utils.remove_file_if_exists(handle.tpu_create_script)
@@ -4425,30 +4373,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                        task.num_nodes,
                                                        prev_cluster_status=None,
                                                        prev_handle=None)
-
-    def _set_tpu_name(self, handle: CloudVmRayResourceHandle,
-                      tpu_name: str) -> None:
-        """Sets TPU_NAME on all nodes."""
-        ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in handle'
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml, handle.docker_user)
-
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, port_list=None, **ssh_credentials)
-
-        def _setup_tpu_name_on_node(
-                runner: command_runner.SSHCommandRunner) -> None:
-            cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
-                   '>> ~/.bashrc || echo "TPU_NAME already set"')
-            returncode = runner.run(cmd,
-                                    log_path=os.path.join(
-                                        self.log_dir, 'tpu_setup.log'),
-                                    stream_logs=False)
-            subprocess_utils.handle_returncode(
-                returncode, cmd, 'Failed to set TPU_NAME on node.')
-
-        subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Optional[Dict[Path, Path]]):

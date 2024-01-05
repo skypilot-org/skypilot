@@ -3,7 +3,7 @@
 VERSION = 'v1'
 # Using v2 according to
 # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#create-curl # pylint: disable=line-too-long
-TPU_VERSION = 'v2'
+TPU_VM_VERSION = 'v2'
 
 RAY = 'ray-autoscaler'
 DEFAULT_SERVICE_ACCOUNT_ID = RAY + '-sa-' + VERSION

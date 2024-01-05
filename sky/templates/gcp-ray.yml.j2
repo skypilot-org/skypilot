@@ -76,6 +76,12 @@ available_node_types:
         key: compute.googleapis.com/reservation-name
         values: {{ specific_reservations }}
       {%- endif %}
+{%- if tpu_node_name %}
+      tpu_node:
+        name: {{tpu_node_name}}
+        acceleratorType: {{tpu_type}}
+        runtimeVersion: {{runtime_version}}
+{%- endif %}
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
@@ -181,6 +187,9 @@ setup_commands:
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
     pip3 install --upgrade google-api-python-client;
+  {%- endif %}
+  {%- if tpu_node_name %}
+    grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;
   {%- endif %}
     mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     (pip3 list | grep "ray " | grep {{ray_version}} 2>&1 > /dev/null || pip3 install --exists-action w -U ray[default]=={{ray_version}});

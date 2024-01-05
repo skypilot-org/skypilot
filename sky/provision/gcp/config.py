@@ -98,7 +98,7 @@ def _create_compute(gcp_credentials=None):
 def _create_tpu(gcp_credentials=None):
     return gcp.build(
         'tpu',
-        constants.TPU_VERSION,
+        constants.TPU_VM_VERSION,
         credentials=gcp_credentials,
         cache_discovery=False,
         discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest',
