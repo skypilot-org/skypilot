@@ -475,6 +475,7 @@ class SSHConfigHelper(object):
             docker_user: If not None, use this user to ssh into the docker
         """
         username = auth_config['ssh_user']
+        print("In add cluster")
         if docker_user is not None:
             username = docker_user
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
@@ -525,8 +526,9 @@ class SSHConfigHelper(object):
 
         docker_proxy_command_generator = None
         if docker_user is not None:
-            docker_proxy_command_generator = lambda ip: ' '.join(
-                ['ssh'] + command_runner.ssh_options_list(key_path, None) +
+            docker_proxy_command_generator = lambda ip, port: ' '.join(
+                ['ssh'] + command_runner.ssh_options_list(
+                    key_path, None, port=port) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
         codegen = ''
@@ -535,7 +537,7 @@ class SSHConfigHelper(object):
             docker_proxy_command = None
             port = ports[i]
             if docker_proxy_command_generator is not None:
-                docker_proxy_command = docker_proxy_command_generator(ip)
+                docker_proxy_command = docker_proxy_command_generator(ip, port)
                 ip = 'localhost'
                 port = constants.DEFAULT_DOCKER_PORT
             node_name = cluster_name if i == 0 else cluster_name + f'-worker{i}'
