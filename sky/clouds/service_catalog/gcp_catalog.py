@@ -385,7 +385,8 @@ def list_accelerators(
             new_results[acc_name] = acc_info
     results = new_results
 
-    # If we can figure out which instances are to be used then we can attach them here.
+    # If we can figure out which instances are to be used then we 
+    # can attach them here.
     accs = list(results.keys())
     acc_infos: List[common.InstanceTypeInfo] = sum(
         [results.get(a, []) for a in accs], [])
@@ -397,6 +398,8 @@ def list_accelerators(
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
                                                         info.accelerator_count)
+        if vm_types is None:
+            continue
         for vm_type in vm_types:
             df = _df[(_df['InstanceType'] == vm_type) &
                      (_df['Region'] == info.region)]
