@@ -57,12 +57,21 @@ data:
     from kubernetes import client
     from kubernetes import config
     
+    canonical_gpu_names = [
+        'A100-80GB', 'A100', 'A10G', 'K80', 'M60', 'T4g', 'T4', 'V100', 'A10',
+        'P100', 'P40', 'P4', 'L4'
+    ]
+    
+    
     def get_gpu_name() -> Optional[str]:
         try:
             result = subprocess.run(
                 ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'],
                 stdout=subprocess.PIPE)
             gpu_name = result.stdout.decode('utf-8').strip()
+            # In the case of multi-gpu nodes, we assume the node is homogenous and 
+            # just use the first GPU name.
+            gpu_name = gpu_name.split('\n')[0]
             return gpu_name.lower()
         except Exception as e:
             print(f'Error getting GPU name: {e}')
@@ -91,8 +100,19 @@ data:
     
     def main():
         gpu_name = get_gpu_name()
-        if gpu_name:
-            label_node(allowed_name.lower())
+        if gpu_name is not None:
+            labelled = False
+            for canonical_name in canonical_gpu_names:
+                if canonical_name.lower() in gpu_name.lower():
+                    label_node(canonical_name.lower())
+                    labelled = True
+                    break
+            if not labelled:
+                # If we didn't find a canonical name, just use the GPU name
+                # with spaces replaced by dashes
+                gpu_label = gpu_name.lower().replace(' ', '-')
+                label_node(gpu_label)
+                labelled = True
         else:
             print('No GPU detected. Try running nvidia-smi in the container.')
     

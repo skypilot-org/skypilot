@@ -30,6 +30,12 @@ if ! kind version > /dev/null 2>&1; then
     exit 1
 fi
 
+# Check if kubectl is installed
+if ! kubectl > /dev/null 2>&1; then
+    >&2 echo "kubectl is not installed. Please install kubectl and try again. Installation instructions: https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/"
+    exit 1
+fi
+
 # Check if the local cluster already exists
 if kind get clusters | grep -q skypilot; then
     echo "Local cluster already exists. Exiting."

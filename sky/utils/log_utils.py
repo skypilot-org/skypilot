@@ -94,7 +94,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
         if ('Pulling SkyPilot GPU image...' in log_line):
             self.status_display.update(
                 '[bold cyan]Creating local cluster - '
-                'pulling SkyPilot GPU image')
+                'pulling and loading SkyPilot GPU image')
         if ('SkyPilot GPU image loaded into kind cluster' in log_line):
             logger.info(f'{colorama.Fore.GREEN}SkyPilot GPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
@@ -114,7 +114,7 @@ class SkyLocalUpLineProcessor(LineProcessor):
         if ('Pulling SkyPilot CPU image...' in log_line):
             self.status_display.update(
                 '[bold cyan]Creating local cluster - '
-                'pulling SkyPilot CPU image')
+                'pulling and loading SkyPilot CPU image')
         if ('SkyPilot CPU image loaded into kind cluster' in log_line):
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
