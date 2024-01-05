@@ -1328,7 +1328,7 @@ def get_node_type(node: dict) -> GCPNodeType:
     return GCPNodeType.COMPUTE
 
 
-def create_tpu_node(project_id: str, availability_zone: str,
+def create_tpu_node(project_id: str, zone: str,
                     tpu_node_config: Dict[str, str], vpc_name: str):
     # Create TPU node.
     # TODO(suquark, zhwu): move this to GCPTPUNodeInstance.
@@ -1337,7 +1337,7 @@ def create_tpu_node(project_id: str, availability_zone: str,
     try:
         cmd = (f'gcloud compute tpus create {tpu_name} '
                f'--project={project_id} '
-               f'--zone={availability_zone} '
+               f'--zone={zone} '
                f'--version={tpu_node_config["runtimeVersion"]} '
                f'--accelerator-type={tpu_type} '
                f'--network={vpc_name}')
@@ -1369,6 +1369,7 @@ def create_tpu_node(project_id: str, availability_zone: str,
                            'https://console.cloud.google.com/iam-admin/quotas '
                            'for more information.'
             }]
+            _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'PERMISSION_DENIED' in stderr:
@@ -1378,6 +1379,7 @@ def create_tpu_node(project_id: str, availability_zone: str,
                 'domain': 'tpu',
                 'message': 'TPUs are not available in this zone.'
             }]
+            _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'no more capacity in the zone' in stderr:
@@ -1387,6 +1389,7 @@ def create_tpu_node(project_id: str, availability_zone: str,
                 'domain': 'tpu',
                 'message': 'No more capacity in this zone.'
             }]
+            _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
         if 'CloudTpu received an invalid AcceleratorType' in stderr:
@@ -1398,19 +1401,20 @@ def create_tpu_node(project_id: str, availability_zone: str,
                 'code': 'INVALID_ARGUMENT',
                 'domain': 'tpu',
                 'message': (f'TPU type {tpu_type} is not available in this '
-                            f'zone {availability_zone}.')
+                            f'zone {zone}.')
             }]
+            _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
 
-def delete_tpu_node(project_id: str, availability_zone: str,
+def delete_tpu_node(project_id: str, zone: str,
                     tpu_node_config: Dict[str, str]):
     # Delete TPU node.
     tpu_name = tpu_node_config['name']
     try:
-        cmd = (f'gcloud compute tpus delete {tpu_name} '
+        cmd = (f'yes | gcloud compute tpus delete {tpu_name} '
                f'--project={project_id} '
-               f'--zone={availability_zone}')
+               f'--zone={zone}')
         logger.info(f'Deleting TPU {tpu_name} with cmd:\n{cmd}')
         proc = subprocess.run(
             cmd,
