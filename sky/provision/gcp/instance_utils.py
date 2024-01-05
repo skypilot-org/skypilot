@@ -881,7 +881,7 @@ class GCPTPUVMInstance(GCPInstance):
     def load_resource(cls):
         return gcp.build(
             'tpu',
-            constants.TPU_VERSION,
+            constants.TPU_VM_VERSION,
             credentials=None,
             cache_discovery=False,
             discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest')
