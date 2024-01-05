@@ -136,13 +136,13 @@ Simply ``curl -L`` the service endpoint, which automatically load-balances acros
 
         .. code-block:: console
 
-            $ curl -L 3.83.159.229:30001/v1/chat/completions \
+            $ curl -L 3.84.15.251:30001/v1/chat/completions \
                 -X POST \
                 -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
                 -H 'Content-Type: application/json'
 
             # Example output:
-            {"id":"cmpl-47ca2e9b5a104cae984643f7309f33c6","object":"chat.completion","created":880,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful assistant here to provide information, answer questions, and engage in conversation to help make your life easier and more enjoyable. I can help you with a variety of tasks, such as setting reminders, providing weather updates, answering trivia, and much more. How can I assist you today?"},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":77,"completion_tokens":64}}
+            {"id":"cmpl-80b2bfd6f60c4024884c337a7e0d859a","object":"chat.completion","created":1005,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful AI assistant designed to provide information, answer questions, and engage in conversation with users. I do not have personal experiences or emotions, but I am programmed to understand and process human language, and to provide helpful and accurate responses."},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":64,"completion_tokens":51}}
 
     .. tab-item:: TGI
         :sync: tgi-tab
