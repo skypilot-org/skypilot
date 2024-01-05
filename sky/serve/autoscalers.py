@@ -230,9 +230,8 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        launched_replica_infos = [
-            info for info in replica_infos if info.is_launched
-        ]
+        launched_replica_infos = list(
+            filter(lambda info: info.is_launched, replica_infos))
         num_launched_replicas = len(launched_replica_infos)
 
         self.target_num_replicas = self._get_desired_num_replicas()
@@ -328,10 +327,10 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             num_spot_to_scale_down = num_launched_spot - num_to_provision
             for replica_id in (
                     RequestRateAutoscaler.get_replica_ids_to_scale_down(
-                        num_spot_to_scale_down, [
-                            info for info in launched_replica_infos
-                            if info.is_spot
-                        ])):
+                        num_spot_to_scale_down,
+                        list(
+                            filter(lambda info: info.is_spot,
+                                   launched_replica_infos)))):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                        target=replica_id))
@@ -342,9 +341,9 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        launched_replica_infos = [
-            info for info in replica_infos if info.is_launched
-        ]
+        launched_replica_infos = list(
+            filter(lambda info: info.is_launched, replica_infos))
+
         self.target_num_replicas = self._get_desired_num_replicas()
 
         num_launched_spot, num_ready_spot = 0, 0
@@ -384,9 +383,8 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
 
-        launched_replica_infos = [
-            info for info in replica_infos if info.is_launched
-        ]
+        launched_replica_infos = list(
+            filter(lambda info: info.is_launched, replica_infos))
         self.target_num_replicas = self._get_desired_num_replicas()
 
         num_launched_spot, num_ready_spot = 0, 0
@@ -435,10 +433,10 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
         elif num_on_demand_to_scale_down > 0:
             for replica_id in (
                     RequestRateAutoscaler.get_replica_ids_to_scale_down(
-                        num_on_demand_to_scale_down, [
-                            info for info in launched_replica_infos
-                            if not info.is_spot
-                        ])):
+                        num_on_demand_to_scale_down,
+                        list(
+                            filter(lambda info: not info.is_spot,
+                                   launched_replica_infos)))):
                 scaling_options.append(
                     AutoscalerDecision(AutoscalerDecisionOperator.SCALE_DOWN,
                                        target=replica_id))
