@@ -29,7 +29,7 @@ GPU_NAME_MAP = {
     'RTX4090': 'NVIDIA GeForce RTX 4090',
     # Following instance is displayed as SXM at the console
     # but the ID from the API appears as HBM
-    'H100-80GB-SXM': 'NVIDIA H100 80GB HBM3',
+    'H100-SXM': 'NVIDIA H100 80GB HBM3',
     'H100': 'NVIDIA H100 PCIe',
     'L4': 'NVIDIA L4',
     'L40': 'NVIDIA L40',
