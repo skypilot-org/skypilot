@@ -408,32 +408,23 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
                                                      launched_replica_infos)
 
         num_to_provision = self.target_num_replicas + self.num_overprovision
-        num_on_demand_to_scale_up, num_on_demand_to_scale_down = 0, 0
-        if num_alive_on_demand < self.extra_on_demand_replicas:
-            num_on_demand_to_scale_up = (self.extra_on_demand_replicas -
-                                         num_alive_on_demand)
-        if num_ready_spot + num_alive_on_demand < num_to_provision:
-            num_on_demand_to_scale_up = max(
-                num_on_demand_to_scale_up,
-                (min(self.target_num_replicas,
-                     num_to_provision - num_ready_spot) - num_alive_on_demand))
+        num_on_demand_target = 0
+        if num_ready_spot < num_to_provision:
+            num_on_demand_target = min(self.target_num_replicas,
+                                       num_to_provision - num_ready_spot)
+        num_on_demand_target = max(self.extra_on_demand_replicas,
+                                   num_on_demand_target)
 
-        elif (num_ready_spot + num_alive_on_demand > num_to_provision and
-              num_alive_on_demand > self.extra_on_demand_replicas):
-            num_on_demand_to_scale_down = (num_ready_spot +
-                                           num_alive_on_demand -
-                                           num_to_provision)
-
-        if num_on_demand_to_scale_up > 0:
-            for _ in range(num_on_demand_to_scale_up):
+        if num_on_demand_target > num_alive_on_demand:
+            for _ in range(num_on_demand_target - num_alive_on_demand):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
-        elif num_on_demand_to_scale_down > 0:
+        elif num_alive_on_demand > num_on_demand_target:
             for replica_id in (
                     RequestRateAutoscaler.get_replica_ids_to_scale_down(
-                        num_on_demand_to_scale_down,
+                        num_alive_on_demand - num_on_demand_target,
                         list(
                             filter(lambda info: not info.is_spot,
                                    launched_replica_infos)))):
