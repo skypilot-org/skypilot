@@ -625,6 +625,7 @@ class Task:
     def set_service(self,
                     service: Optional[service_spec.SkyServiceSpec]) -> 'Task':
         """Sets the service spec for this task.
+
         Args:
           service: a SkyServiceSpec object.
 

@@ -4331,7 +4331,7 @@ def serve_up(
                             'because spot placer is enabled.')
                 break
 
-    if task.service.spot_placer is None:
+    else:
         use_spot = False
         for resource in list(task.resources):
             if resource.use_spot is not None and resource.use_spot:
@@ -4340,9 +4340,11 @@ def serve_up(
         if use_spot:
             yellow = colorama.Fore.YELLOW
             reset = colorama.Style.RESET_ALL
-            logger.info(f'{yellow}SkyServe uses spot but spot_policy is not'
-                        f'specified.{reset}. Consider spot_policy to automate'
-                        'spot management.')
+            logger.info(f'{yellow}SkyServe uses spot instances as replica '
+                        f'but spot_policy is not specified.{reset} '
+                        f'Consider adding `spot_policy: SpotHedge` to '
+                        'automate spot replica management for better '
+                        'service quality and smaller downtime.')
 
     sky.optimize(dag)
 

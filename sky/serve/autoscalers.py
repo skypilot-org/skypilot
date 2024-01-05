@@ -236,7 +236,7 @@ class RequestRateAutoscaler(Autoscaler):
         num_launched_replicas = len(launched_replica_infos)
 
         self.target_num_replicas = self._get_desired_num_replicas()
-        num_to_provision = (self.target_num_replicas + self.num_overprovision)
+        num_to_provision = self.target_num_replicas + self.num_overprovision
 
         scaling_options = []
 
@@ -305,7 +305,7 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
         scale up or down accordingly.
         """
         scaling_options = []
-        num_to_provision = (self.target_num_replicas + self.num_overprovision)
+        num_to_provision = self.target_num_replicas + self.num_overprovision
 
         # Scale spot instances.
         if num_launched_spot < num_to_provision:
@@ -315,9 +315,8 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             zones = self.spot_placer.select(launched_replica_infos,
                                             num_spot_to_scale_up)
             assert len(zones) == num_spot_to_scale_up
-            for spot_idx in range(num_spot_to_scale_up):
+            for zone in zones:
                 spot_override = self._get_spot_resources_override_dict()
-                zone = zones[spot_idx]
                 spot_override.update({'zone': zone})
                 logger.info(f'Chosen zone {zone} with {self.spot_placer}')
                 scaling_options.append(
@@ -407,35 +406,36 @@ class SpotOnDemandRequestRateAutoscaler(SpotRequestRateAutoscaler):
             f'Number of alive on-demand instances: {num_alive_on_demand}, '
             f'Number of ready on-demand instances: {num_ready_on_demand}')
 
-        scaling_options = (self._scale_spot_instances(num_launched_spot,
-                                                      launched_replica_infos))
+        scaling_options = self._scale_spot_instances(num_launched_spot,
+                                                     launched_replica_infos)
 
-        num_to_provision = (self.target_num_replicas + self.num_overprovision)
-        num_demand_to_scale_up, num_demand_to_scale_down = 0, 0
+        num_to_provision = self.target_num_replicas + self.num_overprovision
+        num_on_demand_to_scale_up, num_on_demand_to_scale_down = 0, 0
         if num_alive_on_demand < self.extra_on_demand_replicas:
-            num_demand_to_scale_up = (self.extra_on_demand_replicas -
-                                      num_alive_on_demand)
+            num_on_demand_to_scale_up = (self.extra_on_demand_replicas -
+                                         num_alive_on_demand)
         if num_ready_spot + num_alive_on_demand < num_to_provision:
-            num_demand_to_scale_up = max(
-                num_demand_to_scale_up,
+            num_on_demand_to_scale_up = max(
+                num_on_demand_to_scale_up,
                 (min(self.target_num_replicas,
                      num_to_provision - num_ready_spot) - num_alive_on_demand))
 
         elif (num_ready_spot + num_alive_on_demand > num_to_provision and
               num_alive_on_demand > self.extra_on_demand_replicas):
-            num_demand_to_scale_down = (num_ready_spot + num_alive_on_demand -
-                                        num_to_provision)
+            num_on_demand_to_scale_down = (num_ready_spot +
+                                           num_alive_on_demand -
+                                           num_to_provision)
 
-        if num_demand_to_scale_up > 0:
-            for _ in range(num_demand_to_scale_up):
+        if num_on_demand_to_scale_up > 0:
+            for _ in range(num_on_demand_to_scale_up):
                 scaling_options.append(
                     AutoscalerDecision(
                         AutoscalerDecisionOperator.SCALE_UP,
                         target=self._get_on_demand_resources_override_dict()))
-        elif num_demand_to_scale_down > 0:
+        elif num_on_demand_to_scale_down > 0:
             for replica_id in (
                     RequestRateAutoscaler.get_replica_ids_to_scale_down(
-                        num_demand_to_scale_down, [
+                        num_on_demand_to_scale_down, [
                             info for info in launched_replica_infos
                             if not info.is_spot
                         ])):

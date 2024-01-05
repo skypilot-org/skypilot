@@ -164,6 +164,7 @@ def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
+    assert len(task.resources) >= 1, task
     task_resources = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
@@ -172,9 +173,7 @@ def _get_resources_ports(task_yaml: str) -> str:
 
 def _get_use_spot_override(task_yaml: str,
                            resource_override: Optional[Dict[str, Any]]) -> bool:
-    """Get whether the task uses spot
-    from either overeride or task_yaml.
-    """
+    """Get whether the task uses spot from either overeride or task_yaml."""
     if resource_override is not None:
         use_spot_override = resource_override.get('use_spot')
         if use_spot_override is not None:
@@ -188,8 +187,7 @@ def _get_use_spot_override(task_yaml: str,
 
 def _get_zone_override(
         resource_override: Optional[Dict[str, Any]]) -> Optional[str]:
-    """ Get zone override from resource_override.
-    """
+    """Get zone override from resource_override."""
     if resource_override is not None:
         zone_override = resource_override.get('zone')
         if zone_override is not None:
@@ -472,8 +470,6 @@ class ReplicaInfo:
             if response.status_code == 200:
                 logger.debug(f'{replica_identity.capitalize()} is ready.')
                 return self, True, probe_time
-            else:
-                logger.info(msg)
         except requests.exceptions.RequestException as e:
             logger.info(f'Error when probing {replica_identity}: '
                         f'{common_utils.format_exception(e)}.')
