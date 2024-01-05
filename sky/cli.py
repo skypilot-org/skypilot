@@ -61,14 +61,14 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
-from sky.skylet import constants, log_lib
+from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
 from sky.utils import kubernetes_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -3457,10 +3457,17 @@ def show_gpus(
                 return
 
             # "Common" GPUs
-            for gpu in service_catalog.get_common_gpus():
-                if gpu in result:
+            # If cloud is kubernetes, we want to show all GPUs here, even if
+            # they are not listed as common in SkyPilot.
+            if cloud == 'kubernetes':
+                for gpu, _ in sorted(result.items()):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-            yield from gpu_table.get_string()
+                yield from gpu_table.get_string()
+            else:
+                for gpu in service_catalog.get_common_gpus():
+                    if gpu in result:
+                        gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
+                yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
@@ -5202,7 +5209,7 @@ def local():
               default=False,
               is_flag=True,
               help='Launch cluster without GPU support even '
-                   'if GPUs are detected on the host.')
+              'if GPUs are detected on the host.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def local_up(no_gpus: bool):
@@ -5236,8 +5243,7 @@ def local_up(no_gpus: bool):
 
     # Setup logging paths
     run_timestamp = backend_utils.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                            run_timestamp,
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_up.log')
     tail_cmd = 'tail -n100 -f ' + log_path
 
@@ -5246,12 +5252,13 @@ def local_up(no_gpus: bool):
     click.echo('To view detailed progress: '
                f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
 
-    returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
-                                                      log_path=log_path,
-                                                      require_outputs=True,
-                                                      stream_logs=False,
-                                                      line_processor=log_utils.SkyLocalUpLineProcessor(),
-                                                      cwd=cwd)
+    returncode, _, stderr = log_lib.run_with_log(
+        cmd=run_command,
+        log_path=log_path,
+        require_outputs=True,
+        stream_logs=False,
+        line_processor=log_utils.SkyLocalUpLineProcessor(),
+        cwd=cwd)
 
     # Kind always writes to stderr even if it succeeds.
     # If the failure happens after the cluster is created, we need
@@ -5287,7 +5294,7 @@ def local_up(no_gpus: bool):
         if gpus:
             # Get GPU model by querying the node labels
             label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
-            gpu_type_cmd = f"kubectl get node skypilot-control-plane -o jsonpath=\"{{.metadata.labels['{label_name_escaped}']}}\""
+            gpu_type_cmd = f'kubectl get node skypilot-control-plane -o jsonpath=\"{{.metadata.labels[\'{label_name_escaped}\']}}\"'  # pylint: disable=line-too-long
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_type_cmd,
@@ -5297,24 +5304,26 @@ def local_up(no_gpus: bool):
             except subprocess.CalledProcessError as e:
                 output = str(e.output.decode('utf-8'))
                 logger.warning(f'Failed to get GPU type: {output}')
-                gpu_type_str = f''
+                gpu_type_str = ''
 
             # Get number of GPUs (sum of nvidia.com/gpu resources)
-            gpu_count_command = "kubectl get nodes -o=jsonpath='{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}' | awk '{sum += $1} END {print sum}'"
+            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
             try:
                 # Run the command and capture the output
                 gpu_count_output = subprocess.check_output(gpu_count_command,
                                                            shell=True,
                                                            text=True)
-                gpu_count = gpu_count_output.strip()  # Remove any extra whitespace
+                gpu_count = gpu_count_output.strip(
+                )  # Remove any extra whitespace
                 gpu_message = f' and {gpu_count} {gpu_type_str}GPUs'
             except subprocess.CalledProcessError as e:
                 output = str(e.output.decode('utf-8'))
                 logger.warning(f'Failed to get GPU count: {output}')
                 gpu_message = f' with {gpu_type_str}GPU support'
 
-            gpu_hint = ('\nHint: To see the list of GPUs in the cluster, '
-                       'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
+            gpu_hint = (
+                '\nHint: To see the list of GPUs in the cluster, '
+                'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
 
         if num_cpus < 2:
             click.echo('Warning: Local cluster has less than 2 CPUs. '
@@ -5325,8 +5334,7 @@ def local_up(no_gpus: bool):
             f'locally.{style.RESET_ALL}'
             '\nHint: To change the number of CPUs, change your docker '
             'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
-            f'{gpu_hint}'
-        )
+            f'{gpu_hint}')
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
@@ -5344,8 +5352,7 @@ def local_down():
 
     # Setup logging paths
     run_timestamp = backend_utils.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY,
-                            run_timestamp,
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path
 

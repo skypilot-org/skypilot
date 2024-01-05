@@ -33,12 +33,14 @@ def generate_kind_config(path: str,
     nodes:
     - role: control-plane""")
     if gpus:
-        preamble += textwrap.indent(textwrap.dedent("""
+        preamble += textwrap.indent(
+            textwrap.dedent("""
         extraMounts:
         - hostPath: /dev/null
-          containerPath: /var/run/nvidia-container-devices/all"""), ' '*2)
-    preamble += textwrap.indent(textwrap.dedent("""
-      extraPortMappings:"""), ' '*2)
+          containerPath: /var/run/nvidia-container-devices/all"""), ' ' * 2)
+    preamble += textwrap.indent(
+        textwrap.dedent("""
+      extraPortMappings:"""), ' ' * 2)
     suffix = ''
     if num_nodes > 1:
         for _ in range(1, num_nodes):
