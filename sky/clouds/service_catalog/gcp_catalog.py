@@ -385,23 +385,24 @@ def list_accelerators(
             new_results[acc_name] = acc_info
     results = new_results
 
-    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
-    # A100 GPUs can only be attached to fixed-size A2 VMs,
-    # and L4 GPUs can only be attached to G2 VMs.
-    # Thus, we can show their exact cost including the host VM prices.
-
+    # If we can figure out which instances are to be used then we can attach them here.
+    accs = list(results.keys())
     acc_infos: List[common.InstanceTypeInfo] = sum(
-        [results.get(a, []) for a in _ACC_INSTANCE_TYPE_DICTS], [])
+        [results.get(a, []) for a in accs], [])
     if not acc_infos:
         return results
 
     new_infos = defaultdict(list)
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
-        vm_types = _ACC_INSTANCE_TYPE_DICTS[info.accelerator_name][
-            info.accelerator_count]
+        vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
+                                                        info.accelerator_count)
         for vm_type in vm_types:
-            df = _df[_df['InstanceType'] == vm_type]
+            df = _df[(_df['InstanceType'] == vm_type) &
+                     (_df['Region'] == info.region)]
+            if df.empty:
+                logger.warning(f'Cannot find {vm_type} in {info.region}')
+                continue
             cpu_count = df['vCPUs'].iloc[0]
             memory = df['MemoryGiB'].iloc[0]
             vm_price = common.get_hourly_cost_impl(_df,

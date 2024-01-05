@@ -3543,11 +3543,6 @@ def show_gpus(
             yield 'to show available accelerators.'
             return
 
-        if cloud is None or cloud.lower() == 'gcp':
-            yield '*NOTE*: for most GCP accelerators, '
-            yield 'INSTANCE_TYPE == (attachable) means '
-            yield 'the host VM\'s cost is not included.\n\n'
-
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
             accelerator_table_headers = [
