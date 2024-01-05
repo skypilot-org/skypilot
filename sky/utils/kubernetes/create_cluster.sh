@@ -205,9 +205,9 @@ wait_for_skypilot_cpu_image_pull
 NUM_CPUS=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}')
 echo "Kubernetes cluster ready! Run `sky check` to setup Kubernetes access."
 if $ENABLE_GPUS; then
-    # Check if GPU support is enabled
+    # As a sanity check, verify if GPU support is enabled
     if ! kubectl describe nodes | grep -q nvidia.com/gpu; then
-        >&2 echo "GPU support is not enabled. Please enable GPU support and try again."
+        >&2 echo "GPU support was not enabled. Please check for any errors above."
         exit 1
     else
         echo "GPU support is enabled. Run 'sky show-gpus --cloud kubernetes' to see the GPUs available on the cluster."
