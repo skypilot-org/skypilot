@@ -410,7 +410,11 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read()
         if not public_key.endswith('\n'):
             public_key += '\n'
-        secret = k8s.client.V1Secret(metadata=k8s.client.V1ObjectMeta(name=secret_name), string_data={
+        secret_metadata = k8s.client.V1ObjectMeta(
+            name=secret_name,
+            labels={"parent": "skypilot"}
+        )
+        secret = k8s.client.V1Secret(metadata=secret_metadata, string_data={
             secret_field_name: public_key
         })
     if kubernetes_utils.check_secret_exists(secret_name, namespace):
