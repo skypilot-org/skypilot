@@ -402,12 +402,12 @@ def list_accelerators(
             vm_price = common.get_hourly_cost_impl(_df,
                                                    vm_type,
                                                    use_spot=False,
-                                                   region=None,
+                                                   region=region_filter,
                                                    zone=None)
             vm_spot_price = common.get_hourly_cost_impl(_df,
                                                         vm_type,
                                                         use_spot=True,
-                                                        region=None,
+                                                        region=region_filter,
                                                         zone=None)
             new_infos[info.accelerator_name].append(
                 info._replace(
