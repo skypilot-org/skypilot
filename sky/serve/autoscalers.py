@@ -390,6 +390,12 @@ class HeteroGPUAutoscaler(Autoscaler):
                                                   info)
                 logger.info(f'fallback_scale_down_sync(replica_id): {replica_id}')
 
+    def in_scale_down_candidates(self, replica_id: int):
+        for info in self.scale_down_candidates:
+            if info.replica_id == replica_id:
+                return True
+        return False
+
     def evaluate_scaling(
         self,
         replica_infos: List['replica_managers.ReplicaInfo'],
@@ -510,7 +516,7 @@ class HeteroGPUAutoscaler(Autoscaler):
                     all_replica_infos_to_scale_down.extend(
                         _get_replica_infos_to_scale_down(
                             info_filter=lambda info: info.accelerator ==
-                            accelerator and info.is_primary,
+                            accelerator and info.is_primary and not self.in_scale_down_candidates(info.replica_id),
                             status_order=serve_state.ReplicaStatus.
                             scale_down_decision_order(),
                             num_limit=diff_accel_num,
