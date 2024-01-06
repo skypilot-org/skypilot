@@ -62,7 +62,7 @@ Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v
             # Fields below describe each replica.
             resources:
               ports: 8080
-              accelerators: {L4:8, A10g:8, A10:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+              accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 
             setup: |
               conda create -n vllm python=3.9 -y
