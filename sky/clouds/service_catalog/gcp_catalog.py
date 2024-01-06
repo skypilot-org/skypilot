@@ -387,14 +387,13 @@ def list_accelerators(
 
     # If we can figure out which instances are to be used then we
     # can attach them here.
-    acc_infos: List[common.InstanceTypeInfo] = sum(
-        results.values(), [])
+    acc_infos: List[common.InstanceTypeInfo] = sum(results.values(), [])
 
     new_infos = defaultdict(list)
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
-                                                        info.accelerator_count, 
+                                                        info.accelerator_count,
                                                         region=region_filter)
         for vm_type in vm_types:
             df = _df[(_df['InstanceType'] == vm_type)]
