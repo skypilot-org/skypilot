@@ -8,7 +8,7 @@ user re-launches a task before the duration is over, then ssh jump pod is being
 reused and will terminate itself when it sees that no ray clusters exist in
 that duration.
 
-To allow multiple users to the share the same SSH jump pod, 
+To allow multiple users to the share the same SSH jump pod,
 this script also reloads SSH keys from the mounted secret volume on an
 interval and updates `~/.ssh/authorized_keys`.
 """
@@ -45,7 +45,7 @@ label_selector = f'skypilot-ssh-jump={current_name}'
 
 def poll(interval, leading=True):
     """Decorator factory for polling function. To stop polling, return True.
-    
+
     Args:
         interval (int): The amount of time to wait between function calls.
         leading (bool): Whether to wait before (rather than after) calls.
