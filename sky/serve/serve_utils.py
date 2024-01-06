@@ -529,7 +529,7 @@ def stream_replica_logs(service_name: str,
     if not skip_down_log_file_check and os.path.exists(down_replica_file_name):
         # When sync down, we set skip_down_log_file_check to False, so it
         # won't detect the just created log file. Otherwise, it indicates the
-        # replica is already been terminated. All logs should be in the
+        # replica has already been terminated. All logs should be in the
         # log file, and we don't need to stream logs for it.
         with open(log_file_name, 'r') as f:
             print(f.read(), flush=True)
@@ -800,11 +800,11 @@ class ServeCodeGen:
                             service_name: str,
                             replica_id: int,
                             follow: bool,
-                            skip_local_log_file_check: bool = False) -> str:
+                            skip_down_log_file_check: bool = False) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
             f'{service_name!r}, {replica_id!r}, follow={follow}, '
-            f'skip_local_log_file_check={skip_local_log_file_check})',
+            f'skip_down_log_file_check={skip_down_log_file_check})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
