@@ -285,6 +285,9 @@ class ReplicaStatusProperty:
         notify the user that something is wrong with the user code / setup.
         """
         logger.info('is_scale_down_succeeded(1)')
+        logger.info(f'is_scale_down_succeeded(self.sky_launch_status):{self.sky_launch_status}')
+        logger.info(f'is_scale_down_succeeded(self.sky_down_status):{self.sky_down_status}')
+
         if self.sky_launch_status != ProcessStatus.SUCCEEDED:
             logger.info('is_scale_down_succeeded(2)')
             return False
@@ -343,6 +346,11 @@ class ReplicaStatusProperty:
             # Pending to launch
             return serve_state.ReplicaStatus.PENDING
         if self.sky_launch_status == ProcessStatus.RUNNING:
+            # replica is terminated, but the ReplicaInfo is kept as some
+            # failure detected.
+            if self.sky_down_status is not None:
+                if self.sky_down_status == ProcessStatus.SUCCEEDED:
+                    return serve_state.ReplicaStatus.TERMINATED
             # Still launching
             return serve_state.ReplicaStatus.PROVISIONING
         if self.sky_down_status is not None:
@@ -841,6 +849,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
                                 'failure detected.')
+                    info.status_property
                     serve_state.add_or_update_replica(self._service_name,
                                                       replica_id, info)
 

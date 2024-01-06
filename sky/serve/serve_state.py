@@ -95,6 +95,10 @@ class ReplicaStatus(enum.Enum):
 
     # Unknown. This should never happen (used only for unexpected errors).
     UNKNOWN = 'UNKNOWN'
+    
+    # The replica successfully terminated, but the 'ReplicaInfo' is kept since
+    # some failure detected.
+    TERMINATED = 'TERMINATED'
 
     @classmethod
     def failed_statuses(cls) -> List['ReplicaStatus']:
