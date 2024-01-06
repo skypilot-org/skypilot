@@ -204,8 +204,7 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'load_balancer.log')
 
 
-def generate_replica_log_file_name(service_name: str,
-                                   replica_id: int) -> str:
+def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, f'replica_{replica_id}.log')
@@ -521,8 +520,7 @@ def stream_replica_logs(service_name: str,
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    log_file_name = generate_replica_log_file_name(
-        service_name, replica_id)
+    log_file_name = generate_replica_log_file_name(service_name, replica_id)
     down_replica_file_name = generate_replica_down_log_file_name(
         service_name, replica_id)
 

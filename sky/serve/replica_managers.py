@@ -565,7 +565,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             if log_file is not None:
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name,
-                          'a') as replica_log_file, open(log_file, 'r') as job_file:
+                          'a') as replica_log_file, open(log_file,
+                                                         'r') as job_file:
                     replica_log_file.write(job_file.read())
 
         logger.info(f'Terminating replica {replica_id}...')
@@ -579,11 +580,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
         p = multiprocessing.Process(
-            target=ux_utils.RedirectOutputForProcess(
-                terminate_cluster,
-                log_file_name,
-                'a'
-            ).run,
+            target=ux_utils.RedirectOutputForProcess(terminate_cluster,
+                                                     log_file_name, 'a').run,
             args=(info.cluster_name,),
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
