@@ -26,7 +26,7 @@ pod_spec:
             lifecycle:
                 postStart:
                     exec:
-                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-key-* > ~/.ssh/authorized_keys && sudo service ssh restart"]
+                        command: ["/bin/bash", "-c", "mkdir -p ~/.ssh && cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys && sudo service ssh restart"]
             env:
               - name: MY_POD_NAME
                 valueFrom:
