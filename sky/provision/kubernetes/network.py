@@ -180,7 +180,7 @@ def _query_ports_for_loadbalancer(
     result: Dict[int, List[common.Endpoint]] = {}
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
-    external_ip, external_ports = network_utils.get_loadbalancer_ip_and_ports(
+    external_ip = network_utils.get_loadbalancer_ip(
         namespace=provider_config.get('namespace', 'default'),
         service_name=service_name)
 
@@ -188,14 +188,7 @@ def _query_ports_for_loadbalancer(
         return {}
 
     for port in ports:
-        if external_ports is not None and port in external_ports:
-            socket_port = external_ports[port]
-        else:
-            socket_port = port
-
-        result[port] = [
-            common.SocketEndpoint(host=external_ip, port=socket_port)
-        ]
+        result[port] = [common.SocketEndpoint(host=external_ip, port=port)]
 
     return result
 
