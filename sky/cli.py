@@ -3471,8 +3471,7 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if (len(result) == 0 and
-                    cloud_obj is not None and
+            if (len(result) == 0 and cloud_obj is not None and
                     cloud_obj.is_same_cloud(clouds.Kubernetes())):
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
