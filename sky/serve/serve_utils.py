@@ -204,11 +204,11 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'load_balancer.log')
 
 
-def generate_replica_launch_log_file_name(service_name: str,
-                                          replica_id: int) -> str:
+def generate_replica_log_file_name(service_name: str,
+                                   replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, f'replica_{replica_id}_launch.log')
+    return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
 def generate_replica_down_log_file_name(service_name: str,
@@ -216,13 +216,6 @@ def generate_replica_down_log_file_name(service_name: str,
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, f'replica_{replica_id}_down.log')
-
-
-def generate_replica_local_log_file_name(service_name: str,
-                                         replica_id: int) -> str:
-    dir_name = generate_remote_service_dir_name(service_name)
-    dir_name = os.path.expanduser(dir_name)
-    return os.path.join(dir_name, f'replica_{replica_id}_local.log')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -522,21 +515,23 @@ def _follow_replica_logs(
 def stream_replica_logs(service_name: str,
                         replica_id: int,
                         follow: bool,
-                        skip_local_log_file_check: bool = False) -> str:
+                        skip_down_log_file_check: bool = False) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
-    local_log_file_name = generate_replica_local_log_file_name(
+    log_file_name = generate_replica_log_file_name(
+        service_name, replica_id)
+    down_replica_file_name = generate_replica_down_log_file_name(
         service_name, replica_id)
 
-    if not skip_local_log_file_check and os.path.exists(local_log_file_name):
-        # When sync down, we set skip_local_log_file_check to False so it won't
-        # detect the just created local log file. Otherwise, it indicates the
-        # replica is already been terminated. All logs should be in the local
-        # log file and we don't need to stream logs for it.
-        with open(local_log_file_name, 'r') as f:
+    if not skip_down_log_file_check and os.path.exists(down_replica_file_name):
+        # When sync down, we set skip_down_log_file_check to False, so it
+        # won't detect the just created log file. Otherwise, it indicates the
+        # replica is already been terminated. All logs should be in the
+        # log file, and we don't need to stream logs for it.
+        with open(log_file_name, 'r') as f:
             print(f.read(), flush=True)
         return ''
 
@@ -548,9 +543,7 @@ def stream_replica_logs(service_name: str,
         return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
-    launch_log_file_name = generate_replica_launch_log_file_name(
-        service_name, replica_id)
-    if not os.path.exists(launch_log_file_name):
+    if not os.path.exists(log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
@@ -564,7 +557,7 @@ def stream_replica_logs(service_name: str,
 
     finish_stream = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
-    with open(launch_log_file_name, 'r', newline='') as f:
+    with open(log_file_name, 'r', newline='') as f:
         for line in _follow_replica_logs(f,
                                          replica_cluster_name,
                                          finish_stream=finish_stream,
