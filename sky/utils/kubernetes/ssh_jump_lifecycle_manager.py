@@ -14,10 +14,10 @@ interval and updates `~/.ssh/authorized_keys`.
 """
 import datetime
 import os
-import sys
-import time
 import subprocess
+import sys
 import threading
+import time
 
 from kubernetes import client
 from kubernetes import config
@@ -52,6 +52,7 @@ def poll(interval, leading=True):
     """
 
     def decorator(func):
+
         def wrapper(*args, **kwargs):
             while True:
                 if leading:
@@ -61,13 +62,16 @@ def poll(interval, leading=True):
                     return
                 if not leading:
                     time.sleep(interval)
+
         return wrapper
+
     return decorator
 
 
 # Flag to terminate the reload keys thread when the lifecycle thread
 # terminates.
 terminated = False
+
 
 @poll(interval=reload_interval, leading=False)
 def reload_keys():
@@ -80,18 +84,24 @@ def reload_keys():
     # Reload SSH keys from mounted secret volume if changed.
     tmpfile = '/tmp/sky-ssh-keys'
     try:
-        subprocess.check_output(f'cat /etc/secret-volume/ssh-publickey* > {tmpfile}', shell=True)
+        subprocess.check_output(
+            f'cat /etc/secret-volume/ssh-publickey* > {tmpfile}', shell=True)
         try:
-            subprocess.check_output(f'diff {tmpfile} ~/.ssh/authorized_keys', shell=True)
-            sys.stdout.write('[SSH Key Reloader] No keys changed, continuing.\n')
+            subprocess.check_output(f'diff {tmpfile} ~/.ssh/authorized_keys',
+                                    shell=True)
+            sys.stdout.write(
+                '[SSH Key Reloader] No keys changed, continuing.\n')
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
-                sys.stdout.write('[SSH Key Reloader] Changes detected, reloading.\n')
-                subprocess.check_output(f'mv {tmpfile} ~/.ssh/authorized_keys', shell=True)
+                sys.stdout.write(
+                    '[SSH Key Reloader] Changes detected, reloading.\n')
+                subprocess.check_output(f'mv {tmpfile} ~/.ssh/authorized_keys',
+                                        shell=True)
             else:
                 raise
     except Exception as e:
-        sys.stdout.write(f'[SSH Key Reloader][ERROR] Failed to reload SSH keys: {e}\n')
+        sys.stdout.write(
+            f'[SSH Key Reloader][ERROR] Failed to reload SSH keys: {e}\n')
         raise
 
 
@@ -101,6 +111,7 @@ retry_interval_delta = datetime.timedelta(seconds=retry_interval)
 # against alert_threshold.
 nocluster_delta = datetime.timedelta()
 
+
 @poll(interval=retry_interval)
 def manage_lifecycle():
     """Manages lifecycle of ssh jump pod."""
@@ -109,14 +120,15 @@ def manage_lifecycle():
 
     try:
         ret = v1.list_namespaced_pod(current_namespace,
-                                        label_selector=label_selector)
+                                     label_selector=label_selector)
     except Exception as e:
         sys.stdout.write('[Lifecycle] [ERROR] listing pods failed with '
-            f'error: {e}\n')
+                         f'error: {e}\n')
         raise
 
     if len(ret.items) == 0:
-        sys.stdout.write(f'[Lifecycle] Did not find pods with label '
+        sys.stdout.write(
+            f'[Lifecycle] Did not find pods with label '
             f'"{label_selector}" in namespace {current_namespace}\n')
         nocluster_delta = nocluster_delta + retry_interval_delta
         sys.stdout.write(
@@ -128,7 +140,8 @@ def manage_lifecycle():
             f'namespace {current_namespace}\n')
         # reset ..
         nocluster_delta = datetime.timedelta()
-        sys.stdout.write(f'[Lifecycle] nocluster_delta is reset: {nocluster_delta}\n')
+        sys.stdout.write(
+            f'[Lifecycle] nocluster_delta is reset: {nocluster_delta}\n')
 
     if nocluster_delta >= alert_delta:
         sys.stdout.write(
@@ -141,7 +154,7 @@ def manage_lifecycle():
             v1.delete_namespaced_pod(current_name, current_namespace)
         except Exception as e:
             sys.stdout.write('[Lifecycle][ERROR] Deletion failed. Exiting '
-                                f'poll() with error: {e}\n')
+                             f'poll() with error: {e}\n')
             raise
 
         terminated = True
@@ -150,7 +163,7 @@ def manage_lifecycle():
 
 def main():
     sys.stdout.write('SkyPilot SSH Jump Pod Lifecycle Manager\n')
-    sys.stdout.write(f'current_name: {current_name}\n')  
+    sys.stdout.write(f'current_name: {current_name}\n')
     sys.stdout.write(f'current_namespace: {current_namespace}\n')
     sys.stdout.write(f'alert_threshold time: {alert_threshold}\n')
     sys.stdout.write(f'retry_interval time: {retry_interval}\n')
