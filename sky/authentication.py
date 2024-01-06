@@ -41,8 +41,8 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.adaptors import ibm
-from sky.clouds.utils import lambda_utils
 from sky.adaptors import kubernetes
+from sky.clouds.utils import lambda_utils
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
 from sky.utils import kubernetes_utils
@@ -409,16 +409,15 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = f.read()
         if not public_key.endswith('\n'):
             public_key += '\n'
-        secret_metadata = k8s.client.V1ObjectMeta(
-            name=secret_name,
-            labels={"parent": "skypilot"}
-        )
-        secret = k8s.client.V1Secret(metadata=secret_metadata, string_data={
-            secret_field_name: public_key
-        })
+        secret_metadata = k8s.client.V1ObjectMeta(name=secret_name,
+                                                  labels={"parent": "skypilot"})
+        secret = k8s.client.V1Secret(
+            metadata=secret_metadata,
+            string_data={secret_field_name: public_key})
     if kubernetes_utils.check_secret_exists(secret_name, namespace):
         logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
-        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace, secret)
+        kubernetes.core_api().patch_namespaced_secret(secret_name, namespace,
+                                                      secret)
     else:
         logger.debug(
             f'Key {secret_name} does not exist in the cluster, creating it...')

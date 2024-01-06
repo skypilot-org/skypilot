@@ -992,6 +992,7 @@ def check_port_forward_mode_dependencies() -> None:
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {install_cmd}') from None
 
+
 def check_secret_exists(secret_name: str, namespace: str) -> bool:
     """Checks if a secret exists in a namespace
 
@@ -1001,7 +1002,8 @@ def check_secret_exists(secret_name: str, namespace: str) -> bool:
     """
 
     try:
-        kubernetes.core_api().read_namespaced_secret(secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
+        kubernetes.core_api().read_namespaced_secret(
+            secret_name, namespace, _request_timeout=kubernetes.API_TIMEOUT)
     except kubernetes.api_exception() as e:
         if e.status == 404:
             return False
