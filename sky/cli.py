@@ -3445,7 +3445,7 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    clouds.CLOUD_REGISTRY.from_str(cloud)
+    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and accelerator_str is not None:
@@ -3471,22 +3471,21 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if len(result) == 0 and cloud == 'kubernetes':
+            if len(result) == 0 and cloud_obj.is_same_cloud(clouds.Kubernetes):
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
             # "Common" GPUs
             # If cloud is kubernetes, we want to show all GPUs here, even if
             # they are not listed as common in SkyPilot.
-            if cloud == 'kubernetes':
-                for gpu, _ in sorted(result.items()):
+            if cloud_obj.is_same_cloud(clouds.Kubernetes):
+                for gpu in sorted(result):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-                yield from gpu_table.get_string()
             else:
                 for gpu in service_catalog.get_common_gpus():
                     if gpu in result:
                         gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
-                yield from gpu_table.get_string()
+            yield from gpu_table.get_string()
 
             # Google TPUs
             for tpu in service_catalog.get_tpus():
@@ -5223,20 +5222,20 @@ def local():
     pass
 
 
-@click.option('--no-gpus',
-              default=False,
+@click.option('--gpus/--no-gpus',
+              default=True,
               is_flag=True,
               help='Launch cluster without GPU support even '
               'if GPUs are detected on the host.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
-def local_up(no_gpus: bool):
+def local_up(gpus: bool):
     """Creates a local cluster."""
     cluster_created = False
 
     # Check if GPUs are available on the host
     local_gpus_available = backend_utils.check_local_gpus()
-    gpus = not no_gpus and local_gpus_available
+    gpus = gpus and local_gpus_available
 
     # Check if ~/.kube/config exists:
     if os.path.exists(os.path.expanduser('~/.kube/config')):
