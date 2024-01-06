@@ -77,11 +77,19 @@ def reload_keys():
         sys.stdout.write('[SSH Key Reloader] Terminated.\n')
         return True
 
-    # Reload SSH keys from mounted secret volume
-    sys.stdout.write('[SSH Key Reloader] Reloading SSH keys.\n')
-    cmd = 'cat /etc/secret-volume/ssh-key-* > ~/.ssh/authorized_keys'
+    # Reload SSH keys from mounted secret volume if changed.
+    tmpfile = '/tmp/sky-ssh-keys'
     try:
-        subprocess.check_output(cmd, shell=True)
+        subprocess.check_output(f'cat /etc/secret-volume/ssh-key-* > {tmpfile}', shell=True)
+        try:
+            subprocess.check_output(f'diff {tmpfile} ~/.ssh/authorized_keys', shell=True)
+            sys.stdout.write('[SSH Key Reloader] No keys changed, continuing.\n')
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                sys.stdout.write('[SSH Key Reloader] Keys changed, reloading.\n')
+                subprocess.check_output(f'mv {tmpfile} ~/.ssh/authorized_keys', shell=True)
+            else:
+                raise
     except Exception as e:
         sys.stdout.write(f'[SSH Key Reloader][ERROR] Failed to reload SSH keys: {e}\n')
         raise
