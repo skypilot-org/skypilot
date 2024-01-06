@@ -58,8 +58,8 @@ data:
     from kubernetes import config
     
     canonical_gpu_names = [
-        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 'A10',
-        'P100', 'P40', 'P4', 'L4'
+        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100', 
+        'A10', 'P100', 'P40', 'P4', 'L4', 'A6000'
     ]
     
     

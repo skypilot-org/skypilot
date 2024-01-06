@@ -3471,15 +3471,18 @@ def show_gpus(
                 region_filter=region,
             )
 
-            if len(result) == 0 and cloud_obj.is_same_cloud(clouds.Kubernetes):
+            if (len(result) == 0 and
+                    cloud_obj is not None and
+                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
                 yield kubernetes_utils.NO_GPU_ERROR_MESSAGE
                 return
 
             # "Common" GPUs
             # If cloud is kubernetes, we want to show all GPUs here, even if
             # they are not listed as common in SkyPilot.
-            if cloud_obj.is_same_cloud(clouds.Kubernetes):
-                for gpu in sorted(result):
+            if (cloud_obj is not None and
+                    cloud_obj.is_same_cloud(clouds.Kubernetes())):
+                for gpu, _ in sorted(result.items()):
                     gpu_table.add_row([gpu, _list_to_str(result.pop(gpu))])
             else:
                 for gpu in service_catalog.get_common_gpus():

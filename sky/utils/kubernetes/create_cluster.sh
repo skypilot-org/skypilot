@@ -18,6 +18,10 @@ if [[ "$1" == "--gpus" ]]; then
     ENABLE_GPUS=true
 fi
 
+# ====== Dependency checks =======
+# Initialize error message string
+error_msg=""
+
 # Temporarily disable 'exit on error' to capture docker info output
 set +e
 docker_output=$(docker info 2>&1)
@@ -26,26 +30,55 @@ set -e
 
 # Check if docker info command was successful
 if [ $exit_status -ne 0 ]; then
-    # Check for 'permission denied' in docker output
     if echo "$docker_output" | grep -q "permission denied"; then
-        >&2 echo "Permission denied while trying to connect to the Docker daemon socket. Make sure your user is added to the docker group or has appropriate permissions. Instructions: https://docs.docker.com/engine/install/linux-postinstall/"
+        error_msg+="\n* Permission denied while trying to connect to the Docker daemon socket. Make sure your user is added to the docker group or has appropriate permissions.\nInstructions: https://docs.docker.com/engine/install/linux-postinstall/\n"
     else
-        >&2 echo "Docker is not running. Please start Docker and try again."
+        error_msg+="\n* Docker is not running. Please start Docker and try again.\n"
     fi
-    exit 1
 fi
 
 # Check if kind is installed
 if ! kind version > /dev/null 2>&1; then
-    >&2 echo "kind is not installed. Please install kind and try again. Installation instructions: https://kind.sigs.k8s.io/docs/user/quick-start/#installation."
-    exit 1
+    error_msg+="\n* kind is not installed. Please install kind and try again.\nInstallation instructions: https://kind.sigs.k8s.io/docs/user/quick-start/#installation\n"
 fi
 
 # Check if kubectl is installed
 if ! kubectl > /dev/null 2>&1; then
-    >&2 echo "kubectl is not installed. Please install kubectl and try again. Installation instructions: https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/"
+    error_msg+="\n* kubectl is not installed. Please install kubectl and try again.\nInstallation instructions: https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/\n"
+fi
+
+if $ENABLE_GPUS; then
+    # Check GPU dependencies. We don't automatically run sudo commands since the script may not have sudo permissions.
+    # Check if nvidia-container-toolkit is already installed
+    if ! dpkg -s nvidia-container-toolkit > /dev/null 2>&1; then
+        error_msg+="\n* NVIDIA Container Toolkit not installed. Please install NVIDIA Container Toolkit and try again.\nInstallation instructions: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker\n"
+    fi
+
+    # Check if NVIDIA is set as the default runtime for docker
+    if ! grep -q '"default-runtime": "nvidia"' /etc/docker/daemon.json; then
+        error_msg+="\n* NVIDIA is not set as the default runtime for Docker. To fix, run: \nsudo nvidia-ctk runtime configure --runtime=docker --set-as-default\nsudo systemctl restart docker\n"
+    fi
+
+    # Check if NVIDIA visible devices as configured as volume mounts
+    if ! grep -q 'accept-nvidia-visible-devices-as-volume-mounts = true' /etc/nvidia-container-runtime/config.toml; then
+        error_msg+="\n* NVIDIA visible devices are not set as volume mounts in container runtime. To fix, run: \nsudo sed -i '/accept-nvidia-visible-devices-as-volume-mounts/c\\\\accept-nvidia-visible-devices-as-volume-mounts = true' /etc/nvidia-container-runtime/config.toml\n"
+    fi
+
+    # Check if helm is installed
+    if ! helm version > /dev/null 2>&1; then
+        error_msg+="\n* helm is not installed. Please install helm and try again.\nInstallation instructions: https://helm.sh/docs/intro/install/\n"
+    fi
+fi
+
+# Print the error message and exit if there are missing dependencies
+if [ ! -z "$error_msg" ]; then
+    >&2 echo "Some dependencies were not found or are not configured correctly. Please fix the following errors and try again:"
+    # Strip the trailing newline character
+    error_msg=$(echo -e "$error_msg" | sed -z '$ s/\n$//')
+    >&2 printf "%s" "$error_msg" # Use printf to handle special characters
     exit 1
 fi
+# ====== End of dependency checks =======
 
 # Check if the local cluster already exists
 if kind get clusters | grep -q skypilot; then
@@ -63,43 +96,6 @@ if $ENABLE_GPUS; then
     python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END} --gpus
 else
   python -m sky.utils.kubernetes.generate_kind_config --path /tmp/skypilot-kind.yaml --port-start ${PORT_RANGE_START} --port-end ${PORT_RANGE_END}
-fi
-
-if $ENABLE_GPUS; then
-    # Add GPU support. We don't run sudo commands since the script may not have sudo permissions.
-
-    # Check if nvidia-container-toolkit is already installed
-    if ! dpkg -s nvidia-container-toolkit > /dev/null 2>&1; then
-        >&2 echo "NVIDIA Container Toolkit not installed. Please install NVIDIA Container Toolkit and try again. Installation instructions: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker"
-        exit 1
-    else
-        echo "NVIDIA Container Toolkit found."
-    fi
-
-    # Check if NVIDIA is set as the default runtime for docker
-    if ! grep -q '"default-runtime": "nvidia"' /etc/docker/daemon.json; then
-        >&2 echo "NVIDIA is not set as the default runtime for Docker. To fix, run:"
-        >&2 echo "sudo nvidia-ctk runtime configure --runtime=docker --set-as-default"
-        >&2 echo "sudo systemctl restart docker"
-        exit 1
-    else
-        echo "NVIDIA is the default runtime for Docker"
-    fi
-
-    # Check if NVIDIA visible devices as configured as volume mounts
-    if ! grep -q 'accept-nvidia-visible-devices-as-volume-mounts = true' /etc/nvidia-container-runtime/config.toml; then
-        >&2 echo "NVIDIA visible devices are not set as volume mounts in container runtime. To fix, run:"
-        >&2 echo "sudo sed -i '/accept-nvidia-visible-devices-as-volume-mounts/c\accept-nvidia-visible-devices-as-volume-mounts = true' /etc/nvidia-container-runtime/config.toml"
-        exit 1
-    else
-        echo "NVIDIA visible devices are set as volume mounts"
-    fi
-
-    # Check if helm is installed
-    if ! helm version > /dev/null 2>&1; then
-        >&2 echo "helm is not installed. Please install helm and try again. Installation instructions: https://helm.sh/docs/intro/install/"
-        exit 1
-    fi
 fi
 
 kind create cluster --config /tmp/skypilot-kind.yaml --name skypilot
