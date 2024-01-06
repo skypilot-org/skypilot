@@ -86,7 +86,7 @@ def reload_keys():
             sys.stdout.write('[SSH Key Reloader] No keys changed, continuing.\n')
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
-                sys.stdout.write('[SSH Key Reloader] Keys changed, reloading.\n')
+                sys.stdout.write('[SSH Key Reloader] Changes detected, reloading.\n')
                 subprocess.check_output(f'mv {tmpfile} ~/.ssh/authorized_keys', shell=True)
             else:
                 raise
