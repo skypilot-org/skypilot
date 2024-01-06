@@ -126,3 +126,61 @@ curl http://$IP:8000/v1/chat/completions \
   }
 }
 ```
+
+## Serving Mixtral 8x7b model with vLLM and SkyServe
+
+1. Start serving the Mixtral 8x7b model using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+```bash
+sky serve up -n vllm-mixtral mixtral-service.yaml
+```
+
+2. Use `sky serve status` to check the status of the serving:
+```bash
+sky serve status vllm-mixtral
+```
+
+You should get a similar output as the following:
+
+```console
+Services
+NAME           UPTIME     STATUS    REPLICAS   ENDPOINT
+vllm-mixtral   7m 43s     READY     2/2        3.84.15.251:30001
+
+Service Replicas
+SERVICE_NAME   ID   IP             LAUNCHED       RESOURCES          STATUS  REGION
+vllm-mixtral   1    34.66.255.4    11 mins ago    1x GCP({'L4': 8})  READY   us-central1
+vllm-mixtral   2    35.221.37.64   15 mins ago    1x GCP({'L4': 8})  READY   us-east4
+```
+
+3. Once it status is `READY`, you can use the endpoint to interact with the model:
+
+```bash
+$ curl -L 3.84.15.251:30001/v1/chat/completions \
+    -X POST \
+    -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
+    -H 'Content-Type: application/json'
+```
+
+You should get a similar response as the following:
+
+```console
+{
+    'id': 'cmpl-80b2bfd6f60c4024884c337a7e0d859a',
+    'object': 'chat.completion',
+    'created': 1005,
+    'model': 'mistralai/Mixtral-8x7B-Instruct-v0.1',
+    'choices': [
+        {
+            'index': 0,
+            'message': {
+                'role': 'assistant',
+                'content': ' I am a helpful AI assistant designed to provide information, answer questions, and engage in conversation with users.
+I do not have personal experiences or emotions, but I am programmed to understand and process human language, and to provide helpful and accurate 
+responses.'
+            },
+            'finish_reason': 'stop'
+        }
+    ],
+    'usage': {'prompt_tokens': 13, 'total_tokens': 64, 'completion_tokens': 51}
+}
+```
