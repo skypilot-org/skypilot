@@ -80,7 +80,7 @@ def reload_keys():
     # Reload SSH keys from mounted secret volume if changed.
     tmpfile = '/tmp/sky-ssh-keys'
     try:
-        subprocess.check_output(f'cat /etc/secret-volume/ssh-key-* > {tmpfile}', shell=True)
+        subprocess.check_output(f'cat /etc/secret-volume/ssh-publickey* > {tmpfile}', shell=True)
         try:
             subprocess.check_output(f'diff {tmpfile} ~/.ssh/authorized_keys', shell=True)
             sys.stdout.write('[SSH Key Reloader] No keys changed, continuing.\n')
