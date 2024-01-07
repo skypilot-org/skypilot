@@ -379,22 +379,50 @@ class HeteroGPUAutoscaler(Autoscaler):
             info for info in replica_infos if info.is_primary and
             info.is_ready and info.fallback_replica_id_list
         ]
-        logger.info(f'fallback_scale_down_sync(ready_primary_replica_infos): {ready_primary_replica_infos}')
+        ready_replica_info_dicts = [
+            info.to_info_dict(
+                with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
+            for info in ready_primary_replica_infos
+        ]
+        logger.info(f'fallback_scale_down_sync(ready_primary_replica_infos): {ready_replica_info_dicts}')
         for info in ready_primary_replica_infos:
             fallback_replica_id_to_terminate = info.fallback_replica_id_list
             logger.info(f'fallback_scale_down_sync(fallback_replica_id_to_terminate): {fallback_replica_id_to_terminate}')
             for replica_id in fallback_replica_id_to_terminate:
+                logger.info(f'fallback_scale_down_sync(before replica_id): {replica_id}')
                 replica_manager.scale_down(replica_id)
                 info.fallback_replica_id_list.remove(replica_id)
                 serve_state.add_or_update_replica(service_name, info.replica_id,
                                                   info)
-                logger.info(f'fallback_scale_down_sync(replica_id): {replica_id}')
+                logger.info(f'fallback_scale_down_sync(after replica_id): {replica_id}')
+
 
     def in_scale_down_candidates(self, replica_id: int):
         for info in self.scale_down_candidates:
             if info.replica_id == replica_id:
                 return True
         return False
+
+    def filter_scale_down_candidates(self,
+                                     accelerator_type: AcceleratorType,
+                                     max_num: Optional[int] = None):
+        # Removes the 'accelerator_type' infos from the scale_down_candidates
+        # If 'max_num' is provided, it filters out only 'max_num' number of
+        # 'accelerator_type' infos from the scale_down_candidates and the rest
+        # remains.
+        if max_num is None:
+            return [info for info in self.scale_down_candidates
+                    if info.accelerator != accelerator_type]
+
+        cnt = 0
+        tmp_scale_down_candidates = []
+        for info in self.scale_down_candidates:
+            if info.accelerator == accelerator_type:
+                if cnt < max_num:
+                    cnt += 1
+                    continue
+            tmp_scale_down_candidates.append(info)
+        return tmp_scale_down_candidates[:]
 
     def evaluate_scaling(
         self,
@@ -453,15 +481,15 @@ class HeteroGPUAutoscaler(Autoscaler):
 
         # Compare the nubmers from GPU allocation and replica infos to get what needs to be scaled up/down
         # return a list of AutoscalerDecisions
-        for accelerator in [AcceleratorType.A10, AcceleratorType.A100]:
+        for accelerator_type in [AcceleratorType.A10, AcceleratorType.A100]:
             num_alive_accel = len([
                 info for info in launched_replica_infos
-                if info.accelerator == accelerator and info.is_primary
+                if info.accelerator == accelerator_type and info.is_primary
             ])
             
             alive_accel = [
                 info for info in launched_replica_infos
-                if info.accelerator == accelerator and info.is_primary
+                if info.accelerator == accelerator_type and info.is_primary
             ]
             alive_accel_dict = [
                 info.to_info_dict(
@@ -472,21 +500,32 @@ class HeteroGPUAutoscaler(Autoscaler):
             
             num_scale_down_candidate = len([
                 info for info in self.scale_down_candidates
-                if info.accelerator == accelerator
+                if info.accelerator == accelerator_type
             ])
             logger.info(f'evaluate_scaling(num_scale_down_candidate): {num_scale_down_candidate}')
-            if accelerator in accel_allocation: # and accel_allocation[accelerator] > 0: Setting this > 0 condition made impossible to enther this condition when accelerator was allocated to 0.
-                diff_accel_num = num_alive_accel - accel_allocation[accelerator] - num_scale_down_candidate
+            if accelerator_type in accel_allocation: # and accel_allocation[accelerator_type] > 0: Setting this > 0 condition made impossible to enther this condition when accelerator was allocated to 0.
+                diff_accel_num = num_alive_accel - accel_allocation[accelerator_type]
                 logger.info(f'evaluate_scaling(diff_accel_num): {diff_accel_num}')
+                # Need to clear scale_down_candidates
+                if diff_accel_num == 0:
+                    if num_scale_down_candidate > 0:
+                        # remove all the 'accelerator_type' infos from the
+                        # scale_down_candidates list. This is necessary since
+                        # it's determined at this interval that we need to keep
+                        # the number of replicas for this accelerator type.
+                        self.scale_down_candidates = self.filter_scale_down_candidates(accelerator_type)
+                        logger.info('evaluate_scaling(1)')
+                        [info for info in self.scale_down_candidates if info.accelerator != accelerator_type]
                 # Need to scale up
-                if diff_accel_num < 0:
+                elif diff_accel_num < 0:
                     num_to_scale_up = int(abs(diff_accel_num))
                     for _ in range(num_to_scale_up):
                         num, fallback_type = self._get_fallback_allocation(
-                            accelerator)
+                            accelerator_type)
                         # Setting up to launch fallback replicas along with
                         # primary replica
                         if num > 0:
+                            logger.info('evaluate_scaling(2-1)')
                             primary_fallback_decisions = []
                             for _ in range(num):
                                 fallback_decision = self._get_autoscaler_decision(
@@ -497,30 +536,52 @@ class HeteroGPUAutoscaler(Autoscaler):
                                     fallback_decision)
                             primary_decision = self._get_autoscaler_decision(
                                 AutoscalerDecisionOperator.SCALE_UP,
-                                accelerator=accelerator,
+                                accelerator=accelerator_type,
                                 is_primary=True)
                             primary_fallback_decisions.append(primary_decision)
                             scaling_decisions.append(primary_fallback_decisions)
                         # There is no fallback replica to be launched for the
                         # accelerator type
                         else:
+                            logger.info('evaluate_scaling(2-2)')
                             decision = self._get_autoscaler_decision(
                                 AutoscalerDecisionOperator.SCALE_UP,
-                                accelerator=accelerator,
+                                accelerator=accelerator_type,
                                 is_primary=True)
                             scaling_decisions.append(decision)
+                    logger.info(f'evaluate_scaling(2)(scaling_decisions): {scaling_decisions}')
+                    # Remove all the 'accelerator_type' replicas from 
+                    # scale_down_candidates list. This is necessary as it is 
+                    # determined at this interval that this accelerator type
+                    # needs to be scaled up and not down.
+                    self.scale_down_candidates = self.filter_scale_down_candidates(accelerator_type)
                 # Need to scale down
                 elif diff_accel_num > 0:
-                    # Need to make sure the fallback replicas are not included
-                    # in the scale down list.
-                    all_replica_infos_to_scale_down.extend(
-                        _get_replica_infos_to_scale_down(
-                            info_filter=lambda info: info.accelerator ==
-                            accelerator and info.is_primary and not self.in_scale_down_candidates(info.replica_id),
-                            status_order=serve_state.ReplicaStatus.
-                            scale_down_decision_order(),
-                            num_limit=diff_accel_num,
-                        ))
+                    extra_scale_down_num = diff_accel_num - num_scale_down_candidate
+                    # Nothing to be done when extra_scale_down_num == 0
+                    # Need to scale down replicas in addition to the ones
+                    # already in the scale_down_candidates list
+                    if extra_scale_down_num > 0:
+                        logger.info('evaluate_scaling(3-1)')
+                        all_replica_infos_to_scale_down.extend(
+                            _get_replica_infos_to_scale_down(
+                                info_filter=lambda info: info.accelerator ==
+                                accelerator_type and info.is_primary and
+                                not self.in_scale_down_candidates(info.replica_id),
+                                status_order=serve_state.ReplicaStatus.
+                                scale_down_decision_order(),
+                                num_limit=extra_scale_down_num,
+                            ))
+                    # Reduce the number of replicas from scale_down_candidate
+                    # list. It is determined in this interval by the solver
+                    # that the number of replicas to be scaled down are less
+                    # than what is determined from the previous interval.
+                    elif extra_scale_down_num < 0:
+                        self.scale_down_candidates = self.filter_scale_down_candidates(
+                            accelerator_type,
+                            max_num=abs(extra_scale_down_num))
+                        logger.info('evaluate_scaling(3-2)')
+        
                 all_replica_infos_to_scale_down_dicts = [
                     info.to_info_dict(
                         with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
@@ -570,7 +631,6 @@ class HeteroGPUAutoscaler(Autoscaler):
             if info.replica_id not in down_set:
                 self.scale_down_candidates.append(info)
 
-        #self.scale_down_candidates = all_replica_infos_to_scale_down[:]
         scale_down_candidates_dicts = [
             info.to_info_dict(
                 with_handle=env_options.Options.SHOW_DEBUG_INFO.get())
