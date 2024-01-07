@@ -103,6 +103,9 @@ class SkyServeController:
                     self._service_name, self._replica_manager)
                 # Making autoscaling decisions based on the allocation
                 # of the solver
+                # TODO(Doyoung): Currently, TERMINATED replicas are remaining
+                # in the serve state, and therefore, replica_info contains
+                # these as well. Need to exclude these.
                 replica_info = serve_state.get_replica_infos(self._service_name)
                 replica_info_dicts = [
                     info.to_info_dict(
