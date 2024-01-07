@@ -4359,7 +4359,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     - ``CONTROLLER_INIT``: The controller is initializing.
 
     - ``REPLICA_INIT``: The controller has finished initializing, and there are
-      no available replicas for now. This also indicates that no replica failure
+      no ready replicas for now. This also indicates that no replica failure
       has been detected.
 
     - ``CONTROLLER_FAILED``: The controller failed to start or is in an abnormal
@@ -4385,6 +4385,9 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
     - ``FAILED_CLEANUP``: Some error occurred while the service was being shut
       down. This usually indicates resource leakages. If you see such status,
       please login to the cloud console and double-check
+
+    - ``NO_REPLICAS``: The service has no replicas. This usually happens when
+        min_replicas is set to 0 and there is no traffic to the system.
 
     Each replica can have one of the following statuses:
 

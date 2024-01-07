@@ -154,7 +154,7 @@ class RequestRateAutoscaler(Autoscaler):
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
 
-        if not self.bootstrap_done:
+        if not self.bootstrap_done or self.target_num_replicas == 0:
             self.bootstrap_done = True
             return target_num_replicas
         elif target_num_replicas > self.target_num_replicas:
@@ -172,6 +172,14 @@ class RequestRateAutoscaler(Autoscaler):
         else:
             self.upscale_counter = self.downscale_counter = 0
         return self.target_num_replicas
+
+    def get_decision_interval(self) -> int:
+        # Reduce autoscaler interval when target_num_replicas = 0.
+        # This will happen when min_replicas = 0 and no traffic.
+        if self.target_num_replicas == 0:
+            return constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS
+        else:
+            return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
     def evaluate_scaling(
         self,
