@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 import traceback
-from typing import List
+from typing import Any, Dict, List
 
 import fastapi
 import uvicorn
@@ -47,10 +47,7 @@ class SkyServeController:
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
         self._autoscaler: autoscalers.Autoscaler = (
-            autoscalers.HeteroGPUAutoscaler(
-                service_spec,
-                frequency=constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS,
-                rps_window_size=constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS))
+            autoscalers.Autoscaler.from_spec(service_spec))
         self._port = port
         self._app = fastapi.FastAPI()
 
@@ -92,8 +89,8 @@ class SkyServeController:
                     logger.error(f'  Traceback: {traceback.format_exc()}')
             time.sleep(constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
-    def _run_heteroGPU_autoscaler(self):
-        logger.info('Starting autoscaler.')
+    def _run_HeteroAccel_autoscaler(self):
+        logger.info('Starting HeteroAccel Autoscaler.')
         while True:
             try:
                 # If the primary replica successfully launched to ReplicaStatus.READY,
@@ -170,7 +167,8 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
-            request_aggregator = request_data.get('request_aggregator')
+            request_aggregator: Dict[str, Any] = request_data.get(
+                'request_aggregator', {})
             logger.info(
                 f'Received inflight request information: {request_aggregator}')
             self._autoscaler.collect_request_information(request_aggregator)
@@ -185,8 +183,11 @@ class SkyServeController:
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
 
-        #threading.Thread(target=self._run_autoscaler).start()
-        threading.Thread(target=self._run_heteroGPU_autoscaler).start()
+        if (isinstance(self._autoscaler,
+                autoscalers.HeteroAccelAutoscaler)):       
+            threading.Thread(target=self._run_HeteroAccel_autoscaler).start()
+        else:
+            threading.Thread(target=self._run_autoscaler).start()
 
         logger.info('SkyServe Controller started on '
                     f'http://localhost:{self._port}')

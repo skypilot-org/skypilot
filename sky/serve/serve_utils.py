@@ -170,10 +170,10 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
-class RequestHeteroGPU(RequestsAggregator):
+class RequestHeteroAccel(RequestsAggregator):
     """RequestTimestamp: Aggregates request timestamps.
 
-    This is useful for HeteroGPU-autoscaling.
+    This is useful for HeteroAccel-autoscaling.
     """
 
     def __init__(self) -> None:

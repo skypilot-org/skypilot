@@ -49,6 +49,9 @@ AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # TODO(tian): We might need to be careful that service logs can take a lot of
 # disk space. Maybe we could use a larger disk size, migrate to cloud storage or
 # do some log rotation.
+# Default autoscaler
+DEFAULT_AUTOSCALER = 'RequestRateAutoscaler'
+
 CONTROLLER_RESOURCES = {'cpus': '4+', 'disk_size': 200}
 
 # A default controller with 4 vCPU and 16 GB memory can run up to 16 services.

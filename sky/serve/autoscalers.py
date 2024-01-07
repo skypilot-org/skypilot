@@ -5,7 +5,7 @@ import enum
 import math
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -58,6 +58,9 @@ class AutoscalerDecision:
 class Autoscaler:
     """Abstract class for autoscalers."""
 
+    NAME: Optional[str] = None
+    REGISTRY: Dict[str, Type['Autoscaler']] = dict()
+
     def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the autoscaler.
 
@@ -83,6 +86,21 @@ class Autoscaler:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError
 
+    def __init_subclass__(cls) -> None:
+        if cls.NAME is None:
+            # This is an abstract class, don't put it in the registry.
+            return
+        assert cls.NAME not in cls.REGISTRY, f'Name {cls.NAME} already exists'
+        cls.REGISTRY[cls.NAME] = cls
+
+    @classmethod
+    def get_autoscaler_names(cls) -> List[str]:
+        return list(cls.REGISTRY.keys())
+
+    @classmethod
+    def from_spec(cls, spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
+        assert (spec.autoscaler is not None and spec.autoscaler in cls.REGISTRY)
+        return cls.REGISTRY[spec.autoscaler](spec)
 
 class RequestRateAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.
@@ -90,14 +108,13 @@ class RequestRateAutoscaler(Autoscaler):
     Scales when the number of requests in the given interval is above or below
     the threshold.
     """
+    NAME: Optional[str] = 'RequestRateAutoscaler'
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 qps_window_size: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec') -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
             target_qps_per_replica: Target qps per replica for autoscaling.
-            qps_window_size: Window size for qps calculating.
             request_timestamps: All request timestamps within the window.
             upscale_counter: counter for upscale number of replicas.
             downscale_counter: counter for downscale number of replicas.
@@ -107,7 +124,6 @@ class RequestRateAutoscaler(Autoscaler):
         super().__init__(spec)
         self.target_qps_per_replica: Optional[
             float] = spec.target_qps_per_replica
-        self.qps_window_size: int = qps_window_size
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
@@ -136,7 +152,7 @@ class RequestRateAutoscaler(Autoscaler):
             request_aggregator_info.get('timestamps', []))
         current_time = time.time()
         index = bisect.bisect_left(self.request_timestamps,
-                                   current_time - self.qps_window_size)
+                                   current_time - constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS)
         self.request_timestamps = self.request_timestamps[index:]
 
     def _get_desired_num_replicas(self) -> int:
@@ -148,7 +164,7 @@ class RequestRateAutoscaler(Autoscaler):
 
         # Convert to requests per second.
         num_requests_per_second = len(
-            self.request_timestamps) / self.qps_window_size
+            self.request_timestamps) / constants.AUTOSCALER_QPS_WINDOW_SIZE_SECONDS
         target_num_replicas = math.ceil(num_requests_per_second /
                                         self.target_qps_per_replica)
         target_num_replicas = max(self.min_replicas,
@@ -242,17 +258,17 @@ class RequestRateAutoscaler(Autoscaler):
         return scaling_options
 
 
-class HeteroGPUAutoscaler(Autoscaler):
+class HeteroAccelAutoscaler(Autoscaler):
     """RequestRateAutoscaler: Autoscale according to request rate.
 
     Scales when the number of requests in the given interval is above or below
     the threshold.
     """
+    NAME: Optional[str] = 'HeteroAccelAutoscaler'
 
     SCALE_UP_COOL_DOWN_INTERVAL_SECONDS = 300
 
-    def __init__(self, spec: 'service_spec.SkyServiceSpec',
-                 frequency: int, rps_window_size: int) -> None:
+    def __init__(self, spec: 'service_spec.SkyServiceSpec',) -> None:
         """Initialize the request rate autoscaler.
 
         Variables:
@@ -266,16 +282,14 @@ class HeteroGPUAutoscaler(Autoscaler):
         """
         super().__init__(spec)
         self.rps_window_size: int = self.SCALE_UP_COOL_DOWN_INTERVAL_SECONDS
-        self.frequency = frequency
+        self.frequency = constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
         self.last_scale_operation: float = 0.
-        self.request_timestamps: List[float] = []
         self.request_timestamps_distribution: List[List[float]] = [[], [], [],
                                                                    [], [], [],
                                                                    []]
         self.request_distribution: List[int] = [0, 0, 0, 0, 0, 0, 0]
         self.request_rate_dist: List[float] = [0, 0, 0, 0, 0, 0, 0]
         self.total_request_in_window: int = 0
-        self.last_scale_time: float = 0.
         self.scale_down_candidates: List['replica_managers.ReplicaInfo'] = []
 
     def collect_request_information(
@@ -441,11 +455,11 @@ class HeteroGPUAutoscaler(Autoscaler):
                                        List[AutoscalerDecision]]]) = []
         
         # Return if the cool down interval has not passed. 
-        if (time.time()- self.last_scale_time < 
+        if (time.time()- self.last_scale_operation < 
             self.SCALE_UP_COOL_DOWN_INTERVAL_SECONDS):
             return scaling_decisions
 
-        self.last_scale_time = time.time()
+        self.last_scale_operation = time.time()
         launched_replica_infos = [
             info for info in replica_infos if info.is_launched
         ]

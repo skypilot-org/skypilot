@@ -622,7 +622,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
-        ### Testing for heteroGPU
+        ### Testing for HeteroAccel
         max_retry = 30
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(

@@ -111,7 +111,7 @@ class SkyServeLoadBalancer:
         uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
 
 
-class HeteroGPULoadBalancer(SkyServeLoadBalancer):
+class HeteroAccelLoadBalancer(SkyServeLoadBalancer):
     """SkyServeLoadBalancer: redirect incoming traffic.
 
     This class accept any traffic to the controller and redirect it
@@ -133,7 +133,7 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
         self._load_balancing_policy: lb_policies.LoadBalancingPolicy = (
             lb_policies.RoundRobinPolicy())
         self._request_aggregator: serve_utils.RequestsAggregator = (
-            serve_utils.RequestHeteroGPU())
+            serve_utils.RequestHeteroAccel())
 
     async def _redirect_handler(self, request: fastapi.Request):
         body_bytes = await request.body()
@@ -164,7 +164,7 @@ class HeteroGPULoadBalancer(SkyServeLoadBalancer):
 def run_load_balancer(controller_addr: str, load_balancer_port: int):
     #load_balancer = SkyServeLoadBalancer(controller_url=controller_addr,
     #                                     load_balancer_port=load_balancer_port)
-    load_balancer = HeteroGPULoadBalancer(controller_url=controller_addr,
+    load_balancer = HeteroAccelLoadBalancer(controller_url=controller_addr,
                                           load_balancer_port=load_balancer_port)
     logger.info(f'run_load_balancer(load_balancer_port): {load_balancer_port}')
     load_balancer.run()
