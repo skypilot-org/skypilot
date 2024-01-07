@@ -108,7 +108,6 @@ def list_accelerators(
     all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in RunPod offering GPUs."""
-    return common.list_accelerators_impl('RunPod', _df, gpus_only,
-                                         name_filter, region_filter,
-                                         quantity_filter, case_sensitive,
-                                         all_regions)
+    return common.list_accelerators_impl('RunPod', _df, gpus_only, name_filter,
+                                         region_filter, quantity_filter,
+                                         case_sensitive, all_regions)
