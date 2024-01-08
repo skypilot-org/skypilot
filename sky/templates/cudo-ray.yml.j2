@@ -7,7 +7,7 @@ idle_timeout_minutes: 60
 
 provider:
   type: external
-  module: sky.skylet.providers.cudo.CudoNodeProvider
+  module: sky.provision.cudo
   region: {{region}}
 
 auth:
@@ -18,14 +18,20 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
+      AuthorizedKey: |
+        skypilot:ssh_public_key_content
       InstanceType: {{instance_type}}
+      DiskSize: {{disk_size}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
+      AuthorizedKey: |
+        skypilot:ssh_public_key_content
       InstanceType: {{instance_type}}
+      DiskSize: {{disk_size}}
 {%- endif %}
 
 head_node_type: ray_head_default

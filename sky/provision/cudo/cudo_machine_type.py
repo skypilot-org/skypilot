@@ -1,8 +1,10 @@
+"""Cudo Compute instance search helper for SkyPilot."""
+
 import csv
 import json
 
 from sky.clouds.service_catalog.common import get_catalog_path
-import sky.skylet.providers.cudo.cudo_wrapper as cudo_wrapper
+import sky.provision.cudo.cudo_wrapper as cudo_wrapper
 
 VMS_CSV = 'cudo/vms.csv'
 
@@ -138,6 +140,7 @@ def gpu_exists(model):
 
 def get_gpu_info(count, model):
     mem = cudo_gpu_mem[model]
+    # pylint: disable=line-too-long
     # {'Name': 'A4000', 'Manufacturer': 'NVIDIA', 'Count': 1.0, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 16384}"
     info = {
         'Gpus': [{
@@ -155,8 +158,8 @@ def get_gpu_info(count, model):
 
 
 def get_instance_type(machine_type, vcpu, mem, gpu):
-    return machine_type + "_" + str(gpu) + "x" + str(vcpu) + "v" + str(
-        mem) + "gb"
+    return machine_type + '_' + str(gpu) + 'x' + str(vcpu) + 'v' + str(
+        mem) + 'gb'
 
 
 def update_prices():
@@ -189,6 +192,7 @@ def update_prices():
     path = get_catalog_path(VMS_CSV)
     with open(path, 'w') as file:  # I assume the path is made on install
         file.write(
+            # pylint: disable=line-too-long
             'InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice\n'
         )
         for row in rows:
@@ -204,5 +208,3 @@ def update_prices():
                 row['spot_price'],
             ]
             file.write(",".join(data) + '\n')
-
-    return

@@ -31,7 +31,7 @@ def _run_output(cmd):
 @clouds.CLOUD_REGISTRY.register
 class Cudo(clouds.Cloud):
     """Cudo Compute"""
-    _REPR = 'cudo'
+    _REPR = 'Cudo'
 
     _INDENT_PREFIX = '    '
     _DEPENDENCY_HINT = (
@@ -46,6 +46,15 @@ class Cudo(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
     )
 
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot is not supported, as runpod API does not implement spot .',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk tier is currently not supported on Cudo Compute',
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            ('Docker image is currently not supported on Cudo. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+    }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
     _regions: List[clouds.Region] = []
@@ -54,24 +63,17 @@ class Cudo(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        features = {
-            clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
-                (f'Migrating disk is currently not supported on {cls._REPR}.'),
-            clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-                (f'Docker image is currently not supported on {cls._REPR}. '
-                 'You can try running docker command inside the '
-                 '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-                (f'Custom disk tier is currently not supported on {cls._REPR}.'
-                ),
-            clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is currently not supported on {cls._REPR}.'),
-        }
-        if resources.use_spot:
-            features[clouds.CloudImplementationFeatures.STOP] = (
-                'Stopping spot instances is currently not supported on'
-                f' {cls._REPR}.')
-        return features
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources  # unused
+        return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -160,7 +162,7 @@ class Cudo(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return 'cudo'
+        return 'Cudo'
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
@@ -173,6 +175,7 @@ class Cudo(clouds.Cloud):
             memory: Optional[str] = None,
             disk_tier: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         memory=memory,
                                                          clouds='cudo')
 
     @classmethod
@@ -326,7 +329,7 @@ class Cudo(clouds.Cloud):
         del tag_filters, region, zone, kwargs  # Unused.
 
         # pylint: disable=import-outside-toplevel,unused-import
-        import sky.skylet.providers.cudo.cudo_wrapper as cudo_wrapper
+        import sky.provision.cudo.cudo_wrapper as cudo_wrapper
         status_map = {
             'init': status_lib.ClusterStatus.INIT,
             'pend': status_lib.ClusterStatus.INIT,
