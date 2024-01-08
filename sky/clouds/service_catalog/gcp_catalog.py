@@ -378,6 +378,7 @@ def list_accelerators(
 
     # Remove GPUs that are unsupported by SkyPilot.
     new_results = {}
+    # print(acc_name)
     for acc_name, acc_info in results.items():
         if (acc_name.startswith('tpu') or
                 acc_name in _NUM_ACC_TO_MAX_CPU_AND_MEMORY or
@@ -392,11 +393,20 @@ def list_accelerators(
     new_infos = defaultdict(list)
     for info in acc_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
+        if info.accelerator_name.startswith('tpu'):
+            new_infos[info.accelerator_name].append(
+                info._replace(
+                    instance_type='TPU-VM',
+                ))
+            continue
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
                                                         info.accelerator_count,
-                                                        region=region_filter)
+                                                        region=region_filter, 
+                                                        use_spot=True)
+        #always has a vm type for GCP
+        assert vm_types is not None
         for vm_type in vm_types:
-            df = _df[(_df['InstanceType'] == vm_type)]
+            df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
             memory = df['MemoryGiB'].iloc[0]
             vm_price = common.get_hourly_cost_impl(_df,
@@ -418,8 +428,7 @@ def list_accelerators(
                     price=info.price + vm_price,
                     spot_price=info.spot_price + vm_spot_price,
                 ))
-    results.update(new_infos)
-    return results
+    return new_infos
 
 
 def get_region_zones_for_accelerators(
