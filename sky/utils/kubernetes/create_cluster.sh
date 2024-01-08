@@ -73,8 +73,7 @@ fi
 # Print the error message and exit if there are missing dependencies
 if [ ! -z "$error_msg" ]; then
     >&2 echo "Some dependencies were not found or are not configured correctly. Please fix the following errors and try again:"
-    # Strip the trailing newline character
-    error_msg=$(echo -e "$error_msg" | sed -z '$ s/\n$//')
+    error_msg=$(echo -e "$error_msg")
     >&2 printf "%s" "$error_msg" # Use printf to handle special characters
     exit 1
 fi
