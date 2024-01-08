@@ -209,6 +209,7 @@ aws_dependencies = [
     # the latest version.
     'colorama < 0.4.5',
 ]
+
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -234,7 +235,11 @@ extras_require: Dict[str, List[str]] = {
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
     'remote': remote,
-    'runpod': ['runpod>=1.5.1']
+    'runpod': ['runpod>=1.5.1'],
+    'vsphere': [
+        'pyvmomi==8.0.1.0.2',
+        'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0'
+    ],
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

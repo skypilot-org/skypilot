@@ -18,6 +18,7 @@ from sky.provision import common
 from sky.provision import gcp
 from sky.provision import kubernetes
 from sky.provision import runpod
+from sky.provision import vsphere
 
 logger = sky_logging.init_logger(__name__)
 
