@@ -17,7 +17,7 @@ import pandas as pd
 # is controlled by `--generic-cloud` (typically you do not need to set it).
 #
 # To only run tests for a specific cloud (as well as generic tests), use
-# --aws, --gcp, --azure, or --lambda.
+# --aws, --gcp, --azure, --lambda or --fluidstack.
 #
 # To only run tests for managed spot (without generic tests), use --managed-spot.
 all_clouds_in_smoke_tests = [

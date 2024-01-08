@@ -15,7 +15,7 @@ import requests
 from typing import List
 from sky.clouds.service_catalog import constants
 
-ENDPOINT = 'https://infinity-skypilot-fbc55e9eacf1.herokuapp.com/v1/plans'
+ENDPOINT = 'https://api.fluidstack.io/v1/plans'
 DEFAULT_FLUIDSTACK_API_KEY_PATH = os.path.expanduser(
     '~/.fluidstack/fluidstack_api_key')
 DEFAULT_FLUIDSTACK_API_TOKEN_PATH = os.path.expanduser(
@@ -57,9 +57,13 @@ def get_regions(plans: List) -> dict:
 def create_catalog(output_dir: str) -> None:
     response = requests.get(ENDPOINT)
     plans = response.json()
+    plans = [plan for plan in plans if len(plan['regions'])> 0]
     plans = [
         plan for plan in plans if plan['minimum_commitment'] == 'hourly' and
-        plan['type'] in ['preconfigured'] and plan['gpu_type'] != 'NO GPU'
+        plan['type'] in ['preconfigured'] and plan['gpu_type'] not in  ['NO GPU',
+                                                                        'RTX_3080_10GB',
+                                                                        'RTX_3090_10GB'] and 
+        plan['regions'][0]['id'] != 'india_2'
     ]
 
     with open(os.path.join(output_dir, 'vms.csv'), mode='w') as f:
@@ -115,17 +119,7 @@ def create_catalog(output_dir: str) -> None:
                 ])
 
 
-# def get_api_keys(cmdline_args: argparse.Namespace) -> str:
-#     """Get Fluidstack API key from cmdline or DEFAULT_FLUIDSTACK_API*."""
-#     api_key, api_token = None, None
-#     if cmdline_args.api_key_path is not None and cmdline_args.api_token_path:
-#         with open(cmdline_args.api_key_path, mode='r') as f:
-#             api_key = f.read().strip()
-#         with open(cmdline_args.api_token_path, mode='r') as f:
-#             api_token = f.read().strip()
-#     assert api_key is not None
-#     assert api_token is not None
-#     return api_key, api_token
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

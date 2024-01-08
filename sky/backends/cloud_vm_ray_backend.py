@@ -77,6 +77,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = {
     clouds.IBM: 160,
     clouds.Local: 90,
     clouds.OCI: 300,
+    clouds.Fluidstack: 900
 }
 
 # Time gap between retries after failing to provision in all possible places.

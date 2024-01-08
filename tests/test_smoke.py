@@ -65,9 +65,13 @@ _smoke_test_hash = hashlib.md5(
 test_id = str(uuid.uuid4())[-2:]
 
 LAMBDA_TYPE = '--cloud lambda --gpus A10'
-FLUIDSTACK_TYPE = '--cloud lambda --gpus A4000'
+FLUIDSTACK_TYPE = '--cloud fluidstack --gpus A4000'
 SCP_TYPE = '--cloud scp'
 SCP_GPU_V100 = '--gpus V100-32GB'
+DEFAULT_TIMEOUT = 15 * 60  # 15 mins
+
+
+
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
@@ -96,7 +100,12 @@ _SPOT_CANCEL_WAIT = (
     'done; echo "$s"; echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
-
+def _get_timeout(cloud: str, timeout: int = DEFAULT_TIMEOUT) -> int:
+    if cloud == 'fluidstack': # different DCs have different provisioning times
+        return timeout * 3
+    else:
+        return timeout
+    
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
@@ -224,6 +233,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+pytest.mark.no_fluidstack # Requires GCP/AWS to be enabled
 def test_example_app():
     test = Test(
         'example_app',
@@ -248,6 +258,8 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud),
+
     )
     run_one_test(test)
 
@@ -385,7 +397,6 @@ def test_aws_images():
         f'sky down -y {name}',
     )
     run_one_test(test)
-
 
 @pytest.mark.gcp
 def test_gcp_images():
@@ -638,6 +649,7 @@ def test_image_no_conda():
 
 # ------------ Test stale job ------------
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
+@pytest.mark.no_fluidstack # Fluidstack does not support stopping instances for all plans
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
@@ -727,6 +739,21 @@ def test_env_check(generic_cloud: str):
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
+    )
+    run_one_test(test)
+
+@pytest.mark.fluidstack
+def test_env_check_fluidstack(generic_cloud: str):
+    name = _get_cluster_name()
+    test = Test(
+        'env_check',
+        [
+            f'sky launch -y -c {name} --retry-until-up {FLUIDSTACK_TYPE} --detach-setup examples/fluidstack_env_check.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -750,7 +777,7 @@ def test_file_mounts(generic_cloud: str):
         'using_file_mounts',
         test_commands,
         f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
+        timeout = _get_timeout(generic_cloud, 20 * 60),  # 20 mins
     )
     run_one_test(test)
 
@@ -771,7 +798,7 @@ def test_scp_file_mounts():
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -960,6 +987,7 @@ def test_cli_logs(generic_cloud: str):
             f'sky logs {name} | grep "{timestamp} 4"',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -1041,6 +1069,22 @@ def test_lambda_job_queue():
     )
     run_one_test(test)
 
+@pytest.mark.fluidstack
+def test_fluidstack_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'fluidstack_job_queue',
+        [
+            f'sky launch -y -c {name} {FLUIDSTACK_TYPE} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 --gpus A4000:1 -d examples/job_queue/job.yaml',
+            'sleep 5',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f'sky cancel -y {name} 1',
+            'sleep 5',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
 
 @pytest.mark.ibm
 def test_ibm_job_queue():
@@ -1089,7 +1133,7 @@ def test_scp_job_queue():
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack  # T4 can be unavailable on Fluidstack
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1169,7 +1213,7 @@ def test_large_job_queue(generic_cloud: str):
             ],
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=_get_timeout(generic_cloud, 20 * 60),
     )
     run_one_test(test)
 
@@ -1187,7 +1231,7 @@ def test_fast_large_job_queue(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep -v grep | grep SUCCEEDED | wc -l | grep 32',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=_get_timeout(generic_cloud, 20 * 60),
     )
     run_one_test(test)
 
@@ -1232,6 +1276,7 @@ def test_ibm_job_queue_multinode():
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
+@pytest.mark.no_fluidstack # FluidStack does not have K80 gpus
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have K80 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1257,6 +1302,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_fluidstack # Test failing due to low availability of V100 gpus in DC
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
@@ -1272,8 +1318,10 @@ def test_huggingface(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
+
 
 
 @pytest.mark.lambda_cloud
@@ -1288,6 +1336,7 @@ def test_lambda_huggingface(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -1384,6 +1433,7 @@ def test_multi_hostname(generic_cloud: str):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -1423,6 +1473,7 @@ def test_aws_http_server_with_custom_ports():
 
 
 # ---------- Task: n=2 nodes with setups. ----------
+@pytest.mark.no_fluidstack # Test failing due to low availability of V100 gpus in DC
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1497,6 +1548,7 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
+@pytest.mark.no_fluidstack # FluidStack does not support stopping for all plans
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1587,7 +1639,7 @@ def test_autodown(generic_cloud: str):
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=_get_timeout(generic_cloud, 20 * 60),
     )
     run_one_test(test)
 
@@ -1710,7 +1762,7 @@ def test_cancel_azure():
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack # Test failing due to low availability of V100 gpus in DC
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
@@ -1733,7 +1785,7 @@ def test_cancel_pytorch(generic_cloud: str):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=_get_timeout(generic_cloud, 20 * 60),
     )
     run_one_test(test)
 
@@ -1758,8 +1810,8 @@ def test_cancel_ibm():
     )
     run_one_test(test)
 
-
 # ---------- Testing use-spot option ----------
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1781,6 +1833,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1813,7 +1866,7 @@ def test_spot(generic_cloud: str):
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1852,7 +1905,7 @@ def test_spot_pipeline(generic_cloud: str):
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -1875,7 +1928,7 @@ def test_spot_failed_setup(generic_cloud: str):
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2054,7 +2107,7 @@ def test_spot_pipeline_recovery_gcp():
     )
     run_one_test(test)
 
-
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2262,6 +2315,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2317,6 +2371,7 @@ def test_spot_tpu():
 
 
 # ---------- Testing env for spot ----------
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
@@ -2352,6 +2407,7 @@ def test_inline_env(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -2369,6 +2425,7 @@ def test_inline_env_file(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -2550,6 +2607,7 @@ def test_user_ray_cluster(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        _get_timeout(generic_cloud)
     )
     run_one_test(test)
 
@@ -2564,6 +2622,7 @@ def test_core_api():
 
 
 # ---------- Testing Storage ----------
+@pytest.mark.no_fluidstack # FluidStack does not support spot instances
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
