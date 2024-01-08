@@ -395,13 +395,11 @@ def list_accelerators(
         assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
         if info.accelerator_name.startswith('tpu'):
             new_infos[info.accelerator_name].append(
-                info._replace(
-                    instance_type='TPU-VM',
-                ))
+                info._replace(instance_type='TPU-VM',))
             continue
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
                                                         info.accelerator_count,
-                                                        region=region_filter, 
+                                                        region=region_filter,
                                                         use_spot=True)
         #always has a vm type for GCP
         assert vm_types is not None
