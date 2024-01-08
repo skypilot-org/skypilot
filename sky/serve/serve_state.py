@@ -127,6 +127,7 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.SHUTTING_DOWN: colorama.Fore.MAGENTA,
     ReplicaStatus.FAILED: colorama.Fore.RED,
     ReplicaStatus.FAILED_CLEANUP: colorama.Fore.RED,
+    ReplicaStatus.TERMINATED: colorama.Fore.RED,
     ReplicaStatus.PREEMPTED: colorama.Fore.MAGENTA,
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
