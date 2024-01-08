@@ -199,7 +199,9 @@ class RunPod(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type
             default_instance_type = RunPod.get_default_instance_type(
-                cpus=resources.cpus)
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
             if default_instance_type is None:
                 return ([], [])
             else:
