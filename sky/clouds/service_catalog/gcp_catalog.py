@@ -386,11 +386,13 @@ def list_accelerators(
     results = new_results
 
     # Figure out which instance type to use.
-    acc_infos: List[common.InstanceTypeInfo] = sum(results.values(), [])
+    infos_with_instance_type: List[common.InstanceTypeInfo] = sum(
+        results.values(), [])
 
     new_infos = defaultdict(list)
-    for info in acc_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
+    for info in infos_with_instance_type:
+        assert pd.isna(info.instance_type) and pd.isna(
+            info.memory), infos_with_instance_type
         if info.accelerator_name.startswith('tpu'):
             new_infos[info.accelerator_name].append(
                 info._replace(instance_type='TPU-VM',))
