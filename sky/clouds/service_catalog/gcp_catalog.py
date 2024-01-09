@@ -403,8 +403,8 @@ def list_accelerators(
         # The acc name & count in `info` are retrieved from the table so we
         # could definitely find a column in the original table
         # Additionally the way get_instance_type_for_accelerator works
-        # we will always get either a specialized instance type (L274 - L284)
-        # or a default instance type (L300). So we can safely assume that
+        # we will always get either a specialized instance type
+        # or a default instance type. So we can safely assume that
         # vm_types is not None.
         assert vm_types is not None
         for vm_type in vm_types:
