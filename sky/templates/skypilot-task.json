@@ -20,7 +20,7 @@
     "file_mounts": {
       "type": "object",
       "properties": {
-        "/datasets-storage": {
+        "datasets-storage": {
           "type": "object",
           "properties": {
             "name": {
