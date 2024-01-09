@@ -281,7 +281,7 @@ def add_or_update_cluster(cluster_name: str,
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
     launched_resources = getattr(cluster_handle, 'launched_resources', None)
-    #if cluster_hash is already present in cluster_history table
+    # if cluster_hash is already present in cluster_history table
     if _get_cluster_usage_intervals(cluster_hash):
         _DB.cursor.execute(
             'UPDATE cluster_history SET num_nodes=(?), '
@@ -294,7 +294,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_hash,
             ))
     else:
-        #This will never be none as we are getting it from the handler
+        # This will never be none as we are getting it from the handler.
         assert launched_resources is not None
         launched_instance_hourly_cost = launched_resources.get_cost(
             seconds=3600)
