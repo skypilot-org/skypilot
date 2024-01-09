@@ -10,7 +10,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-cudo_mt.update_prices()
 _df = common.read_catalog(cudo_mt.VMS_CSV)
 
 

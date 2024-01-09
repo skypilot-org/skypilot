@@ -101,27 +101,3 @@ def list_instances():
         return instances
     except cudo_compute.rest.ApiException as e:
         raise e
-
-
-def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
-    try:
-        api = cudo_compute.cudo_api.virtual_machines()
-        types = api.list_vm_machine_types(mem_gib,
-                                          vcpu_count,
-                                          gpu=gpu_count,
-                                          gpu_model=gpu_model)
-        return types.to_dict()
-    except cudo_compute.rest.ApiException as e:
-        raise e
-
-
-def gpu_types():
-    try:
-        api = cudo_compute.cudo_api.virtual_machines()
-        types = api.list_vm_machine_types(4, 2)
-        gpu_names = []
-        for gpu in types.to_dict()['gpu_models']:
-            gpu_names.append(gpu['name'])
-        return gpu_names
-    except cudo_compute.rest.ApiException as e:
-        raise e
