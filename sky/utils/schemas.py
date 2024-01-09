@@ -3,7 +3,6 @@
 Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
-import json
 
 def get_single_resources_schema():
     # To avoid circular imports, only import when needed.
@@ -364,6 +363,7 @@ def get_service_schema():
 
 def get_task_schema():
     """Return Task JSON Schema from file"""
+    import json 
     with open('sky/templates/skypilot-task.json', 'r') as file:
         data = json.load(file)
     return data
