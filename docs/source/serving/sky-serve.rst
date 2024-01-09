@@ -291,7 +291,7 @@ Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vi
       ports: 8080
       accelerators: A100:1
       disk_size: 1024
-      disk_tier: high
+      disk_tier: best
 
     setup: |
       conda activate chatbot
