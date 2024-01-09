@@ -169,8 +169,11 @@ Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
 If your Kubernetes cluster has Nvidia GPUs, ensure that:
 
-1. The Nvidia device plugin is installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
+1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and is ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
 2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+
+.. note::
+    If you are using RKE2, the GPU operator installation through helm requires extra flags to set ``nvidia`` as the default runtime for containerd. Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ for details.
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
