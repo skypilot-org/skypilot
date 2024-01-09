@@ -1,0 +1,15 @@
+# Runs nvidia-smi in a pod to test GPU operator and nvidia runtime are setup correctly
+# Run with kubectl apply -f gpu_pod_test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nvidia-smi
+spec:
+  restartPolicy: Never
+  containers:
+  - name: nvidia-smi
+    image: nvidia/cuda:12.3.1-devel-ubuntu20.04
+    command: ["nvidia-smi"]
+    resources:
+      limits:
+         nvidia.com/gpu: "1"
