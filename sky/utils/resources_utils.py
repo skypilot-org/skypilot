@@ -26,14 +26,17 @@ class DiskTier(enum.Enum):
 
     @classmethod
     def supported_tiers(cls) -> List[str]:
-        return [tier.value for tier in cls]
+        # 'none' is a special tier for overriding
+        # the tier specified in task YAML.
+        return [tier.value for tier in cls] + ['none']
 
     @classmethod
     def cli_help_message(cls) -> str:
         return (
             f'OS disk tier. Could be one of {", ".join(cls.supported_tiers())}'
-            f'. if {cls.BEST.value} is specified, use the best possible disk '
-            f'tier. Default: {cls.MEDIUM.value}')
+            f'. If {cls.BEST.value} is specified, use the best possible disk '
+            'tier. If none is specified, enforce to use default value and '
+            f'override the option in task YAML. Default: {cls.MEDIUM.value}')
 
     def __le__(self, other: 'DiskTier') -> bool:
         types = list(DiskTier)

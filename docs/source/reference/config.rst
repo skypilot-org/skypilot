@@ -153,9 +153,8 @@ Available fields and semantics:
     # zero cost) if the requested resources matches the reservation.
     # Ref: https://cloud.google.com/compute/docs/instances/reservations-overview#consumption-type
     specific_reservations:
-      # Only one element is allowed in this list, as GCP disallows multiple
-      # specific_reservations in a single request.
-      - projects/my-project/reservations/my-reservation
+      - projects/my-project/reservations/my-reservation1
+      - projects/my-project/reservations/my-reservation2
 
   # Advanced Kubernetes configurations (optional).
   kubernetes:
