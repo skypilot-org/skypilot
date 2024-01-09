@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://json.schemastore.org/skypilot-task.json",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "workdir": {
+      "type": "string"
+    },
+    "event_callback": {
+      "type": "string"
+    },
+    "num_nodes": {
+      "type": "integer"
+    },
+    "resources": {
+      "type": "object"
+    },
+    "file_mounts": {
+      "type": "object",
+      "properties": {
+        "/datasets-storage": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of storage, optional when source is bucket URI"
+            },
+            "source": {
+              "type": "string",
+              "description": "Source path, can be local or s3/gcs URL. Optional, do not specify to create an empty bucket."
+            },
+            "store": {
+              "type": "string",
+              "enum": ["s3", "gcs"],
+              "description": "Could be either 's3' or 'gcs'; default: None. Optional."
+            },
+            "persistent": {
+              "type": "boolean",
+              "default": true,
+              "description": "Defaults to True; can be set to false. Optional."
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["MOUNT", "COPY"],
+              "description": "Either MOUNT or COPY. Optional."
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "service": {
+      "type": "object"
+    },
+    "setup": {
+      "type": "string"
+    },
+    "run": {
+      "type": "string"
+    },
+    "envs": {
+      "type": "object",
+      "required": [],
+      "patternProperties": {
+        "^[a-zA-Z_][a-zA-Z0-9_]*$": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "required": [],
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "required": [],
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "number"
+      }
+    }
+  },
+  "type": "object",
+  "required": []
+}
