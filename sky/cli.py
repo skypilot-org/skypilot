@@ -713,12 +713,12 @@ def _parse_resources_override_params(
 def _parse_services_override_params(
     readiness_path: Optional[str] = None,
     initial_delay_seconds: Optional[int] = None,
-    post_data: Optional[str] = None,
-    auto_restart: Optional[bool] = None,
     min_replicas: Optional[int] = None,
     max_replicas: Optional[int] = None,
-    qps_upper_threshold: Optional[int] = None,
-    qps_lower_threshold: Optional[int] = None,
+    target_qps_per_replica: Optional[float] = None,
+    post_data: Optional[str] = None,
+    upscale_delay_seconds: Optional[int] = None,
+    downscale_delay_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Parses the services override parameters into a dictionary."""
     services_override_params: Dict[str, Any] = {}
@@ -730,6 +730,13 @@ def _parse_services_override_params(
     if initial_delay_seconds is not None:
         services_override_params[
             'initial_delay_seconds'] = initial_delay_seconds
+    if min_replicas is not None:
+        services_override_params['min_replicas'] = min_replicas
+    if max_replicas is not None:
+        services_override_params['max_replicas'] = max_replicas
+    if target_qps_per_replica is not None:
+        services_override_params[
+            'target_qps_per_replica'] = target_qps_per_replica
     if post_data is not None:
         if post_data.lower() == 'none':
             services_override_params['post_data'] = None
@@ -743,16 +750,12 @@ def _parse_services_override_params(
                         '`readiness_probe` section of your service YAML.'
                     ) from e
             services_override_params['post_data'] = post_data
-    if auto_restart is not None:
-        services_override_params['auto_restart'] = auto_restart
-    if min_replicas is not None:
-        services_override_params['min_replicas'] = min_replicas
-    if max_replicas is not None:
-        services_override_params['max_replicas'] = max_replicas
-    if qps_upper_threshold is not None:
-        services_override_params['qps_upper_threshold'] = qps_upper_threshold
-    if qps_lower_threshold is not None:
-        services_override_params['qps_lower_threshold'] = qps_lower_threshold
+    if upscale_delay_seconds is not None:
+        services_override_params[
+            'upscale_delay_seconds'] = upscale_delay_seconds
+    if downscale_delay_seconds is not None:
+        services_override_params[
+            'downscale_delay_seconds'] = downscale_delay_seconds
     return services_override_params
 
 
@@ -1117,12 +1120,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     ports: Optional[Tuple[str]] = None,
     readiness_path: Optional[str] = None,
     initial_delay_seconds: Optional[int] = None,
-    post_data: Optional[str] = None,
-    auto_restart: Optional[bool] = None,
     min_replicas: Optional[int] = None,
     max_replicas: Optional[int] = None,
-    qps_upper_threshold: Optional[int] = None,
-    qps_lower_threshold: Optional[int] = None,
+    target_qps_per_replica: Optional[float] = None,
+    post_data: Optional[str] = None,
+    upscale_delay_seconds: Optional[int] = None,
+    downscale_delay_seconds: Optional[int] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
@@ -1173,12 +1176,12 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     services_override_params = _parse_services_override_params(
         readiness_path=readiness_path,
         initial_delay_seconds=initial_delay_seconds,
-        post_data=post_data,
-        auto_restart=auto_restart,
         min_replicas=min_replicas,
         max_replicas=max_replicas,
-        qps_upper_threshold=qps_upper_threshold,
-        qps_lower_threshold=qps_lower_threshold,
+        target_qps_per_replica=target_qps_per_replica,
+        post_data=post_data,
+        upscale_delay_seconds=upscale_delay_seconds,
+        downscale_delay_seconds=downscale_delay_seconds,
     )
 
     if is_yaml:
@@ -4353,16 +4356,6 @@ def serve():
               required=False,
               help=('Initial delay in seconds. Any readiness probe failures '
                     'during this period will be ignored.'))
-@click.option('--post-data',
-              default=None,
-              type=str,
-              required=False,
-              help=('Post data for the readiness probe.'))
-@click.option('--auto-restart',
-              default=None,
-              type=bool,
-              required=False,
-              help=('Whether to restart the service replica if it fails.'))
 @click.option('--min-replicas',
               default=None,
               type=int,
@@ -4375,20 +4368,31 @@ def serve():
               help=('Maximum number of replicas. If not specified, SkyServe '
                     'will use fixed number of replicas same as min_replicas '
                     'and ignore any specified QPS threshold.'))
-@click.option('--qps-upper-threshold',
+@click.option('--target-qps-per-replica',
+              default=None,
+              type=float,
+              required=False,
+              help=('Target number of queries per second per replica for '
+                    'autoscaling. If not specified, SkyServe will use fixed '
+                    'number of replicas same as min_replicas.'))
+@click.option('--post-data',
+              default=None,
+              type=str,
+              required=False,
+              help=('Post data for the readiness probe. If not specified, '
+                    'use GET request; otherwise, use POST request with '
+                    'the argument as the post data. The argument should be '
+                    'an JSON formatted string, like \'{"key": "value"}\'.'))
+@click.option('--upscale-delay-seconds',
               default=None,
               type=int,
               required=False,
-              help=('QPS threshold for scaling up. If the QPS of your service'
-                    'exceeds this threshold, SkyServe will scale up your '
-                    'service.'))
-@click.option('--qps-lower-threshold',
+              help=('Upscale delay in seconds.'))
+@click.option('--downscale-delay-seconds',
               default=None,
               type=int,
               required=False,
-              help=('QPS threshold for scaling down. If the QPS of your '
-                    'service is lower than this threshold, SkyServe will '
-                    'scale down your service.'))
+              help=('Downscale delay in seconds.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4419,12 +4423,12 @@ def serve_up(
     disk_tier: Optional[str],
     readiness_path: Optional[str],
     initial_delay_seconds: Optional[int],
-    post_data: Optional[str],
-    auto_restart: Optional[bool],
     min_replicas: Optional[int],
     max_replicas: Optional[int],
-    qps_upper_threshold: Optional[int],
-    qps_lower_threshold: Optional[int],
+    target_qps_per_replica: Optional[float],
+    post_data: Optional[str],
+    upscale_delay_seconds: Optional[int],
+    downscale_delay_seconds: Optional[int],
     yes: bool,
 ):
     """Launch a SkyServe service.
@@ -4490,12 +4494,12 @@ def serve_up(
         ports=ports,
         readiness_path=readiness_path,
         initial_delay_seconds=initial_delay_seconds,
-        post_data=post_data,
-        auto_restart=auto_restart,
         min_replicas=min_replicas,
         max_replicas=max_replicas,
-        qps_upper_threshold=qps_upper_threshold,
-        qps_lower_threshold=qps_lower_threshold,
+        target_qps_per_replica=target_qps_per_replica,
+        post_data=post_data,
+        upscale_delay_seconds=upscale_delay_seconds,
+        downscale_delay_seconds=downscale_delay_seconds,
         entrypoint_name='Service',
     )
     if isinstance(task, sky.Dag):
