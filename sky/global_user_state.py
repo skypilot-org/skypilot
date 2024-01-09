@@ -610,7 +610,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, ch.instance_cost, '
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, ch.hourly_cost, '
         'ch.launched_resources, ch.usage_intervals, clusters.status  '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
@@ -627,7 +627,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             cluster_hash,
             name,
             num_nodes,
-            instance_cost,
+            hourly_cost,
             launched_resources,
             usage_intervals,
             status,
@@ -641,7 +641,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'launched_at': _get_cluster_launch_time(cluster_hash),
             'duration': _get_cluster_duration(cluster_hash),
             'num_nodes': num_nodes,
-            'instance_cost': instance_cost,
+            'hourly_cost': hourly_cost,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),

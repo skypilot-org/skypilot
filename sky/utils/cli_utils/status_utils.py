@@ -402,7 +402,7 @@ def _get_price_for_cost_report(
     launched_nodes = cluster_cost_report_record['num_nodes']
     launched_resources = cluster_cost_report_record['resources']
 
-    hourly_cost = cluster_cost_report_record['instance_cost']
+    hourly_cost = cluster_cost_report_record['hourly_cost']
     price_str = f'$ {hourly_cost:.2f}'
     return price_str
 
