@@ -4,6 +4,7 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
+
 def get_single_resources_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
@@ -363,7 +364,7 @@ def get_service_schema():
 
 def get_task_schema():
     """Return Task JSON Schema from file"""
-    import json 
+    import json
     with open('sky/templates/skypilot-task.json', 'r') as file:
         data = json.load(file)
     return data
