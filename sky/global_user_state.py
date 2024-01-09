@@ -122,7 +122,7 @@ _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
 def _cluster_history_backward_compatibility():
-    """For backward compatibility. 
+    """For backward compatibility.
     This ensures that the cluster_history table has hourly_cost column.
     """
     cursor = _DB.cursor
@@ -286,8 +286,7 @@ def add_or_update_cluster(cluster_name: str,
         _DB.cursor.execute(
             'UPDATE cluster_history SET num_nodes=(?), '
             'launched_resources=(?), usage_intervals=(?), '
-            'requested_resources, WHERE cluster_hash=(?)',
-            (
+            'requested_resources, WHERE cluster_hash=(?)', (
                 launched_nodes,
                 pickle.dumps(launched_resources),
                 pickle.dumps(usage_intervals),
@@ -295,6 +294,8 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_hash,
             ))
     else:
+        #This will never be none as we are getting it from the handler
+        assert launched_resources is not None
         launched_instance_hourly_cost = launched_resources.get_cost(
             seconds=3600)
         _DB.cursor.execute(
@@ -313,9 +314,9 @@ def add_or_update_cluster(cluster_name: str,
             # launched resources
             '?, '
             # usage intervals
-            '?)'
+            '?, '
             # hourly_cost
-            '?, ',
+            '?)',
             (
                 # hash
                 cluster_hash,
