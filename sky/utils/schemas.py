@@ -364,6 +364,7 @@ def get_service_schema():
 
 def get_task_schema():
     """Return Task JSON Schema from file"""
+    # pylint: disable=import-outside-toplevel
     import json
     with open('sky/templates/skypilot-task.json', 'r') as file:
         data = json.load(file)

@@ -1,6 +1,5 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://json.schemastore.org/skypilot-task.json",
   "additionalProperties": false,
   "properties": {
     "name": {
