@@ -159,16 +159,15 @@ def up(
         # whether the service is already running. If the id is the same
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
-        with ux_utils.enable_traceback():
-            controller_job_id, controller_handle = execution.execute(
-                entrypoint=controller_task,
-                stream_logs=False,
-                cluster_name=controller_name,
-                detach_run=True,
-                idle_minutes_to_autostop=constants.
-                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                retry_until_up=True,
-            )
+        controller_job_id, controller_handle = execution.execute(
+            entrypoint=controller_task,
+            stream_logs=False,
+            cluster_name=controller_name,
+            detach_run=True,
+            idle_minutes_to_autostop=constants.
+            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
+        )
 
         style = colorama.Style
         fore = colorama.Fore

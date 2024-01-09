@@ -52,7 +52,6 @@ def load_chain_dag_from_yaml(
         # can listen to user feedback to change this.
         env_overrides = None
         services_overrides = None
-    print(1, services_overrides)
 
     current_task = None
     with dag_lib.Dag() as dag:
