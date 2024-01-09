@@ -552,5 +552,3 @@ def get_config_schema():
             },
         }
     }
-
-
