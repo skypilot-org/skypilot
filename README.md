@@ -27,7 +27,8 @@
 
 ----
 :fire: *News* :fire:
-- [Dec, 2023] [**Mixtral 8x7B**](https://mistral.ai/news/mixtral-of-experts/), a high quality sparse mixture-of-experts model, was released by Mistral AI! Deploy via SkyPilot on any cloud: [**single replica**](https://docs.mistral.ai/self-deployment/skypilot/); [**multiple replicas**](./llm/mixtral/).
+- [Dec, 2023] Example: Using [LoRAX](https://github.com/predibase/lorax) to serve 1000s of finetuned LLMs on a single instance in the cloud: [**example**](./llm/lorax/)
+- [Dec, 2023] [**Mixtral 8x7B**](https://mistral.ai/news/mixtral-of-experts/), a high quality sparse mixture-of-experts model, was released by Mistral AI! Deploy via SkyPilot on any cloud: [**example**](./llm/mixtral/).
 - [Nov, 2023] Example: Using [Axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) to finetune Mistral 7B on the cloud (on-demand and spot): [**example**](./llm/axolotl/)
 - [Sep, 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a high-quality open LLM, was released! Deploy via SkyPilot on any cloud: [**Mistral docs**](https://docs.mistral.ai/self-deployment/skypilot)
 - [Sep, 2023] Case study: [**Covariant**](https://covariant.ai/) transformed AI development on the cloud using SkyPilot, delivering models 4x faster cost-effectively: [**read the case study**](https://blog.skypilot.co/covariant/)
@@ -137,8 +138,7 @@ To learn more, see our [Documentation](https://skypilot.readthedocs.io/en/latest
 
 Runnable examples:
 - LLMs on SkyPilot
-  - [Mixtral 8x7B](./llm/mixtral/)
-  - [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
+  - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
   - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
   - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
   - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)

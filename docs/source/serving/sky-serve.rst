@@ -1,9 +1,9 @@
 .. _sky-serve:
 
 Serving Models
-==========================
+==============
 
-SkyServe is SkyPilot's model serving library. SkyServe (short for SkyPilot Serving) takes an existing serving
+SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
@@ -22,9 +22,9 @@ Why SkyServe?
 
 How it works:
 
-- Each service gets an endpoint that automatically redirects requests to its underlying replicas.
-- The replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
-- SkyServe transparently handles the load balancing, recovery, and autoscaling of the replicas.
+- Each service gets an endpoint that automatically redirects requests to its replicas.
+- Replicas of the same service can run in different regions and clouds — reducing cloud costs and increasing availability.
+- SkyServe handles the load balancing, recovery, and autoscaling of the replicas.
 
 .. GPU availability has become a critical bottleneck for many AI services. With Sky
 .. Serve, we offer a lightweight control plane that simplifies deployment across
@@ -43,53 +43,122 @@ How it works:
   To get started with SkyServe, use the nightly build of SkyPilot: ``pip install -U skypilot-nightly``
 
 Quick tour: LLM serving
--------------------------------
+-----------------------
 
-Here is a simple example of serving a Vicuna-13B LLM model on TGI with SkyServe:
+Here is a simple example of serving an LLM model (:code:`Mixtral-8x7B-Instruct-v0.1` on vLLM or :code:`lmsys/vicuna-13b-v1.5` on TGI):
 
-.. code-block:: yaml
+.. tab-set::
 
-    service:
-      readiness_probe: /health
-      replicas: 2
+    .. tab-item:: vLLM
+        :sync: vllm-tab
 
-    # Fields below describe each replica.
-    resources:
-      ports: 8080
-      accelerators: A100:1
+        .. code-block:: yaml
 
-    run: |
-      docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
-        ghcr.io/huggingface/text-generation-inference \
-        --model-id lmsys/vicuna-13b-v1.5
+            # service.yaml
+            service:
+              readiness_probe: /v1/models
+              replicas: 2
 
-Use :code:`sky serve status` to check the status of the service:
+            # Fields below describe each replica.
+            resources:
+              ports: 8080
+              accelerators: {L4:8, A10g:8, A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 
-.. image:: ../images/sky-serve-status-tgi.png
-    :width: 800
-    :align: center
-    :alt: sky-serve-status-tgi
+            setup: |
+              conda create -n vllm python=3.9 -y
+              conda activate vllm
+              pip install vllm
+
+            run: |
+              conda activate vllm
+              python -m vllm.entrypoints.openai.api_server \
+                --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+                --host 0.0.0.0 --port 8080 \
+                --model mistralai/Mixtral-8x7B-Instruct-v0.1
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. code-block:: yaml
+
+            # service.yaml
+            service:
+              readiness_probe: /health
+              replicas: 2
+
+            # Fields below describe each replica.
+            resources:
+              ports: 8080
+              accelerators: A100
+
+            run: |
+              docker run --gpus all --shm-size 1g -p 8080:80 -v ~/data:/data \
+                ghcr.io/huggingface/text-generation-inference \
+                --model-id lmsys/vicuna-13b-v1.5
+
+Run :code:`sky serve up service.yaml` to deploy the service with automatic price and capacity optimization. Once it is deployed, use :code:`sky serve status` to check the status of the service:
+
+.. tab-set::
+
+    .. tab-item:: vLLM
+        :sync: vllm-tab
+
+        .. image:: ../images/sky-serve-status-vllm.png
+            :width: 800
+            :align: center
+            :alt: sky-serve-status-vllm
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. image:: ../images/sky-serve-status-tgi.png
+            :width: 800
+            :align: center
+            :alt: sky-serve-status-tgi
 
 .. raw:: html
 
    <div style="height: 20px;"></div>
 
+.. tip::
+
+  Notice that the two replicas are launched in different regions/clouds for the lowest cost and highest GPU availability.
+  This is performed automatically, like a regular ``sky launch``.
+
 If you see the :code:`STATUS` column becomes :code:`READY`, then the service is ready to accept traffic!
 
-Simply ``curl`` the service endpoint --- for the above example, use
-``44.211.131.51:30001`` which automatically load-balances across the two replicas:
+Simply ``curl -L`` the service endpoint, which automatically load-balances across the two replicas:
 
-.. code-block:: console
+.. tab-set::
 
-    $ curl -L <endpoint-url>/generate \
-        -X POST \
-        -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
-        -H 'Content-Type: application/json'
-    # Example output:
-    {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
+    .. tab-item:: vLLM
+        :sync: vllm-tab
+
+        .. code-block:: console
+
+            $ curl -L 3.84.15.251:30001/v1/chat/completions \
+                -X POST \
+                -d '{"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": "Who are you?"}]}' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"id":"cmpl-80b2bfd6f60c4024884c337a7e0d859a","object":"chat.completion","created":1005,"model":"mistralai/Mixtral-8x7B-Instruct-v0.1","choices":[{"index":0,"message":{"role":"assistant","content":" I am a helpful AI assistant designed to provide information, answer questions, and engage in conversation with users. I do not have personal experiences or emotions, but I am programmed to understand and process human language, and to provide helpful and accurate responses."},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"total_tokens":64,"completion_tokens":51}}
+
+    .. tab-item:: TGI
+        :sync: tgi-tab
+
+        .. code-block:: console
+
+            $ curl -L 44.211.131.51:30001/generate \
+                -X POST \
+                -d '{"inputs":"What is Deep Learning?","parameters":{"max_new_tokens":20}}' \
+                -H 'Content-Type: application/json'
+
+            # Example output:
+            {"generated_text":"\n\nDeep learning is a subset of machine learning that uses artificial neural networks to model and solve"}
 
 Tutorial: Hello, SkyServe!
----------------------------
+--------------------------
 
 Here we will go through an example to deploy a simple HTTP server with SkyServe. To spin up a service, you can simply reuse your task YAML with the two following requirements:
 
@@ -302,6 +371,7 @@ Send a request using the following cURL command:
         -X POST \
         -d '{"model":"vicuna-13b-v1.3","messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Who are you?"}],"temperature":0}' \
         -H 'Content-Type: application/json'
+
     # Example output:
     {"id":"chatcmpl-gZ8SfgUwcm9Xjbuv4xfefq","object":"chat.completion","created":1702082533,"model":"vicuna-13b-v1.3","choices":[{"index":0,"message":{"role":"assistant","content":"I am Vicuna, a language model trained by researchers from Large Model Systems Organization (LMSYS)."},"finish_reason":"stop"}],"usage":{"prompt_tokens":19,"total_tokens":43,"completion_tokens":24}}
 

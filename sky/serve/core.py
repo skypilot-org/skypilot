@@ -355,8 +355,6 @@ def status(
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
             'policy': (Optional[str]) load balancer policy description,
-            'auto_restart': (bool) whether the service replica will be
-              auto-restarted,
             'requested_resources': (sky.Resources) requested resources
               for replica (deprecated),
             'requested_resources_str': (str) str representation of

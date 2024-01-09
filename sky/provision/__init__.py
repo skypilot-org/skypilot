@@ -137,7 +137,10 @@ def wait_instances(provider_name: str, region: str, cluster_name_on_cloud: str,
 
 
 @_route_to_cloud_impl
-def get_cluster_info(provider_name: str, region: str,
-                     cluster_name_on_cloud: str) -> common.ClusterInfo:
+def get_cluster_info(
+        provider_name: str,
+        region: str,
+        cluster_name_on_cloud: str,
+        provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     """Get the metadata of instances in a cluster."""
     raise NotImplementedError
