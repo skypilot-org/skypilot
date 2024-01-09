@@ -151,7 +151,8 @@ def _cluster_history_backward_compatibility():
             launched_instance_hourly_cost = launched_resources.get_cost(
                 seconds=3600)
             _DB.cursor.execute(
-                'UPDATE cluster_history SET hourly_cost=(?) WHERE cluster_hash=(?)',
+                'UPDATE cluster_history SET hourly_cost=(?) '
+                'WHERE cluster_hash=(?)',
                 (launched_instance_hourly_cost, cluster_hash))
         _DB.conn.commit()
 
@@ -280,42 +281,57 @@ def add_or_update_cluster(cluster_name: str,
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
     launched_resources = getattr(cluster_handle, 'launched_resources', None)
-    launched_instance_hourly_cost = launched_resources.get_cost(seconds=3600)
-    _DB.cursor.execute(
-        'INSERT or REPLACE INTO cluster_history'
-        '(cluster_hash, name, hourly_cost, num_nodes, '
-        'requested_resources, launched_resources, usage_intervals) '
-        'VALUES ('
-        # hash
-        '?, '
-        # name
-        '?, '
-        # number of nodes
-        '?, '
-        # requested resources
-        '?, '
-        # launched resources
-        '?, '
-        # usage intervals
-        '?)'
-        # hourly_cost
-        '?, ',
-        (
+    #if cluster_hash is already present in cluster_history table
+    if _get_cluster_usage_intervals(cluster_hash):
+        _DB.cursor.execute(
+            'UPDATE cluster_history SET num_nodes=(?), '
+            'launched_resources=(?), usage_intervals=(?), '
+            'requested_resources, WHERE cluster_hash=(?)',
+            (
+                launched_nodes,
+                pickle.dumps(launched_resources),
+                pickle.dumps(usage_intervals),
+                requested_resources,
+                cluster_hash,
+            ))
+    else:
+        launched_instance_hourly_cost = launched_resources.get_cost(
+            seconds=3600)
+        _DB.cursor.execute(
+            'INSERT INTO cluster_history'
+            '(cluster_hash, name, hourly_cost, num_nodes, '
+            'requested_resources, launched_resources, usage_intervals) '
+            'VALUES ('
             # hash
-            cluster_hash,
+            '?, '
             # name
-            cluster_name,
+            '?, '
             # number of nodes
-            launched_nodes,
+            '?, '
             # requested resources
-            pickle.dumps(requested_resources),
+            '?, '
             # launched resources
-            pickle.dumps(launched_resources),
+            '?, '
             # usage intervals
-            pickle.dumps(usage_intervals),
-            # hourly cost
-            launched_instance_hourly_cost,
-        ))
+            '?)'
+            # hourly_cost
+            '?, ',
+            (
+                # hash
+                cluster_hash,
+                # name
+                cluster_name,
+                # number of nodes
+                launched_nodes,
+                # requested resources
+                pickle.dumps(requested_resources),
+                # launched resources
+                pickle.dumps(launched_resources),
+                # usage intervals
+                pickle.dumps(usage_intervals),
+                # hourly cost
+                launched_instance_hourly_cost,
+            ))
 
     _DB.conn.commit()
 
