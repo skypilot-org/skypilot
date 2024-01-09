@@ -120,6 +120,47 @@ def create_table(cursor, conn):
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
+def _cluster_history_backward_compatibility():
+    """For backward compatibility. 
+    This ensures that the cluster_history table has hourly_cost column.
+    """
+    cursor = _DB.cursor
+    conn = _DB.conn
+    # check if hourly_cost column exists in cluster_history table
+    cursor.execute('SELECT * FROM cluster_history LIMIT 1')
+    columns = [description[0] for description in cursor.description]
+    print(columns)
+    if 'hourly_cost' not in columns:
+        # add hourly_cost column to cluster_history table
+        db_utils.add_column_to_table(cursor, conn, 'cluster_history',
+                                     'hourly_cost', 'REAL DEFAULT 0')
+
+        # get all rows from cluster_history table
+        rows = cursor.execute('SELECT * FROM cluster_history').fetchall()
+
+        # update hourly_cost column in cluster_history table to the cost
+        # calculated from launched_resources
+        for row in rows:
+            # Explicitly specify the number of fields to unpack, so that
+            # we can add new fields to the database in the future without
+            # breaking the previous code.
+            (
+                cluster_hash, 
+                _, 
+                _, 
+                _, 
+                launched_resources,
+                _
+            ) = row[:6]
+            launched_resources = pickle.loads(launched_resources)
+            launched_instance_hourly_cost = launched_resources.get_cost(
+                seconds=3600)
+            _DB.cursor.execute(
+                'UPDATE cluster_history SET hourly_cost=(?) WHERE cluster_hash=(?)',
+                (launched_instance_hourly_cost, cluster_hash))
+        _DB.conn.commit()
+
+
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
@@ -137,6 +178,7 @@ def add_or_update_cluster(cluster_name: str,
             and last_use will be updated. Otherwise, use the old value.
     """
     # FIXME: launched_at will be changed when `sky launch -c` is called.
+    _cluster_history_backward_compatibility()
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
@@ -609,6 +651,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
+    _cluster_history_backward_compatibility()
     rows = _DB.cursor.execute(
         'SELECT ch.cluster_hash, ch.name, ch.num_nodes, ch.hourly_cost, '
         'ch.launched_resources, ch.usage_intervals, clusters.status  '
