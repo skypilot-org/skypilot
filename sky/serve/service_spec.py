@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from sky.serve import autoscalers
 from sky.serve import constants
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -25,6 +26,7 @@ class SkyServiceSpec:
         post_data: Optional[Dict[str, Any]] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
+        autoscaler: Optional[str] = None,
         # The following arguments are deprecated.
         # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
         # Deprecated: Always be True
@@ -60,12 +62,20 @@ class SkyServiceSpec:
                     'Currently, SkyServe will cleanup failed replicas'
                     'and auto restart it to keep the service running.')
 
+        if autoscaler is None:
+            autoscaler = constants.DEFAULT_AUTOSCALER
+            
+        if autoscaler not in autoscalers.Autoscaler.get_autoscaler_names():
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unsupported autoscaler: {autoscaler}.')
+            
         self._readiness_path = readiness_path
         self._initial_delay_seconds = initial_delay_seconds
         self._min_replicas = min_replicas
         self._max_replicas = max_replicas
         self._target_qps_per_replica = target_qps_per_replica
         self._post_data = post_data
+        self._autoscaler: str = autoscaler
 
         self._upscale_delay_seconds = (
             upscale_delay_seconds if upscale_delay_seconds is not None else
@@ -138,6 +148,8 @@ class SkyServiceSpec:
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
                 'downscale_delay_seconds', None)
+            service_config['autoscaler'] = policy_section.get(
+                'autoscaler', None)
 
         return SkyServiceSpec(**service_config)
 
@@ -183,6 +195,7 @@ class SkyServiceSpec:
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
+        add_if_not_none('replica_policy', 'autoscaler', self._autoscaler)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
@@ -236,6 +249,10 @@ class SkyServiceSpec:
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
         return self._post_data
+    
+    @property
+    def autoscaler(self) -> Optional[str]:
+        return self._autoscaler
 
     @property
     def upscale_delay_seconds(self) -> int:

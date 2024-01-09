@@ -165,6 +165,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Generate load balancer log file name.
     load_balancer_log_file = os.path.expanduser(
         serve_utils.generate_remote_load_balancer_log_file_name(service_name))
+    
+    # Generate controller log file name.
+    controller_log_file = os.path.expanduser(
+        serve_utils.generate_remote_controller_log_file_name(service_name))
 
     controller_process = None
     load_balancer_process = None
@@ -174,8 +178,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             controller_port = common_utils.find_free_port(
                 constants.CONTROLLER_PORT_START)
             # Start the controller.
+            #controller_process = multiprocessing.Process(
+            #    target=controller.run_controller,
+            #    args=(service_name, service_spec, task_yaml, controller_port))
+
             controller_process = multiprocessing.Process(
-                target=controller.run_controller,
+                target=ux_utils.RedirectOutputForProcess(
+                    controller.run_controller, controller_log_file).run,
                 args=(service_name, service_spec, task_yaml, controller_port))
             controller_process.start()
             serve_state.set_service_controller_port(service_name,
