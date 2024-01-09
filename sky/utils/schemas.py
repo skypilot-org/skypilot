@@ -363,6 +363,7 @@ def get_service_schema():
 
 
 def get_task_schema():
+    """Return Task JSON Schema from file"""
     with open('sky/templates/skypilot-task.json', 'r') as file:
         data = json.load(file)
     return data
