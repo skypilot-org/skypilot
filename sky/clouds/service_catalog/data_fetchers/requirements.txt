@@ -4,3 +4,4 @@ lxml
 pandas
 ray
 requests
+cudo-compute
