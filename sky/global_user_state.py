@@ -76,6 +76,7 @@ def create_table(cursor, conn):
         CREATE TABLE IF NOT EXISTS cluster_history (
         cluster_hash TEXT PRIMARY KEY,
         name TEXT,
+        hourly_cost REAL,
         num_nodes int,
         requested_resources BLOB,
         launched_resources BLOB,
@@ -242,20 +243,23 @@ def add_or_update_cluster(cluster_name: str,
 
     launched_nodes = getattr(cluster_handle, 'launched_nodes', None)
     launched_resources = getattr(cluster_handle, 'launched_resources', None)
+    launched_instance_hourly_cost = launched_resources.get_cost(seconds=3600)
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
-        '(cluster_hash, name, num_nodes, requested_resources, '
-        'launched_resources, usage_intervals) '
+        '(cluster_hash, name, hourly_cost, num_nodes, '
+        'requested_resources, launched_resources, usage_intervals) '
         'VALUES ('
         # hash
         '?, '
         # name
         '?, '
+        # hourly_cost
+        '?, '
+        # number of nodes
+        '?, '
         # requested resources
         '?, '
         # launched resources
-        '?, '
-        # number of nodes
         '?, '
         # usage intervals
         '?)',
@@ -264,6 +268,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_hash,
             # name
             cluster_name,
+            # hourly cost
+            launched_instance_hourly_cost,
             # number of nodes
             launched_nodes,
             # requested resources
@@ -604,7 +610,7 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, ch.instance_cost, '
         'ch.launched_resources, ch.usage_intervals, clusters.status  '
         'FROM cluster_history ch '
         'LEFT OUTER JOIN clusters '
@@ -621,10 +627,11 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             cluster_hash,
             name,
             num_nodes,
+            instance_cost,
             launched_resources,
             usage_intervals,
             status,
-        ) = row[:6]
+        ) = row[:7]
 
         if status is not None:
             status = status_lib.ClusterStatus[status]
@@ -634,6 +641,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'launched_at': _get_cluster_launch_time(cluster_hash),
             'duration': _get_cluster_duration(cluster_hash),
             'num_nodes': num_nodes,
+            'instance_cost': instance_cost,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
