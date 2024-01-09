@@ -130,7 +130,6 @@ def _cluster_history_backward_compatibility():
     # check if hourly_cost column exists in cluster_history table
     cursor.execute('SELECT * FROM cluster_history LIMIT 1')
     columns = [description[0] for description in cursor.description]
-    print(columns)
     if 'hourly_cost' not in columns:
         # add hourly_cost column to cluster_history table
         db_utils.add_column_to_table(cursor, conn, 'cluster_history',
@@ -658,7 +657,6 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
     # '(cluster_hash, name, num_nodes, requested_resources, '
     #         'launched_resources, usage_intervals) '
     records = []
-
     for row in rows:
         # TODO: use namedtuple instead of dict
 
