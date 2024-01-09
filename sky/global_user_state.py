@@ -71,16 +71,17 @@ def create_table(cursor, conn):
     #  Actual launched resources fetched from handle for cluster.
 
     # num_nodes: Optional[int] number of nodes launched.
+    # hourly_cost: Optional[float] hourly cost of the cluster.
 
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS cluster_history (
         cluster_hash TEXT PRIMARY KEY,
         name TEXT,
-        hourly_cost REAL,
         num_nodes int,
         requested_resources BLOB,
         launched_resources BLOB,
-        usage_intervals BLOB)""")
+        usage_intervals BLOB, 
+        hourly_cost REAL)""")
     # Table for configs (e.g. enabled clouds)
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS config (
@@ -136,7 +137,9 @@ def _cluster_history_backward_compatibility():
                                      'hourly_cost', 'REAL DEFAULT 0')
 
         # get all rows from cluster_history table
-        rows = cursor.execute('SELECT * FROM cluster_history').fetchall()
+        rows = cursor.execute(
+            'SELECT cluster_hash, launched_resources FROM cluster_history'
+        ).fetchall()
 
         # update hourly_cost column in cluster_history table to the cost
         # calculated from launched_resources
@@ -144,14 +147,7 @@ def _cluster_history_backward_compatibility():
             # Explicitly specify the number of fields to unpack, so that
             # we can add new fields to the database in the future without
             # breaking the previous code.
-            (
-                cluster_hash, 
-                _, 
-                _, 
-                _, 
-                launched_resources,
-                _
-            ) = row[:6]
+            cluster_hash, launched_resources = row
             launched_resources = pickle.loads(launched_resources)
             launched_instance_hourly_cost = launched_resources.get_cost(
                 seconds=3600)
@@ -295,8 +291,6 @@ def add_or_update_cluster(cluster_name: str,
         '?, '
         # name
         '?, '
-        # hourly_cost
-        '?, '
         # number of nodes
         '?, '
         # requested resources
@@ -304,14 +298,14 @@ def add_or_update_cluster(cluster_name: str,
         # launched resources
         '?, '
         # usage intervals
-        '?)',
+        '?)'
+        # hourly_cost
+        '?, ',
         (
             # hash
             cluster_hash,
             # name
             cluster_name,
-            # hourly cost
-            launched_instance_hourly_cost,
             # number of nodes
             launched_nodes,
             # requested resources
@@ -320,6 +314,8 @@ def add_or_update_cluster(cluster_name: str,
             pickle.dumps(launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
+            # hourly cost
+            launched_instance_hourly_cost,
         ))
 
     _DB.conn.commit()
