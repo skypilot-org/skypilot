@@ -1,5 +1,5 @@
-"""GCP instance provisioning."""
-import os
+"""Cudo Compute instance provisioning."""
+
 import time
 from typing import Any, Dict, List, Optional
 
@@ -46,7 +46,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = ['pend','init','prol','boot']
+    pending_status = ['pend', 'init', 'prol', 'boot']
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -94,7 +94,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 vcpu_count=int(spec['vcpu_count']),
                 gpu_count=int(float(spec['gpu_count'])),
                 gpu_model=spec['gpu_model'],
-                tags={},  #TODO
+                tags={},
                 disk_size=config.node_config['DiskSize'])
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
@@ -164,7 +164,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region, provider_config
-    nodes = _filter_instances(cluster_name_on_cloud, ['runn','pend'])
+    nodes = _filter_instances(cluster_name_on_cloud, ['runn', 'pend'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for node_id, node_info in nodes.items():

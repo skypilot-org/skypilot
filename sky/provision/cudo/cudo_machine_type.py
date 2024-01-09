@@ -153,7 +153,7 @@ def get_gpu_info(count, model):
         }],
         'TotalGpuMemoryInMiB': 1024 * mem * count
     }
-
+    # pylint: disable=invalid-string-quote
     return '"' + json.dumps(info).replace('"', "'") + '"'
 
 
@@ -207,4 +207,4 @@ def update_prices():
                 row['gpu_info'],
                 row['spot_price'],
             ]
-            file.write(",".join(data) + '\n')
+            file.write(','.join(data) + '\n')
