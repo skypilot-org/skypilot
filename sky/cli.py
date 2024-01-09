@@ -112,7 +112,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 
 _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
-    '{cluster_num} cluster{plural} {verb}. Please specify an existing '
+    '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
     'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
@@ -1902,11 +1902,13 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     plural = 's' if len(clusters) > 1 else ''
                     cluster_num = (str(len(clusters))
                                    if len(clusters) > 0 else 'No')
+                    cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
                             verb='specified',
+                            cause=cause,
                             property='IP address' if ip else 'endpoint(s)',
                             flag='ip' if ip else
                             ('endpoint port'
@@ -1924,12 +1926,16 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
-                                   if len(clusters) > 0 else 'No')
+                                   if len(cluster_records) > 0
+                                   else f'{clusters[0]!r}')
+                    verb = 'found' if len(cluster_records) > 0 else f'not found'
+                    cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
                             cluster_num=cluster_num,
                             plural=plural,
-                            verb='found',
+                            verb=verb,
+                            cause=cause,
                             property='IP address' if ip else 'endpoint(s)',
                             flag='ip' if ip else
                             ('endpoint port'
