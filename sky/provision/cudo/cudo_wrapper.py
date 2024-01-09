@@ -93,8 +93,9 @@ def list_instances():
                 'status': vm['short_state'],
                 'tags': vm['metadata'],
                 'name': vm['id'],
-                # public_ip_address, external_ip_address,
-                'ip': vm['public_ip_address']
+                'ip': vm['external_ip_address'],
+                'external_ip': vm['external_ip_address'],
+                'internal_ip': vm['internal_ip_address']
             }
             instances[vm['id']] = instance
         return instances

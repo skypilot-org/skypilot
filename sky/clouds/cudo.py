@@ -57,6 +57,9 @@ class Cudo(clouds.Cloud):
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     _regions: List[clouds.Region] = []
 
     @classmethod

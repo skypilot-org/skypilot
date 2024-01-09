@@ -46,7 +46,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = ['CREATED', 'RESTARTING']
+    pending_status = ['pend','init','prol','boot']
 
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
@@ -164,7 +164,7 @@ def get_cluster_info(
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     del region, provider_config
-    nodes = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    nodes = _filter_instances(cluster_name_on_cloud, ['runn','pend'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for node_id, node_info in nodes.items():
@@ -173,7 +173,7 @@ def get_cluster_info(
                 instance_id=node_id,
                 internal_ip=node_info['internal_ip'],
                 external_ip=node_info['external_ip'],
-                tags={},
+                tags=node_info['tags'],
             )
         ]
         if node_info['name'].endswith('-head'):
