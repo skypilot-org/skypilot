@@ -50,6 +50,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import accelerator_registry
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -324,9 +325,11 @@ class RayCodeGen:
             acc_name, acc_count = list(resources_dict.items())[0]
             gpu_dict = {'GPU': acc_count}
             # gpu_dict should be empty when the accelerator is not GPU.
-            # FIXME: This is a hack to make sure that we do not reserve
-            # GPU when requesting TPU.
-            if 'tpu' in acc_name.lower():
+            # TODO(zongheng,zhanghao): an alternative is to start the remote
+            # cluster with custom resource 'GPU': <n> even if the accelerator(s)
+            # are not GPU. We opt for the current solution for now.
+            if accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name):
                 gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
@@ -488,7 +491,8 @@ class RayCodeGen:
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
             resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' not in resources_key.lower():
+            if not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    resources_key):
                 # `num_gpus` should be empty when the accelerator is not GPU.
                 # FIXME: use a set of GPU types, instead of 'tpu' in the key.
 
