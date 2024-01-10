@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YAPF formatter, adapted from ray.
+# Ruff formatter, adapted from ray.
 #
 # Usage:
 #    # Do work and commit your work.
@@ -7,10 +7,10 @@
 #    # Format files that differ from origin/master.
 #    bash format.sh
 
-#    # Commit changed files with message 'Run yapf and pylint'
+#    # Commit changed files with message 'Run ruff and pylint'
 #
 #
-# YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
+# ruff + Clang formatter (if installed). This script formats all changed files from the last mergebase.
 # You are encouraged to run this locally before pushing changes for review.
 
 # Cause the script to exit if a single command fails
@@ -21,7 +21,7 @@ builtin cd "$(dirname "${BASH_SOURCE:-$0}")"
 ROOT="$(git rev-parse --show-toplevel)"
 builtin cd "$ROOT" || exit 1
 
-YAPF_VERSION=$(yapf --version | awk '{print $2}')
+RUFF_VERSION=$(ruff version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
 PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
 MYPY_VERSION=$(mypy --version | awk '{print $2}')
@@ -35,7 +35,6 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
@@ -46,7 +45,7 @@ YAPF_FLAGS=(
     '--parallel'
 )
 
-YAPF_EXCLUDES=(
+RUFF_EXCLUDES=(
     '--exclude' 'build/**'
     '--exclude' 'sky/skylet/providers/aws/**'
     '--exclude' 'sky/skylet/providers/gcp/**'
@@ -71,7 +70,7 @@ BLACK_INCLUDES=(
 
 # Format specified files
 format() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "$@"
+    ruff format --in-place "${YAPF_FLAGS[@]}" "$@"
 }
 
 # Format files that differ from main branch. Ignores dirs that are not slated
@@ -94,7 +93,7 @@ format_changed() {
 
 # Format all files
 format_all() {
-    yapf --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples llm
+    ruff format --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples llm
 }
 
 echo 'SkyPilot Black:'
@@ -112,7 +111,7 @@ else
    # Format only the files that changed in last commit.
    format_changed
 fi
-echo 'SkyPilot yapf: Done'
+echo 'SkyPilot ruff: Done'
 
 echo 'SkyPilot isort:'
 isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
