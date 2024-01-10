@@ -325,8 +325,8 @@ class RayCodeGen:
             gpu_dict = {'GPU': acc_count}
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve
-            # GPU when requesting TPU.
-            if 'tpu' in acc_name.lower():
+            # GPU when requesting non-GPU accelerators (e.g., TPU/Inferentia).
+            if 'tpu' in acc_name.lower() or 'inferentia' in acc_name.lower():
                 gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
@@ -488,7 +488,8 @@ class RayCodeGen:
             options.append(f'resources={json.dumps(ray_resources_dict)}')
 
             resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' not in resources_key.lower():
+            if 'tpu' not in resources_key.lower(
+            ) and 'inferentia' not in resources_key.lower():
                 # `num_gpus` should be empty when the accelerator is not GPU.
                 # FIXME: use a set of GPU types, instead of 'tpu' in the key.
 
