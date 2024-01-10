@@ -40,7 +40,7 @@ tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes
 tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
-YAPF_FLAGS=(
+RUFF_FLAGS=(
     '--recursive'
     '--parallel'
 )
@@ -53,7 +53,7 @@ RUFF_EXCLUDES=(
     '--exclude' 'sky/skylet/providers/ibm/**'
 )
 
-ISORT_YAPF_EXCLUDES=(
+ISORT_RUFF_EXCLUDES=(
     '--sg' 'build/**'
     '--sg' 'sky/skylet/providers/aws/**'
     '--sg' 'sky/skylet/providers/gcp/**'
@@ -70,14 +70,14 @@ BLACK_INCLUDES=(
 
 # Format specified files
 format() {
-    ruff format --in-place "${YAPF_FLAGS[@]}" "$@"
+    ruff format --in-place "${RUFF_FLAGS[@]}" "$@"
 }
 
 # Format files that differ from main branch. Ignores dirs that are not slated
 # for autoformat yet.
 format_changed() {
     # The `if` guard ensures that the list of filenames is not empty, which
-    # could cause yapf to receive 0 positional arguments, making it hang
+    # could cause ruff to receive 0 positional arguments, making it hang
     # waiting for STDIN.
     #
     # `diff-filter=ACM` and $MERGEBASE is to ensure we only format files that
@@ -86,14 +86,14 @@ format_changed() {
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
-             yapf --in-place "${YAPF_EXCLUDES[@]}" "${YAPF_FLAGS[@]}"
+             ruff --in-place "${RUFF_EXCLUDES[@]}" "${RUFF_FLAGS[@]}"
     fi
 
 }
 
 # Format all files
 format_all() {
-    ruff format --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples llm
+    ruff format --in-place "${RUFF_FLAGS[@]}" "${RUFF_EXCLUDES[@]}" sky tests examples llm
 }
 
 echo 'SkyPilot Black:'
@@ -114,7 +114,7 @@ fi
 echo 'SkyPilot ruff: Done'
 
 echo 'SkyPilot isort:'
-isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
+isort sky tests examples llm docs "${ISORT_RUFF_EXCLUDES[@]}"
 
 isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
 

@@ -9,7 +9,9 @@ VPC_TEMPLATE = {
     "selfLink": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
     "autoCreateSubnetworks": True,
     "mtu": 1460,
-    "routingConfig": {"routingMode": "GLOBAL"},
+    "routingConfig": {
+        "routingMode": "GLOBAL"
+    },
 }
 
 # Required firewall rules for SkyPilot to work.
@@ -18,20 +20,24 @@ FIREWALL_RULES_REQUIRED = [
     {
         "direction": "INGRESS",
         "allowed": [
-            {"IPProtocol": "tcp", "ports": ["0-65535"]},
-            {"IPProtocol": "udp", "ports": ["0-65535"]},
+            {
+                "IPProtocol": "tcp",
+                "ports": ["0-65535"]
+            },
+            {
+                "IPProtocol": "udp",
+                "ports": ["0-65535"]
+            },
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
     # Allow ssh connection from anywhere.
     {
         "direction": "INGRESS",
-        "allowed": [
-            {
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }
-        ],
+        "allowed": [{
+            "IPProtocol": "tcp",
+            "ports": ["22"],
+        }],
         # Some users have reported that this conflicts with their network
         # security policy. A custom VPC can be specified in ~/.sky/config.yaml
         # allowing for restriction of source ranges bypassing this requirement.
@@ -49,9 +55,17 @@ FIREWALL_RULES_TEMPLATE = [
         "direction": "INGRESS",
         "priority": 65534,
         "allowed": [
-            {"IPProtocol": "tcp", "ports": ["0-65535"]},
-            {"IPProtocol": "udp", "ports": ["0-65535"]},
-            {"IPProtocol": "icmp"},
+            {
+                "IPProtocol": "tcp",
+                "ports": ["0-65535"]
+            },
+            {
+                "IPProtocol": "udp",
+                "ports": ["0-65535"]
+            },
+            {
+                "IPProtocol": "icmp"
+            },
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
@@ -62,12 +76,10 @@ FIREWALL_RULES_TEMPLATE = [
         "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-ssh",
         "direction": "INGRESS",
         "priority": 65534,
-        "allowed": [
-            {
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }
-        ],
+        "allowed": [{
+            "IPProtocol": "tcp",
+            "ports": ["22"],
+        }],
         # TODO(skypilot): some users reported that this should be relaxed (e.g.,
         # allowlisting only certain IPs to have ssh access).
         "sourceRanges": ["0.0.0.0/0"],
@@ -79,11 +91,9 @@ FIREWALL_RULES_TEMPLATE = [
         "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-icmp",
         "direction": "INGRESS",
         "priority": 65534,
-        "allowed": [
-            {
-                "IPProtocol": "icmp",
-            }
-        ],
+        "allowed": [{
+            "IPProtocol": "icmp",
+        }],
         "sourceRanges": ["0.0.0.0/0"],
     },
 ]
@@ -126,7 +136,9 @@ VM_MINIMAL_PERMISSIONS = [
 # unless opening ports (e.g., via `resources.ports`).
 if skypilot_config.get_nested(("gcp", "vpc_name"), ""):
     remove = ("compute.firewalls.create", "compute.firewalls.delete")
-    VM_MINIMAL_PERMISSIONS = [p for p in VM_MINIMAL_PERMISSIONS if p not in remove]
+    VM_MINIMAL_PERMISSIONS = [
+        p for p in VM_MINIMAL_PERMISSIONS if p not in remove
+    ]
 
 TPU_MINIMAL_PERMISSIONS = [
     "tpu.nodes.create",

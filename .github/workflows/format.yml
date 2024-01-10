@@ -26,13 +26,13 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yapf==0.32.0
+        pip install ruff==0.1.11
         pip install toml==0.10.2
         pip install black==22.10.0
         pip install isort==5.12.0
-    - name: Running yapf
+    - name: Running ruff
       run: |
-        yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
+        ruff --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
             --exclude 'sky/skylet/providers/aws/**' \
             --exclude 'sky/skylet/providers/gcp/**' \
             --exclude 'sky/skylet/providers/azure/**' \
@@ -47,7 +47,7 @@ jobs:
       run: |
         isort --diff --check --profile black -l 88 -m 3 \
             sky/skylet/providers/ibm/
-    - name: Running isort for yapf formatted files
+    - name: Running isort for ruff formatted files
       run: |
         isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
             --sg 'sky/skylet/providers/aws/**' \

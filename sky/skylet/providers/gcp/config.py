@@ -49,8 +49,7 @@ DEFAULT_SERVICE_ACCOUNT_CONFIG = {
 SKYPILOT = "skypilot"
 SKYPILOT_SERVICE_ACCOUNT_ID = SKYPILOT + "-" + VERSION
 SKYPILOT_SERVICE_ACCOUNT_EMAIL_TEMPLATE = (
-    "{account_id}@{project_id}.iam.gserviceaccount.com"
-)
+    "{account_id}@{project_id}.iam.gserviceaccount.com")
 SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
     "displayName": "SkyPilot Service Account ({})".format(VERSION),
 }
@@ -102,8 +101,7 @@ def get_node_type(node: dict) -> GCPNodeType:
             "required. "
             "For a TPU instance, 'acceleratorType' and no 'machineType' "
             "is required. "
-            f"Got {list(node)}"
-        )
+            f"Got {list(node)}")
 
     if "machineType" not in node and "acceleratorType" in node:
         return GCPNodeType.TPU
@@ -112,10 +110,8 @@ def get_node_type(node: dict) -> GCPNodeType:
 
 def wait_for_crm_operation(operation, crm):
     """Poll for cloud resource manager operation until finished."""
-    logger.info(
-        "wait_for_crm_operation: "
-        "Waiting for operation {} to finish...".format(operation)
-    )
+    logger.info("wait_for_crm_operation: "
+                "Waiting for operation {} to finish...".format(operation))
 
     for _ in range(MAX_POLLS):
         result = crm.operations().get(name=operation["name"]).execute()
@@ -133,20 +129,15 @@ def wait_for_crm_operation(operation, crm):
 
 def wait_for_compute_global_operation(project_name, operation, compute):
     """Poll for global compute operation until finished."""
-    logger.info(
-        "wait_for_compute_global_operation: "
-        "Waiting for operation {} to finish...".format(operation["name"])
-    )
+    logger.info("wait_for_compute_global_operation: "
+                "Waiting for operation {} to finish...".format(
+                    operation["name"]))
 
     for _ in range(MAX_POLLS):
-        result = (
-            compute.globalOperations()
-            .get(
-                project=project_name,
-                operation=operation["name"],
-            )
-            .execute()
-        )
+        result = (compute.globalOperations().get(
+            project=project_name,
+            operation=operation["name"],
+        ).execute())
         if "error" in result:
             raise Exception(result["error"])
 
@@ -161,7 +152,8 @@ def wait_for_compute_global_operation(project_name, operation, compute):
 
 def key_pair_name(i, region, project_id, ssh_user):
     """Returns the ith default gcp_key_pair_name."""
-    key_name = "{}_gcp_{}_{}_{}_{}".format(SKYPILOT, region, project_id, ssh_user, i)
+    key_name = "{}_gcp_{}_{}_{}_{}".format(SKYPILOT, region, project_id,
+                                           ssh_user, i)
     return key_name
 
 
@@ -175,17 +167,13 @@ def key_pair_paths(key_name):
 def generate_rsa_key_pair():
     """Create public and private ssh-keys."""
 
-    key = rsa.generate_private_key(
-        backend=default_backend(), public_exponent=65537, key_size=2048
-    )
+    key = rsa.generate_private_key(backend=default_backend(),
+                                   public_exponent=65537,
+                                   key_size=2048)
 
-    public_key = (
-        key.public_key()
-        .public_bytes(
-            serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH
-        )
-        .decode("utf-8")
-    )
+    public_key = (key.public_key().public_bytes(
+        serialization.Encoding.OpenSSH,
+        serialization.PublicFormat.OpenSSH).decode("utf-8"))
 
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -211,25 +199,29 @@ def _is_head_node_a_tpu(config: dict) -> bool:
         node_id: node_type["node_config"]
         for node_id, node_type in config["available_node_types"].items()
     }
-    return get_node_type(node_configs[config["head_node_type"]]) == GCPNodeType.TPU
+    return get_node_type(
+        node_configs[config["head_node_type"]]) == GCPNodeType.TPU
 
 
 def _create_crm(gcp_credentials=None):
-    return discovery.build(
-        "cloudresourcemanager", "v1", credentials=gcp_credentials, cache_discovery=False
-    )
+    return discovery.build("cloudresourcemanager",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_iam(gcp_credentials=None):
-    return discovery.build(
-        "iam", "v1", credentials=gcp_credentials, cache_discovery=False
-    )
+    return discovery.build("iam",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_compute(gcp_credentials=None):
-    return discovery.build(
-        "compute", "v1", credentials=gcp_credentials, cache_discovery=False
-    )
+    return discovery.build("compute",
+                           "v1",
+                           credentials=gcp_credentials,
+                           cache_discovery=False)
 
 
 def _create_tpu(gcp_credentials=None):
@@ -252,26 +244,19 @@ def construct_clients_from_provider_config(provider_config):
     """
     gcp_credentials = provider_config.get("gcp_credentials")
     if gcp_credentials is None:
-        logger.debug(
-            "gcp_credentials not found in cluster yaml file. "
-            "Falling back to GOOGLE_APPLICATION_CREDENTIALS "
-            "environment variable."
-        )
-        tpu_resource = (
-            _create_tpu()
-            if provider_config.get(HAS_TPU_PROVIDER_FIELD, False)
-            else None
-        )
+        logger.debug("gcp_credentials not found in cluster yaml file. "
+                     "Falling back to GOOGLE_APPLICATION_CREDENTIALS "
+                     "environment variable.")
+        tpu_resource = (_create_tpu() if provider_config.get(
+            HAS_TPU_PROVIDER_FIELD, False) else None)
         # If gcp_credentials is None, then discovery.build will search for
         # credentials in the local environment.
         return _create_crm(), _create_iam(), _create_compute(), tpu_resource
 
-    assert (
-        "type" in gcp_credentials
-    ), "gcp_credentials cluster yaml field missing 'type' field."
-    assert (
-        "credentials" in gcp_credentials
-    ), "gcp_credentials cluster yaml field missing 'credentials' field."
+    assert ("type" in gcp_credentials
+           ), "gcp_credentials cluster yaml field missing 'type' field."
+    assert ("credentials" in gcp_credentials
+           ), "gcp_credentials cluster yaml field missing 'credentials' field."
 
     cred_type = gcp_credentials["type"]
     credentials_field = gcp_credentials["credentials"]
@@ -282,22 +267,16 @@ def construct_clients_from_provider_config(provider_config):
         try:
             service_account_info = json.loads(credentials_field)
         except json.decoder.JSONDecodeError:
-            raise RuntimeError(
-                "gcp_credentials found in cluster yaml file but "
-                "formatted improperly."
-            )
+            raise RuntimeError("gcp_credentials found in cluster yaml file but "
+                               "formatted improperly.")
         credentials = service_account.Credentials.from_service_account_info(
-            service_account_info
-        )
+            service_account_info)
     elif cred_type == "credentials_token":
         # Otherwise the credentials type must be credentials_token.
         credentials = OAuthCredentials(credentials_field)
 
-    tpu_resource = (
-        _create_tpu(credentials)
-        if provider_config.get(HAS_TPU_PROVIDER_FIELD, False)
-        else None
-    )
+    tpu_resource = (_create_tpu(credentials) if provider_config.get(
+        HAS_TPU_PROVIDER_FIELD, False) else None)
 
     return (
         _create_crm(credentials),
@@ -318,7 +297,8 @@ def bootstrap_gcp(config):
     if _has_tpus_in_node_configs(config):
         config["provider"][HAS_TPU_PROVIDER_FIELD] = True
 
-    crm, iam, compute, tpu = construct_clients_from_provider_config(config["provider"])
+    crm, iam, compute, tpu = construct_clients_from_provider_config(
+        config["provider"])
 
     config = _configure_project(config, crm)
     config = _configure_iam_role(config, crm, iam)
@@ -340,8 +320,7 @@ def _configure_project(config, crm):
     project_id = config["provider"].get("project_id")
     assert config["provider"]["project_id"] is not None, (
         "'project_id' must be set in the 'provider' section of the autoscaler"
-        " config. Notice that the project id must be globally unique."
-    )
+        " config. Notice that the project id must be globally unique.")
     project = _get_project(project_id, crm)
 
     if project is None:
@@ -350,18 +329,17 @@ def _configure_project(config, crm):
         project = _get_project(project_id, crm)
 
     assert project is not None, "Failed to create project"
-    assert (
-        project["lifecycleState"] == "ACTIVE"
-    ), "Project status needs to be ACTIVE, got {}".format(project["lifecycleState"])
+    assert (project["lifecycleState"] == "ACTIVE"
+           ), "Project status needs to be ACTIVE, got {}".format(
+               project["lifecycleState"])
 
     config["provider"]["project_id"] = project["projectId"]
 
     return config
 
 
-def _is_permission_satisfied(
-    service_account, crm, iam, required_permissions, required_roles
-):
+def _is_permission_satisfied(service_account, crm, iam, required_permissions,
+                             required_roles):
     """Check if either of the roles or permissions are satisfied."""
     if service_account is None:
         return False, None
@@ -395,12 +373,10 @@ def _is_permission_satisfied(
         if not role_exists:
             logger.info(f"_configure_iam_role: role {role} does not exist.")
             already_configured = False
-            policy["bindings"].append(
-                {
-                    "members": [member_id],
-                    "role": role,
-                }
-            )
+            policy["bindings"].append({
+                "members": [member_id],
+                "role": role,
+            })
 
     if already_configured:
         # In some managed environments, an admin needs to grant the
@@ -411,7 +387,8 @@ def _is_permission_satisfied(
         if member_id in binding["members"]:
             role = binding["role"]
             try:
-                role_definition = iam.projects().roles().get(name=role).execute()
+                role_definition = iam.projects().roles().get(
+                    name=role).execute()
             except TypeError as e:
                 if "does not match the pattern" in str(e):
                     logger.info(
@@ -428,7 +405,8 @@ def _is_permission_satisfied(
     if not required_permissions:
         # All required permissions are already granted.
         return True, policy
-    logger.info(f"_configure_iam_role: missing permisisons {required_permissions}")
+    logger.info(
+        f"_configure_iam_role: missing permisisons {required_permissions}")
 
     return False, policy
 
@@ -457,9 +435,8 @@ def _configure_iam_role(config, crm, iam):
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
         permissions = VM_MINIMAL_PERMISSIONS + TPU_MINIMAL_PERMISSIONS
 
-    satisfied, policy = _is_permission_satisfied(
-        service_account, crm, iam, permissions, roles
-    )
+    satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
+                                                 permissions, roles)
 
     if not satisfied:
         # SkyPilot: Fallback to the old ray service account name for
@@ -475,22 +452,19 @@ def _configure_iam_role(config, crm, iam):
         logger.info(f"_configure_iam_role: Fallback to service account {email}")
 
         ray_service_account = _get_service_account(email, config, iam)
-        ray_satisfied, _ = _is_permission_satisfied(
-            ray_service_account, crm, iam, permissions, roles
-        )
+        ray_satisfied, _ = _is_permission_satisfied(ray_service_account, crm,
+                                                    iam, permissions, roles)
         logger.info(
             "_configure_iam_role: "
-            f"Fallback to service account {email} succeeded? {ray_satisfied}"
-        )
+            f"Fallback to service account {email} succeeded? {ray_satisfied}")
 
         if ray_satisfied:
             service_account = ray_service_account
             satisfied = ray_satisfied
         elif service_account is None:
-            logger.info(
-                "_configure_iam_role: "
-                "Creating new service account {}".format(SKYPILOT_SERVICE_ACCOUNT_ID)
-            )
+            logger.info("_configure_iam_role: "
+                        "Creating new service account {}".format(
+                            SKYPILOT_SERVICE_ACCOUNT_ID))
             # SkyPilot: a GCP user without the permission to create a service
             # account will fail here.
             service_account = _create_service_account(
@@ -500,15 +474,13 @@ def _configure_iam_role(config, crm, iam):
                 iam,
             )
             satisfied, policy = _is_permission_satisfied(
-                service_account, crm, iam, permissions, roles
-            )
+                service_account, crm, iam, permissions, roles)
 
     assert service_account is not None, "Failed to create service account"
 
     if not satisfied:
-        logger.info(
-            "_configure_iam_role: " f"Adding roles to service account {email}..."
-        )
+        logger.info("_configure_iam_role: "
+                    f"Adding roles to service account {email}...")
         _add_iam_policy_binding(service_account, policy, crm, iam)
 
     account_dict = {
@@ -553,16 +525,14 @@ def _configure_key_pair(config, compute):
 
     ssh_user = config["auth"]["ssh_user"]
 
-    project = compute.projects().get(project=config["provider"]["project_id"]).execute()
+    project = compute.projects().get(
+        project=config["provider"]["project_id"]).execute()
 
     # Key pairs associated with project meta data. The key pairs are general,
     # and not just ssh keys.
     ssh_keys_str = next(
-        (
-            item
-            for item in project["commonInstanceMetadata"].get("items", [])
-            if item["key"] == "ssh-keys"
-        ),
+        (item for item in project["commonInstanceMetadata"].get("items", [])
+         if item["key"] == "ssh-keys"),
         {},
     ).get("value", "")
 
@@ -571,9 +541,8 @@ def _configure_key_pair(config, compute):
     # Try a few times to get or create a good key pair.
     key_found = False
     for i in range(10):
-        key_name = key_pair_name(
-            i, config["provider"]["region"], config["provider"]["project_id"], ssh_user
-        )
+        key_name = key_pair_name(i, config["provider"]["region"],
+                                 config["provider"]["project_id"], ssh_user)
         public_key_path, private_key_path = key_pair_paths(key_name)
 
         for ssh_key in ssh_keys:
@@ -592,9 +561,8 @@ def _configure_key_pair(config, compute):
 
         # Create a key since it doesn't exist locally or in GCP
         if not key_found and not os.path.exists(private_key_path):
-            logger.info(
-                "_configure_key_pair: Creating new key pair {}".format(key_name)
-            )
+            logger.info("_configure_key_pair: Creating new key pair {}".format(
+                key_name))
             public_key, private_key = generate_rsa_key_pair()
 
             _create_project_ssh_key_pair(project, public_key, ssh_user, compute)
@@ -607,9 +575,9 @@ def _configure_key_pair(config, compute):
             # permissions. In order to do that we need to change the default
             # os.open behavior to include the mode we want.
             with open(
-                private_key_path,
-                "w",
-                opener=partial(os.open, mode=0o600),
+                    private_key_path,
+                    "w",
+                    opener=partial(os.open, mode=0o600),
             ) as f:
                 f.write(private_key)
 
@@ -624,17 +592,14 @@ def _configure_key_pair(config, compute):
             break
 
     assert key_found, "SSH keypair for user {} not found for {}".format(
-        ssh_user, private_key_path
-    )
+        ssh_user, private_key_path)
     assert os.path.exists(
-        private_key_path
-    ), "Private key file {} not found for user {}".format(private_key_path, ssh_user)
+        private_key_path), "Private key file {} not found for user {}".format(
+            private_key_path, ssh_user)
 
-    logger.info(
-        "_configure_key_pair: "
-        "Private key not specified in config, using"
-        "{}".format(private_key_path)
-    )
+    logger.info("_configure_key_pair: "
+                "Private key not specified in config, using"
+                "{}".format(private_key_path))
 
     config["auth"]["ssh_private_key"] = private_key_path
 
@@ -646,8 +611,7 @@ def _check_firewall_rules(vpc_name, config, compute):
     required_rules = FIREWALL_RULES_REQUIRED.copy()
 
     operation = compute.networks().getEffectiveFirewalls(
-        project=config["provider"]["project_id"], network=vpc_name
-    )
+        project=config["provider"]["project_id"], network=vpc_name)
     response = operation.execute()
     if len(response) == 0:
         return False
@@ -706,7 +670,8 @@ def _check_firewall_rules(vpc_name, config, compute):
             allowed = rule.get("allowed", [])
             for source in sources:
                 key = (direction, source)
-                source2allowed_list[key] = source2allowed_list.get(key, []) + allowed
+                source2allowed_list[key] = source2allowed_list.get(key,
+                                                                   []) + allowed
         for direction_source, allowed_list in source2allowed_list.items():
             source2rules[direction_source] = {}
             for allowed in allowed_list:
@@ -726,11 +691,14 @@ def _check_firewall_rules(vpc_name, config, compute):
                                 len(parse_ports) == 2
                             ), f"Failed to parse the port range: {port_range}"
                             port_set.update(
-                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1))
-                            )
+                                set(
+                                    range(int(parse_ports[0]),
+                                          int(parse_ports[1]) + 1)))
                 if allowed["IPProtocol"] not in source2rules[direction_source]:
-                    source2rules[direction_source][allowed["IPProtocol"]] = set()
-                source2rules[direction_source][allowed["IPProtocol"]].update(port_set)
+                    source2rules[direction_source][
+                        allowed["IPProtocol"]] = set()
+                source2rules[direction_source][allowed["IPProtocol"]].update(
+                    port_set)
         return source2rules
 
     effective_rules = _merge_and_refine_rule(effective_rules)
@@ -757,18 +725,23 @@ def _create_rules(config, compute, rules, VPC_NAME, PROJ_ID):
         # Query firewall rule by its name (unique in a project).
         # If the rule already exists, delete it first.
         rule_name = rule["name"].format(VPC_NAME=VPC_NAME)
-        rule_list = _list_firewall_rules(config, compute, filter=f"(name={rule_name})")
+        rule_list = _list_firewall_rules(config,
+                                         compute,
+                                         filter=f"(name={rule_name})")
         if len(rule_list) > 0:
             _delete_firewall_rule(config, compute, rule_name)
 
         body = rule.copy()
         body["name"] = body["name"].format(VPC_NAME=VPC_NAME)
-        body["network"] = body["network"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
-        body["selfLink"] = body["selfLink"].format(PROJ_ID=PROJ_ID, VPC_NAME=VPC_NAME)
+        body["network"] = body["network"].format(PROJ_ID=PROJ_ID,
+                                                 VPC_NAME=VPC_NAME)
+        body["selfLink"] = body["selfLink"].format(PROJ_ID=PROJ_ID,
+                                                   VPC_NAME=VPC_NAME)
         op = _create_firewall_rule_submit(config, compute, body)
         opertaions.append(op)
     for op in opertaions:
-        wait_for_compute_global_operation(config["provider"]["project_id"], op, compute)
+        wait_for_compute_global_operation(config["provider"]["project_id"], op,
+                                          compute)
 
 
 def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
@@ -777,8 +750,7 @@ def _network_interface_to_vpc_name(network_interface: Dict[str, str]) -> str:
 
 
 def get_usable_vpc_and_subnet(
-    config,
-) -> Tuple[str, "google.cloud.compute_v1.types.compute.Subnetwork"]:
+    config,) -> Tuple[str, "google.cloud.compute_v1.types.compute.Subnetwork"]:
     """Return a usable VPC and the subnet in it.
 
     If config['provider']['vpc_name'] is set, return the VPC with the name
@@ -796,7 +768,8 @@ def get_usable_vpc_and_subnet(
     Raises:
       RuntimeError: if the user has specified a VPC name but the VPC is not found.
     """
-    _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
+    _, _, compute, _ = construct_clients_from_provider_config(
+        config["provider"])
 
     # For existing cluster, it is ok to return a VPC and subnet not used by
     # the cluster, as AWS will ignore them.
@@ -808,9 +781,9 @@ def get_usable_vpc_and_subnet(
 
     specific_vpc_to_use = config["provider"].get("vpc_name", None)
     if specific_vpc_to_use is not None:
-        vpcnets_all = _list_vpcnets(
-            config, compute, filter=f"name={specific_vpc_to_use}"
-        )
+        vpcnets_all = _list_vpcnets(config,
+                                    compute,
+                                    filter=f"name={specific_vpc_to_use}")
         # On GCP, VPC names are unique, so it'd be 0 or 1 VPC found.
         assert (
             len(vpcnets_all) <= 1
@@ -818,7 +791,9 @@ def get_usable_vpc_and_subnet(
         if len(vpcnets_all) == 1:
             # Skip checking any firewall rules if the user has specified a VPC.
             logger.info(f"Using user-specified VPC {specific_vpc_to_use!r}.")
-            subnets = _list_subnets(config, compute, network=specific_vpc_to_use)
+            subnets = _list_subnets(config,
+                                    compute,
+                                    network=specific_vpc_to_use)
             if not subnets:
                 _skypilot_log_error_and_exit_for_failover(
                     f"No subnet for region {config['provider']['region']} found for specified VPC {specific_vpc_to_use!r}. "
@@ -829,8 +804,7 @@ def get_usable_vpc_and_subnet(
             # VPC with this name not found. Error out and let SkyPilot failover.
             _skypilot_log_error_and_exit_for_failover(
                 f"No VPC with name {specific_vpc_to_use!r} is found. "
-                "To fix: specify a correct VPC name."
-            )
+                "To fix: specify a correct VPC name.")
             # Should not reach here.
 
     subnets_all = _list_subnets(config, compute)
@@ -842,7 +816,8 @@ def get_usable_vpc_and_subnet(
         if vpc_name in insufficient_vpcs:
             continue
         if _check_firewall_rules(vpc_name, config, compute):
-            logger.info(f"get_usable_vpc: Found a usable VPC network {vpc_name!r}.")
+            logger.info(
+                f"get_usable_vpc: Found a usable VPC network {vpc_name!r}.")
             return vpc_name, subnet
         else:
             insufficient_vpcs.add(vpc_name)
@@ -852,16 +827,18 @@ def get_usable_vpc_and_subnet(
     logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
     # Create a SkyPilot VPC network if it doesn't exist
-    vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+    vpc_list = _list_vpcnets(config,
+                             compute,
+                             filter=f"name={SKYPILOT_VPC_NAME}")
     if len(vpc_list) == 0:
         body = VPC_TEMPLATE.copy()
         body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-        body["selfLink"] = body["selfLink"].format(
-            PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME
-        )
+        body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id,
+                                                   VPC_NAME=SKYPILOT_VPC_NAME)
         _create_vpcnet(config, compute, body)
 
-    _create_rules(config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME, proj_id)
+    _create_rules(config, compute, FIREWALL_RULES_TEMPLATE, SKYPILOT_VPC_NAME,
+                  proj_id)
 
     usable_vpc_name = SKYPILOT_VPC_NAME
     subnets = _list_subnets(config, compute, network=usable_vpc_name)
@@ -888,26 +865,20 @@ def _configure_subnet(config, compute):
     # completely manually configured
 
     # networkInterfaces is compute, networkConfig is TPU
-    if all(
-        "networkInterfaces" in node_config or "networkConfig" in node_config
-        for node_config in node_configs
-    ):
+    if all("networkInterfaces" in node_config or "networkConfig" in node_config
+           for node_config in node_configs):
         return config
 
     # SkyPilot: make sure there's a usable VPC
     _, default_subnet = get_usable_vpc_and_subnet(config)
 
-    default_interfaces = [
-        {
-            "subnetwork": default_subnet["selfLink"],
-            "accessConfigs": [
-                {
-                    "name": "External NAT",
-                    "type": "ONE_TO_ONE_NAT",
-                }
-            ],
-        }
-    ]
+    default_interfaces = [{
+        "subnetwork": default_subnet["selfLink"],
+        "accessConfigs": [{
+            "name": "External NAT",
+            "type": "ONE_TO_ONE_NAT",
+        }],
+    }]
     if config["provider"].get("use_internal_ips", False):
         # Removing this key means the VM will not be assigned an external IP.
         default_interfaces[0].pop("accessConfigs")
@@ -930,78 +901,54 @@ def _configure_subnet(config, compute):
 
 
 def _create_firewall_rule_submit(config, compute, body):
-    operation = (
-        compute.firewalls()
-        .insert(project=config["provider"]["project_id"], body=body)
-        .execute()
-    )
+    operation = (compute.firewalls().insert(
+        project=config["provider"]["project_id"], body=body).execute())
     return operation
 
 
 def _delete_firewall_rule(config, compute, name):
-    operation = (
-        compute.firewalls()
-        .delete(project=config["provider"]["project_id"], firewall=name)
-        .execute()
-    )
+    operation = (compute.firewalls().delete(
+        project=config["provider"]["project_id"], firewall=name).execute())
     response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
-    )
+        config["provider"]["project_id"], operation, compute)
     return response
 
 
 def _list_firewall_rules(config, compute, filter=None):
-    response = (
-        compute.firewalls()
-        .list(
-            project=config["provider"]["project_id"],
-            filter=filter,
-        )
-        .execute()
-    )
+    response = (compute.firewalls().list(
+        project=config["provider"]["project_id"],
+        filter=filter,
+    ).execute())
     return response["items"] if "items" in response else []
 
 
 def _create_vpcnet(config, compute, body):
-    operation = (
-        compute.networks()
-        .insert(project=config["provider"]["project_id"], body=body)
-        .execute()
-    )
+    operation = (compute.networks().insert(
+        project=config["provider"]["project_id"], body=body).execute())
     response = wait_for_compute_global_operation(
-        config["provider"]["project_id"], operation, compute
-    )
+        config["provider"]["project_id"], operation, compute)
     return response
 
 
 def _list_vpcnets(config, compute, filter=None):
-    response = (
-        compute.networks()
-        .list(
-            project=config["provider"]["project_id"],
-            filter=filter,
-        )
-        .execute()
-    )
+    response = (compute.networks().list(
+        project=config["provider"]["project_id"],
+        filter=filter,
+    ).execute())
 
-    return (
-        list(sorted(response["items"], key=lambda x: x["name"]))
-        if "items" in response
-        else []
-    )
+    return (list(sorted(response["items"], key=lambda x: x["name"]))
+            if "items" in response else [])
 
 
 def _list_subnets(
-    config, compute, network=None
+        config,
+        compute,
+        network=None
 ) -> List["google.cloud.compute_v1.types.compute.Subnetwork"]:
-    response = (
-        compute.subnetworks()
-        .list(
-            project=config["provider"]["project_id"],
-            region=config["provider"]["region"],
-        )
-        .execute()
-    )
+    response = (compute.subnetworks().list(
+        project=config["provider"]["project_id"],
+        region=config["provider"]["region"],
+    ).execute())
 
     items = response["items"] if "items" in response else []
     if network is None:
@@ -1021,15 +968,11 @@ def _list_subnets(
 
 
 def _get_subnet(config, subnet_id, compute):
-    subnet = (
-        compute.subnetworks()
-        .get(
-            project=config["provider"]["project_id"],
-            region=config["provider"]["region"],
-            subnetwork=subnet_id,
-        )
-        .execute()
-    )
+    subnet = (compute.subnetworks().get(
+        project=config["provider"]["project_id"],
+        region=config["provider"]["region"],
+        subnetwork=subnet_id,
+    ).execute())
 
     return subnet
 
@@ -1046,11 +989,10 @@ def _get_project(project_id, crm):
 
 
 def _create_project(project_id, crm):
-    operation = (
-        crm.projects()
-        .create(body={"projectId": project_id, "name": project_id})
-        .execute()
-    )
+    operation = (crm.projects().create(body={
+        "projectId": project_id,
+        "name": project_id
+    }).execute())
 
     result = wait_for_crm_operation(operation, crm)
 
@@ -1060,10 +1002,10 @@ def _create_project(project_id, crm):
 def _get_service_account(account, config, iam):
     project_id = config["provider"]["project_id"]
     full_name = "projects/{project_id}/serviceAccounts/{account}".format(
-        project_id=project_id, account=account
-    )
+        project_id=project_id, account=account)
     try:
-        service_account = iam.projects().serviceAccounts().get(name=full_name).execute()
+        service_account = iam.projects().serviceAccounts().get(
+            name=full_name).execute()
     except errors.HttpError as e:
         if e.resp.status not in [403, 404]:
             # SkyPilot: added 403, which means the service account doesn't exist,
@@ -1078,18 +1020,13 @@ def _get_service_account(account, config, iam):
 def _create_service_account(account_id, account_config, config, iam):
     project_id = config["provider"]["project_id"]
 
-    service_account = (
-        iam.projects()
-        .serviceAccounts()
-        .create(
-            name="projects/{project_id}".format(project_id=project_id),
-            body={
-                "accountId": account_id,
-                "serviceAccount": account_config,
-            },
-        )
-        .execute()
-    )
+    service_account = (iam.projects().serviceAccounts().create(
+        name="projects/{project_id}".format(project_id=project_id),
+        body={
+            "accountId": account_id,
+            "serviceAccount": account_config,
+        },
+    ).execute())
 
     return service_account
 
@@ -1098,16 +1035,12 @@ def _add_iam_policy_binding(service_account, policy, crm, iam):
     """Add new IAM roles for the service account."""
     project_id = service_account["projectId"]
 
-    result = (
-        crm.projects()
-        .setIamPolicy(
-            resource=project_id,
-            body={
-                "policy": policy,
-            },
-        )
-        .execute()
-    )
+    result = (crm.projects().setIamPolicy(
+        resource=project_id,
+        body={
+            "policy": policy,
+        },
+    ).execute())
 
     return result
 
@@ -1122,15 +1055,13 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
     assert key_parts[0] == "ssh-rsa", key_parts
 
     new_ssh_meta = "{ssh_user}:ssh-rsa {key_value} {ssh_user}".format(
-        ssh_user=ssh_user, key_value=key_parts[1]
-    )
+        ssh_user=ssh_user, key_value=key_parts[1])
 
     common_instance_info = project["commonInstanceMetadata"]
     items = common_instance_info.get("items", [])
 
     ssh_keys_i = next(
-        (i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None
-    )
+        (i for i, item in enumerate(items) if item["key"] == "ssh-keys"), None)
 
     if ssh_keys_i is None:
         items.append({"key": "ssh-keys", "value": new_ssh_meta})
@@ -1141,12 +1072,10 @@ def _create_project_ssh_key_pair(project, public_key, ssh_user, compute):
 
     common_instance_info["items"] = items
 
-    operation = (
-        compute.projects()
-        .setCommonInstanceMetadata(project=project["name"], body=common_instance_info)
-        .execute()
-    )
+    operation = (compute.projects().setCommonInstanceMetadata(
+        project=project["name"], body=common_instance_info).execute())
 
-    response = wait_for_compute_global_operation(project["name"], operation, compute)
+    response = wait_for_compute_global_operation(project["name"], operation,
+                                                 compute)
 
     return response
