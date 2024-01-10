@@ -593,7 +593,7 @@ class Resources:
         # Validate if region and zone exist in the catalog, and set the region
         # if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
-            region=region, zone=zone)
+            region, zone)
 
     def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
