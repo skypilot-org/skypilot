@@ -188,9 +188,7 @@ def generate_task_yaml_file_name(service_name: str,
     dir_name = generate_remote_service_dir_name(service_name)
     if expand_user:
         dir_name = os.path.expanduser(dir_name)
-    # Backward compatibility.
-    version_str = f'_v{version}' if version > 1 else ''
-    return os.path.join(dir_name, f'task{version_str}.yaml')
+    return os.path.join(dir_name, f'task_v{version}.yaml')
 
 
 def generate_remote_config_yaml_file_name(service_name: str) -> str:
@@ -278,7 +276,10 @@ def update_service(controller_port: int, version: int,
             'version': version,
             'mixed_replica_versions': mixed_replica_versions
         })
-    if resp.status_code != 200:
+    if resp.status_code == 404:
+        raise ValueError('The service is up-ed before update is supported, '
+                         'serve down first and relaunch the service. ')
+    elif resp.status_code != 200:
         raise ValueError(f'Failed to update service: {resp.text}')
     return resp.json()['message']
 

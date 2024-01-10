@@ -456,12 +456,8 @@ class ReplicaManager:
 
         self.latest_version: int = initial_version
         self.oldest_version: int = initial_version
-        self.version2spec: serve_utils.ThreadSafeDict[
-            int, 'service_spec.SkyServiceSpec'] = serve_utils.ThreadSafeDict()
-        self.version2yaml: serve_utils.ThreadSafeDict[
-            int, str] = serve_utils.ThreadSafeDict()
-        self.version2spec[initial_version] = spec
-        self.version2yaml[initial_version] = task_yaml_path
+        serve_state.add_or_update_version(self._service_name, initial_version,
+                                          spec, task_yaml_path)
         self.mixed_replica_versions: bool = False
 
     def get_ready_replica_urls(self) -> List[str]:
@@ -984,11 +980,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 if self.oldest_version < current_oldest_version:
                     for version in range(self.oldest_version,
                                          current_oldest_version):
+                        task_yaml = self._get_yaml(version)
                         # Delete old version metadata.
-                        del self.version2spec[version]
-                        del self.version2yaml[version]
+                        serve_state.delete_version(self._service_name, version)
                         # Delete storage buckets of older versions.
-                        service.cleanup_storage(self.version2yaml[version])
+                        service.cleanup_storage(task_yaml)
                     # newest version will be cleaned in serve down
                     self.oldest_version = current_oldest_version
 
@@ -1008,17 +1004,31 @@ class SkyPilotReplicaManager(ReplicaManager):
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        mixed_replica_versions: bool,
                        task_yaml_path: str) -> None:
-        self.version2spec[version] = spec
-        self.version2yaml[version] = task_yaml_path
+        serve_state.add_or_update_version(self._service_name, version, spec,
+                                          task_yaml_path)
         self.latest_version = version
         self.mixed_replica_versions = mixed_replica_versions
         self._task_yaml_path = task_yaml_path
 
+    def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
+        output = serve_state.get_spec_and_yaml(self._service_name, version)
+        assert output is not None
+        spec, _ = output
+        assert spec is not None
+        return spec
+
+    def _get_yaml(self, version: int) -> str:
+        output = serve_state.get_spec_and_yaml(self._service_name, version)
+        assert output is not None
+        _, yaml = output
+        assert yaml is not None
+        return yaml
+
     def _get_readiness_path(self, version: int) -> str:
-        return self.version2spec[version].readiness_path
+        return self._get_version_spec(version).readiness_path
 
     def _get_post_data(self, version: int) -> Optional[Dict[str, Any]]:
-        return self.version2spec[version].post_data
+        return self._get_version_spec(version).post_data
 
     def _get_initial_delay_seconds(self, version: int) -> int:
-        return self.version2spec[version].initial_delay_seconds
+        return self._get_version_spec(version).initial_delay_seconds

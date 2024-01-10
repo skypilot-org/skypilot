@@ -5,7 +5,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
@@ -15,6 +15,7 @@ from sky.utils import db_utils
 if typing.TYPE_CHECKING:
     import sky
     from sky.serve import replica_managers
+    from sky.serve import service_spec
 
 _DB_PATH = pathlib.Path(constants.SKYSERVE_METADATA_DIR) / 'services.db'
 _DB_PATH = _DB_PATH.expanduser().absolute()
@@ -43,6 +44,13 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         replica_id INTEGER,
         replica_info BLOB,
         PRIMARY KEY (service_name, replica_id))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS versions (
+            service_name TEXT,
+            version INTEGER,
+            spec BLOB,
+            yaml STR,
+            PRIMARY KEY (service_name, version))""")
     # For backward compatibility.
     # TODO(MaoZiming): Remove this function after all users have migrated to
     # the latest version of SkyServe.
@@ -401,3 +409,41 @@ def total_number_provisioning_replicas() -> int:
         if replica_info.status == ReplicaStatus.PROVISIONING:
             provisioning_count += 1
     return provisioning_count
+
+
+# === Version functions ===
+def add_or_update_version(service_name: str, version: int,
+                          spec: 'service_spec.SkyServiceSpec',
+                          task_yaml_path: str) -> None:
+    """Adds a version to the database."""
+    _DB.cursor.execute(
+        """\
+        INSERT OR REPLACE INTO versions
+        (service_name, version, spec, yaml)
+        VALUES (?, ?, ?, ?)""",
+        (service_name, version, pickle.dumps(spec), task_yaml_path))
+    _DB.conn.commit()
+
+
+def get_spec_and_yaml(
+        service_name: str,
+        version: int) -> Optional[Tuple['service_spec.SkyServiceSpec', str]]:
+    """Gets a spec and yaml from the database."""
+    rows = _DB.cursor.execute(
+        """\
+        SELECT spec, yaml FROM versions
+        WHERE service_name=(?)
+        AND version=(?)""", (service_name, version)).fetchall()
+    for row in rows:
+        return pickle.loads(row[0]), row[1]
+    return None
+
+
+def delete_version(service_name: str, version: int) -> None:
+    """Deletes a version from the database."""
+    _DB.cursor.execute(
+        """\
+        DELETE FROM versions
+        WHERE service_name=(?)
+        AND version=(?)""", (service_name, version))
+    _DB.conn.commit()
