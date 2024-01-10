@@ -73,8 +73,7 @@ class Autoscaler:
 
     def update_spec(self, version: int, spec: 'service_spec.SkyServiceSpec',
                     mixed_replica_versions: bool) -> None:
-        del version
-        del mixed_replica_versions
+        del version, mixed_replica_versions  # Unused.
         self.min_nodes = spec.min_replicas
         self.max_nodes = spec.max_replicas or spec.min_replicas
         self.target_num_replicas = spec.min_replicas
@@ -130,7 +129,7 @@ class RequestRateAutoscaler(Autoscaler):
 
         self.bootstrap_done: bool = False
         self.latest_version: int = initial_version
-        self.mixed_replica_versions = True
+        self.mixed_replica_versions: bool = True
 
     def update_spec(self, version: int, spec: 'service_spec.SkyServiceSpec',
                     mixed_replica_versions: bool) -> None:
@@ -212,22 +211,17 @@ class RequestRateAutoscaler(Autoscaler):
         override dict. Active migration could require returning both SCALE_UP
         and SCALE_DOWN.
         """
-        launched_new_replica_infos = [
-            info for info in replica_infos
-            if (info.is_launched and info.version == self.latest_version)
-        ]
-        ready_new_replica_infos = [
-            info for info in replica_infos
-            if (info.is_ready and info.version == self.latest_version)
-        ]
-        ready_old_replica_infos = [
-            info for info in replica_infos
-            if (info.is_ready and info.version != self.latest_version)
-        ]
-        not_ready_old_replica_infos = [
-            info for info in replica_infos
-            if (not info.is_ready and info.version != self.latest_version)
-        ]
+        launched_new_replica_infos, ready_new_replica_infos = [], []
+        ready_old_replica_infos, not_ready_old_replica_infos = [], []
+        for info in replica_infos:
+            if info.is_launched and info.version == self.latest_version:
+                launched_new_replica_infos.append(info)
+            if info.is_ready and info.version == self.latest_version:
+                ready_new_replica_infos.append(info)
+            if info.is_ready and info.version != self.latest_version:
+                ready_old_replica_infos.append(info)
+            if not info.is_ready and info.version != self.latest_version:
+                not_ready_old_replica_infos.append(info)
 
         self.target_num_replicas = self._get_desired_num_replicas()
         logger.info(

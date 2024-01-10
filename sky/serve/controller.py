@@ -3,7 +3,6 @@
 Responsible for autoscaling and replica management.
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -112,9 +111,9 @@ class SkyServeController:
             }
 
         @self._app.post('/controller/update_service')
-        def update_service(request: fastapi.Request):
+        async def update_service(request: fastapi.Request):
 
-            request_data = asyncio.run(request.json())
+            request_data = await request.json()
             version = request_data['version']
             logger.info(f'Update to version: {version}')
 

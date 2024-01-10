@@ -4334,7 +4334,7 @@ def serve_up(
 
 @serve.command('update', cls=_DocumentedCodeCommand)
 @click.argument('service_name', required=True, type=str)
-@click.argument('entrypoint',
+@click.argument('service_yaml',
                 required=True,
                 type=str,
                 nargs=-1,
@@ -4350,6 +4350,7 @@ def serve_up(
 # pylint: disable=bad-docstring-quotes
 @click.option(
     '--mixed-replica-version',
+    '-m',
     is_flag=True,
     default=False,
     required=False,
@@ -4362,13 +4363,13 @@ def serve_up(
           'new replicas.'))
 def serve_update(
     service_name: str,
-    entrypoint: List[str],
+    service_yaml: List[str],
     yes: bool,
     mixed_replica_version: bool,
 ):
     """Update a SkyServe service.
 
-    ENTRYPOINT must point to a valid YAML file.
+    service_yaml must point to a valid YAML file.
 
     Example:
 
@@ -4377,8 +4378,11 @@ def serve_update(
         sky serve update sky-service-16aa new_service.yaml
     """
 
+    is_yaml, _ = _check_yaml(''.join(service_yaml))
+    if not is_yaml:
+        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        entrypoint, entrypoint_name='Service')
+        service_yaml, entrypoint_name='Service')
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
