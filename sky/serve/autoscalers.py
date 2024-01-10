@@ -142,11 +142,18 @@ class RequestRateAutoscaler(Autoscaler):
                     mixed_replica_versions: bool) -> None:
         super().update_spec(version, spec, mixed_replica_versions)
         self.target_qps_per_replica = spec.target_qps_per_replica
+        upscale_delay_seconds = (
+            spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
+            else constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
         self.scale_up_consecutive_periods = int(
-            spec.upscale_delay_seconds /
+            upscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        downscale_delay_seconds = (
+            spec.downscale_delay_seconds
+            if spec.downscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
         self.scale_down_consecutive_periods = int(
-            spec.downscale_delay_seconds /
+            downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
         self.target_num_replicas = spec.min_replicas
         self.latest_version = version
