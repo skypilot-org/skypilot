@@ -1201,12 +1201,9 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                     f'{resources_override_params} are ignored, '
                     'since the yaml file contains multiple tasks.',
                     fg='yellow')
-            if services_override_params:
-                click.secho(
-                    'WARNING: Services override params '
-                    f'{services_override_params} are ignored, '
-                    'since the yaml file contains multiple tasks.',
-                    fg='yellow')
+            # We don't need to check service override params, since
+            # sky serve does not support serving a chain dag. It will
+            # raise an error in `serve_up`.
             return dag
         assert len(dag.tasks) == 1, (
             f'If you see this, please file an issue; tasks: {dag.tasks}')
@@ -4367,7 +4364,7 @@ def serve():
               required=False,
               help=('Maximum number of replicas. If not specified, SkyServe '
                     'will use fixed number of replicas same as min_replicas '
-                    'and ignore any specified QPS threshold.'))
+                    'and ignore autoscaling parameters like target QPS.'))
 @click.option('--target-qps-per-replica',
               default=None,
               type=float,
@@ -4387,12 +4384,12 @@ def serve():
               default=None,
               type=int,
               required=False,
-              help=('Upscale delay in seconds.'))
+              help=('Autoscaler upscale delay in seconds.'))
 @click.option('--downscale-delay-seconds',
               default=None,
               type=int,
               required=False,
-              help=('Downscale delay in seconds.'))
+              help=('Autoscaler downscale delay in seconds.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
