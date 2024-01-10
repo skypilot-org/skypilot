@@ -4219,6 +4219,51 @@ def serve():
     pass
 
 
+def _generate_task_with_service(service_yaml: List[str]):
+    """Generate a task with service section from a service YAML file."""
+    is_yaml, _ = _check_yaml(''.join(service_yaml))
+    if not is_yaml:
+        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
+    # We keep nargs=-1 in service_yaml argument to reuse this function.
+    task = _make_task_or_dag_from_entrypoint_with_overrides(
+        service_yaml, entrypoint_name='Service')
+    if isinstance(task, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Service section not found in the YAML file. '
+                             'To fix, add a valid `service` field.')
+    service_port: Optional[int] = None
+    for requested_resources in list(task.resources):
+        if requested_resources.ports is None or len(
+                requested_resources.ports) != 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must only specify one port in resources. Each replica '
+                    'will use the port specified as application ingress port.')
+        service_port_str = requested_resources.ports[0]
+        if not service_port_str.isdigit():
+            # For the case when the user specified a port range like 10000-10010
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Port {service_port_str!r} is not a valid '
+                                 'port number. Please specify a single port '
+                                 f'instead. Got: {service_port_str!r}')
+        # We request all the replicas using the same port for now, but it
+        # should be fine to allow different replicas to use different ports
+        # in the future.
+        resource_port = int(service_port_str)
+        if service_port is None:
+            service_port = resource_port
+        if service_port != resource_port:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Got multiple ports: {service_port} and '
+                                 f'{resource_port} in different resources. '
+                                 'Please specify single port instead.')
+    return task
+
+
 @serve.command('up', cls=_DocumentedCodeCommand)
 @click.argument('service_yaml',
                 required=True,
@@ -4274,47 +4319,7 @@ def serve_up(
     if service_name is None:
         service_name = serve_lib.generate_service_name()
 
-    is_yaml, _ = _check_yaml(''.join(service_yaml))
-    if not is_yaml:
-        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
-    # We keep nargs=-1 in service_yaml argument to reuse this function.
-    task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml, entrypoint_name='Service')
-    if isinstance(task, sky.Dag):
-        raise click.UsageError(
-            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the YAML file. '
-                             'To fix, add a valid `service` field.')
-    service_port: Optional[int] = None
-    for requested_resources in list(task.resources):
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {service_port_str!r} is not a valid '
-                                 'port number. Please specify a single port '
-                                 f'instead. Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it
-        # should be fine to allow different replicas to use different ports
-        # in the future.
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Got multiple ports: {service_port} and '
-                                 f'{resource_port} in different resources. '
-                                 'Please specify single port instead.')
-
+    task = _generate_task_with_service(service_yaml)
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
@@ -4377,49 +4382,7 @@ def serve_update(
 
         sky serve update sky-service-16aa new_service.yaml
     """
-
-    is_yaml, _ = _check_yaml(''.join(service_yaml))
-    if not is_yaml:
-        raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
-    task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml, entrypoint_name='Service')
-    if isinstance(task, sky.Dag):
-        raise click.UsageError(
-            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError('Service section not found in the YAML file. '
-                             'To fix, add a valid `service` field.')
-
-    # Same as serve_up
-    service_port: Optional[int] = None
-    for requested_resources in list(task.resources):
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {service_port_str!r} is not a valid '
-                                 'port number. Please specify a single port '
-                                 f'instead. Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it
-        # should be fine to allow different replicas to use different ports
-        # in the future.
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Got multiple ports: {service_port} and '
-                                 f'{resource_port} in different resources. '
-                                 'Please specify single port instead.')
-
+    task = _generate_task_with_service(service_yaml)
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
 
