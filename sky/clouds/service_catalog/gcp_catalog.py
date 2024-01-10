@@ -392,7 +392,8 @@ def list_accelerators(
     new_infos = defaultdict(list)
     for info in infos_with_instance_type:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), info
-        #TPU-VM prices are shown here, so we don't ned to attach a VM to it.
+        # We show TPU-VM prices here, so no instance type is needed.
+        # Set it as `TPU-VM` to be shown in the table.
         if info.accelerator_name.startswith('tpu'):
             new_infos[info.accelerator_name].append(
                 info._replace(instance_type='TPU-VM'))
