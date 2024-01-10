@@ -222,7 +222,7 @@ class Kubernetes(clouds.Cloud):
             k8s_acc_label_key, k8s_acc_label_value = \
                 kubernetes_utils.get_gpu_label_key_value(acc_type)
 
-        port_mode = network_utils.get_port_mode(None)
+        port_mode = kubernetes_utils.get_port_mode(None)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
