@@ -564,11 +564,6 @@ def stream_replica_logs(service_name: str,
 
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
-    handle = global_user_state.get_handle_from_cluster_name(
-        replica_cluster_name)
-    if handle is None:
-        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
@@ -597,11 +592,17 @@ def stream_replica_logs(service_name: str,
         # Early exit if not following the logs.
         return ''
 
+    backend = backends.CloudVmRayBackend()
+    handle = global_user_state.get_handle_from_cluster_name(
+        replica_cluster_name)
+    if handle is None:
+        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+
     # Notify user here to make sure user won't think the log is finished.
     print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
-    backend = backends.CloudVmRayBackend()
     # Always tail the latest logs, which represent user setup & run.
     returncode = backend.tail_logs(handle, job_id=None, follow=follow)
     if returncode != 0:
