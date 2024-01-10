@@ -1926,9 +1926,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
-                                   if len(cluster_records) > 0
-                                   else f'{clusters[0]!r}')
-                    verb = 'found' if len(cluster_records) > 0 else f'not found'
+                                   if len(cluster_records) > 0 else
+                                   f'{clusters[0]!r}')
+                    verb = 'found' if len(cluster_records) > 0 else 'not found'
                     cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
@@ -1966,7 +1966,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     handle.launched_resources.ports, config['provider'])
 
                 if endpoint is not None:
-                    # If the user requested a specific port endpoint, show and exit
+                    # If the user requested a specific port endpoint
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
@@ -1989,8 +1989,6 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                                                'If the cluster was recently '
                                                'started, please retry after a '
                                                'while.')
-
-
 
                 for port, urls in port_details.items():
                     click.echo(
