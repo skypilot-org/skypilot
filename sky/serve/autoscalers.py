@@ -109,11 +109,18 @@ class RequestRateAutoscaler(Autoscaler):
         self.request_timestamps: List[float] = []
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
+        upscale_delay_seconds = (
+            spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
+            else constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
         self.scale_up_consecutive_periods: int = int(
-            spec.upscale_delay_seconds /
+            upscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        downscale_delay_seconds = (
+            spec.downscale_delay_seconds
+            if spec.downscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
         self.scale_down_consecutive_periods: int = int(
-            spec.downscale_delay_seconds /
+            downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
         # Target number of replicas is initialized to min replicas.
         # TODO(MaoZiming): add init replica numbers in SkyServe spec.
