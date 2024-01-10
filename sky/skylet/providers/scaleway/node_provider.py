@@ -29,6 +29,17 @@ class ServerID:
     def __repr__(self):
         return "{zone}/{server_id}".format(zone=self.zone, server_id=self.server_id)
 
+    def __str__(self):
+        return "{zone}/{server_id}".format(zone=self.zone, server_id=self.server_id)
+
+    @classmethod
+    def from_string(cls, server_id_string: str):
+        temp = server_id_string.split("/")
+        return cls(
+            zone=temp[0],
+            server_id=temp[1]
+        )
+
 
 def synchronized(f):
     def wrapper(self, *args, **kwargs):
@@ -169,6 +180,10 @@ class ScalewayNodeProvider(NodeProvider):
 
         return find_node_id()
 
+    def node_is_stable(self, node_id: ServerID):
+        valid_states = ['running', 'error']
+        return self.instance.get_server(zone=node_id.zone, server_id=node_id.server_id).server.state in valid_states
+
     def create_node(self, node_config: Dict[str, Any], tags: Dict[str, str],
                     count: int) -> Optional[Dict[str, Any]]:
         """Creates a number of nodes within the namespace.
@@ -181,7 +196,8 @@ class ScalewayNodeProvider(NodeProvider):
         observability.
 
         """
-        nodes = []
+        nodes: Dict[str, Any] = {}
+        # First we launch all nodes
         for _ in range(count):
             node = self.instance._create_server(
                 name=f"{self.cluster_name}-{tags['ray-node-type']}",
@@ -195,13 +211,13 @@ class ScalewayNodeProvider(NodeProvider):
                 zone=self.zone
             )
             self.instance.server_action(server_id=node.server.id, action="poweron", zone=self.zone)
-            nodes.append(get_node_id_from_node(node))
+            nodes[str(get_node_id_from_node(node))] = None
+
         for node_id in nodes:
-            while self.instance.get_server(zone=node_id.zone, server_id=node_id.server_id).server.state not in ['running', 'error']:
-                node = self.instance.get_server(zone=node_id.zone,
-                                                server_id=node_id.server_id)
+            server_id = ServerID.from_string(node_id)
+            while not self.node_is_stable(server_id):
                 time.sleep(2)
-            if self.instance.get_server(zone=node_id.zone, server_id=node_id.server_id).server.state == 'error':
+            if self.instance.get_server(zone=server_id.zone, server_id=server_id.server_id).server.state == 'error':
                 raise RuntimeError("Unable to launch instance")
             config_tags = node_config.get('tags', {}).copy()
             config_tags.update(tags)
@@ -209,6 +225,7 @@ class ScalewayNodeProvider(NodeProvider):
 
             if node is None:
                 raise ScalewayError('Failed to launch instance.')
+            nodes[str(get_node_id_from_node(node))] = node
 
         return nodes
 
