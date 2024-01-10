@@ -1966,6 +1966,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     handle.launched_resources.ports, config['provider'])
 
                 if endpoint is not None:
+                    # If the user requested a specific port endpoint, show and exit
                     if endpoint not in port_details:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
@@ -1976,9 +1977,20 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     return
 
                 if not port_details:
-                    click.echo('No endpoints exposed yet.\n'
-                               'If the cluster was recently started, '
-                               'please retry after a while.')
+                    # If cluster had no ports to be exposed
+                    if handle.launched_resources.ports is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError('Cluster does not have any ports '
+                                             'to be exposed.\n')
+                    # Else wait for the ports to be exposed
+                    else:
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError('No endpoints exposed yet.\n'
+                                               'If the cluster was recently '
+                                               'started, please retry after a '
+                                               'while.')
+
+
 
                 for port, urls in port_details.items():
                     click.echo(
