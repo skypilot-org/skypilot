@@ -527,7 +527,7 @@ class SSHConfigHelper(object):
         if docker_user is not None:
             docker_proxy_command_generator = lambda ip, port: ' '.join(
                 ['ssh'] + command_runner.ssh_options_list(
-                    key_path, None, port=port) +
+                    key_path, ssh_control_name=None, port=port) +
                 ['-W', '%h:%p', f'{auth_config["ssh_user"]}@{ip}'])
 
         codegen = ''
@@ -655,7 +655,7 @@ class SSHConfigHelper(object):
                 break
 
     @classmethod
-    # TODO: We can remve this after 0.6.0 and have a lock only per cluster.
+    # TODO: We can remove this after 0.6.0 and have a lock only per cluster.
     @timeline.FileLockEvent(ssh_conf_lock_path)
     def remove_cluster(
         cls,
