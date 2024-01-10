@@ -288,7 +288,7 @@ def test_aws_region():
 
 
 @pytest.mark.gcp
-def test_gcp_region():
+def test_gcp_region_and_service_account():
     name = _get_cluster_name()
     test = Test(
         'gcp_region',
@@ -296,6 +296,8 @@ def test_gcp_region():
             f'sky launch -y -c {name} --region us-central1 --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
