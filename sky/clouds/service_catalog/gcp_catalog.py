@@ -392,15 +392,14 @@ def list_accelerators(
     new_infos = defaultdict(list)
     for info in infos_with_instance_type:
         assert pd.isna(info.instance_type) and pd.isna(
-            info.memory), infos_with_instance_type
+            info.memory), infos
         if info.accelerator_name.startswith('tpu'):
             new_infos[info.accelerator_name].append(
-                info._replace(instance_type='TPU-VM',))
+                info._replace(instance_type='TPU-VM'))
             continue
         vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
                                                         info.accelerator_count,
-                                                        region=region_filter,
-                                                        use_spot=True)
+                                                        region=region_filter)
         # The acc name & count in `info` are retrieved from the table so we
         # could definitely find a column in the original table
         # Additionally the way get_instance_type_for_accelerator works
