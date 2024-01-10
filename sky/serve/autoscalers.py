@@ -73,8 +73,7 @@ class Autoscaler:
 
     def update_spec(self, version: int, spec: 'service_spec.SkyServiceSpec',
                     mixed_replica_versions: bool) -> None:
-        del version  # Unused.
-        del mixed_replica_versions  # Unused.
+        del version, mixed_replica_versions  # Unused.
         self.min_nodes = spec.min_replicas
         self.max_nodes = spec.max_replicas or spec.min_replicas
         self.target_num_replicas = spec.min_replicas
