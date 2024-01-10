@@ -46,24 +46,24 @@ class Resources:
     _VERSION = 14
 
     def __init__(
-            self,
-            cloud: Optional[clouds.Cloud] = None,
-            instance_type: Optional[str] = None,
-            cpus: Union[None, int, float, str] = None,
-            memory: Union[None, int, float, str] = None,
-            accelerators: Union[None, str, Dict[str, int]] = None,
-            accelerator_args: Optional[Dict[str, str]] = None,
-            use_spot: Optional[bool] = None,
-            spot_recovery: Optional[str] = None,
-            region: Optional[str] = None,
-            zone: Optional[str] = None,
-            image_id: Union[Dict[str, str], str, None] = None,
-            disk_size: Optional[int] = None,
-            disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
-            ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
-            # Internal use only.
-            _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
-            _is_image_managed: Optional[bool] = None,
+        self,
+        cloud: Optional[clouds.Cloud] = None,
+        instance_type: Optional[str] = None,
+        cpus: Union[None, int, float, str] = None,
+        memory: Union[None, int, float, str] = None,
+        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerator_args: Optional[Dict[str, str]] = None,
+        use_spot: Optional[bool] = None,
+        spot_recovery: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        image_id: Union[Dict[str, str], str, None] = None,
+        disk_size: Optional[int] = None,
+        disk_tier: Optional[Literal['high', 'medium', 'low']] = None,
+        ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
+        # Internal use only.
+        _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
+        _is_image_managed: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -403,8 +403,8 @@ class Resources:
         return self._is_image_managed
 
     def _set_cpus(
-            self,
-            cpus: Union[None, int, float, str],
+        self,
+        cpus: Union[None, int, float, str],
     ) -> None:
         if cpus is None:
             self._cpus = None
@@ -433,8 +433,8 @@ class Resources:
                     f'The "cpus" field should be positive. Found: {cpus!r}')
 
     def _set_memory(
-            self,
-            memory: Union[None, int, float, str],
+        self,
+        memory: Union[None, int, float, str],
     ) -> None:
         if memory is None:
             self._memory = None
@@ -463,9 +463,9 @@ class Resources:
                     f'The "cpus" field should be positive. Found: {memory!r}')
 
     def _set_accelerators(
-            self,
-            accelerators: Union[None, str, Dict[str, int]],
-            accelerator_args: Optional[Dict[str, str]],
+        self,
+        accelerators: Union[None, str, Dict[str, int]],
+        accelerator_args: Optional[Dict[str, str]],
     ) -> None:
         """Sets accelerators.
 
@@ -502,7 +502,7 @@ class Resources:
             # Canonicalize the accelerator names.
             accelerators = {
                 accelerator_registry.canonicalize_accelerator_name(acc):
-                    acc_count for acc, acc_count in accelerators.items()
+                acc_count for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
@@ -792,9 +792,9 @@ class Resources:
         # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(
-            clouds.GCP()) and not self._cloud.is_same_cloud(
-            clouds.IBM()) and not self._cloud.is_same_cloud(
-            clouds.OCI()):
+                    clouds.GCP()) and not self._cloud.is_same_cloud(
+                        clouds.IBM()) and not self._cloud.is_same_cloud(
+                            clouds.OCI()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/IBM/OCI, please '
@@ -934,10 +934,10 @@ class Resources:
             specific_reservations)
 
     def less_demanding_than(
-            self,
-            other: Union[List['Resources'], 'Resources'],
-            requested_num_nodes: int = 1,
-            check_ports: bool = False,
+        self,
+        other: Union[List['Resources'], 'Resources'],
+        requested_num_nodes: int = 1,
+        check_ports: bool = False,
     ) -> bool:
         """Returns whether this resources is less demanding than the other.
 
@@ -1305,7 +1305,7 @@ class Resources:
             if accelerators is not None:
                 accelerators = {
                     accelerator_registry.canonicalize_accelerator_name(acc):
-                        acc_count for acc, acc_count in accelerators.items()
+                    acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
 

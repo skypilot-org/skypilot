@@ -15,6 +15,7 @@ scaleway_client = None
 
 
 def import_package(func):
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global scaleway

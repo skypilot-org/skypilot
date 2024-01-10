@@ -1,15 +1,19 @@
 """Scaleway
 """
 import typing
-from typing import Dict, List, Optional, Tuple, Iterator
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import requests
 
 import sky
-from sky import clouds, status_lib
+from sky import clouds
 from sky import sky_logging
-from sky.adaptors.scaleway import get_client, get_instance
-from sky.clouds import Region, Zone, service_catalog
+from sky import status_lib
+from sky.adaptors.scaleway import get_client
+from sky.adaptors.scaleway import get_instance
+from sky.clouds import Region
+from sky.clouds import service_catalog
+from sky.clouds import Zone
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -37,7 +41,10 @@ class Scaleway(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 50
 
     _regions: List[clouds.Region] = [clouds.Region(name='fr-par')]
-    _zones: List[clouds.Zone] = [clouds.Zone(name='fr-par-1'), clouds.Zone(name='fr-par-2')]
+    _zones: List[clouds.Zone] = [
+        clouds.Zone(name='fr-par-1'),
+        clouds.Zone(name='fr-par-2')
+    ]
 
     @classmethod
     def _cloud_unsupported_features(
@@ -82,13 +89,13 @@ class Scaleway(clouds.Cloud):
 
     @classmethod
     def zones_provision_loop(
-            cls,
-            *,
-            region: str,
-            num_nodes: int,
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: bool = False,
+        cls,
+        *,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False,
     ) -> Iterator[Optional[List[Zone]]]:
         """Loops over zones to retry for provisioning in a given region.
 
@@ -162,8 +169,8 @@ class Scaleway(clouds.Cloud):
                                      zone: Optional[str]) -> float:
         """Returns the hourly on-demand/spot price for an instance type."""
         instance = get_instance()
-        hourly_cost = instance(client=get_client()).list_servers_types(zone=zone, per_page=100).servers[
-            instance_type].hourly_price
+        hourly_cost = instance(client=get_client()).list_servers_types(
+            zone=zone, per_page=100).servers[instance_type].hourly_price
         return hourly_cost
 
     def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
@@ -211,17 +218,22 @@ class Scaleway(clouds.Cloud):
         return True, None
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'
+        self, resources: 'resources_lib.Resources'
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         """See get_feasible_launchable_resources()."""
-        return [sky.Resources(cloud=Scaleway(), instance_type='GPU-3070-S', zone='fr-par-2', region='fr-par')], []
+        return [
+            sky.Resources(cloud=Scaleway(),
+                          instance_type='GPU-3070-S',
+                          zone='fr-par-2',
+                          region='fr-par')
+        ], []
 
     def make_deploy_resources_variables(
-            self,
-            resources: 'resources_lib.Resources',
-            cluster_name_on_cloud: str,
-            region: 'Region',
-            zones: Optional[List['Zone']],
+        self,
+        resources: 'resources_lib.Resources',
+        cluster_name_on_cloud: str,
+        region: 'Region',
+        zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
@@ -246,13 +258,13 @@ class Scaleway(clouds.Cloud):
     def get_vcpus_mem_from_instance_type(
             cls, instance_type: str) -> Tuple[Optional[float], Optional[float]]:
         """Returns the #vCPUs and memory that the instance type offers."""
-        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
-                                                                clouds='scaleway')
+        return service_catalog.get_vcpus_mem_from_instance_type(
+            instance_type, clouds='scaleway')
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls,
-            instance_type: str,
+        cls,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         """Returns {acc: acc_count} held by 'instance_type', if any."""
         return service_catalog.get_accelerators_from_instance_type(
@@ -291,9 +303,7 @@ class Scaleway(clouds.Cloud):
 
         Returns a dictionary that will be added to a task's file mounts.
         """
-        return {
-            '~/.config/scw/config.yaml': f'~/.config/scw/config.yaml'
-        }
+        return {'~/.config/scw/config.yaml': f'~/.config/scw/config.yaml'}
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
@@ -306,7 +316,8 @@ class Scaleway(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
-        return service_catalog.instance_type_exists(instance_type, clouds='scaleway')
+        return service_catalog.instance_type_exists(instance_type,
+                                                    clouds='scaleway')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
