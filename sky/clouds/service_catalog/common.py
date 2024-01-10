@@ -463,7 +463,7 @@ def list_accelerators_impl(
     instance types offered by this cloud.
     """
     if gpus_only:
-        df = df[~df['AcceleratorName'].isna()]
+        df = df[~df['GpuInfo'].isna()]
     df = df.copy()  # avoid column assignment warning
 
     try:
