@@ -1401,6 +1401,23 @@ def test_scp_huggingface(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Inferentia. ----------
+@pytest.mark.aws
+def test_inferentia():
+    name = _get_cluster_name()
+    test = Test(
+        'test_inferentia',
+        [
+            f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
+            f'sky exec {name} --gpus Inferentia:1 echo hi',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- TPU. ----------
 @pytest.mark.gcp
 @pytest.mark.tpu
