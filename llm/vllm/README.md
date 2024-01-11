@@ -127,9 +127,9 @@ curl http://$IP:8000/v1/chat/completions \
 }
 ```
 
-## Serving the above Llama-2 example with vLLM and SkyServe
-
-1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML` file](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
+## Serving Llama-2 with vLLM for more traffic using SkyServe
+To scale up the model serving for more traffic, we introduced SkyServe to enable a user to easily deploy multiple replica of the model:
+1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
 
 ```yaml
 # The newly-added `service` section to the `serve-openai-api.yaml` file.
@@ -140,7 +140,7 @@ service:
   replicas: 2
 ```
 
-The whole Service YAML is shown here: [serve-openai-api-service.yaml](service.yaml).
+The entire Service YAML can be found here: [service.yaml](service.yaml).
 
 2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
 ```bash
@@ -214,6 +214,6 @@ Notice that it is the same with previously curl command, except for thr `-L` arg
 }
 ```
 
-## Serving Mixtral 8x7b model with vLLM and SkyServe
+## Serving Mistral.ai's Mixtral 8x7b model with vLLM
 
 Please refer to the [Mixtral 8x7b example](https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral) for more details.
