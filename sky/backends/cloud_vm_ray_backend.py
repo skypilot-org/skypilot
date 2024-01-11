@@ -1191,6 +1191,7 @@ class RetryingVmProvisioner(object):
             num_nodes: int,
             prev_cluster_status: Optional[status_lib.ClusterStatus],
             prev_handle: Optional['CloudVmRayResourceHandle'],
+            prev_cluster_ever_up: bool,
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
@@ -1198,6 +1199,7 @@ class RetryingVmProvisioner(object):
             self.num_nodes = num_nodes
             self.prev_cluster_status = prev_cluster_status
             self.prev_handle = prev_handle
+            self.prev_cluster_ever_up = prev_cluster_ever_up
 
     def __init__(self,
                  log_dir: str,
@@ -1440,6 +1442,7 @@ class RetryingVmProvisioner(object):
         cloud_user_identity: Optional[List[str]],
         prev_cluster_status: Optional[status_lib.ClusterStatus],
         prev_handle: Optional['CloudVmRayResourceHandle'],
+        prev_cluster_ever_up: bool,
     ) -> Dict[str, Any]:
         """The provision retry loop."""
         style = colorama.Style
@@ -1456,9 +1459,6 @@ class RetryingVmProvisioner(object):
 
         # Get previous cluster status
         cluster_exists = prev_cluster_status is not None
-        is_prev_cluster_healthy = prev_cluster_status in [
-            status_lib.ClusterStatus.STOPPED, status_lib.ClusterStatus.UP
-        ]
 
         assert to_provision.region is not None, (
             to_provision, 'region should have been set by the optimizer.')
@@ -1607,7 +1607,7 @@ class RetryingVmProvisioner(object):
                                                 handle.cluster_name_on_cloud),
                         num_nodes=num_nodes,
                         cluster_yaml=handle.cluster_yaml,
-                        is_prev_cluster_healthy=is_prev_cluster_healthy,
+                        prev_cluster_ever_up=prev_cluster_ever_up,
                         log_dir=self.log_dir)
                     # NOTE: We will handle the logic of '_ensure_cluster_ray_started'
                     # in 'provision_utils.post_provision_runtime_setup()' in the caller.
@@ -1637,7 +1637,7 @@ class RetryingVmProvisioner(object):
                     # cluster does not exist. Also we are fast at
                     # cleaning up clusters now if there is no existing node..
                     CloudVmRayBackend().post_teardown_cleanup(
-                        handle, terminate=not is_prev_cluster_healthy)
+                        handle, terminate=not prev_cluster_ever_up)
                     # TODO(suquark): other clouds may have different zone
                     #  blocking strategy. See '_update_blocklist_on_error'
                     #  for details.
@@ -1704,7 +1704,7 @@ class RetryingVmProvisioner(object):
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            terminate_or_stop = not is_prev_cluster_healthy
+            terminate_or_stop = not prev_cluster_ever_up
             definitely_no_nodes_launched = False
             if status == GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
@@ -1774,7 +1774,7 @@ class RetryingVmProvisioner(object):
         # Do not failover to other clouds if the cluster was previously
         # UP or STOPPED, since the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
-            message, no_failover=is_prev_cluster_healthy)
+            message, no_failover=prev_cluster_ever_up)
 
     # TODO(suquark): Deprecate this method
     # once the `provision_utils` is adopted for all the clouds.
@@ -2085,6 +2085,7 @@ class RetryingVmProvisioner(object):
         num_nodes = to_provision_config.num_nodes
         prev_cluster_status = to_provision_config.prev_cluster_status
         prev_handle = to_provision_config.prev_handle
+        prev_cluster_ever_up = to_provision_config.prev_cluster_ever_up
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
@@ -2114,7 +2115,8 @@ class RetryingVmProvisioner(object):
                     cluster_name=cluster_name,
                     cloud_user_identity=cloud_user,
                     prev_cluster_status=prev_cluster_status,
-                    prev_handle=prev_handle)
+                    prev_handle=prev_handle,
+                    prev_cluster_ever_up=prev_cluster_ever_up)
                 if dryrun:
                     return config_dict
             except (exceptions.InvalidClusterNameError,
@@ -4320,33 +4322,46 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # TODO(zhwu): complete the list of exceptions.
         """
         record = global_user_state.get_cluster_from_name(cluster_name)
-        handle_before_refresh = None if record is None else record['handle']
-        status_before_refresh = None if record is None else record['status']
+        if record is None:
+            handle_before_refresh = None
+            status_before_refresh = None
+        else:
+            handle_before_refresh = record['handle']
+            status_before_refresh = record['status']
 
         prev_cluster_status, handle = (status_before_refresh,
                                        handle_before_refresh)
 
         if not dryrun:
-            prev_cluster_status, handle = (
-                backend_utils.refresh_cluster_status_handle(
-                    cluster_name,
-                    # We force refresh for the init status to determine the
-                    # actual state of a previous cluster in INIT state.
-                    #
-                    # This is important for the case, where an existing cluster
-                    # is transitioned into INIT state due to key interruption
-                    # during launching, with the following steps:
-                    # (1) launch, after answering prompt immediately ctrl-c;
-                    # (2) launch again.
-                    # If we don't refresh the state of the cluster and reset it
-                    # back to STOPPED, our failover logic will consider it as an
-                    # abnormal cluster after hitting resources capacity limit on
-                    # the cloud, and will start failover. This is not desired,
-                    # because the user may want to keep the data on the disk of
-                    # that cluster.
-                    force_refresh_statuses={status_lib.ClusterStatus.INIT},
-                    acquire_per_cluster_status_lock=False,
-                ))
+            record = backend_utils.refresh_cluster_record(
+                cluster_name,
+                # We force refresh for the init status to determine the
+                # actual state of a previous cluster in INIT state.
+                #
+                # This is important for the case, where an existing cluster
+                # is transitioned into INIT state due to key interruption
+                # during launching, with the following steps:
+                # (1) launch, after answering prompt immediately ctrl-c;
+                # (2) launch again.
+                # If we don't refresh the state of the cluster and reset it
+                # back to STOPPED, our failover logic will consider it as an
+                # abnormal cluster after hitting resources capacity limit on
+                # the cloud, and will start failover. This is not desired,
+                # because the user may want to keep the data on the disk of
+                # that cluster.
+                force_refresh_statuses={status_lib.ClusterStatus.INIT},
+                acquire_per_cluster_status_lock=False,
+            )
+            if record is not None:
+                prev_cluster_status = record['status']
+                handle = record['handle']
+            else:
+                prev_cluster_status = None
+                handle = None
+        # We should check the cluster_ever_up after refresh, as the cluster
+        # may be terminated, and the cluster_ever_up should be set to False.
+        cluster_ever_up = record is not None and record['cluster_ever_up']
+
         if prev_cluster_status is not None:
             assert handle is not None
             # Cluster already exists.
@@ -4369,7 +4384,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 to_provision,
                 handle.launched_nodes,
                 prev_cluster_status=prev_cluster_status,
-                prev_handle=handle)
+                prev_handle=handle,
+                prev_cluster_ever_up=cluster_ever_up)
         usage_lib.messages.usage.set_new_cluster()
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
@@ -4424,11 +4440,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'Tip: to reuse an existing cluster, '
                 'specify --cluster (-c). '
                 'Run `sky status` to see existing clusters.')
-        return RetryingVmProvisioner.ToProvisionConfig(cluster_name,
-                                                       to_provision,
-                                                       task.num_nodes,
-                                                       prev_cluster_status=None,
-                                                       prev_handle=None)
+        return RetryingVmProvisioner.ToProvisionConfig(
+            cluster_name,
+            to_provision,
+            task.num_nodes,
+            prev_cluster_status=None,
+            prev_handle=None,
+            prev_cluster_ever_up=False)
 
     def _set_tpu_name(self, handle: CloudVmRayResourceHandle,
                       tpu_name: str) -> None:

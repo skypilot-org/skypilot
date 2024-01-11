@@ -135,7 +135,7 @@ def bulk_provision(
     cluster_name: ClusterName,
     num_nodes: int,
     cluster_yaml: str,
-    is_prev_cluster_healthy: bool,
+    prev_cluster_ever_up: bool,
     log_dir: str,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
@@ -174,7 +174,7 @@ def bulk_provision(
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            terminate = not is_prev_cluster_healthy
+            terminate = not prev_cluster_ever_up
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')
             teardown_cluster(repr(cloud),
