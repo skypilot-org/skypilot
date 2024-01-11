@@ -107,8 +107,8 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
             zone for zone in self.active_zones() if zone not in existing_zones
         ]
 
-        logger.info(f'existing_zones: {existing_zones}')
-        logger.info(f'unvisited_active_zones: {unvisited_active_zones}')
+        logger.info(f'existing_zones: {existing_zones}, '
+                    f'unvisited_active_zones: {unvisited_active_zones}')
 
         if unvisited_active_zones:
             selected_zones.extend(

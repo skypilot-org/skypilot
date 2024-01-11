@@ -114,6 +114,7 @@ class SkyServeController:
         @self._app.post('/controller/load_balancer_sync')
         async def load_balancer_sync(request: fastapi.Request):
             request_data = await request.json()
+            # TODO(MaoZiming): Check aggregator type.
             request_aggregator: Dict[str, Any] = request_data.get(
                 'request_aggregator', {})
             timestamps: List[int] = request_aggregator.get('timestamps', [])

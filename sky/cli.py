@@ -4327,7 +4327,7 @@ def serve_up(
     if task.service.spot_placer is not None:
         for resource in list(task.resources):
             if resource.use_spot is not None and not resource.use_spot:
-                logger.info(f'{resource} use_spot will be override to True, '
+                logger.info('use_spot will be override to True, '
                             'because spot placer is enabled.')
                 break
 

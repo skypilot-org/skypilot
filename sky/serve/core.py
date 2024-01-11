@@ -62,8 +62,8 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Service section not found.')
 
+    first_resource_dict = list(task.resources)[0].to_yaml_config()
     for requested_resources in task.resources:
-        first_resource_dict = list(task.resources)[0].to_yaml_config()
         requested_resources_dict = requested_resources.to_yaml_config()
         for key in ['region', 'zone', 'cloud']:
             if key in first_resource_dict:

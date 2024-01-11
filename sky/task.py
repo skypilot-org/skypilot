@@ -632,7 +632,7 @@ class Task:
           self: The current task, with service set.
         """
 
-        if (service and service.spot_placer is not None):
+        if service and service.spot_placer is not None:
 
             enabled_clouds = global_user_state.get_enabled_clouds()
             launchable_zones = set()

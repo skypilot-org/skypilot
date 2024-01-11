@@ -71,7 +71,7 @@ def launch_cluster(task_yaml_path: str,
             resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
-                    f'config: {config}')
+                    f'resource_config: {resource_config}')
         task = sky.Task.from_yaml_config(config)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to construct task object from yaml file with '
