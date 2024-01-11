@@ -124,9 +124,8 @@ def create_table(cursor, conn):
         'clusters',
         'cluster_ever_up',
         'INTEGER DEFAULT 0',
-        # Set default value to 1 so that all the
-        # existing clusters before #2 are considered
-        # as ever up.
+        # Set default value to 1 so that all the existing clusters before #2977
+        # are considered as ever up.
         default_value_to_replace_nulls=1)
     conn.commit()
 
