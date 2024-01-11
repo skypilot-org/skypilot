@@ -28,12 +28,15 @@ def get_azure_sdk_function(client: Any, function_name: str) -> Callable:
     versions of the SDK by first trying the old name and falling back to
     the prefixed new name.
     """
-    func = getattr(client, function_name,
-                   getattr(client, f"begin_{function_name}", None))
+    func = getattr(
+        client, function_name, getattr(client, f"begin_{function_name}", None)
+    )
     if func is None:
         raise AttributeError(
             "'{obj}' object has no {func} or begin_{func} attribute".format(
-                obj={client.__name__}, func=function_name))
+                obj={client.__name__}, func=function_name
+            )
+        )
     return func
 
 
@@ -57,13 +60,14 @@ def _configure_resource_group(config):
     config["provider"]["subscription_id"] = subscription_id
     logger.info("Using subscription id: %s", subscription_id)
 
-    assert ("resource_group" in config["provider"]
-           ), "Provider config must include resource_group field"
+    assert (
+        "resource_group" in config["provider"]
+    ), "Provider config must include resource_group field"
     resource_group = config["provider"]["resource_group"]
 
     assert (
-        "location"
-        in config["provider"]), "Provider config must include location field"
+        "location" in config["provider"]
+    ), "Provider config must include location field"
     params = {"location": config["provider"]["location"]}
 
     if "tags" in config["provider"]:
@@ -71,8 +75,8 @@ def _configure_resource_group(config):
 
     logger.info("Creating/Updating resource group: %s", resource_group)
     rg_create_or_update = get_azure_sdk_function(
-        client=resource_client.resource_groups,
-        function_name="create_or_update")
+        client=resource_client.resource_groups, function_name="create_or_update"
+    )
     rg_create_or_update(resource_group_name=resource_group, parameters=params)
 
     # load the template file
@@ -107,23 +111,24 @@ def _configure_resource_group(config):
             "mode": DeploymentMode.incremental,
             "template": template,
             "parameters": {
-                "subnet": {
-                    "value": subnet_mask
-                },
-                "clusterId": {
-                    "value": cluster_id
-                },
+                "subnet": {"value": subnet_mask},
+                "clusterId": {"value": cluster_id},
             },
         }
     }
 
     create_or_update = get_azure_sdk_function(
-        client=resource_client.deployments, function_name="create_or_update")
-    outputs = (create_or_update(
-        resource_group_name=resource_group,
-        deployment_name="ray-config",
-        parameters=parameters,
-    ).result().properties.outputs)
+        client=resource_client.deployments, function_name="create_or_update"
+    )
+    outputs = (
+        create_or_update(
+            resource_group_name=resource_group,
+            deployment_name="ray-config",
+            parameters=parameters,
+        )
+        .result()
+        .properties.outputs
+    )
 
     # We should wait for the NSG to be created before opening any ports
     # to avoid overriding the newly-added NSG rules.
@@ -133,17 +138,19 @@ def _configure_resource_group(config):
     backoff = common_utils.Backoff(max_backoff_factor=1)
     start_time = time.time()
     while True:
-        nsg = network_client.network_security_groups.get(
-            resource_group, nsg_name)
+        nsg = network_client.network_security_groups.get(resource_group, nsg_name)
         if nsg.provisioning_state == "Succeeded":
             break
         if time.time() - start_time > _WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS:
             raise RuntimeError(
                 f"Fails to create NSG {nsg_name} in {resource_group} within "
-                f"{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds.")
+                f"{_WAIT_NSG_CREATION_NUM_TIMEOUT_SECONDS} seconds."
+            )
         backoff_time = backoff.current_backoff()
-        logger.info(f"NSG {nsg_name} is not created yet. Waiting for "
-                    f"{backoff_time} seconds before checking again.")
+        logger.info(
+            f"NSG {nsg_name} is not created yet. Waiting for "
+            f"{backoff_time} seconds before checking again."
+        )
         time.sleep(backoff_time)
 
     # append output resource ids to be used with vm creation
