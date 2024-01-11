@@ -134,11 +134,18 @@ class RequestRateAutoscaler(Autoscaler):
             constants.AUTOSCALER_DEFAULT_NUM_OVERPROVISION)
         self.upscale_counter: int = 0
         self.downscale_counter: int = 0
+        upscale_delay_seconds = (
+            spec.upscale_delay_seconds if spec.upscale_delay_seconds is not None
+            else constants.AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS)
         self.scale_up_consecutive_periods: int = int(
-            spec.upscale_delay_seconds /
+            upscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+        downscale_delay_seconds = (
+            spec.downscale_delay_seconds
+            if spec.downscale_delay_seconds is not None else
+            constants.AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS)
         self.scale_down_consecutive_periods: int = int(
-            spec.downscale_delay_seconds /
+            downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
 
     def collect_request_information(
@@ -176,7 +183,10 @@ class RequestRateAutoscaler(Autoscaler):
                                   min(self.max_replicas, target_num_replicas))
         logger.info(f'Requests per second: {num_requests_per_second}, '
                     f'Current target number of replicas: {target_num_replicas}')
-        if target_num_replicas > self.target_num_replicas:
+
+        if self.target_num_replicas == 0:
+            return target_num_replicas
+        elif target_num_replicas > self.target_num_replicas:
             self.upscale_counter += 1
             self.downscale_counter = 0
             if self.upscale_counter >= self.scale_up_consecutive_periods:
@@ -216,6 +226,14 @@ class RequestRateAutoscaler(Autoscaler):
 
         return [info.replica_id for info in launched_replica_infos_sorted
                ][:num_limit]
+
+    def get_decision_interval(self) -> int:
+        # Reduce autoscaler interval when target_num_replicas = 0.
+        # This will happen when min_replicas = 0 and no traffic.
+        if self.target_num_replicas == 0:
+            return constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS
+        else:
+            return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
 
     def evaluate_scaling(
         self,

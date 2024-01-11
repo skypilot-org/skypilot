@@ -14,7 +14,6 @@ import uvicorn
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
-from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.utils import common_utils
@@ -107,7 +106,7 @@ class SkyServeController:
                              f'{common_utils.format_exception(e)}')
                 with ux_utils.enable_traceback():
                     logger.error(f'  Traceback: {traceback.format_exc()}')
-            time.sleep(constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
+            time.sleep(self._autoscaler.get_decision_interval())
 
     def run(self) -> None:
 

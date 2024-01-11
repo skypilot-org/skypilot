@@ -50,6 +50,22 @@ _ACCELERATORS = [
     'H100',
 ]
 
+# List of non-GPU accelerators that are supported by our backend for job queue
+# scheduling.
+_SCHEDULABLE_NON_GPU_ACCELERATORS = [
+    'tpu',
+    'inferentia',
+    'trainium',
+]
+
+
+def is_schedulable_non_gpu_accelerator(accelerator_name: str) -> bool:
+    """Returns if this accelerator is a 'schedulable' non-GPU accelerator."""
+    for name in _SCHEDULABLE_NON_GPU_ACCELERATORS:
+        if name in accelerator_name.lower():
+            return True
+    return False
+
 
 def canonicalize_accelerator_name(accelerator: str) -> str:
     """Returns the canonical accelerator name."""
