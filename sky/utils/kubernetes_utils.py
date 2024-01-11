@@ -12,7 +12,6 @@ import yaml
 import sky
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.backends import backend_utils
 from sky.utils import common_utils
@@ -1031,21 +1030,3 @@ def check_port_forward_mode_dependencies() -> None:
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {install_cmd}') from None
-
-
-def get_port_mode(
-        mode_str: Optional[str] = None) -> kubernetes_enums.KubernetesPortMode:
-    """Get the port mode from the skypilot config."""
-    mode_str = mode_str or skypilot_config.get_nested(
-        ('kubernetes', 'ports'),
-        kubernetes_enums.KubernetesPortMode.LOADBALANCER.value)
-    try:
-        port_mode = kubernetes_enums.KubernetesPortMode(mode_str)
-    except ValueError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(str(e)
-                + ' Cluster was setup with invalid port mode.'
-                + 'Please check the port_mode in provider config.') \
-                from None
-
-    return port_mode

@@ -5,7 +5,6 @@ from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.utils import kubernetes_enums
-from sky.utils import kubernetes_utils
 from sky.utils.resources_utils import port_ranges_to_set
 
 _PATH_PREFIX = '/skypilot/{cluster_name_on_cloud}/{port}'
@@ -19,7 +18,7 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
-    port_mode = kubernetes_utils.get_port_mode(
+    port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
@@ -99,7 +98,7 @@ def cleanup_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
-    port_mode = kubernetes_utils.get_port_mode(
+    port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
@@ -149,7 +148,7 @@ def query_ports(
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, 'provider_config is required'
-    port_mode = kubernetes_utils.get_port_mode(
+    port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
     ports = list(port_ranges_to_set(ports))
 
