@@ -41,8 +41,6 @@ tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cu
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
 RUFF_FLAGS=(
-    '--recursive'
-    '--parallel'
 )
 
 RUFF_EXCLUDES=(
@@ -70,7 +68,7 @@ BLACK_INCLUDES=(
 
 # Format specified files
 format() {
-    ruff format --in-place "${RUFF_FLAGS[@]}" "$@"
+    ruff format "${RUFF_FLAGS[@]}" "$@"
 }
 
 # Format files that differ from main branch. Ignores dirs that are not slated
@@ -86,14 +84,14 @@ format_changed() {
 
     if ! git diff --diff-filter=ACM --quiet --exit-code "$MERGEBASE" -- '*.py' '*.pyi' &>/dev/null; then
         git diff --name-only --diff-filter=ACM "$MERGEBASE" -- '*.py' '*.pyi' | xargs -P 5 \
-             ruff --in-place "${RUFF_EXCLUDES[@]}" "${RUFF_FLAGS[@]}"
+             ruff "${RUFF_EXCLUDES[@]}" "${RUFF_FLAGS[@]}"
     fi
 
 }
 
 # Format all files
 format_all() {
-    ruff format --in-place "${RUFF_FLAGS[@]}" "${RUFF_EXCLUDES[@]}" sky tests examples llm
+    ruff format "${RUFF_FLAGS[@]}" "${RUFF_EXCLUDES[@]}" sky tests examples llm
 }
 
 echo 'SkyPilot Black:'

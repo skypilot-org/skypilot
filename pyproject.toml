@@ -2,6 +2,19 @@
 requires = ["setuptools>=58.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.ruff]
+ignore = [
+    "F401", # https://docs.astral.sh/ruff/rules/unused-import/
+    "E741", # https://docs.astral.sh/ruff/rules/ambiguous-variable-name/
+    "E402", # https://docs.astral.sh/ruff/rules/module-import-not-at-top-of-file/
+    "E712",
+    "F541", # https://docs.astral.sh/ruff/rules/f-string-missing-placeholders/
+    "E713", # https://docs.astral.sh/ruff/rules/not-in-test/
+    "F841", # https://docs.astral.sh/ruff/rules/unused-variable/
+    "E731", # https://docs.astral.sh/ruff/rules/lambda-assignment/
+    "F402"
+]
+
 [tool.pytest.ini_options]
 required_plugins = [
     "pytest-xdist",
