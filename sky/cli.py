@@ -62,6 +62,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.provision.kubernetes import network_utils as kubernetes_network_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -114,6 +115,9 @@ _NUM_SPOT_JOBS_TO_SHOW_IN_STATUS = 5
 _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
     'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
+
+_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
+                            'please retry after a while.')
 
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky spot launch`. `{command}` supports a '
@@ -1968,11 +1972,14 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 if endpoint is not None:
                     # If the user requested a specific port endpoint
                     if endpoint not in port_details:
+                        error_msg = (f'Port {endpoint} not exposed yet. '
+                                     f'{_ENDPOINTS_RETRY_MESSAGE}')
+                        if handle.launched_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()):
+                            # Add Kubernetes specific debugging info
+                            error_msg += kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Port {endpoint} not exposed yet.\n'
-                                'If the cluster was recently started, '
-                                'please retry after a while.')
+                            raise ValueError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
                     return
 
@@ -1984,11 +1991,14 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                                              'to be exposed.\n')
                     # Else wait for the ports to be exposed
                     else:
+                        error_msg = (f'No endpoints exposed yet. '
+                                     f'{_ENDPOINTS_RETRY_MESSAGE}')
+                        if handle.launched_resources.cloud.is_same_cloud(
+                                clouds.Kubernetes()):
+                            # Add Kubernetes specific debugging info
+                            error_msg += kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
-                            raise RuntimeError('No endpoints exposed yet.\n'
-                                               'If the cluster was recently '
-                                               'started, please retry after a '
-                                               'while.')
+                            raise ValueError(error_msg)
 
                 for port, urls in port_details.items():
                     click.echo(
