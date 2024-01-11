@@ -64,7 +64,7 @@ def test_empty_fields_resources(tmp_path):
     assert resources.cloud is None
     assert resources.region is None
     assert resources.accelerators == {'V100': 1}
-    assert resources.disk_size is 256
+    assert resources.disk_size == 256
     assert resources.use_spot is False
     assert resources.cpus == '32'
 
