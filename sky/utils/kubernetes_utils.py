@@ -36,8 +36,9 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 To further debug, run: sky check.'
 
 # TODO(romilb): Add links to docs for configuration instructions when ready.
-ENDPOINTS_DEBUG_MESSAGE = ('Make sure your {endpoint_type} is configured '
-                           'correctly. \nTo debug, run: {debug_cmd}')
+ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
+                           'is configured correctly. '
+                           '\nTo debug, run: {debug_cmd}')
 
 KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 

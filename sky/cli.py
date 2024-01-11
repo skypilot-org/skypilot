@@ -1969,17 +1969,23 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     handle.launched_resources.ports, config['provider'])
 
                 if endpoint is not None:
+                    # If cluster had no ports to be exposed
+                    if str(endpoint) not in handle.launched_resources.ports:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(f'Port {endpoint} is not exposed '
+                                             'on cluster '
+                                             f'{cluster_record["name"]!r}.')
                     # If the user requested a specific port endpoint
                     if endpoint not in port_details:
                         error_msg = (f'Port {endpoint} not exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE}')
+                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
                             error_msg += \
                                 kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
-                            raise ValueError(error_msg)
+                            raise RuntimeError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
                     return
 
@@ -1988,18 +1994,18 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                     if handle.launched_resources.ports is None:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError('Cluster does not have any ports '
-                                             'to be exposed.\n')
+                                             'to be exposed.')
                     # Else wait for the ports to be exposed
                     else:
                         error_msg = (f'No endpoints exposed yet. '
-                                     f'{_ENDPOINTS_RETRY_MESSAGE}')
+                                     f'{_ENDPOINTS_RETRY_MESSAGE} ')
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
                             error_msg += \
                                 kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
-                            raise ValueError(error_msg)
+                            raise RuntimeError(error_msg)
 
                 for port, urls in port_details.items():
                     click.echo(
