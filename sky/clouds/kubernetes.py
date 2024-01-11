@@ -68,11 +68,17 @@ class Kubernetes(clouds.Cloud):
                                                          'Kubernetes.',
     }
 
-    if kubernetes_utils.get_current_kube_config_context_name() == kubernetes_utils.KIND_CONTEXT_NAME and network_utils.get_port_mode() == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
+    if kubernetes_utils.get_current_kube_config_context_name(
+    ) == kubernetes_utils.KIND_CONTEXT_NAME and network_utils.get_port_mode(
+    ) == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         # If we are using KIND and port mode is loadbalancer, the loadbalancer
         # service will never asisgned an external IP. In such cases, we have
         # to disable port opening feature for Kubernetes.
-        _CLOUD_UNSUPPORTED_FEATURES[clouds.CloudImplementationFeatures.OPEN_PORTS] = 'Opening ports is not supported in Kubernetes when using `sky local up` with port mode loadbalancer. Consider using ingress port mode instead.'
+        _CLOUD_UNSUPPORTED_FEATURES[
+            clouds.CloudImplementationFeatures.OPEN_PORTS] = (
+                'Opening ports is not supported in Kubernetes when '
+                'using `sky local up` with port mode loadbalancer. '
+                'Consider using ingress port mode instead.')
 
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'

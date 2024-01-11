@@ -35,12 +35,11 @@ If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on
 (e.g., skypilot.co/accelerators) are setup correctly. \
 To further debug, run: sky check.'
 
-
 # TODO(romilb): Add links to docs for configuration instructions when ready.
 ENDPOINTS_DEBUG_MESSAGE = ('Make sure your {endpoint_type} is configured '
                            'correctly. \nTo debug, run: {debug_cmd}')
 
-KIND_CONTEXT_NAME = 'kind-skypilot' # Context name used by sky local up
+KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 logger = sky_logging.init_logger(__name__)
 

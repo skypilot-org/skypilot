@@ -62,7 +62,6 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
-from sky.provision.kubernetes import network_utils as kubernetes_network_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -1977,7 +1976,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
-                            error_msg += kubernetes_utils.get_endpoint_debug_message()
+                            error_msg += \
+                                kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(error_msg)
                     click.echo(port_details[endpoint][0].url(ip=head_ip))
@@ -1996,7 +1996,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                         if handle.launched_resources.cloud.is_same_cloud(
                                 clouds.Kubernetes()):
                             # Add Kubernetes specific debugging info
-                            error_msg += kubernetes_utils.get_endpoint_debug_message()
+                            error_msg += \
+                                kubernetes_utils.get_endpoint_debug_message()
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(error_msg)
 
