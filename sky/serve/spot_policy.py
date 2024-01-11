@@ -1,6 +1,5 @@
 """ Sky Spot Policy for SkyServe."""
 import enum
-import random
 import typing
 from typing import Dict, List, Optional, Type
 
@@ -30,6 +29,7 @@ class SpotPlacer:
         self.zone2type: Dict[str, SpotZoneType] = {
             zone: SpotZoneType.ACTIVE for zone in self.zones
         }
+        self.zone2count: Dict[str, int] = {zone: 0 for zone in self.zones}
 
     def __init_subclass__(cls) -> None:
         if cls.NAME is None:
@@ -50,10 +50,13 @@ class SpotPlacer:
     def move_zone_to_active(self, zone: str) -> None:
         assert zone in self.zone2type
         self.zone2type[zone] = SpotZoneType.ACTIVE
+        self.zone2count[zone] += 1
 
     def move_zone_to_preempted(self, zone: str) -> None:
         assert zone in self.zone2type
         self.zone2type[zone] = SpotZoneType.PREEMPTED
+        self.zone2count[zone] -= 1
+        assert self.zone2count[zone] >= 0
 
     def handle_active(self, zone: str) -> None:
         self.move_zone_to_active(zone)
@@ -94,28 +97,26 @@ class DynamicFailoverSpotPlacer(SpotPlacer):
     def select(self, existing_replicas: List['replica_managers.ReplicaInfo'],
                num_replicas: int) -> List[str]:
         # Prevent the case with only one active zones.
-        selected_zones = []
         if (len(self.active_zones()) <= 1 and len(self.preempted_zones()) > 0):
             self.clear_preempted_zones()
 
-        existing_zones = {
+        existing_zones = [
             info.zone
             for info in existing_replicas
             if not info.is_spot and info.zone is not None
-        }
-        unvisited_active_zones = [
-            zone for zone in self.active_zones() if zone not in existing_zones
         ]
+        existing_zones_to_count = {
+            zone: existing_zones.count(zone) for zone in existing_zones
+        }
 
-        logger.info(f'existing_zones: {existing_zones}, '
-                    f'unvisited_active_zones: {unvisited_active_zones}')
-
-        if unvisited_active_zones:
-            selected_zones.extend(
-                random.sample(unvisited_active_zones,
-                              min(num_replicas, len(unvisited_active_zones))))
-            num_replicas -= len(selected_zones)
-        if num_replicas > 0:
-            selected_zones.extend(
-                random.choices(self.active_zones(), k=num_replicas))
+        selected_zones = []
+        while num_replicas > 0:
+            # Select the zone with the least number of replicas.
+            selected_zone = min(self.active_zones(),
+                                key=lambda zone: existing_zones_to_count.get(
+                                    zone, 0) + self.zone2count.get(zone, 0))
+            selected_zones.append(selected_zone)
+            num_replicas -= 1
+            existing_zones_to_count[selected_zone] = (
+                existing_zones_to_count.get(selected_zone, 0) + 1)
         return selected_zones
