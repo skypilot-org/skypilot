@@ -11,7 +11,9 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 _PULL_FREQUENCY_HOURS = 7
-_df = common.read_catalog(cudo_mt.VMS_CSV, pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_df = common.read_catalog(cudo_mt.VMS_CSV,
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)

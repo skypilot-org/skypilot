@@ -3,9 +3,8 @@ import random
 import string
 from typing import Dict
 
-from sky.adaptors.cudo import cudo
-
 from sky import sky_logging
+from sky.adaptors.cudo import cudo
 
 logger = sky_logging.init_logger(__name__)
 
@@ -21,22 +20,21 @@ def launch(name: str, data_center_id: str, ssh_key: str, machine_type: str,
            tags: Dict[str, str], disk_size: int):
     """Launches an instance with the given parameters."""
     disk = cudo().Disk(storage_class='STORAGE_CLASS_NETWORK',
-                             size_gib=disk_size,
-                             id=generate_random_string(10))
+                       size_gib=disk_size,
+                       id=generate_random_string(10))
 
-    request = cudo().CreateVMBody(
-        ssh_key_source='SSH_KEY_SOURCE_NONE',
-        custom_ssh_keys=[ssh_key],
-        vm_id=name,
-        machine_type=machine_type,
-        data_center_id=data_center_id,
-        boot_disk_image_id='ubuntu-nvidia-docker',
-        memory_gib=memory_gib,
-        vcpus=vcpu_count,
-        gpus=gpu_count,
-        gpu_model=gpu_model,
-        boot_disk=disk,
-        metadata=tags)
+    request = cudo().CreateVMBody(ssh_key_source='SSH_KEY_SOURCE_NONE',
+                                  custom_ssh_keys=[ssh_key],
+                                  vm_id=name,
+                                  machine_type=machine_type,
+                                  data_center_id=data_center_id,
+                                  boot_disk_image_id='ubuntu-nvidia-docker',
+                                  memory_gib=memory_gib,
+                                  vcpus=vcpu_count,
+                                  gpus=gpu_count,
+                                  gpu_model=gpu_model,
+                                  boot_disk=disk,
+                                  metadata=tags)
 
     try:
         api = cudo().cudo_api.virtual_machines()
