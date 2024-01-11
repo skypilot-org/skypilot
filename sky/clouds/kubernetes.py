@@ -67,16 +67,6 @@ class Kubernetes(clouds.Cloud):
                                                          'Kubernetes.',
     }
 
-    if kubernetes_utils.get_current_kube_config_context_name(
-    ) == kubernetes_utils.KIND_CONTEXT_NAME:
-        # If we are using KIND, the loadbalancer service will never asisgned an
-        # external IP. Users may use ingress, but that requires blocking HTTP
-        # port 80. For now, we disable port opening feature on kind clusters.
-        _CLOUD_UNSUPPORTED_FEATURES[
-            clouds.CloudImplementationFeatures.OPEN_PORTS] = (
-                'Opening ports is not supported in Kubernetes when '
-                'using local kind cluster.')
-
     IMAGE_CPU = 'skypilot:cpu-ubuntu-2004'
     IMAGE_GPU = 'skypilot:gpu-ubuntu-2004'
 
@@ -84,7 +74,18 @@ class Kubernetes(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES
+        curr_context = kubernetes_utils.get_current_kube_config_context_name()
+        if curr_context == kubernetes_utils.KIND_CONTEXT_NAME:
+            # If we are using KIND, the loadbalancer service will never be
+            # assigned an external IP. Users may use ingress, but that requires
+            # blocking HTTP port 80.
+            # For now, we disable port opening feature on kind clusters.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.OPEN_PORTS] = (
+                    'Opening ports is not supported in Kubernetes when '
+                    'using local kind cluster.')
+        return unsupported_features
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
