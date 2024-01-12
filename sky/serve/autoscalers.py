@@ -76,7 +76,9 @@ class Autoscaler:
         del version, mixed_replica_versions  # Unused.
         self.min_nodes = spec.min_replicas
         self.max_nodes = spec.max_replicas or spec.min_replicas
-        self.target_num_replicas = spec.min_replicas
+        # Reclip self.target_num_replicas with new min and max replicas.
+        self.target_num_replicas = max(
+            self.min_replicas, min(self.max_replicas, self.target_num_replicas))
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
@@ -156,7 +158,6 @@ class RequestRateAutoscaler(Autoscaler):
         self.scale_down_consecutive_periods = int(
             downscale_delay_seconds /
             constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS)
-        self.target_num_replicas = spec.min_replicas
         self.latest_version = version
         self.mixed_replica_versions = mixed_replica_versions
 
