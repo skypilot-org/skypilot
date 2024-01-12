@@ -4219,14 +4219,14 @@ def serve():
     pass
 
 
-def _generate_task_with_service(service_yaml: List[str]):
+def _generate_task_with_service(service_yaml_args: List[str]) -> sky.Task:
     """Generate a task with service section from a service YAML file."""
-    is_yaml, _ = _check_yaml(''.join(service_yaml))
+    is_yaml, _ = _check_yaml(''.join(service_yaml_args))
     if not is_yaml:
         raise click.UsageError('SERVICE_YAML must be a valid YAML file.')
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
-        service_yaml, entrypoint_name='Service')
+        service_yaml_args, entrypoint_name='Service')
     if isinstance(task, sky.Dag):
         raise click.UsageError(
             _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky serve up'))
@@ -4393,9 +4393,10 @@ def serve_update(
     sky.optimize(dag)
 
     if not yes:
-        prompt = f'Updating service {service_name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
+        click.confirm(f'Updating service {service_name!r}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
 
     serve_lib.update(task, service_name, mixed_replica_version)
 

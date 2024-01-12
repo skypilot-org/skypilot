@@ -327,18 +327,18 @@ def update(task: 'sky.Task',
 
     with tempfile.NamedTemporaryFile(prefix=f'{service_name}-v{version}',
                                      mode='w') as service_file:
-
+        current_version = version + 1
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_task_yaml_path = (serve_utils.generate_task_yaml_file_name(
-            service_name, version + 1, False))
+            service_name, current_version, False))
 
         backend.sync_file_mounts(handle,
                                  {remote_task_yaml_path: service_file.name},
                                  task.storage_mounts)
 
         code = serve_utils.ServeCodeGen.update_service(controller_port,
-                                                       version + 1,
+                                                       current_version,
                                                        mixed_replica_versions)
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)

@@ -84,7 +84,8 @@ class Autoscaler:
         raise NotImplementedError
 
     def evaluate_scaling(
-        self, replica_infos: List['replica_managers.ReplicaInfo']
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
     ) -> List[AutoscalerDecision]:
         """Evaluate autoscale options based on replica information."""
         raise NotImplementedError

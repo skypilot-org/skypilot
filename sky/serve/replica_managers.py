@@ -753,7 +753,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                     # a scale down or the cluster is recovering
                     # from preemption. Delete the replica info
                     # so it won't count as a replica.
-                    serve_state.remove_replica(self._service_name, replica_id)
                     if info.status_property.preempted:
                         removal_reason = 'for preemption recovery'
                     else:
@@ -761,7 +760,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Don't keep failed record for version mismatch replicas,
                 # since user should fixed the error before update.
                 elif info.version != self.latest_version:
-                    serve_state.remove_replica(self._service_name, replica_id)
                     removal_reason = 'for old version'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
@@ -770,6 +768,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     serve_state.add_or_update_replica(self._service_name,
                                                       replica_id, info)
                 if removal_reason is not None:
+                    serve_state.remove_replica(self._service_name, replica_id)
                     logger.info(f'Replica {replica_id} removed from the '
                                 f'replica table {removal_reason}.')
 
