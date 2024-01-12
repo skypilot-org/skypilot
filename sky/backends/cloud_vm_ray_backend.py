@@ -1223,9 +1223,10 @@ class RetryingVmProvisioner(object):
         self._wheel_hash = wheel_hash
 
     def _yield_zones(
-        self, to_provision: resources_lib.Resources, num_nodes: int,
-        cluster_name: str,
-        prev_cluster_status: Optional[status_lib.ClusterStatus]
+            self, to_provision: resources_lib.Resources, num_nodes: int,
+            cluster_name: str,
+            prev_cluster_status: Optional[status_lib.ClusterStatus],
+            prev_cluster_ever_up: bool
     ) -> Iterable[Optional[List[clouds.Zone]]]:
         """Yield zones within the given region to try for provisioning.
 
@@ -1299,43 +1300,16 @@ class RetryingVmProvisioner(object):
             # Cluster with status UP can reach here, if it was killed by the
             # cloud provider and no available resources in that region to
             # relaunch, which can happen to spot instance.
-            if prev_cluster_status == status_lib.ClusterStatus.UP:
+            if prev_cluster_ever_up:
                 message = (
-                    f'Failed to connect to the cluster {cluster_name!r}. '
-                    'It is possibly killed by cloud provider or manually '
-                    'in the cloud provider console. To remove the cluster '
+                    f'Failed to launch the cluster {cluster_name!r}. '
+                    'It is stopped. Try launching the cluster again with: '
+                    f'sky start {cluster_name}\nTo remove the cluster '
                     f'please run: sky down {cluster_name}')
-                # Reset to UP (rather than keeping it at INIT), as INIT
-                # mode will enable failover to other regions, causing
-                # data lose.
-                # TODO(zhwu): This is set to UP to be more conservative,
-                # we may need to confirm whether the cluster is down in all
-                # cases.
-                global_user_state.set_cluster_status(
-                    cluster_name, status_lib.ClusterStatus.UP)
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
 
-            # Check the *previous* cluster status. If the cluster is previously
-            # stopped, we should not retry other regions, since the previously
-            # attached volumes are not visible on another region.
-            elif prev_cluster_status == status_lib.ClusterStatus.STOPPED:
-                message = (
-                    'Failed to acquire resources to restart the stopped '
-                    f'cluster {cluster_name} in {region.name}. Please retry '
-                    'again later.')
-
-                # Reset to STOPPED (rather than keeping it at INIT), because
-                # (1) the cluster is not up (2) it ensures future `sky start`
-                # will disable auto-failover too.
-                global_user_state.set_cluster_status(
-                    cluster_name, status_lib.ClusterStatus.STOPPED)
-
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError(message,
-                                                               no_failover=True)
-            assert prev_cluster_status == status_lib.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {prev_cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
@@ -1495,7 +1469,8 @@ class RetryingVmProvisioner(object):
             )
 
         for zones in self._yield_zones(to_provision, num_nodes, cluster_name,
-                                       prev_cluster_status):
+                                       prev_cluster_status,
+                                       prev_cluster_ever_up):
             # Filter out zones that are blocked, if any.
             # This optimize the provision loop by skipping zones that are
             # indicated to be unavailable from previous provision attempts.
@@ -4361,6 +4336,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # We should check the cluster_ever_up after refresh, as the cluster
         # may be terminated, and the cluster_ever_up should be set to False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
+        logger.debug(f'cluster_ever_up: {cluster_ever_up}')
+        logger.debug(f'record: {record}')
 
         if prev_cluster_status is not None:
             assert handle is not None
