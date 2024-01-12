@@ -149,7 +149,7 @@ Documentation
    reference/faq
 
 .. toctree::
-   :maxdepth: 0
+   :maxdepth: 1
    :caption: Developer Guides
 
    developers/CONTRIBUTING
