@@ -1403,6 +1403,7 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
+        # TODO(zhwu): Add more error code handling, if needed.
         provisioner_err.errors = [{
             'code': 'UNKNOWN',
             'domain': 'tpu',

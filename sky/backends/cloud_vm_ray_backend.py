@@ -4033,8 +4033,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         log_abs_path = os.path.abspath(log_path)
         cluster_name_on_cloud = handle.cluster_name_on_cloud
 
-        # Backward compatibility for TPU nodes created before #2943.
-        # Deletion of TPU is done in SkyPilot's new GCP provisioner API
+        # Backward compatibility for TPU nodes created before #2943. Any TPU
+        # node launched before that PR have the delete script generated (and do
+        # not have the tpu_node config set in its cluster yaml), so we have to
+        # call the deletion script to clean up the TPU node.
+        # For TPU nodes launched after the PR, deletion is done in SkyPilot's
+        # new GCP provisioner API.
         # TODO (zhwu): Remove this after 0.6.0.
         if (handle.tpu_delete_script is not None and
                 os.path.exists(handle.tpu_delete_script)):
