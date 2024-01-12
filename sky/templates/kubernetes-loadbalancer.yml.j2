@@ -1,0 +1,18 @@
+service_spec:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: {{ service_name }}
+    labels:
+      parent: skypilot
+  spec:
+    type: LoadBalancer
+    selector:
+      {{ selector_key }}: {{ selector_value }}
+    ports:
+{%- for port in ports %}
+    - port: {{ port | int }}
+      targetPort: {{ port | int }}
+      protocol: TCP
+      name: port{{ port }}
+{%- endfor %}
