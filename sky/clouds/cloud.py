@@ -30,12 +30,11 @@ class CloudImplementationFeatures(enum.Enum):
 
     Used by Cloud.check_features_are_supported().
 
-    Note: If any new feature is added, please check and update
+    NOTE: If any new feature is added, please check and update
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'
-    AUTOSTOP = 'autostop'
+    STOP = 'stop'  # Includes both stop and autostop.
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     DOCKER_IMAGE = 'docker_image'
@@ -62,25 +61,46 @@ class Zone(collections.namedtuple('Zone', ['name'])):
     region: Region
 
 
+class ProvisionerVersion(enum.Enum):
+    """The version of the provisioner.
+
+    1: [Deprecated] ray node provider based implementation
+    2: [Deprecated] ray node provider for provisioning and SkyPilot provisioner
+    for stopping and termination
+    3: SkyPilot provisioner for both provisioning and stopping
+    """
+    RAY_AUTOSCALER = 1
+    RAY_PROVISIONER_SKYPILOT_TERMINATOR = 2
+    SKYPILOT = 3
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
+class StatusVersion(enum.Enum):
+    """The version of the status query.
+
+    1: [Deprecated] cloud-CLI based implementation
+    2: SkyPilot provisioner based implementation
+    """
+    CLOUD_CLI = 1
+    SKYPILOT = 2
+
+    def __ge__(self, other):
+        return self.value >= other.value
+
+
 class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
     _DEFAULT_DISK_TIER = 'medium'
 
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[CloudImplementationFeatures, str]:
-        """The features not supported by the cloud implementation.
-
-        This method is used by check_features_are_supported() to check if the
-        cloud implementation supports all the requested features.
-
-        Returns:
-            A dict of {feature: reason} for the features not supported by the
-            cloud implementation.
-        """
-        raise NotImplementedError
+    # The version of provisioner and status query. This is used to determine
+    # the code path to use for each cloud in the backend.
+    # NOTE: new clouds being added should use the latest version, i.e. SKYPILOT.
+    PROVISIONER_VERSION = ProvisionerVersion.RAY_AUTOSCALER
+    STATUS_VERSION = StatusVersion.CLOUD_CLI
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -304,7 +324,8 @@ class Cloud:
                 CloudImplementationFeatures.MULTI_NODE)
 
         try:
-            self.check_features_are_supported(resources_required_features)
+            self.check_features_are_supported(resources,
+                                              resources_required_features)
         except exceptions.NotSupportedError:
             # TODO(zhwu): The resources are now silently filtered out. We
             # should have some logging telling the user why the resources
@@ -457,28 +478,35 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, requested_features: Set[CloudImplementationFeatures]) -> None:
+            cls, resources: 'resources_lib.Resources',
+            requested_features: Set[CloudImplementationFeatures]) -> None:
         """Errors out if the cloud does not support all requested features.
 
-        For instance, Lambda Cloud does not support autostop, so
-        Lambda.check_features_are_supported({
-            CloudImplementationFeatures.AUTOSTOP
+        For instance, Lambda Cloud does not support stop, so
+        Lambda.check_features_are_supported(to_provision, {
+            CloudImplementationFeatures.STOP
         }) raises the exception.
+
+        Resources are also passed as some features may depend on the resources
+        requested. For example, some clouds support stopping normal instances,
+        but not spot instances, e.g., AWS; or, GCP supports stopping TPU VMs but
+        not TPU VM pods.
 
         Raises:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        unsupported_features2reason = cls._cloud_unsupported_features()
+        unsupported_features2reason = cls._unsupported_features_for_resources(
+            resources)
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_nested(
             (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
             unsupported_features2reason.update({
                 CloudImplementationFeatures.DOCKER_IMAGE: (
-                    f'Docker image is not supported in {cls._REPR} when proxy '
-                    'command is set. Please remove proxy command in the config.'
-                ),
+                    f'Docker image is currently not supported on {cls._REPR} '
+                    'when proxy command is set. Please remove proxy command in '
+                    'the config.'),
             })
 
         unsupported_features = set(unsupported_features2reason.keys())
@@ -493,6 +521,22 @@ class Cloud:
                 raise exceptions.NotSupportedError(
                     f'The following features are not supported by {cls._REPR}:'
                     '\n\t' + table.get_string().replace('\n', '\n\t'))
+
+    @classmethod
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[CloudImplementationFeatures, str]:
+        """The features not supported based on the resources provided.
+
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        del resources
+        raise NotImplementedError
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
@@ -687,3 +731,9 @@ class Cloud:
 
     def __repr__(self):
         return self._REPR
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('PROVISIONER_VERSION', None)
+        state.pop('STATUS_VERSION', None)
+        return state

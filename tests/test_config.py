@@ -141,9 +141,9 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     assert 'Invalid config YAML' in e.value.args[0]
 
 
-def test_invalid_num_items_config(monkeypatch, tmp_path) -> None:
+def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid number of array items."""
-    config_path = tmp_path / 'invalid.yaml'
+    config_path = tmp_path / 'valid.yaml'
     config_path.open('w').write(
         textwrap.dedent(f"""\
         gcp:
@@ -151,11 +151,8 @@ def test_invalid_num_items_config(monkeypatch, tmp_path) -> None:
                 - projects/my-project/reservations/my-reservation
                 - projects/my-project/reservations/my-reservation2
         """))
-    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
-                        tmp_path / 'invalid.yaml')
-    with pytest.raises(ValueError) as e:
-        _reload_config()
-    assert 'Invalid config YAML' in e.value.args[0]
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
+    _reload_config()
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:

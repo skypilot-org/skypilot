@@ -369,11 +369,12 @@ def list_accelerators(
     region_filter: Optional[str] = None,
     quantity_filter: Optional[int] = None,
     case_sensitive: bool = True,
+    all_regions: bool = False,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
                                             region_filter, quantity_filter,
-                                            case_sensitive)
+                                            case_sensitive, all_regions)
 
     # Remove GPUs that are unsupported by SkyPilot.
     new_results = {}
@@ -384,21 +385,29 @@ def list_accelerators(
             new_results[acc_name] = acc_info
     results = new_results
 
-    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
-    # A100 GPUs can only be attached to fixed-size A2 VMs,
-    # and L4 GPUs can only be attached to G2 VMs.
-    # Thus, we can show their exact cost including the host VM prices.
-
-    acc_infos: List[common.InstanceTypeInfo] = sum(
-        [results.get(a, []) for a in _ACC_INSTANCE_TYPE_DICTS], [])
-    if not acc_infos:
-        return results
+    # Figure out which instance type to use.
+    infos_with_instance_type: List[common.InstanceTypeInfo] = sum(
+        results.values(), [])
 
     new_infos = defaultdict(list)
-    for info in acc_infos:
-        assert pd.isna(info.instance_type) and pd.isna(info.memory), acc_infos
-        vm_types = _ACC_INSTANCE_TYPE_DICTS[info.accelerator_name][
-            info.accelerator_count]
+    for info in infos_with_instance_type:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), info
+        # We show TPU-VM prices here, so no instance type is needed.
+        # Set it as `TPU-VM` to be shown in the table.
+        if info.accelerator_name.startswith('tpu'):
+            new_infos[info.accelerator_name].append(
+                info._replace(instance_type='TPU-VM'))
+            continue
+        vm_types, _ = get_instance_type_for_accelerator(info.accelerator_name,
+                                                        info.accelerator_count,
+                                                        region=region_filter)
+        # The acc name & count in `info` are retrieved from the table so we
+        # could definitely find a column in the original table
+        # Additionally the way get_instance_type_for_accelerator works
+        # we will always get either a specialized instance type
+        # or a default instance type. So we can safely assume that
+        # vm_types is not None.
+        assert vm_types is not None
         for vm_type in vm_types:
             df = _df[_df['InstanceType'] == vm_type]
             cpu_count = df['vCPUs'].iloc[0]
@@ -406,12 +415,12 @@ def list_accelerators(
             vm_price = common.get_hourly_cost_impl(_df,
                                                    vm_type,
                                                    use_spot=False,
-                                                   region=None,
+                                                   region=region_filter,
                                                    zone=None)
             vm_spot_price = common.get_hourly_cost_impl(_df,
                                                         vm_type,
                                                         use_spot=True,
-                                                        region=None,
+                                                        region=region_filter,
                                                         zone=None)
             new_infos[info.accelerator_name].append(
                 info._replace(
@@ -422,8 +431,7 @@ def list_accelerators(
                     price=info.price + vm_price,
                     spot_price=info.spot_price + vm_spot_price,
                 ))
-    results.update(new_infos)
-    return results
+    return new_infos
 
 
 def get_region_zones_for_accelerators(

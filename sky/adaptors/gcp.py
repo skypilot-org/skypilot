@@ -2,6 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import functools
+import json
 
 googleapiclient = None
 google = None
@@ -82,3 +83,25 @@ def credential_error_exception():
     """CredentialError exception."""
     from google.auth import exceptions
     return exceptions.DefaultCredentialsError
+
+
+@import_package
+def get_credentials(cred_type: str, credentials_field: str):
+    """Get GCP credentials."""
+    from google.oauth2 import service_account
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+
+    if cred_type == 'service_account':
+        # If parsing the gcp_credentials failed, then the user likely made a
+        # mistake in copying the credentials into the config yaml.
+        try:
+            service_account_info = json.loads(credentials_field)
+        except json.decoder.JSONDecodeError as e:
+            raise RuntimeError('gcp_credentials found in cluster yaml file but '
+                               'formatted improperly.') from e
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info)
+    elif cred_type == 'credentials_token':
+        # Otherwise the credentials type must be credentials_token.
+        credentials = OAuthCredentials(credentials_field)
+    return credentials
