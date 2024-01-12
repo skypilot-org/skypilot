@@ -4137,14 +4137,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if terminate:
             cloud = handle.launched_resources.cloud
             config = common_utils.read_yaml(handle.cluster_yaml)
-            if provision_lib.supports(repr(cloud), 'cleanup_ports'):
-                try:
-                    provision_lib.cleanup_ports(repr(cloud),
-                                                cluster_name_on_cloud,
-                                                handle.launched_resources.ports,
-                                                config['provider'])
-                except exceptions.PortDoesNotExistError:
-                    logger.debug('Ports do not exist. Skipping cleanup.')
+            try:
+                cloud.check_features_are_supported(handle.launched_resources, {
+                    clouds.CloudImplementationFeatures.OPEN_PORTS})
+                provision_lib.cleanup_ports(repr(cloud),
+                                            cluster_name_on_cloud,
+                                            handle.launched_resources.ports,
+                                            config['provider'])
+            except exceptions.NotSupportedError:
+                pass
+            except exceptions.PortDoesNotExistError:
+                logger.debug('Ports do not exist. Skipping cleanup.')
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.

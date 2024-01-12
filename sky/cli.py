@@ -1957,8 +1957,12 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
 
             head_ip = handle.external_ips()[0]
             if show_endpoints:
-                cloud = handle.launched_resources.cloud
-                if not provision_lib.supports(repr(cloud), 'query_ports'):
+                launched_resources = handle.launched_resources
+                cloud = launched_resources.cloud
+                try:
+                    cloud.check_features_are_supported(launched_resources, {
+                        clouds.CloudImplementationFeatures.OPEN_PORTS})
+                except exceptions.NotSupportedError:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Querying endpoints is not supported '
                                          f'for {cloud}.')

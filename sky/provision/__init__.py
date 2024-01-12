@@ -5,7 +5,7 @@ providers supported by SkyPilot need to follow.
 """
 import functools
 import inspect
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky import status_lib
@@ -41,13 +41,6 @@ def _route_to_cloud_impl(func):
         return impl(*args, **kwargs)
 
     return _wrapper
-
-
-def supports(provider_name: str, method_name: str) -> bool:
-    """Check if the provider is supported."""
-    module_name = provider_name.lower()
-    module = globals().get(module_name)
-    return module is not None and hasattr(module, method_name)
 
 
 # pylint: disable=unused-argument
