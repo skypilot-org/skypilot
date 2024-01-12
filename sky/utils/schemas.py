@@ -584,6 +584,13 @@ def get_config_schema():
                             kubernetes_enums.KubernetesNetworkingMode
                         ]
                     },
+                    'ports': {
+                        'type': 'string',
+                        'case_insensitive_enum': [
+                            type.value
+                            for type in kubernetes_enums.KubernetesPortMode
+                        ]
+                    },
                 }
             },
             'oci': {

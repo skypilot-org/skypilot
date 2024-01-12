@@ -85,9 +85,9 @@ def _bulk_provision(
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
         except Exception as e:
-            # UX: for users we print "configure the cloud" vs. "bootstrap".
-            logger.error(f'{colorama.Fore.YELLOW}Failed to configure the cloud '
-                         f'for {cluster_name!r} with the following error:'
+            logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
+                         f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
+                         'with the following error:'
                          f'{colorama.Style.RESET_ALL}\n'
                          f'{common_utils.format_exception(e)}')
             raise

@@ -223,8 +223,7 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.
     # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
-           local_ray,
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
@@ -233,7 +232,7 @@ extras_require: Dict[str, List[str]] = {
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
     'remote': remote,
     'runpod': ['runpod>=1.3.7']
 }

@@ -99,6 +99,16 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                     "iam:GetInstanceProfile"
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
+            },
+            {
+            "Effect": "Allow",
+            "Action": "iam:CreateServiceLinkedRole",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:AWSServiceName": "spot.amazonaws.com"
+                }
+            }
             }
         ]
     }

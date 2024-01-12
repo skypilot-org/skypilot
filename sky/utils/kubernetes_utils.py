@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.backends import backend_utils
+from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -33,6 +34,13 @@ NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
 If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
 (e.g., skypilot.co/accelerators) are setup correctly. \
 To further debug, run: sky check.'
+
+# TODO(romilb): Add links to docs for configuration instructions when ready.
+ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
+                           'is configured correctly. '
+                           '\nTo debug, run: {debug_cmd}')
+
+KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1030,3 +1038,22 @@ def check_port_forward_mode_dependencies() -> None:
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {install_cmd}') from None
+
+
+def get_endpoint_debug_message() -> str:
+    """ Returns a string message for user to debug Kubernetes port opening
+
+    Polls the configured ports mode on Kubernetes to produce an
+    appropriate error message with debugging hints.
+
+    Also checks if the
+    """
+    port_mode = network_utils.get_port_mode()
+    if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
+        endpoint_type = 'Ingress'
+        debug_cmd = 'kubectl describe ingress && kubectl describe ingressclass'
+    elif port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
+        endpoint_type = 'LoadBalancer'
+        debug_cmd = 'kubectl describe service'
+    return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
+                                          debug_cmd=debug_cmd)

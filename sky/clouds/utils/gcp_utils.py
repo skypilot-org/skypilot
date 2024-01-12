@@ -14,6 +14,8 @@ from typing import List, Optional, Set
 import cachetools
 
 from sky import sky_logging
+from sky import skypilot_config
+from sky.provision.gcp import constants
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
@@ -160,3 +162,12 @@ def _list_reservations_for_instance_type(
         stream_logs=True,
     )
     return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
+
+
+def get_minimal_permissions() -> List[str]:
+    if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is not None:
+        return constants.VM_MINIMAL_PERMISSIONS
+    # If custom VPC is not specified, permissions to modify network are
+    # required to ensure SkyPilot to be able to setup the network, and
+    # allow opening ports (e.g., via `resources.ports`).
+    return constants.VM_MINIMAL_PERMISSIONS + constants.FIREWALL_PERMISSIONS

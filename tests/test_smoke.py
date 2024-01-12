@@ -288,7 +288,7 @@ def test_aws_region():
 
 
 @pytest.mark.gcp
-def test_gcp_region():
+def test_gcp_region_and_service_account():
     name = _get_cluster_name()
     test = Test(
         'gcp_region',
@@ -296,6 +296,8 @@ def test_gcp_region():
             f'sky launch -y -c {name} --region us-central1 --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
@@ -1401,6 +1403,23 @@ def test_scp_huggingface(generic_cloud: str):
     run_one_test(test)
 
 
+# ---------- Inferentia. ----------
+@pytest.mark.aws
+def test_inferentia():
+    name = _get_cluster_name()
+    test = Test(
+        'test_inferentia',
+        [
+            f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
+            f'sky exec {name} --gpus Inferentia:1 echo hi',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- TPU. ----------
 @pytest.mark.gcp
 @pytest.mark.tpu
@@ -1492,9 +1511,9 @@ def test_gcp_http_server_with_custom_ports():
         'gcp_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud gcp examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi',
         ],
         f'sky down -y {name}',
     )
@@ -1509,9 +1528,9 @@ def test_aws_http_server_with_custom_ports():
         'aws_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud aws examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi'
         ],
         f'sky down -y {name}',
     )
@@ -1526,9 +1545,26 @@ def test_azure_http_server_with_custom_ports():
         'azure_http_server_with_custom_ports',
         [
             f'sky launch -y -d -c {name} --cloud azure examples/http_server_with_custom_ports/task.yaml',
-            'sleep 10',
-            'ip=$(grep -A1 "Host ' + name +
-            '" ~/.ssh/config | grep "HostName" | awk \'{print $2}\'); curl $ip:33828 | grep "<h1>This is a demo HTML page.</h1>"',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 5); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 10; done; if [ "$success" = false ]; then exit 1; fi'
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Web apps with custom ports on Kubernetes. ----------
+@pytest.mark.kubernetes
+def test_kubernetes_http_server_with_custom_ports():
+    name = _get_cluster_name()
+    test = Test(
+        'kubernetes_http_server_with_custom_ports',
+        [
+            f'sky launch -y -d -c {name} --cloud kubernetes examples/http_server_with_custom_ports/task.yaml',
+            f'until SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}; do sleep 10; done',
+            # Retry a few times to avoid flakiness in ports being open.
+            f'ip=$(SKYPILOT_DEBUG=0 sky status --endpoint 33828 {name}); success=false; for i in $(seq 1 100); do if curl $ip | grep "<h1>This is a demo HTML page.</h1>"; then success=true; break; fi; sleep 5; done; if [ "$success" = false ]; then exit 1; fi'
         ],
         f'sky down -y {name}',
     )
@@ -1891,7 +1927,7 @@ def test_stop_gcp_spot():
             f'sky logs {name} 3 --status',
             # -i option at launch should go through:
             f'sky launch -c {name} -i0 -y',
-            'sleep 90',
+            'sleep 120',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
