@@ -149,6 +149,7 @@ def _get_cluster_config_template(cloud):
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
+        clouds.Scaleway: 'scaleway-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 

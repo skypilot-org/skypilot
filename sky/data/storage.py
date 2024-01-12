@@ -99,6 +99,8 @@ class StoreType(enum.Enum):
             return StoreType.AZURE
         elif isinstance(cloud, clouds.IBM):
             return StoreType.IBM
+        elif isinstance(cloud, clouds.Scaleway):
+            return StoreType.S3
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
@@ -138,6 +140,8 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.SCP):
         with ux_utils.print_exception_no_traceback():
             raise ValueError('SCP does not provide cloud storage.')
+    elif isinstance(cloud, clouds.Scaleway):
+        return StoreType.S3
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')

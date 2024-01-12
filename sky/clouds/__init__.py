@@ -17,6 +17,7 @@ from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 from sky.clouds.oci import OCI
+from sky.clouds.scaleway import Scaleway
 from sky.clouds.scp import SCP
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     'CloudImplementationFeatures',
     'Region',
     'Zone',
+    'Scaleway',
     'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
