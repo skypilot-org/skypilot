@@ -20,3 +20,11 @@
 .rst-versions {
     z-index: 10001 !important; /* Set to 10001 to avoid overlap with kapa */
 }
+
+html[data-theme="light"] {
+  --pst-color-secondary: var(--pst-color-primary);
+}
+
+html[data-theme="dark"] {
+  --pst-color-secondary: var(--pst-color-primary);
+}
