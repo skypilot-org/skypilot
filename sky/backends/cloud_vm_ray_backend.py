@@ -1289,18 +1289,15 @@ class RetryingVmProvisioner(object):
             yield zones
 
             # If it reaches here: the cluster status in the database gets
-            # set to INIT, since a launch request was issued but failed.
-            #
-            # Cluster with status UP can reach here, if it was killed by the
-            # cloud provider and no available resources in that region to
-            # relaunch, which can happen to spot instance.
+            # set to either STOPPED or None, since a launch request was issued
+            # but failed, and the provisioner stopped the cluster if
+            # `cluster_ever_up` is True; or terminated the cluster otherwise.
             if prev_cluster_ever_up:
-                message = (
-                    f'Failed to launch the cluster {cluster_name!r}. '
-                    'It is now stopped.\nTo remove the cluster '
-                    f'please run: sky down {cluster_name}\n'
-                    'Try launching the cluster again with: '
-                    f'sky start {cluster_name}')
+                message = (f'Failed to launch the cluster {cluster_name!r}. '
+                           'It is now stopped.\n\tTo remove the cluster '
+                           f'please run: sky down {cluster_name}\n\t'
+                           'Try launching the cluster again with: '
+                           f'sky start {cluster_name}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
