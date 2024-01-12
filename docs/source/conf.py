@@ -50,7 +50,6 @@ templates_path = ['_templates']
 # The main toctree document.
 main_doc = 'index'
 
-pygments_style = None
 autosummary_generate = True
 napolean_use_rtype = False
 
@@ -73,6 +72,8 @@ html_theme_options = {
     'use_edit_page_button': True,
     'repository_branch': 'master',
     'path_to_docs': 'docs/source',
+    'pygment_light_style': 'tango',
+    'pygment_dark_style': 'monokai',
 }
 
 # The name for this set of Sphinx documents.  If None, it defaults to
