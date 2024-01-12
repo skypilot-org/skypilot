@@ -6,6 +6,7 @@ import typing
 from typing import Any, Dict, List, Set, Tuple
 
 from sky.adaptors import gcp
+from sky.clouds.utils import gcp_utils
 from sky.provision import common
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
@@ -98,7 +99,7 @@ def _create_compute(gcp_credentials=None):
 def _create_tpu(gcp_credentials=None):
     return gcp.build(
         'tpu',
-        constants.TPU_VERSION,
+        constants.TPU_VM_VERSION,
         credentials=gcp_credentials,
         cache_discovery=False,
         discoveryServiceUrl='https://tpu.googleapis.com/$discovery/rest',
@@ -285,13 +286,12 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     )
     service_account = _get_service_account(email, project_id, iam)
 
-    permissions = constants.VM_MINIMAL_PERMISSIONS
+    permissions = gcp_utils.get_minimal_permissions()
     roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
         roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +
                  constants.TPU_SERVICE_ACCOUNT_ROLES)
-        permissions = (constants.VM_MINIMAL_PERMISSIONS +
-                       constants.TPU_MINIMAL_PERMISSIONS)
+        permissions = (permissions + constants.TPU_MINIMAL_PERMISSIONS)
 
     satisfied, policy = _is_permission_satisfied(service_account, crm, iam,
                                                  permissions, roles)
