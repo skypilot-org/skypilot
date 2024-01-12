@@ -68,7 +68,21 @@ def launch_cluster(task_yaml_path: str,
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         if resources_override is not None:
             resource_config = config.get('resources', {})
-            resource_config.update(resources_override)
+            # SkyServe does not support ordered resources.
+            if 'any_of' in resource_config:
+                new_any_of_configs = []
+                for any_of_config in resource_config['any_of']:
+                    for key, value in resources_override.items():
+                        # del keys that are set to None in resources_override
+                        if value is None:
+                            if key in any_of_config:
+                                del any_of_config[key]
+                        else:
+                            any_of_config[key] = value
+                    new_any_of_configs.append(any_of_config)
+                resource_config['any_of'] = new_any_of_configs
+            else:
+                resource_config.update(resources_override)
             config['resources'] = resource_config
         logger.info(f'Launching replica cluster {cluster_name} with '
                     f'resource_config: {resource_config}')

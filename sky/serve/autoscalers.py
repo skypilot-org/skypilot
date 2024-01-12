@@ -310,7 +310,6 @@ class SpotRequestRateAutoscaler(RequestRateAutoscaler):
             'use_spot': True,
             'spot_recovery': None,
             'region': None,
-            'any_of': None
         }
 
     def _scale_spot_instances(
