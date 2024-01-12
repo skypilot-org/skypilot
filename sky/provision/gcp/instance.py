@@ -331,6 +331,7 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
     if tpu_node is not None:
         vpc_name = resource.get_vpc_name(project_id, availability_zone,
                                          head_instance_id)
+        assert config.count == 1, 'TPU node only supports 1 instance'
         instance_utils.create_tpu_node(
             project_id,
             availability_zone,

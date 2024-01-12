@@ -173,6 +173,13 @@ class GCP(clouds.Cloud):
                     'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
                 )
             }
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            # TPU node does not support multi-node.
+            return {
+                clouds.CloudImplementationFeatures.MULTI_NODE:
+                    ('TPU node does not support multi-node. Please set '
+                     'num_nodes to 1.')
+            }
         return {}
 
     @classmethod
@@ -701,8 +708,6 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel,unused-import
         import google.auth
         import googleapiclient.discovery
-
-        from sky.provision.gcp import constants
 
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()

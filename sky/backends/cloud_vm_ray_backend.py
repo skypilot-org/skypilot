@@ -2166,8 +2166,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             stable_internal_external_ips: Optional[List[Tuple[str,
                                                               str]]] = None,
             stable_ssh_ports: Optional[List[int]] = None,
-            # Deprecated. SkyPilot new provisioner API handles the TPU node
-            # creation/deletion.
+            # The following 2 fields are deprecated. SkyPilot new provisioner
+            # API handles the TPU node creation/deletion.
             # Backward compatibility for TPU nodes created before #2943.
             # TODO (zhwu): Remove this after 0.6.0.
             tpu_create_script: Optional[str] = None,

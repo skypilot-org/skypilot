@@ -1329,8 +1329,8 @@ def get_node_type(node: dict) -> GCPNodeType:
 
 def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
                     vpc_name: str):
-    # Create TPU node.
-    # TODO(suquark, zhwu): move this to GCPTPUNodeInstance.
+    """Create a TPU node with gcloud CLI."""
+    # TODO(suquark, zhwu): move this to GcpTpuNodeInstance.
     tpu_name = tpu_node_config['name']
     tpu_type = tpu_node_config['acceleratorType']
     try:
@@ -1358,9 +1358,9 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             # 'create'. Or it can be in a "deleting" state. Investigate the
             # right thing to do (force kill + re-provision?).
             logger.warning(f'TPU {tpu_name} already exists; skipped creation.')
-
+            return
+        provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
         if 'RESOURCE_EXHAUSTED' in stderr:
-            provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
             provisioner_err.errors = [{
                 'code': 'RESOURCE_EXHAUSTED',
                 'domain': 'tpu',
@@ -1373,7 +1373,6 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             raise provisioner_err from e
 
         if 'PERMISSION_DENIED' in stderr:
-            provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
             provisioner_err.errors = [{
                 'code': 'PERMISSION_DENIED',
                 'domain': 'tpu',
@@ -1383,7 +1382,6 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             raise provisioner_err from e
 
         if 'no more capacity in the zone' in stderr:
-            provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
             provisioner_err.errors = [{
                 'code': 'CapacityExceeded',
                 'domain': 'tpu',
@@ -1396,7 +1394,6 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             # INVALID_ARGUMENT: CloudTpu received an invalid
             # AcceleratorType, "v3-8" for zone "us-central1-c". Valid
             # values are "v2-8, ".
-            provisioner_err = common.ProvisionError(TPU_NODE_CREATION_FAILURE)
             provisioner_err.errors = [{
                 'code': 'INVALID_ARGUMENT',
                 'domain': 'tpu',
@@ -1406,10 +1403,23 @@ def create_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str, str],
             _log_errors(provisioner_err.errors, e, zone)
             raise provisioner_err from e
 
+        provisioner_err.errors = [{
+            'code': 'UNKNOWN',
+            'domain': 'tpu',
+            'message': stderr
+        }]
+        _log_errors(provisioner_err.errors, e, zone)
+        raise provisioner_err from e
+
 
 def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
                                                                       str]):
-    # Delete TPU node.
+    """Delete a TPU node with gcloud CLI.
+
+    This is used for both stopping and terminating a TPU node. It is ok to call
+    this function to stop a TPU node because the host VM will be stopped and
+    have all the information preserved.
+    """
     tpu_name = tpu_node_config['name']
     try:
         cmd = (f'gcloud compute tpus delete {tpu_name} '

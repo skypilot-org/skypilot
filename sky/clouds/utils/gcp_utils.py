@@ -166,8 +166,8 @@ def _list_reservations_for_instance_type(
 
 def get_minimal_permissions() -> List[str]:
     if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is not None:
-        # If custom VPC is not specified, permissions to modify network are
-        # required to ensure SkyPilot to be able to setup the network, and
-        # allow opening ports (e.g., via `resources.ports`).
-        return constants.VM_MINIMAL_PERMISSIONS + constants.FIREWALL_PERMISSIONS
-    return constants.VM_MINIMAL_PERMISSIONS
+        return constants.VM_MINIMAL_PERMISSIONS
+    # If custom VPC is not specified, permissions to modify network are
+    # required to ensure SkyPilot to be able to setup the network, and
+    # allow opening ports (e.g., via `resources.ports`).
+    return constants.VM_MINIMAL_PERMISSIONS + constants.FIREWALL_PERMISSIONS

@@ -144,6 +144,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     # Other clouds
     ('provider', 'docker_login_config'),
     ('provider', 'firewall_rule'),
+    # TPU node launched before #2943 does not have the `provider.tpu_node` set,
+    # and our latest code need this field to be set to distinguish the node, so
+    # we need to restore this field.
     ('provider', 'tpu_node'),
     ('provider', 'security_group', 'GroupName'),
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
