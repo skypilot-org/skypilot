@@ -1286,14 +1286,8 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: '
                     f'{prev_cluster_status.value}) was previously launched '
                     f'in {cloud} {region.name}. Relaunching in that region.')
-            # TODO(zhwu): The cluster being killed by cloud provider should
-            # be tested whether re-launching a cluster killed spot instance
-            # will recover the data.
             yield zones
 
-            # TODO(zhwu): update the following logics, since we have added
-            # the support for refreshing the cluster status from the cloud
-            # provider.
             # If it reaches here: the cluster status in the database gets
             # set to INIT, since a launch request was issued but failed.
             #
@@ -1303,9 +1297,10 @@ class RetryingVmProvisioner(object):
             if prev_cluster_ever_up:
                 message = (
                     f'Failed to launch the cluster {cluster_name!r}. '
-                    'It is stopped. Try launching the cluster again with: '
-                    f'sky start {cluster_name}\nTo remove the cluster '
-                    f'please run: sky down {cluster_name}')
+                    'It is now stopped.\nTo remove the cluster '
+                    f'please run: sky down {cluster_name}\n'
+                    'Try launching the cluster again with: '
+                    f'sky start {cluster_name}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
