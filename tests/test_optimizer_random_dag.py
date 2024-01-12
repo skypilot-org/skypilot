@@ -37,7 +37,7 @@ def generate_random_dag(
             op = sky.Task(name=f'task{i}')
             task_runtime = random.random() * max_task_runtime
             op.set_time_estimator(lambda _: task_runtime)
-            op.num_nodes = random.randint(1, max_num_nodes)
+            op.num_nodes = random.randint(2, max_num_nodes)
             if i in single_node_task:
                 op.num_nodes = 1
 
