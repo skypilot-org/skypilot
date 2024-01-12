@@ -1960,8 +1960,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 launched_resources = handle.launched_resources
                 cloud = launched_resources.cloud
                 try:
-                    cloud.check_features_are_supported(launched_resources, {
-                        clouds.CloudImplementationFeatures.OPEN_PORTS})
+                    cloud.check_features_are_supported(
+                        launched_resources,
+                        {clouds.CloudImplementationFeatures.OPEN_PORTS})
                 except exceptions.NotSupportedError:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Querying endpoints is not supported '
