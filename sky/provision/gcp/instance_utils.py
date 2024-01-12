@@ -1416,9 +1416,9 @@ def delete_tpu_node(project_id: str, zone: str, tpu_node_config: Dict[str,
                                                                       str]):
     """Delete a TPU node with gcloud CLI.
 
-    This is used for both stopping and terminating a TPU node. It is ok to call
-    this function to stop a TPU node because the host VM will be stopped and
-    have all the information preserved.
+    This is used for both stopping and terminating a cluster with a TPU node. It
+    is ok to call this function to delete the TPU node when stopping the cluster
+    because the host VM will be stopped and have all the information preserved.
     """
     tpu_name = tpu_node_config['name']
     try:
