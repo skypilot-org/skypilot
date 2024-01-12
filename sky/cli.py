@@ -1966,7 +1966,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 except exceptions.NotSupportedError:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError('Querying endpoints is not supported '
-                                         f'for {cloud}.')
+                                         f'for {cloud}.') from None
 
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 port_details = provision_lib.query_ports(
