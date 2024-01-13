@@ -159,18 +159,18 @@ def get_cluster_info(
     running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
-    for node_id, node_info in running_instances.items():
-        instances[node_id] = [
+    for instance_id, instance_info in running_instances.items():
+        instances[instance_id] = [
             common.InstanceInfo(
-                instance_id=node_id,
-                internal_ip=node_info['internal_ip'],
-                external_ip=node_info['external_ip'],
-                ssh_port=node_info['ssh_port'],
+                instance_id=instance_id,
+                internal_ip=instance_info['internal_ip'],
+                external_ip=instance_info['external_ip'],
+                ssh_port=instance_info['ssh_port'],
                 tags={},
             )
         ]
-        if node_info['name'].endswith('-head'):
-            head_instance_id = node_id
+        if instance_info['name'].endswith('-head'):
+            head_instance_id = instance_id
 
     return common.ClusterInfo(
         instances=instances,

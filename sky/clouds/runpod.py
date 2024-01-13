@@ -178,8 +178,6 @@ class RunPod(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         """Returns a list of feasible resources for the given resources."""
-        if resources.use_spot:
-            return ([], [])
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -244,7 +242,7 @@ class RunPod(clouds.Cloud):
             return True, None
 
         except ImportError:
-            return False, ('Failed to import runpod.'
+            return False, ('Failed to import runpod. '
                            'To install, run: pip install skypilot[runpod]')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

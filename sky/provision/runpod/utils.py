@@ -1,7 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -64,11 +64,11 @@ def retry(func):
     return wrapper
 
 
-def list_instances() -> Dict[str, dict]:
+def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     instances = runpod.runpod().get_pods()
 
-    instance_dict: Dict[str, dict] = {}
+    instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
         info = {}
 
