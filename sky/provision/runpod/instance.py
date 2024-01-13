@@ -7,6 +7,7 @@ from sky import status_lib
 from sky.provision import common
 from sky.provision.runpod import utils
 from sky.utils import common_utils
+from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
 
@@ -143,9 +144,11 @@ def terminate_instances(
         try:
             utils.remove(inst_id)
         except Exception as e:
-            raise RuntimeError(
-                f'Failed to terminate instance {inst_id}: '
-                f'{common_utils.format_exception(e, use_bracket=False)}')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to terminate instance {inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
+                ) from e
 
 
 def get_cluster_info(
