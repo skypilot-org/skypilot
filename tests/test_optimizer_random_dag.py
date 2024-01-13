@@ -31,7 +31,7 @@ def generate_random_dag(
 ) -> sky.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
     random.seed(seed)
-    single_node_task = random.choices(list(range(num_tasks)), k=num_tasks // 2)
+    single_node_task_ids = random.choices(list(range(num_tasks)), k=num_tasks // 2)
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
