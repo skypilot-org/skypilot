@@ -343,10 +343,11 @@ RunPod
 
 `RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settingse>`_ page on your RunPod console and generate an API key. Then, run:
 
-.. code-bolck:: shell
+.. code-block:: shell
   
   pip install runpod
   runpod config
+
 
 Kubernetes
 ~~~~~~~~~~
