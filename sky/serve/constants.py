@@ -30,16 +30,22 @@ ENDPOINT_PROBE_INTERVAL_SECONDS = 10
 # TODO(tian): Expose this option to users in yaml file.
 READINESS_PROBE_TIMEOUT_SECONDS = 15
 
-# Autoscaler window size in seconds for request per second. We calculate rps by
-# divide the number of requests in last window size by this window size.
-AUTOSCALER_RPS_WINDOW_SIZE_SECONDS = 60
-# Autoscaler scale frequency in seconds. We will try to scale up/down every
-# `scale_frequency`.
-AUTOSCALER_SCALE_FREQUENCY_SECONDS = 20
-# Autoscaler cooldown time in seconds. We will not scale up/down if the last
-# scale up/down is within this cooldown time.
-AUTOSCALER_COOLDOWN_SECONDS = 60
-
+# Autoscaler window size in seconds for query per second. We calculate qps by
+# divide the number of queries in last window size by this window size.
+AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
+# Autoscaler scale decision interval in seconds.
+# We will try to scale up/down every `decision_interval`.
+AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20
+# Autoscaler no replica decision interval in seconds.
+AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS = 5
+# Autoscaler default upscale delays in seconds.
+# We will upscale only if the target number of instances
+# is larger than the current launched instances for delay amount of time.
+AUTOSCALER_DEFAULT_UPSCALE_DELAY_SECONDS = 300
+# Autoscaler default downscale delays in seconds.
+# We will downscale only if the target number of instances
+# is smaller than the current launched instances for delay amount of time.
+AUTOSCALER_DEFAULT_DOWNSCALE_DELAY_SECONDS = 1200
 # The default controller resources. We need 200 GB disk space to enable using
 # Azure as controller, since its default image size is 150 GB.
 # TODO(tian): We might need to be careful that service logs can take a lot of

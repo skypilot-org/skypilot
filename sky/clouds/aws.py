@@ -106,17 +106,26 @@ class AWS(clouds.Cloud):
     _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        f'\n{_INDENT_PREFIX}  $ pip install boto3'
         f'\n{_INDENT_PREFIX}  $ aws configure'
         f'\n{_INDENT_PREFIX}  $ aws configure list  # Ensure that this shows identity is set.'
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return dict()
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources_lib.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if resources.use_spot:
+            return {
+                clouds.CloudImplementationFeatures.STOP:
+                    ('Stopping spot instances is currently not supported on'
+                     f' {cls._REPR}.'),
+            }
+        return {}
 
     @classmethod
     def max_cluster_name_length(cls) -> Optional[int]:
@@ -452,6 +461,13 @@ class AWS(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
+        dependency_installation_hints = (
+            'AWS dependencies are not installed. '
+            'Run the following commands:'
+            f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
+            f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
+            f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws --version',
                               shell=True,
@@ -459,12 +475,14 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            return False, (
-                'AWS CLI is not installed properly. '
-                'Run the following commands:'
-                f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[aws]'
-                f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                f'{cls._STATIC_CREDENTIAL_HELP_STR}')
+            return False, dependency_installation_hints
+        try:
+            # Checks if aws boto is installed properly
+            # pylint: disable=import-outside-toplevel, unused-import
+            import boto3
+            import botocore
+        except ImportError:
+            return False, dependency_installation_hints
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
@@ -793,7 +811,7 @@ class AWS(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         # TODO(suquark): deprecate this method
-        assert False, 'This could path should not be used.'
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,

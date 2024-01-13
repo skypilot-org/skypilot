@@ -68,7 +68,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
-    assert not use_spot, 'Current Azure subscription does not support spot.'
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
@@ -170,9 +169,9 @@ def list_accelerators(
         name_filter: Optional[str],
         region_filter: Optional[str],
         quantity_filter: Optional[int],
-        case_sensitive: bool = True
-) -> Dict[str, List[common.InstanceTypeInfo]]:
+        case_sensitive: bool = True,
+        all_regions: bool = False) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
                                          region_filter, quantity_filter,
-                                         case_sensitive)
+                                         case_sensitive, all_regions)

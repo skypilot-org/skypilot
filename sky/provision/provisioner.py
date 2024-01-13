@@ -22,6 +22,7 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -84,9 +85,9 @@ def _bulk_provision(
                                                    cluster_name.name_on_cloud,
                                                    bootstrap_config)
         except Exception as e:
-            # UX: for users we print "configure the cloud" vs. "bootstrap".
-            logger.error(f'{colorama.Fore.YELLOW}Failed to configure the cloud '
-                         f'for {cluster_name!r} with the following error:'
+            logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
+                         f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
+                         'with the following error:'
                          f'{colorama.Style.RESET_ALL}\n'
                          f'{common_utils.format_exception(e)}')
             raise
@@ -120,8 +121,9 @@ def _bulk_provision(
             f'Instances of {cluster_name!r} are ready after {retry_cnt} '
             'retries.')
 
-    logger.debug(f'\nProvisioning {cluster_name!r} took {time.time() - start} '
-                 f'seconds.')
+    logger.debug(
+        f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
+        f'seconds.')
 
     return provision_record
 
@@ -135,16 +137,17 @@ def bulk_provision(
     cluster_yaml: str,
     is_prev_cluster_healthy: bool,
     log_dir: str,
-) -> Optional[provision_common.ProvisionRecord]:
+) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned."""
     original_config = common_utils.read_yaml(cluster_yaml)
+    head_node_type = original_config['head_node_type']
     bootstrap_config = provision_common.ProvisionConfig(
         provider_config=original_config['provider'],
         authentication_config=original_config['auth'],
         docker_config=original_config.get('docker', {}),
         # NOTE: (might be a legacy issue) we call it
         # 'ray_head_default' in 'gcp-ray.yaml'
-        node_config=original_config['available_node_types']['ray.head.default']
+        node_config=original_config['available_node_types'][head_node_type]
         ['node_config'],
         count=num_nodes,
         tags={},
@@ -178,7 +181,7 @@ def bulk_provision(
                              cluster_name,
                              terminate=terminate,
                              provider_config=original_config['provider'])
-            return None
+            raise
 
 
 def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
@@ -194,6 +197,7 @@ def teardown_cluster(cloud_name: str, cluster_name: ClusterName,
 
 
 def _ssh_probe_command(ip: str,
+                       ssh_port: int,
                        ssh_user: str,
                        ssh_private_key: str,
                        ssh_proxy_command: Optional[str] = None) -> List[str]:
@@ -205,6 +209,8 @@ def _ssh_probe_command(ip: str,
         '-i',
         ssh_private_key,
         f'{ssh_user}@{ip}',
+        '-p',
+        str(ssh_port),
         '-o',
         'StrictHostKeyChecking=no',
         '-o',
@@ -237,19 +243,20 @@ def _shlex_join(command: List[str]) -> str:
 
 def _wait_ssh_connection_direct(
         ip: str,
+        ssh_port: int,
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
     assert ssh_proxy_command is None, 'SSH proxy command is not supported.'
     try:
-        with socket.create_connection((ip, 22), timeout=1) as s:
+        with socket.create_connection((ip, ssh_port), timeout=1) as s:
             if s.recv(100).startswith(b'SSH'):
                 # Wait for SSH being actually ready, otherwise we may get the
                 # following error:
                 # "System is booting up. Unprivileged users are not permitted to
                 # log in yet".
-                return _wait_ssh_connection_indirect(ip, ssh_user,
+                return _wait_ssh_connection_indirect(ip, ssh_port, ssh_user,
                                                      ssh_private_key,
                                                      ssh_control_name,
                                                      ssh_proxy_command)
@@ -257,7 +264,7 @@ def _wait_ssh_connection_direct(
         pass
     except Exception:  # pylint: disable=broad-except
         pass
-    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+    command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
                  f'{_shlex_join(command)}')
@@ -266,12 +273,13 @@ def _wait_ssh_connection_direct(
 
 def _wait_ssh_connection_indirect(
         ip: str,
+        ssh_port: int,
         ssh_user: str,
         ssh_private_key: str,
         ssh_control_name: Optional[str] = None,
         ssh_proxy_command: Optional[str] = None) -> bool:
     del ssh_control_name
-    command = _ssh_probe_command(ip, ssh_user, ssh_private_key,
+    command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_proxy_command)
     proc = subprocess.run(command,
                           shell=False,
@@ -297,15 +305,19 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
         # See https://github.com/skypilot-org/skypilot/pull/1512
         waiter = _wait_ssh_connection_indirect
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
 
     timeout = 60 * 10  # 10-min maximum timeout
     start = time.time()
     # use a queue for SSH querying
     ips = collections.deque(ip_list)
+    ssh_ports = collections.deque(port_list)
     while ips:
         ip = ips.popleft()
-        if not waiter(ip, **ssh_credentials):
+        ssh_port = ssh_ports.popleft()
+        if not waiter(ip, ssh_port, **ssh_credentials):
             ips.append(ip)
+            ssh_ports.append(ssh_port)
             if time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
@@ -318,11 +330,14 @@ def _post_provision_setup(
         cloud_name: str, cluster_name: ClusterName, cluster_yaml: str,
         provision_record: provision_common.ProvisionRecord,
         custom_resource: Optional[str]) -> provision_common.ClusterInfo:
+    config_from_yaml = common_utils.read_yaml(cluster_yaml)
+    provider_config = config_from_yaml.get('provider')
     cluster_info = provision.get_cluster_info(cloud_name,
                                               provision_record.region,
-                                              cluster_name.name_on_cloud)
+                                              cluster_name.name_on_cloud,
+                                              provider_config=provider_config)
 
-    if len(cluster_info.instances) > 1:
+    if cluster_info.num_instances > 1:
         # Only worker nodes have logs in the per-instance log directory. Head
         # node's log will be redirected to the main log file.
         per_instance_log_dir = metadata_utils.get_instance_log_dir(
@@ -342,16 +357,9 @@ def _post_provision_setup(
                            'Could not find any head instance.')
 
     # TODO(suquark): Move wheel build here in future PRs.
-    config_from_yaml = common_utils.read_yaml(cluster_yaml)
     ip_list = cluster_info.get_feasible_ips()
+    port_list = cluster_info.get_ssh_ports()
     ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-
-    # TODO(suquark): Handle TPU VMs when dealing with GCP later.
-    # if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
-    #     logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
-    #                 f'{style.RESET_ALL}')
-    #     RetryingVmProvisioner._tpu_pod_setup(
-    #         None, handle.cluster_yaml, handle)
 
     with rich_utils.safe_status(
             '[bold cyan]Launching - Waiting for SSH access[/]') as status:
@@ -409,22 +417,25 @@ def _post_provision_setup(
             cluster_info, ssh_credentials)
 
         head_runner = command_runner.SSHCommandRunner(ip_list[0],
-                                                      port=22,
+                                                      port=port_list[0],
                                                       **ssh_credentials)
 
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
         full_ray_setup = True
+        ray_port = constants.SKY_REMOTE_RAY_PORT
         if not provision_record.is_instance_just_booted(
                 head_instance.instance_id):
             # Check if head node Ray is alive
-            returncode = head_runner.run(
+            returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                stream_logs=False)
+                stream_logs=False,
+                require_outputs=True)
             if returncode:
                 logger.info('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
+                ray_port = common_utils.decode_payload(stdout)['ray_port']
             full_ray_setup = bool(returncode)
 
         if full_ray_setup:
@@ -449,6 +460,11 @@ def _post_provision_setup(
                 cluster_name.name_on_cloud,
                 no_restart=not full_ray_setup,
                 custom_resource=custom_resource,
+                # Pass the ray_port to worker nodes for backward compatibility
+                # as in some existing clusters the ray_port is not dumped with
+                # instance_setup._DUMP_RAY_PORTS. We should use the ray_port
+                # from the head node for worker nodes.
+                ray_port=ray_port,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
 

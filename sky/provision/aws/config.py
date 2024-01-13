@@ -8,6 +8,7 @@ _default_ec2_resource() to avoid version mismatch issues.
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
+import functools
 import json
 import logging
 import time
@@ -195,7 +196,58 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
+@functools.lru_cache(maxsize=128)  # Keep bounded.
+def _get_route_tables(ec2, vpc_id: Optional[str], main: bool) -> List[Any]:
+    filters = [{'Name': 'association.main', 'Values': [str(main).lower()]}]
+    if vpc_id is not None:
+        filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
+    return ec2.meta.client.describe_route_tables(Filters=filters).get(
+        'RouteTables', [])
+
+
+def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
+    """Checks if a subnet is public by existence of a route to an IGW.
+
+    Conventionally, public subnets connect to a IGW, and private subnets to a
+    NAT. See ref:
+    https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Internet_Gateway.html
+    """
+    # Get the route tables associated with the subnet
+    all_route_tables = _get_route_tables(ec2, vpc_id, main=False)
+    route_tables = [
+        rt for rt in all_route_tables
+        # An RT can be associated with multiple subnets, i.e.,
+        # rt['Associations'] is a list of associations.
+        # There may be no subnet associated in an association.
+        if any(
+            assoc.get('SubnetId', '') == subnet_id
+            for assoc in rt['Associations'])
+    ]
+
+    # Check each route table for an internet gateway route
+    def _has_igw_route(route_tables):
+        for route_table in route_tables:
+            for route in route_table.get('Routes', []):
+                if route.get('GatewayId', '').startswith('igw-'):
+                    return True
+        return False
+
+    logger.debug(f'subnet {subnet_id} route tables: {route_tables}')
+    if _has_igw_route(route_tables):
+        return True
+    if len(route_tables) > 0:
+        return False
+
+    # Handle the case that a "main" route table is implicitly associated with
+    # subnets. Since the associations are implicit, the filter above won't find
+    # any. Check there exists a main route table with routes pointing to an IGW.
+    logger.debug('Checking main route table')
+    main_route_tables = _get_route_tables(ec2, vpc_id, main=True)
+    return _has_igw_route(main_route_tables)
+
+
 def _usable_subnets(
+    ec2,
     user_specified_subnets: Optional[List[Any]],
     all_subnets: List[Any],
     azs: Optional[str],
@@ -234,14 +286,6 @@ def _usable_subnets(
         }
         return user_specified_subnet_ids - current_subnet_ids
 
-    def _subnet_name_tag_contains(subnet, substr: str) -> bool:
-        tags = subnet.meta.data['Tags']
-        for tag in tags:
-            if tag['Key'] == 'Name':
-                name = tag['Value']
-                return substr in name
-        return False
-
     try:
         candidate_subnets = (user_specified_subnets if user_specified_subnets
                              is not None else all_subnets)
@@ -250,50 +294,44 @@ def _usable_subnets(
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
 
+        available_subnets = [
+            s for s in candidate_subnets if s.state == 'available'
+        ]
+
+        if use_internal_ips:
+            # Get private subnets.
+            #
+            # We get private subnets by (1) not _is_subnet_public(), which
+            # checks if there is a route to IGW; (2) the subnets must not assign
+            # public IPs by default (not map_public_ip_on_launch).
+            subnets = [
+                s for s in available_subnets
+                if not _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg) and
+                not s.map_public_ip_on_launch
+            ]
+        else:
+            # Get public subnets.
+            #
+            # Note that we do not test for 's.map_public_ip_on_launch' being
+            # True. For example, the VPC creation helper from AWS will create a
+            # 'public' and a 'private' subnet per AZ. However, the created
+            # 'public' subnet by default has map_public_ip_on_launch set to
+            # False as well. We can still allow users to launch a public
+            # IP-enabled VM in such a public subnet (the underlying
+            # ec2.create_instances() call will set AssociatePublicIpAddress to
+            # True appropriately).
+            subnets = [
+                s for s in available_subnets
+                if _is_subnet_public(ec2, s.subnet_id, vpc_id_of_sg)
+            ]
+
         subnets = sorted(
-            (
-                s for s in candidate_subnets if s.state == 'available' and (
-                    # If using internal IPs, the subnets must not assign public
-                    # IPs. Additionally, requires that each eligible subnet
-                    # contain a name tag which includes the substring
-                    # 'private'. This is a HACK; see below.
-                    #
-                    # Reason: the first two checks alone are not enough. For
-                    # example, the VPC creation helper from AWS will create a
-                    # 'public' and a 'private' subnet per AZ. However, the
-                    # created 'public' subnet by default has
-                    # map_public_ip_on_launch set to False as well. This means
-                    # we could've launched in that subnet, which will make any
-                    # instances not able to send outbound traffic to the
-                    # Internet, due to the way route tables/gateways are set up
-                    # for that public subnet. The 'public' subnets are NOT
-                    # intended to host data plane VMs, while the 'private'
-                    # subnets are.
-                    #
-                    # An alternative to the subnet name hack is to ensure
-                    # there's a route (dest=0.0.0.0/0, target=nat-*) in the
-                    # subnet's route table so that outbound connections
-                    # work. This seems hard to do, given a ec2.Subnet
-                    # object. (Easy to see in console though.) So we opt for
-                    # the subnet name requirement for now.
-                    (use_internal_ips and not s.map_public_ip_on_launch and
-                     _subnet_name_tag_contains(s, 'private')) or
-                    # Or if using public IPs, the subnets must assign public
-                    # IPs.
-                    (not use_internal_ips and s.map_public_ip_on_launch)
-                    # NOTE: SkyPilot also changes the semantics of
-                    # 'use_internal_ips' through the above two conditions.
-                    # Previously, this flag by itself does not enforce only
-                    # choosing subnets that do not assign public IPs.  Now we
-                    # do so.
-                    #
-                    # In both before and now, this flag makes Ray communicate
-                    # between the client and the head node using the latter's
-                    # private ip.
-                )),
+            subnets,
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
         )
+        logger.debug(f'use_internal_ips: {use_internal_ips}')
+        logger.debug(f'subnets: {subnets}')
     except aws.botocore_exceptions().ClientError as exc:
         utils.handle_boto_error(exc,
                                 'Failed to fetch available subnets from AWS.')
@@ -413,8 +451,9 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
 
     all_subnets = list(ec2.subnets.all())
     subnets, vpc_id = _usable_subnets(
-        None,
-        all_subnets,
+        ec2,
+        user_specified_subnets=None,
+        all_subnets=all_subnets,
         azs=availability_zone,
         vpc_id_of_sg=vpc_id_of_sg,
         use_internal_ips=use_internal_ips,

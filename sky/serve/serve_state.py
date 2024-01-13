@@ -25,6 +25,7 @@ _DB_PATH = str(_DB_PATH)
 def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
     """Creates the service and replica tables if they do not exist."""
 
+    # auto_restart column is deprecated.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS services (
         name TEXT PRIMARY KEY,
@@ -47,6 +48,8 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
+                             'requested_resources_str', 'TEXT')
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
@@ -97,6 +100,15 @@ class ReplicaStatus(enum.Enum):
     def failed_statuses(cls) -> List['ReplicaStatus']:
         return [cls.FAILED, cls.FAILED_CLEANUP, cls.UNKNOWN]
 
+    @classmethod
+    def launched_statuses(cls) -> List['ReplicaStatus']:
+        return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
+
+    @classmethod
+    def scale_down_decision_order(cls) -> List['ReplicaStatus']:
+        # Scale down replicas in the order of replica initialization
+        return [cls.PENDING, cls.PROVISIONING, cls.STARTING, cls.READY]
+
     def colored_str(self) -> str:
         color = _REPLICA_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
@@ -141,6 +153,9 @@ class ServiceStatus(enum.Enum):
     # Clean up failed
     FAILED_CLEANUP = 'FAILED_CLEANUP'
 
+    # No replica
+    NO_REPLICA = 'NO_REPLICA'
+
     @classmethod
     def failed_statuses(cls) -> List['ServiceStatus']:
         return [cls.CONTROLLER_FAILED, cls.FAILED_CLEANUP]
@@ -163,6 +178,9 @@ class ServiceStatus(enum.Enum):
         if sum(status2num[status]
                for status in ReplicaStatus.failed_statuses()) > 0:
             return cls.FAILED
+        # When min_replicas = 0, there is no (provisioning) replica.
+        if len(replica_statuses) == 0:
+            return cls.NO_REPLICA
         return cls.REPLICA_INIT
 
 
@@ -174,12 +192,12 @@ _SERVICE_STATUS_TO_COLOR = {
     ServiceStatus.SHUTTING_DOWN: colorama.Fore.YELLOW,
     ServiceStatus.FAILED: colorama.Fore.RED,
     ServiceStatus.FAILED_CLEANUP: colorama.Fore.RED,
+    ServiceStatus.NO_REPLICA: colorama.Fore.MAGENTA,
 }
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                auto_restart: bool, requested_resources: 'sky.Resources',
-                status: ServiceStatus) -> bool:
+                requested_resources_str: str, status: ServiceStatus) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -191,10 +209,9 @@ def add_service(name: str, controller_job_id: int, policy: str,
             """\
             INSERT INTO services
             (name, controller_job_id, status, policy,
-            auto_restart, requested_resources)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, controller_job_id, status.value, policy, int(auto_restart),
-             pickle.dumps(requested_resources)))
+            requested_resources_str)
+            VALUES (?, ?, ?, ?, ?)""", (name, controller_job_id, status.value,
+                                        policy, requested_resources_str))
         _DB.conn.commit()
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -251,7 +268,7 @@ def set_service_load_balancer_port(service_name: str,
 
 def _get_service_from_row(row) -> Dict[str, Any]:
     (name, controller_job_id, controller_port, load_balancer_port, status,
-     uptime, policy, auto_restart, requested_resources) = row[:9]
+     uptime, policy, _, requested_resources, requested_resources_str) = row[:10]
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -260,9 +277,11 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'status': ServiceStatus[status],
         'uptime': uptime,
         'policy': policy,
-        'auto_restart': bool(auto_restart),
+        # TODO(tian): Backward compatibility.
+        # Remove after 2 minor release, 0.6.0.
         'requested_resources': pickle.loads(requested_resources)
                                if requested_resources is not None else None,
+        'requested_resources_str': requested_resources_str,
     }
 
 

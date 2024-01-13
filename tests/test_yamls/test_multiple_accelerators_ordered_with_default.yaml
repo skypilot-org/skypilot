@@ -1,0 +1,8 @@
+name: multi-accelerators-ordered
+
+resources:
+  use_spot: true
+  accelerators: ['A100:1', 'T4:1', 'V100:1', 'K80:1']
+
+run: |
+  nvidia-smi
