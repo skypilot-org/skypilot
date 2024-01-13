@@ -102,7 +102,7 @@ def generate_random_dag(
     return dag
 
 
-def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> Tuple[float, dict]:
+def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
     """Manually finds the minimum objective value."""
     graph = dag.get_graph()
     topo_order = dag.tasks
