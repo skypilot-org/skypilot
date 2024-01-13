@@ -135,7 +135,9 @@ install_requires = [
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
-    'colorama',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama < 0.4.5',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
@@ -205,9 +207,6 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -234,7 +233,6 @@ extras_require: Dict[str, List[str]] = {
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
     'remote': remote,
-    'runpod': ['runpod>=1.3.7']
 }
 
 extras_require['all'] = sum(extras_require.values(), [])

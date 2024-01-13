@@ -17,7 +17,6 @@ from sky.provision import azure
 from sky.provision import common
 from sky.provision import gcp
 from sky.provision import kubernetes
-from sky.provision import runpod
 
 logger = sky_logging.init_logger(__name__)
 

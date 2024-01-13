@@ -79,7 +79,6 @@ class InstanceInfo:
     internal_ip: str
     external_ip: Optional[str]
     tags: Dict[str, str]
-    ssh_port: int = 22
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -128,17 +127,16 @@ class ClusterInfo:
         Returns:
             A list of tuples (internal_ip, external_ip) of all instances.
         """
-        head_instance = self.get_head_instance()
-        if head_instance is None:
-            head_instance_ip = []
+        head_node = self.get_head_instance()
+        if head_node is None:
+            head_node_ip = []
         else:
-            head_instance_ip = [(head_instance.internal_ip,
-                                 head_instance.external_ip)]
+            head_node_ip = [(head_node.internal_ip, head_node.external_ip)]
         other_ips = []
         for instance in self.get_worker_instances():
             pair = (instance.internal_ip, instance.external_ip)
             other_ips.append(pair)
-        return head_instance_ip + other_ips
+        return head_node_ip + other_ips
 
     def has_external_ips(self) -> bool:
         """True if the cluster has external IP."""
@@ -171,18 +169,6 @@ class ClusterInfo:
     def get_feasible_ips(self, force_internal_ips: bool = False) -> List[str]:
         """Get external IPs if they exist, otherwise get internal ones."""
         return self._get_ips(not self.has_external_ips() or force_internal_ips)
-
-    def get_ssh_ports(self) -> List[int]:
-        """Get the SSH port of all the instances."""
-        head_instance = self.get_head_instance()
-        assert head_instance is not None, self
-        head_instance_port = [head_instance.ssh_port]
-
-        worker_instances = self.get_worker_instances()
-        worker_instance_ports = [
-            instance.ssh_port for instance in worker_instances
-        ]
-        return head_instance_port + worker_instance_ports
 
 
 class Endpoint:
