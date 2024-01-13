@@ -31,7 +31,8 @@ def generate_random_dag(
 ) -> sky.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
     random.seed(seed)
-    single_node_task_ids = random.choices(list(range(num_tasks)), k=num_tasks // 2)
+    single_node_task_ids = random.choices(list(range(num_tasks)),
+                                          k=num_tasks // 2)
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
@@ -102,7 +103,9 @@ def generate_random_dag(
     return dag
 
 
-def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
+def find_min_objective(
+        dag: sky.Dag,
+        minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
     """Manually finds the minimum objective value."""
     graph = dag.get_graph()
     topo_order = dag.tasks
