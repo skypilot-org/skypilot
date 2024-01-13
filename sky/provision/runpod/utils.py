@@ -1,10 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 
-import json
-import os
-from pathlib import Path
 import time
-from typing import Dict, Optional
+from typing import Dict
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -67,65 +64,32 @@ def retry(func):
     return wrapper
 
 
-def get_set_tags(instance_id: str, new_tags: Optional[Dict]) -> Dict:
-    """Gets the tags for the given instance.
-    - Creates the tag file if it doesn't exist.
-    - Returns the tags for the given instance.
-    - If tags are provided, sets the tags for the given instance.
-    """
-    tag_file_path = os.path.expanduser('~/.runpod/skypilot_tags.json')
-
-    # Ensure the tag file exists, create it if it doesn't.
-    if not os.path.exists(tag_file_path):
-        Path(os.path.dirname(tag_file_path)).mkdir(parents=True, exist_ok=True)
-        with open(tag_file_path, 'w', encoding='UTF-8') as tag_file:
-            json.dump({}, tag_file, indent=4)
-
-    # Read existing tags
-    with open(tag_file_path, 'r', encoding='UTF-8') as tag_file:
-        tags = json.load(tag_file)
-
-    if tags is None:
-        tags = {}
-
-    # If new_tags is provided, update the tags for the instance
-    if new_tags:
-        instance_tags = tags.get(instance_id, {})
-        instance_tags.update(new_tags)
-        tags[instance_id] = instance_tags
-        with open(tag_file_path, 'w', encoding='UTF-8') as tag_file:
-            json.dump(tags, tag_file, indent=4)
-
-    return tags.get(instance_id, {})
-
-
-def list_instances():
+def list_instances() -> Dict[str, dict]:
     """Lists instances associated with API key."""
     instances = runpod.runpod().get_pods()
 
-    instance_list = {}
+    instance_dict: Dict[str, dict] = {}
     for instance in instances:
-        instance_list[instance['id']] = {}
+        info = {}
 
-        instance_list[instance['id']]['status'] = instance['desiredStatus']
-        instance_list[instance['id']]['name'] = instance['name']
+        info['status'] = instance['desiredStatus']
+        info['name'] = instance['name']
 
         if instance['desiredStatus'] == 'RUNNING' and instance.get('runtime'):
             for port in instance['runtime']['ports']:
                 if port['privatePort'] == 22 and port['isIpPublic']:
-                    instance_list[instance['id']]['external_ip'] = port['ip']
-                    instance_list[
+                    info['external_ip'] = port['ip']
+                    instance_dict[
                         instance['id']]['ssh_port'] = port['publicPort']
                 elif not port['isIpPublic']:
-                    instance_list[instance['id']]['internal_ip'] = port['ip']
+                    info['internal_ip'] = port['ip']
 
-        instance_list[instance['id']]['tags'] = get_set_tags(
-            instance['id'], None)
+        instance_dict[instance['id']] = info
 
-    return instance_list
+    return instance_dict
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int):
+def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -153,11 +117,6 @@ def launch(name: str, instance_type: str, region: str, disk_size: int):
     )
 
     return new_instance['id']
-
-
-def set_tags(instance_id: str, tags: Dict):
-    """Sets the tags for the given instance."""
-    get_set_tags(instance_id, tags)
 
 
 def remove(instance_id: str):

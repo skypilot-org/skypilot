@@ -1,7 +1,7 @@
 """ RunPod | Catalog
 
 This module loads the service catalog file and can be used to
-quarry instance types and pricing information for RunPod.
+query instance types and pricing information for RunPod.
 """
 
 import typing

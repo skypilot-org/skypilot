@@ -159,6 +159,7 @@ def bulk_provision(
             logger.debug(
                 'Provision config:\n'
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            raise RuntimeError('test')
             return _bulk_provision(cloud, region, zones, cluster_name,
                                    bootstrap_config)
         except Exception:  # pylint: disable=broad-except

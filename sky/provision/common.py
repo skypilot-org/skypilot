@@ -184,6 +184,7 @@ class ClusterInfo:
         ]
         return head_instance_port + worker_instance_ports
 
+
 class Endpoint:
     """Base class for endpoints."""
     pass

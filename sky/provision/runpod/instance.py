@@ -1,4 +1,4 @@
-"""GCP instance provisioning."""
+"""RunPod instance provisioning."""
 import time
 from typing import Any, Dict, List, Optional
 
@@ -6,6 +6,7 @@ from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.runpod import utils
+from sky.utils import common_utils
 
 POLL_INTERVAL = 5
 
@@ -20,14 +21,14 @@ def _filter_instances(cluster_name_on_cloud: str,
         f'{cluster_name_on_cloud}-head', f'{cluster_name_on_cloud}-worker'
     ]
 
-    filtered_nodes = {}
+    filtered_instances = {}
     for instance_id, instance in instances.items():
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
         if instance.get('name') in possible_names:
-            filtered_nodes[instance_id] = instance
-    return filtered_nodes
+            filtered_instances[instance_id] = instance
+    return filtered_instances
 
 
 def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
@@ -97,11 +98,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         for instance_id, instance in instances.items():
             if instance.get('ssh_port') is not None:
                 ready_instance_cnt += 1
+        logger.info('Waiting for instances to be ready: '
+                    f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
             break
 
-        logger.info('Waiting for instances to be ready '
-                    f'({len(instances)}/{config.count}).')
         time.sleep(POLL_INTERVAL)
     assert head_instance_id is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(provider_name='runpod',
@@ -132,26 +133,30 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del provider_config
+    del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
-        logger.info(f'Terminating instance {inst_id}.'
-                    f'{inst}')
+        logger.info(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
         logger.info(f'Start {inst_id}: {inst}')
-        utils.remove(inst_id)
+        try:
+            utils.remove(inst_id)
+        except Exception as e:
+            raise RuntimeError(
+                f'Failed to terminate instance {inst_id}: '
+                f'{common_utils.format_exception(e, use_bracket=False)}')
 
 
 def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    del region, provider_config
-    nodes = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
+    del region, provider_config  # unused
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
-    for node_id, node_info in nodes.items():
+    for node_id, node_info in running_instances.items():
         instances[node_id] = [
             common.InstanceInfo(
                 instance_id=node_id,

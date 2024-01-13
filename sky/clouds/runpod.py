@@ -25,10 +25,15 @@ class RunPod(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as runpod API does not implement spot .'),
+            ('Spot is not supported, as runpod API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            ('Opening ports is not '
+             'supported yet on RunPod.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Customizing disk tier is not supported yet on RunPod.')
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -124,9 +129,6 @@ class RunPod(clouds.Cloud):
     def get_egress_cost(self, num_gigabytes: float) -> float:
         return 0.0
 
-    def __repr__(self):
-        return 'RunPod'
-
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
         return isinstance(other, RunPod)
@@ -157,7 +159,7 @@ class RunPod(clouds.Cloud):
             self, resources: 'resources_lib.Resources',
             cluster_name_on_cloud: str, region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
-        del zones
+        del zones  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -173,7 +175,8 @@ class RunPod(clouds.Cloud):
         }
 
     def _get_feasible_launchable_resources(
-            self, resources: 'resources_lib.Resources'):
+        self, resources: 'resources_lib.Resources'
+    ) -> Tuple[List['resources_lib.Resources'], List[str]]:
         """Returns a list of feasible resources for the given resources."""
         if resources.use_spot:
             return ([], [])
@@ -241,10 +244,8 @@ class RunPod(clouds.Cloud):
             return True, None
 
         except ImportError:
-            return False, (
-                'Failed to import runpod.'
-                'To install, run: "pip install runpod" or "pip install sky[runpod]"'  # pylint: disable=line-too-long
-            )
+            return False, ('Failed to import runpod.'
+                           'To install, run: pip install skypilot[runpod]')
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
