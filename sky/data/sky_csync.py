@@ -47,6 +47,8 @@ def connect_db(func):
                 CREATE TABLE IF NOT EXISTS running_csync (
                 csync_pid INTEGER PRIMARY KEY,
                 sync_pid INTEGER DEFAULT -1,
+                storage_mount_pid INTEGER,
+                fuse_pid INTEGER,
                 source_path TEXT,
                 boot_time FLOAT)""")
 
@@ -67,14 +69,14 @@ def connect_db(func):
 
 
 @connect_db
-def _add_running_csync(csync_pid: int, source_path: str):
-    """Given the process id of CSYNC, it should create a row with it"""
+def _add_running_csync(csync_pid: int, storage_mount_pid: int, fuse_pid: int, source_path: str):
+    """Given the ids processes necessary to CSYNC, it creates a row with it"""
     assert _CURSOR is not None
     assert _CONN is not None
     _CURSOR.execute(
         'INSERT INTO running_csync '
-        '(csync_pid, source_path, boot_time) '
-        'VALUES (?, ?, ?)', (csync_pid, source_path, _BOOT_TIME))
+        '(csync_pid, storage_mount_pid, fuse_pid, source_path, boot_time) '
+        'VALUES (?, ?, ?, ?, ?)', (csync_pid, storage_mount_pid, fuse_pid, source_path, _BOOT_TIME))
     _CONN.commit()
 
 
@@ -466,8 +468,6 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     if _get_csync_pid_from_source_path(mountpoint_path):
         _terminate([mountpoint_path])
     csync_pid = os.getpid()
-    _add_running_csync(csync_pid, mountpoint_path)
-    
     
     # create temp directories of /.tmp_csync and /.tmp_mount
     csync_path = os.path.abspath(os.path.expanduser(_CSYNC_PATH))
@@ -497,19 +497,26 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         f'--type-cache-ttl 5s '
         f'--rename-dir-limit 10000 '
         f'{destination} {csync_read_path}')
-    output = subprocess.run(mount_cmd,
-                            shell=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            check=True,
-                            text=True)
+    # output = subprocess.run(mount_cmd,
+    #                         shell=True,
+    #                         stdout=subprocess.PIPE,
+    #                         stderr=subprocess.PIPE,
+    #                         check=True,
+    #                         text=True)
+    storage_mount_process = subprocess.Popen(mount_cmd,
+                                             shell=True,
+                                             stdout=subprocess.PIPE,
+                                             stderr=subprocess.PIPE,
+                                             text=True)
+    storage_mount_pid = storage_mount_process.pid
     # Use FUSE to mount both write path and read path to the mountpoint
     fuse_process = multiprocessing.Process(target=run_fuse_operation,
                                            args=(csync_read_path,
                                                  csync_write_path,
                                                  mountpoint_path))
     fuse_process.start()
-    
+    fuse_pid = fuse_process.pid
+    _add_running_csync(csync_pid, storage_mount_pid, fuse_pid, mountpoint_path)
     while True:
         start_time = time.time()
         delete = False
@@ -560,6 +567,9 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
     """
     if all:
         csync_pid_set = set(_get_all_running_csync_pid())
+    
+    # when terminating specified CSYNC processes given the paths where
+    # the processes are running on.
     else:
         csync_pid_set = set()
         for path in paths:
@@ -567,7 +577,7 @@ def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=
             csync_pid_set.add(_get_csync_pid_from_source_path(full_path))
     while True:
         if not csync_pid_set:
-            break
+            return
         sync_running_csync_set = set()
         for csync_pid in csync_pid_set:
             # sync_pid is set to -1 when sync is not running
