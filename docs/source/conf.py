@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath('../../'))
 # -- Project information
 
 project = 'SkyPilot'
-copyright = '2023, SkyPilot Team'
+copyright = '2024, SkyPilot Team'
 author = 'the SkyPilot authors'
 
 # The version info for the project you're documenting, acts as replacement for
