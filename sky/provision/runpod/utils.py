@@ -79,8 +79,7 @@ def list_instances() -> Dict[str, dict]:
             for port in instance['runtime']['ports']:
                 if port['privatePort'] == 22 and port['isIpPublic']:
                     info['external_ip'] = port['ip']
-                    instance_dict[
-                        instance['id']]['ssh_port'] = port['publicPort']
+                    info['ssh_port'] = port['publicPort']
                 elif not port['isIpPublic']:
                     info['internal_ip'] = port['ip']
 
