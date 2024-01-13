@@ -1,7 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 
 import time
-from typing import Dict
+from typing import Dict, List
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -119,12 +119,12 @@ def launch(name: str, instance_type: str, region: str, disk_size: int) -> str:
     return new_instance['id']
 
 
-def remove(instance_id: str):
+def remove(instance_id: str) -> None:
     """Terminates the given instance."""
     runpod.runpod().terminate_pod(instance_id)
 
 
-def get_ssh_ports(cluster_name):
+def get_ssh_ports(cluster_name) -> List[int]:
     """Gets the SSH ports for the given cluster."""
     logger.debug(f'Getting SSH ports for cluster {cluster_name}.')
 
