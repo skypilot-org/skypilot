@@ -143,7 +143,7 @@ def terminate_instances(
         logger.info(f'Start {inst_id}: {inst}')
         try:
             utils.remove(inst_id)
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     f'Failed to terminate instance {inst_id}: '
