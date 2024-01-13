@@ -1,11 +1,13 @@
 import copy
 import random
+import sys
 
 import numpy as np
 import pandas as pd
 
 import sky
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 
 ALL_INSTANCE_TYPE_INFOS = sum(
@@ -57,8 +59,8 @@ def generate_random_dag(
             op.set_outputs('CLOUD', random.randint(0, max_data_size))
 
             num_candidates = random.randint(1, max_num_candidate_resources)
-            candidate_instance_types = random.choices(ALL_INSTANCE_TYPE_INFOS,
-                                                      k=num_candidates)
+            candidate_instance_types = random.choices(
+                ALL_INSTANCE_TYPE_INFOS, k=len(ALL_INSTANCE_TYPE_INFOS))
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
@@ -80,7 +82,18 @@ def generate_random_dag(
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count
                     })
+                requested_features = set()
+                if op.num_nodes > 1:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.MULTI_NODE)
+                try:
+                    resources.cloud.check_features_are_supported(
+                        resources, requested_features)
+                except exceptions.NotSupportedError:
+                    continue
                 candidate_resources.add(resources)
+                if len(candidate_resources) >= num_candidates:
+                    break
             op.set_resources(candidate_resources)
     return dag
 
@@ -121,7 +134,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
             resources_stack.pop()
 
     _optimize_by_brute_force(topo_order, {})
-    print(final_plan)
+    print(final_plan, file=sys.stderr)
     return min_objective
 
 
@@ -140,6 +153,9 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
         objective = sky.Optimizer._compute_total_time(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
 
+    print('=== optimizer plan ===', file=sys.stderr)
+    print(optimizer_plan, file=sys.stderr)
+    print('=== brute force ===', file=sys.stderr)
     min_objective = find_min_objective(copy_dag, minimize_cost)
     assert abs(objective - min_objective) < 5e-2
 
