@@ -35,6 +35,8 @@ _DUMMY_SINK_NAME = 'skypilot-dummy-sink'
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
+# task -> resources -> estimated carbon cost or time.
+_TaskToCIMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
 # cloud -> list of resources that have the same accelerators.
 _PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
@@ -45,6 +47,7 @@ _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
+    CARBON_INTENSITY = 2
 
 
 # For logging purposes.
@@ -235,7 +238,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
         quiet: bool = False
-    ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
+    ) -> Tuple[_TaskToCostMap, _TaskToCIMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
         Note that the egress cost/time is not considered in this function.
@@ -246,6 +249,8 @@ class Optimizer:
         # Cost/time of running the task on the resources.
         # node -> {resources -> cost/time}
         node_to_cost_map: _TaskToCostMap = collections.defaultdict(dict)
+        # node -> {resources -> carbon intensity}
+        node_to_ci_map: _TaskToCIMap = collections.defaultdict(dict)
 
         # node -> cloud -> list of resources that satisfy user's requirements.
         node_to_candidate_map: _TaskToPerCloudCandidates = {}
@@ -257,6 +262,7 @@ class Optimizer:
             if node_i == 0:
                 # Base case: a special source node.
                 node_to_cost_map[node][list(node.resources)[0]] = 0
+                node_to_ci_map[node][list(node.resources)[0]] = 0
                 continue
 
             # Don't print for the last node, Sink.
@@ -323,6 +329,12 @@ class Optimizer:
                     else:
                         # Minimize run time.
                         estimated_cost_or_time = estimated_runtime
+
+                    carbs_per_node = resources.get_carbon_cost(
+                        estimated_runtime)
+                    estimated_carbs = carbs_per_node * node.num_nodes
+                    node_to_ci_map[node][resources] = estimated_carbs
+
                     if do_print:
                         logger.debug(
                             '  estimated_runtime: {:.0f} s ({:.1f} hr)'.format(
@@ -370,7 +382,7 @@ class Optimizer:
                     'clouds.')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(error_msg)
-        return node_to_cost_map, node_to_candidate_map
+        return node_to_cost_map, node_to_ci_map, node_to_candidate_map
 
     @staticmethod
     def _optimize_by_dp(
@@ -645,6 +657,28 @@ class Optimizer:
         return total_cost
 
     @staticmethod
+    def _compute_total_carbon_cost(
+        _,
+        topo_order: List[task_lib.Task],
+        plan: Dict[task_lib.Task, resources_lib.Resources],
+    ) -> float:
+        """Estimates the total cost of running the DAG by the plan."""
+        total_cost = 0
+        for node in topo_order:
+            resources = plan[node]
+            if node.time_estimator_func is None:
+                execution_time = 1 * 3600
+            else:
+                # The execution time of dummy nodes is always 0,
+                # as they have a time estimator lambda _: 0.
+                execution_time = node.estimate_runtime(resources)
+
+            cost_per_node = resources.get_carbon_cost(execution_time)
+            total_cost += cost_per_node * node.num_nodes
+
+        return total_cost
+
+    @staticmethod
     def _print_egress_plan(graph, plan, minimize_cost):
         message_data = []
         for parent, child in graph.edges():
@@ -689,14 +723,17 @@ class Optimizer:
         total_time: float,
         total_cost: float,
         node_to_cost_map: _TaskToCostMap,
+        node_to_ci_map: _TaskToCIMap,
         minimize_cost: bool,
     ):
         logger.info('== Optimizer ==')
         ordered_node_to_cost_map = collections.OrderedDict()
+        ordered_node_to_ci_map = collections.OrderedDict()
         ordered_best_plan = collections.OrderedDict()
         for node in topo_order:
             if node.name not in (_DUMMY_SOURCE_NAME, _DUMMY_SINK_NAME):
                 ordered_node_to_cost_map[node] = node_to_cost_map[node]
+                ordered_node_to_ci_map[node] = node_to_ci_map[node]
                 ordered_best_plan[node] = best_plan[node]
 
         is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
@@ -746,6 +783,7 @@ class Optimizer:
                 region_or_zone = resources.region
             else:
                 region_or_zone = resources.zone
+
             return [
                 str(cloud),
                 resources.instance_type + spot,
@@ -757,11 +795,12 @@ class Optimizer:
 
         Row = collections.namedtuple('Row', [
             'cloud', 'instance', 'vcpus', 'mem', 'accelerators',
-            'region_or_zone', 'cost_str', 'chosen_str'
+            'region_or_zone', 'ci_str', 'cost_str', 'chosen_str'
         ])
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
-                                       cost_str: str, chosen: bool) -> Row:
+                                       cost_str: str, ci_str: str,
+                                       chosen: bool) -> Row:
 
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
@@ -790,7 +829,7 @@ class Optimizer:
                 chosen_str = (colorama.Fore.GREEN + '   ' + u'\u2714' +
                               colorama.Style.RESET_ALL)
             row = Row(cloud, resources.instance_type + spot, vcpus, mem,
-                      str(accelerators), str(region_or_zone), cost_str,
+                      str(accelerators), str(region_or_zone), ci_str, cost_str,
                       chosen_str)
 
             return row
@@ -804,11 +843,11 @@ class Optimizer:
                 },
                 sort_keys=True)
 
-        # Print the list of resouces that the optimizer considered.
         resource_fields = [
             'CLOUD', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'ACCELERATORS',
             'REGION/ZONE'
         ]
+
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]
@@ -823,11 +862,17 @@ class Optimizer:
         # Print the egress plan if any data egress is scheduled.
         Optimizer._print_egress_plan(graph, best_plan, minimize_cost)
 
+        # Append carbon footprint metric heading
+        resource_fields.append('CARBON FOOTPRINT(g CO2e)')
+
         metric = 'COST ($)' if minimize_cost else 'TIME (hr)'
         field_names = resource_fields + [metric, 'CHOSEN']
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
+            # Obtain the related carbon intensity mapping
+            ci_v = ordered_node_to_ci_map[task]
+
             # Hack: convert the dictionary values
             # (resources) to their yaml config
             # For dictionary comparison later.
@@ -847,15 +892,23 @@ class Optimizer:
             # of optimizer table for display purpose.
             best_per_resource_group: Dict[str, Tuple[resources_lib.Resources,
                                                      float]] = {}
+            optimized_result_per_cloud_ci_val: Dict[str, Tuple[
+                resources_lib.Resources, float]] = {}
             for resources, cost in v.items():
+                ci = ci_v[resources]
                 resource_table_key = _get_resource_group_hash(resources)
                 if resource_table_key in best_per_resource_group:
                     if cost < best_per_resource_group[resource_table_key][1]:
                         best_per_resource_group[resource_table_key] = (
                             resources, cost)
+                        optimized_result_per_cloud_ci_val[
+                            resource_table_key] = (resources, ci)
+                    # TODO: There's no else here after rebase, what todo?
                 else:
                     best_per_resource_group[resource_table_key] = (resources,
                                                                    cost)
+                    optimized_result_per_cloud_ci_val[resource_table_key] = (
+                        resources, ci)
 
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
@@ -871,7 +924,16 @@ class Optimizer:
                 else:
                     cost_str = f'{cost / 3600:.2f}'
 
-                row = _get_resources_named_tuple(resources, cost_str,
+                resource_table_key = _get_resource_group_hash(resources)
+                _, ci_cloud_val = optimized_result_per_cloud_ci_val[
+                    resource_table_key]
+
+                if ci_cloud_val > 0.0:
+                    ci_str = f'{ci_cloud_val:.2f}'
+                else:
+                    ci_str = 'Unknown'
+
+                row = _get_resources_named_tuple(resources, cost_str, ci_str,
                                                  resources == best_plan[task])
                 rows.append(row)
 
@@ -1006,7 +1068,7 @@ class Optimizer:
 
         local_graph = local_dag.get_graph()
         local_topo_order = list(nx.topological_sort(local_graph))
-        local_node_to_cost_map, local_node_to_candidate_map = (
+        local_node_to_cost_map, local_node_to_ci_map, local_node_to_candidate_map = (  # pylint: disable=line-too-long
             Optimizer._estimate_nodes_cost_or_time(local_topo_order,
                                                    minimize_cost,
                                                    blocked_resources))
@@ -1053,17 +1115,20 @@ class Optimizer:
 
         topo_order = list(nx.topological_sort(graph)) if has_resources_ordered \
             else local_topo_order
-        node_to_cost_map, _ = (Optimizer._estimate_nodes_cost_or_time(
-            topo_order=topo_order,
-            minimize_cost=minimize_cost,
-            blocked_resources=blocked_resources,
-            quiet=True)) if has_resources_ordered else (
-                local_node_to_cost_map, local_node_to_candidate_map)
+        node_to_cost_map, node_to_ci_map, _ = (
+            Optimizer._estimate_nodes_cost_or_time(
+                topo_order=topo_order,
+                minimize_cost=minimize_cost,
+                blocked_resources=blocked_resources,
+                quiet=True)) if has_resources_ordered else (
+                    local_node_to_cost_map, local_node_to_ci_map,
+                    local_node_to_candidate_map)
 
         if not quiet:
             Optimizer.print_optimized_plan(graph, topo_order, best_plan,
                                            total_time, total_cost,
-                                           node_to_cost_map, minimize_cost)
+                                           node_to_cost_map, node_to_ci_map,
+                                           minimize_cost)
             if not env_options.Options.MINIMIZE_LOGGING.get():
                 Optimizer._print_candidates(local_node_to_candidate_map)
         return best_plan
@@ -1078,6 +1143,9 @@ class DummyResources(resources_lib.Resources):
         return DummyResources._REPR
 
     def get_cost(self, seconds):
+        return 0
+
+    def get_carbon_cost(self, seconds):
         return 0
 
 
