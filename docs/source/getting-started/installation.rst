@@ -231,7 +231,7 @@ Lambda Cloud
 IBM
 ~~~~~~~~~
 
-To access IBM's VPC service, store the following fields in ``~/.ibm/credentials.yaml``:
+To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__, store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. code-block:: text
 
@@ -337,6 +337,16 @@ To configure SCP access, you need access keys and the ID of the project your tas
 .. note::
 
   Multi-node clusters are currently not supported on SCP.
+
+RunPod
+~~~~~~~~~~
+
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settingse>`_ page on your RunPod console and generate an API key. Then, run:
+
+.. code-bolck:: shell
+  
+  pip install runpod
+  runpod config
 
 Kubernetes
 ~~~~~~~~~~
