@@ -148,6 +148,7 @@ def _get_cluster_config_template(cloud):
         clouds.Local: 'local-ray.yml.j2',
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
+        clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -2291,6 +2292,15 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         Use this method to use any cloud-specific port fetching logic.
         """
         del max_attempts  # Unused.
+        if isinstance(self.launched_resources.cloud, clouds.RunPod):
+            cluster_info = provision_lib.get_cluster_info(
+                str(self.launched_resources.cloud).lower(),
+                region=self.launched_resources.region,
+                cluster_name_on_cloud=self.cluster_name_on_cloud,
+                provider_config=None)
+            self.stable_ssh_ports = cluster_info.get_ssh_ports()
+            return
+
         head_ssh_port = 22
         self.stable_ssh_ports = (
             [head_ssh_port] + [22] *
