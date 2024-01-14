@@ -235,8 +235,8 @@ class RunPod(clouds.Cloud):
                     f'{error} \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
-                    f'        $ runpod store_api_key <YOUR_RUNPOD_API_KEY> \n'
-                    '    For more information, see https://docs.runpod.io/docs/skypilot'  # pylint: disable=line-too-long
+                    f'        $ runpod config\n'
+                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
                 )
 
             return True, None
