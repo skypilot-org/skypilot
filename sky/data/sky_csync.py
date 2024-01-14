@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import click
 from fuse import FUSE
@@ -23,7 +23,9 @@ from sky.utils import db_utils
 logger = sky_logging.init_logger(__name__)
 
 _CSYNC_PATH = '~/.sky/csync'
-_CSYNC_DB_PATH = f'{_CSYNC_PATH}/sky_csync.db'
+_CSYNC_DB_PATH = os.path.join(_CSYNC_PATH, 'sky_csync.db')
+_CSYNC_READ_PATH = os.path.join(_CSYNC_PATH, 'read_{pid}')
+_CSYNC_WRITE_PATH = os.path.join(_CSYNC_PATH, 'write_{pid}')
 
 _BOOT_TIME = None
 _CURSOR = None
@@ -49,14 +51,15 @@ def connect_db(func):
                 sync_pid INTEGER DEFAULT -1,
                 storage_mount_pid INTEGER,
                 fuse_pid INTEGER,
-                source_path TEXT,
+                mountpoint_path TEXT,
                 boot_time FLOAT)""")
 
             conn.commit()
 
         if _DB is None:
             db_path = os.path.expanduser(_CSYNC_DB_PATH)
-            os.mkdir(os.path.abspath(os.path.expanduser(_CSYNC_PATH)))
+            os.makedirs(os.path.abspath(os.path.expanduser(_CSYNC_PATH)),
+                        exist_ok=True)
             _DB = db_utils.SQLiteConn(db_path, create_table)
 
         _CURSOR = _DB.cursor
@@ -69,14 +72,16 @@ def connect_db(func):
 
 
 @connect_db
-def _add_running_csync(csync_pid: int, storage_mount_pid: int, fuse_pid: int, source_path: str):
+def _add_running_csync(csync_pid: int, storage_mount_pid: int, fuse_pid: int,
+                       mountpoint_path: str):
     """Given the ids processes necessary to CSYNC, it creates a row with it"""
     assert _CURSOR is not None
     assert _CONN is not None
     _CURSOR.execute(
         'INSERT INTO running_csync '
-        '(csync_pid, storage_mount_pid, fuse_pid, source_path, boot_time) '
-        'VALUES (?, ?, ?, ?, ?)', (csync_pid, storage_mount_pid, fuse_pid, source_path, _BOOT_TIME))
+        '(csync_pid, storage_mount_pid, fuse_pid, mountpoint_path, boot_time) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (csync_pid, storage_mount_pid, fuse_pid, mountpoint_path, _BOOT_TIME))
     _CONN.commit()
 
 
@@ -126,16 +131,43 @@ def _delete_running_csync(csync_pid: int):
 
 
 @connect_db
-def _get_csync_pid_from_source_path(path: str) -> Optional[int]:
+def _get_csync_pid_from_mountpoint_path(path: str) -> Optional[int]:
     """Given the path, returns process ID of csync running on it"""
     assert _CURSOR is not None
     _CURSOR.execute(
         'SELECT csync_pid FROM running_csync '
-        'WHERE source_path=(?) AND boot_time=(?)', (path, _BOOT_TIME))
+        'WHERE mountpoint_path=(?) AND boot_time=(?)', (path, _BOOT_TIME))
     row = _CURSOR.fetchone()
     if row:
         return row[0]
     return None
+
+
+@connect_db
+def _get_mountpoint_path_from_csync_pid(csync_pid: int) -> Optional[str]:
+    """Given the process ID of csync, returns mountpoint"""
+    assert _CURSOR is not None
+    _CURSOR.execute(
+        'SELECT mountpoint_path FROM running_csync '
+        'WHERE csync_pid=(?) AND boot_time=(?)', (csync_pid, _BOOT_TIME))
+    row = _CURSOR.fetchone()
+    if row:
+        return row[0]
+    return None
+
+
+def _get_storage_mount_and_fuse_pid(
+        csync_pid: int) -> Tuple[Optional[int], Optional[int]]:
+    """Given the process id of CSYNC, returns storage_mount_pid and fuse_pid.
+    """
+    assert _CURSOR is not None
+    _CURSOR.execute(
+        'SELECT storage_mount_pid, fuse_pid FROM running_csync '
+        'WHERE csync_pid=(?) AND boot_time=(?)', (csync_pid, _BOOT_TIME))
+    row = _CURSOR.fetchone()
+    if row:
+        return row[0], row[1]  # storage_mount_pid, fuse_pid
+    return None, None
 
 
 class Passthrough(Operations):
@@ -285,7 +317,8 @@ class Passthrough(Operations):
         return os.open(self._full_path(path), flags)
 
     def create(self, path, mode, fi=None):
-        return os.open(self._full_path(path, write=True), os.O_WRONLY | os.O_CREAT, mode)
+        return os.open(self._full_path(path, write=True),
+                       os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)
@@ -367,9 +400,9 @@ def get_upload_cmd(storetype: str, source: str, destination: str,
     return full_cmd
 
 
-def run_sync(source: str, storetype: str, destination: str,
-             num_threads: int, interval_seconds: int, delete: bool,
-             no_follow_symlinks: bool, csync_pid: int):
+def run_sync(source: str, storetype: str, destination: str, num_threads: int,
+             interval_seconds: int, delete: bool, no_follow_symlinks: bool,
+             csync_pid: int):
     """Runs the sync command from source to storetype bucket"""
     # TODO(Doyoung): Add a removal sync logic between write path and read path.
     # If any files/dirs exists in both directory, the one from write path must
@@ -465,14 +498,15 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     """
     mountpoint_path = os.path.abspath(os.path.expanduser(source))
     # If the given source is already mounted with CSYNC, terminate it.
-    if _get_csync_pid_from_source_path(mountpoint_path):
+    if _get_csync_pid_from_mountpoint_path(mountpoint_path):
         _terminate([mountpoint_path])
     csync_pid = os.getpid()
-    
-    # create temp directories of /.tmp_csync and /.tmp_mount
-    csync_path = os.path.abspath(os.path.expanduser(_CSYNC_PATH))
-    csync_write_path = os.path.join(csync_path, f'write_{csync_pid}')
-    csync_read_path = os.path.join(csync_path, f'read_{csync_pid}')
+
+    # create redirected directories for writing and reading
+    csync_write_path = os.path.abspath(
+        os.path.expanduser(_CSYNC_WRITE_PATH.format(pid=csync_pid)))
+    csync_read_path = os.path.abspath(
+        os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
     if os.path.isdir(csync_write_path):
         shutil.rmtree(csync_write_path)
     if os.path.isdir(csync_read_path):
@@ -489,14 +523,13 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     #                f'gcsfuse_1.0.1_amd64.deb '
     #                '-O /tmp/gcsfuse.deb && '
     #                'sudo dpkg --install /tmp/gcsfuse.deb')
-    mount_cmd = (
-        'gcsfuse -o allow_other '
-        '--implicit-dirs '
-        f'--stat-cache-capacity 4096 '
-        f'--stat-cache-ttl 5s '
-        f'--type-cache-ttl 5s '
-        f'--rename-dir-limit 10000 '
-        f'{destination} {csync_read_path}')
+    mount_cmd = ('gcsfuse -o allow_other '
+                 '--implicit-dirs '
+                 f'--stat-cache-capacity 4096 '
+                 f'--stat-cache-ttl 5s '
+                 f'--type-cache-ttl 5s '
+                 f'--rename-dir-limit 10000 '
+                 f'{destination} {csync_read_path}')
     # output = subprocess.run(mount_cmd,
     #                         shell=True,
     #                         stdout=subprocess.PIPE,
@@ -558,42 +591,94 @@ def terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=r
     _terminate(paths, all)
 
 
-def _terminate(paths: List[str], all: bool = False) -> None:  # pylint: disable=redefined-builtin
+def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=redefined-builtin
     """Terminates the CSYNC daemon running.
 
     Before terminating the running CSYNC daemon, it checks if the sync process
     spawned by the daemon is running. If it is, we wait until the sync gets
     completed, and then proceed to terminate the daemon.
     """
+    csync_pid_set = set()
     if all:
-        csync_pid_set = set(_get_all_running_csync_pid())
-    
+        for csync_pid in _get_all_running_csync_pid():
+            csync_pid_set.add(csync_pid)
     # when terminating specified CSYNC processes given the paths where
     # the processes are running on.
     else:
-        csync_pid_set = set()
         for path in paths:
             full_path = os.path.abspath(os.path.expanduser(path))
-            csync_pid_set.add(_get_csync_pid_from_source_path(full_path))
-    while True:
-        if not csync_pid_set:
-            return
-        sync_running_csync_set = set()
-        for csync_pid in csync_pid_set:
-            # sync_pid is set to -1 when sync is not running
-            if _get_running_csync_sync_pid(csync_pid) != -1:
-                sync_running_csync_set.add(csync_pid)
-        remove_process_set = csync_pid_set.difference(sync_running_csync_set)
-        for csync_pid in remove_process_set:
+            csync_pid = _get_csync_pid_from_mountpoint_path(full_path)
+            if csync_pid is not None:
+                csync_pid_set.add(csync_pid)
+
+    pid_set = set()
+    for csync_pid in csync_pid_set:
+        storage_mount_pid, fuse_pid = _get_storage_mount_and_fuse_pid(csync_pid)
+        pid_set.add((csync_pid, storage_mount_pid, fuse_pid))
+
+    for csync_pid, _, fuse_pid in pid_set:
+        # 1.unmount cloud storage from read path
+        csync_read_path = os.path.abspath(
+            os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
+        storage_unmount_cmd = f'fusermount -uz {csync_read_path}'
+        with subprocess.Popen(storage_unmount_cmd,
+                              shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True) as unmount_process:
+            return_code = unmount_process.wait()
+            if return_code != 0:
+                # TODO(Doyoung): implement logic to handle this error
+                pass
+
+        # 2.unmount redirection FUSE
+        mountpoint_path = _get_mountpoint_path_from_csync_pid(csync_pid)
+        storage_unmount_cmd = f'fusermount -uz {mountpoint_path}'
+        with subprocess.Popen(storage_unmount_cmd,
+                              shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True) as unmount_process:
+
+            return_code = unmount_process.wait()
+            if return_code != 0:
+                # TODO(Doyoung): implement logic to handle this error
+                pass
+        # If there's any process obtaining the file descriptor of a file in
+        # mountpoint, i.e. writing a checkpoint, the mountpoint will remain
+        # mounted until the file descriptor is released. We can confirm if
+        # the mountpoint is completely unmounted by checking the termination
+        # of the mount process.
+        while True:
             try:
-                psutil.Process(int(csync_pid)).terminate()
+                process = psutil.Process(fuse_pid)
+                # Check if process is still running
+                if (process.status() == psutil.STATUS_ZOMBIE or
+                        process.status() == psutil.STATUS_DEAD):
+                    break
+            # raised if process doesn't exist/terminated
             except psutil.NoSuchProcess:
-                _delete_running_csync(csync_pid)
-                continue
-            _delete_running_csync(csync_pid)
-            print(f'deleted {csync_pid}')
-            csync_pid_set.remove(csync_pid)
-        time.sleep(5)
+                break
+            time.sleep(5)
+
+        # 3.terminate sync daemon
+        while True:
+            # when the sync process is not running, then the sync_pid
+            # is stored as -1 in the state. We want to make sure to only
+            # terminate the sync daemon when the sync is not running.
+            if _get_running_csync_sync_pid(csync_pid) == -1:
+                try:
+                    psutil.Process(int(csync_pid)).terminate()
+                except psutil.NoSuchProcess:
+                    logger.info(f'Sync daemon process, {csync_pid}, was not '
+                                'found.')
+                break
+            time.sleep(5)
+
+        _delete_running_csync(csync_pid)
+        print(f'deleted CSYNC mounted on {mountpoint_path!r}')
+
+    return 0
 
 
 if __name__ == '__main__':
