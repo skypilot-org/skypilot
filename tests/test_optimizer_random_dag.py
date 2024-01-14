@@ -1,6 +1,7 @@
 import copy
 import random
 import sys
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -30,12 +31,16 @@ def generate_random_dag(
 ) -> sky.Dag:
     """Generates a random Sky DAG to test Sky optimizer."""
     random.seed(seed)
+    single_node_task_ids = random.choices(list(range(num_tasks)),
+                                          k=num_tasks // 2)
     with sky.Dag() as dag:
         for i in range(num_tasks):
             op = sky.Task(name=f'task{i}')
             task_runtime = random.random() * max_task_runtime
             op.set_time_estimator(lambda _: task_runtime)
-            op.num_nodes = random.randint(1, max_num_nodes)
+            op.num_nodes = random.randint(2, max_num_nodes)
+            if i in single_node_task_ids:
+                op.num_nodes = 1
 
             if i == 0:
                 num_parents = 0
@@ -98,7 +103,9 @@ def generate_random_dag(
     return dag
 
 
-def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
+def find_min_objective(
+        dag: sky.Dag,
+        minimize_cost: bool) -> Tuple[float, Dict[sky.Task, sky.Resources]]:
     """Manually finds the minimum objective value."""
     graph = dag.get_graph()
     topo_order = dag.tasks
@@ -134,8 +141,7 @@ def find_min_objective(dag: sky.Dag, minimize_cost: bool) -> float:
             resources_stack.pop()
 
     _optimize_by_brute_force(topo_order, {})
-    print(final_plan, file=sys.stderr)
-    return min_objective
+    return min_objective, final_plan
 
 
 def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
@@ -153,10 +159,11 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
         objective = sky.Optimizer._compute_total_time(dag.get_graph(),
                                                       dag.tasks, optimizer_plan)
 
+    min_objective, bf_plan = find_min_objective(copy_dag, minimize_cost)
     print('=== optimizer plan ===', file=sys.stderr)
     print(optimizer_plan, file=sys.stderr)
     print('=== brute force ===', file=sys.stderr)
-    min_objective = find_min_objective(copy_dag, minimize_cost)
+    print(bf_plan, file=sys.stderr)
     assert abs(objective - min_objective) < 5e-2
 
 
