@@ -168,7 +168,6 @@ class DockerInitializer:
                       f'{docker_login_config.username} '
                       f'--password {docker_login_config.password} '
                       f'{docker_login_config.server}')
-            specific_image = f'{docker_login_config.server}/{specific_image}'
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
