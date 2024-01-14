@@ -341,11 +341,11 @@ To configure SCP access, you need access keys and the ID of the project your tas
 RunPod
 ~~~~~~~~~~
 
-`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an API key. Then, run:
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
 
 .. code-block:: shell
   
-  pip install runpod
+  pip install "runpod>=1.5.1"
   runpod config
 
 
