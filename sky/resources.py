@@ -1257,7 +1257,6 @@ class Resources:
         add_if_not_none('image_id', self.image_id)
         add_if_not_none('disk_tier', self.disk_tier)
         add_if_not_none('ports', self.ports)
-        add_if_not_none('_docker_login_config', self._docker_login_config)
         if self._is_image_managed is not None:
             config['_is_image_managed'] = self._is_image_managed
         return config
