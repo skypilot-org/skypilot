@@ -64,7 +64,7 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+            cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -83,16 +83,7 @@ class Cudo(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions(cls) -> List[clouds.Region]:
-        if not cls._regions:
-            # Add the region from catalog entry
-            cls._regions = [
-                clouds.Region(...),
-            ]
-        return cls._regions
-
-    @classmethod
-    def regions_with_offering(cls, instance_type: Optional[str],
+    def regions_with_offering(cls, instance_type,
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
@@ -100,12 +91,9 @@ class Cudo(clouds.Cloud):
         del accelerators, zone  # unused
         if use_spot:
             return []
-        if instance_type is None:
-            # Fall back to default regions
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'cudo')
+
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'cudo')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -113,8 +101,8 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-        cls,
-        instance_type: str,
+            cls,
+            instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
 
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
@@ -122,13 +110,13 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def zones_provision_loop(
-        cls,
-        *,
-        region: str,
-        num_nodes: int,
-        instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool = False,
+            cls,
+            *,
+            region: str,
+            num_nodes: int,
+            instance_type: Optional[str] = None,
+            accelerators: Optional[Dict[str, int]] = None,
+            use_spot: bool = False,
     ) -> Iterator[None]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
@@ -183,8 +171,8 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-        cls,
-        instance_type: str,
+            cls,
+            instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='cudo')
@@ -246,7 +234,7 @@ class Cudo(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(
+         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
@@ -324,31 +312,3 @@ class Cudo(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'cudo')
-
-    @classmethod
-    def query_status(cls, name: str, tag_filters: Dict[str, str],
-                     region: Optional[str], zone: Optional[str],
-                     **kwargs) -> List[status_lib.ClusterStatus]:
-        del tag_filters, region, zone, kwargs  # Unused.
-
-        # pylint: disable=import-outside-toplevel,unused-import
-        import sky.provision.cudo.cudo_wrapper as cudo_wrapper
-        status_map = {
-            'init': status_lib.ClusterStatus.INIT,
-            'pend': status_lib.ClusterStatus.INIT,
-            'prol': status_lib.ClusterStatus.INIT,
-            'boot': status_lib.ClusterStatus.INIT,
-            'runn': status_lib.ClusterStatus.UP,
-            'stop': status_lib.ClusterStatus.STOPPED,
-            'susp': status_lib.ClusterStatus.STOPPED,
-            'done': status_lib.ClusterStatus.STOPPED,
-            'poff': status_lib.ClusterStatus.STOPPED,
-        }
-        status_list = []
-        vms = cudo_wrapper.list_instances()
-        for node in vms:
-            if vms[node]['name'] == name:
-                node_status = status_map[node['status']]
-                if node_status is not None:
-                    status_list.append(node_status)
-        return status_list

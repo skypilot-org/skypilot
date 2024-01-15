@@ -9,7 +9,3 @@ def bootstrap_instances(
     """Bootstraps instances for the given cluster."""
     del region, cluster_name  # unused
     return config
-
-
-def bootstrap_config(cluster_config):
-    return cluster_config

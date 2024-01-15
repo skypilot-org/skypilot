@@ -130,6 +130,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
+    # Waiting is done in run_instances
     del region, cluster_name_on_cloud, state
 
 

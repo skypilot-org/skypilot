@@ -14,20 +14,20 @@ VMS_CSV = 'cudo/vms.csv'
 cudo_gpu_model = {
     'NVIDIA V100': 'V100',
     'NVIDIA A40': 'A40',
-    'RTX 3080': '3080',
-    'RTX A4000': 'A4000',
-    'RTX A4500': 'A4500',
-    'RTX A5000': 'A5000',
-    'RTX A6000': 'A6000',
+    'RTX 3080': 'RTX3080',
+    'RTX A4000': 'RTXA4000',
+    'RTX A4500': 'RTXA4500',
+    'RTX A5000': 'RTXA5000',
+    'RTX A6000': 'RTXA6000',
 }
 
 cudo_gpu_mem = {
-    '3080': 12,
+    'RTX3080': 12,
     'A40': 48,
-    'A4000': 16,
-    'A4500': 20,
-    'A5000': 24,
-    'A6000': 48,
+    'RTXA4000': 16,
+    'RTXA4500': 20,
+    'RTXA5000': 24,
+    'RTXA6000': 48,
     'V100': 16,
 }
 
@@ -114,7 +114,7 @@ def cudo_gpu_to_skypilot_gpu(model):
     if model in cudo_gpu_model:
         return cudo_gpu_model[model]
     else:
-        return model.replace('RTX ', '')
+        return model
 
 
 def skypilot_gpu_to_cudo_gpu(model):
@@ -165,45 +165,28 @@ def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
     except cudo_compute.rest.ApiException as e:
         raise e
 
-
-def gpu_types():
-    try:
-        api = cudo_api()
-        types = api.list_vm_machine_types(4, 2)
-        gpu_names = []
-        for gpu in types.to_dict()['gpu_models']:
-            gpu_names.append(gpu['name'])
-        return gpu_names
-    except cudo_compute.rest.ApiException as e:
-        raise e
-
-
 def update_prices():
     rows = []
-    gpus = gpu_types()
-    for gpu in gpus:
-        for spec in machine_specs:
-            if not gpu_exists(gpu):
-                break
-            accelerator_name = cudo_gpu_to_skypilot_gpu(gpu)
-
-            mts = machine_types(gpu, spec['mem'], spec['vcpu'], spec['gpu'])
-            for hc in mts['host_configs']:
-                row = {
-                    'instance_type': get_instance_type(hc['machine_type'],
-                                                       spec['gpu'],
-                                                       spec['vcpu'],
-                                                       spec['mem']),
-                    'accelerator_name': accelerator_name,
-                    'accelerator_count': str(spec['gpu']) + '.0',
-                    'vcpus': str(spec['vcpu']),
-                    'memory_gib': str(spec['mem']),
-                    'price': hc['total_price_hr']['value'],
-                    'region': hc['data_center_id'],
-                    'gpu_info': get_gpu_info(spec['gpu'], accelerator_name),
-                    'spot_price': hc['total_price_hr']['value'],
-                }
-                rows.append(row)
+    for spec in machine_specs:
+        mts = machine_types('', spec['mem'], spec['vcpu'], spec['gpu'])
+        for hc in mts['host_configs']:
+            if not gpu_exists(hc['gpu_model']):
+                continue
+            accelerator_name = cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
+            row = {
+                'instance_type': get_instance_type(hc['machine_type'],
+                                                   spec['gpu'],
+                                                   spec['vcpu'],
+                                                   spec['mem']),
+                'accelerator_name': accelerator_name,
+                'accelerator_count': str(spec['gpu']) + '.0',
+                'vcpus': str(spec['vcpu']),
+                'memory_gib': str(spec['mem']),
+                'price': hc['total_price_hr']['value'],
+                'region': hc['data_center_id'],
+                'gpu_info': get_gpu_info(spec['gpu'], accelerator_name),
+            }
+            rows.append(row)
     path = VMS_CSV
     with open(path, 'w') as file:
         file.write(
@@ -220,7 +203,7 @@ def update_prices():
                 row['price'],
                 row['region'],
                 row['gpu_info'],
-                row['spot_price'],
+                '',
             ]
             file.write(','.join(data) + '\n')
 
