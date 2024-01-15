@@ -26,12 +26,12 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[oci]"
           pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
+          pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[all]"
 
     .. tab-item:: Latest Release
@@ -49,12 +49,12 @@ Install SkyPilot using pip:
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
-          pip install "skypilot[kubernetes]"
           pip install "skypilot[oci]"
           pip install "skypilot[lambda]"
           pip install "skypilot[runpod]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
+          pip install "skypilot[kubernetes]"
           pip install "skypilot[all]"
 
     .. tab-item:: From Source
@@ -75,12 +75,12 @@ Install SkyPilot using pip:
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
-          pip install -e ".[kubernetes]"
           pip install -e ".[oci]"
           pip install -e ".[lambda]"
           pip install -e ".[runpod]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
+          pip install -e ".[kubernetes]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -129,12 +129,13 @@ This will produce a summary like:
     AWS: enabled
     GCP: enabled
     Azure: enabled
-    Kubernetes: enabled
-    Lambda: enabled
     OCI: enabled
+    Lambda: enabled
+    RunPod: enabled
     IBM: enabled
     SCP: enabled
     Cloudflare (for R2 object store): enabled
+    Kubernetes: enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
@@ -220,19 +221,6 @@ Azure
   az account set -s <subscription_id>
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
-
-Kubernetes
-~~~~~~~~~~
-
-SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
-
-.. code-block:: shell
-
-  # Place your kubeconfig at ~/.kube/config
-  mkdir -p ~/.kube
-  cp /path/to/kubeconfig ~/.kube/config
-
-See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 
 Oracle Cloud Infrastructure (OCI)
@@ -370,6 +358,19 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
+
+.. code-block:: shell
+
+  # Place your kubeconfig at ~/.kube/config
+  mkdir -p ~/.kube
+  cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 
 Requesting quotas for first time users
