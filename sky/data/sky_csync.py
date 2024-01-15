@@ -17,15 +17,16 @@ import psutil
 from sky import sky_logging
 from sky.data import mounting_utils
 from sky.data import storage_utils
+from sky.data.storage_utils import StorageMode
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_CSYNC_PATH = '~/.sky/csync'
-_CSYNC_DB_PATH = os.path.join(_CSYNC_PATH, 'sky_csync.db')
-_CSYNC_READ_PATH = os.path.join(_CSYNC_PATH, 'read_{pid}')
-_CSYNC_WRITE_PATH = os.path.join(_CSYNC_PATH, 'write_{pid}')
+_CSYNC_DB_PATH = os.path.join(constants.CSYNC_DIR, 'sky_csync.db')
+_CSYNC_READ_PATH = os.path.join(constants.CSYNC_DIR, 'read_{pid}')
+_CSYNC_WRITE_PATH = os.path.join(constants.CSYNC_DIR, 'write_{pid}')
 
 _BOOT_TIME = None
 _CURSOR = None
@@ -58,7 +59,7 @@ def connect_db(func):
 
         if _DB is None:
             db_path = os.path.expanduser(_CSYNC_DB_PATH)
-            os.makedirs(os.path.abspath(os.path.expanduser(_CSYNC_PATH)),
+            os.makedirs(os.path.abspath(os.path.expanduser(constants.CSYNC_DIR)),
                         exist_ok=True)
             _DB = db_utils.SQLiteConn(db_path, create_table)
 
@@ -518,11 +519,11 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
     # later, we need to refactor the mount_command perhaps making some
     # part of it a static method so it can be called from here by specifying
     # the bucket name and or whatever. Need to try to think of a way to reuse the code.
-    #install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-    #                f'/releases/download/v1.0.1/'
-    #                f'gcsfuse_1.0.1_amd64.deb '
-    #                '-O /tmp/gcsfuse.deb && '
-    #                'sudo dpkg --install /tmp/gcsfuse.deb')
+    install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+                   f'/releases/download/v1.0.1/'
+                   f'gcsfuse_1.0.1_amd64.deb '
+                   '-O /tmp/gcsfuse.deb && '
+                   'sudo dpkg --install /tmp/gcsfuse.deb')
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity 4096 '
@@ -530,17 +531,36 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
                  f'--type-cache-ttl 5s '
                  f'--rename-dir-limit 10000 '
                  f'{destination} {csync_read_path}')
-    # output = subprocess.run(mount_cmd,
-    #                         shell=True,
-    #                         stdout=subprocess.PIPE,
-    #                         stderr=subprocess.PIPE,
-    #                         check=True,
-    #                         text=True)
-    storage_mount_process = subprocess.Popen(mount_cmd,
-                                             shell=True,
-                                             stdout=subprocess.PIPE,
-                                             stderr=subprocess.PIPE,
-                                             text=True)
+    complete_mount_cmd = mounting_utils.get_mounting_script(StorageMode.MOUNT,
+                                        csync_read_path, mount_cmd,
+                                        install_cmd)
+    logger.info(f'complete mount cmd: {complete_mount_cmd}')
+    log_file_path = '/home/gcpuser/.sky/csync_gcs_sky-gcs-csync-testing-2.log'
+    # with open(log_file_path, 'a') as log_file:
+    #     storage_mount_process = subprocess.Popen(complete_mount_cmd,
+    #                                             shell=True,
+    #                                             stdout=log_file,
+    #                                             stderr=log_file,
+    #                                             start_new_session=True)
+    import tempfile
+    with open(log_file_path, 'a') as log_file:
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
+            script_file.write(complete_mount_cmd)
+            script_file.flush()  # Ensure all data is written to the file
+            bash = 'bash ' + script_file.name
+            storage_mount_process = subprocess.Popen(bash,
+                                                    shell=True,
+                                                    stdout=log_file,
+                                                    stderr=log_file,
+                                                    start_new_session=True)
+
+
+    # storage_mount_process = subprocess.Popen(complete_mount_cmd,
+    #                                          stdout=subprocess.PIPE,
+    #                                          stderr=subprocess.PIPE,
+    #                                          start_new_session=True,
+    #                                          shell=True,
+    #                                          )
     storage_mount_pid = storage_mount_process.pid
     # Use FUSE to mount both write path and read path to the mountpoint
     fuse_process = multiprocessing.Process(target=run_fuse_operation,
@@ -646,8 +666,9 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
                 pass
         # If there's any process obtaining the file descriptor of a file in
         # mountpoint, i.e. writing a checkpoint, the mountpoint will remain
-        # mounted until the file descriptor is released. We can confirm if
-        # the mountpoint is completely unmounted by checking the termination
+        # mounted until the file descriptor is released after running
+        # fusermount -uz MOUNT_PATH. We can confirm if the mountpoint is
+        # completely unmounted by checking the termination
         # of the mount process.
         while True:
             try:

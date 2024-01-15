@@ -28,6 +28,7 @@ from sky.data import sky_csync
 from sky.data import storage_utils
 from sky.data.data_utils import Rclone
 from sky.data.storage_utils import StorageMode
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
@@ -366,7 +367,7 @@ class AbstractStore:
         result = urllib.parse.urlsplit(destination)
         sync_point = result.path.split('/')[-1]
         log_file_name = f'csync_{store_type_str}_{sync_point}.log'
-        log_path = f'~/.sky/{log_file_name}'
+        log_path = os.path.join(constants.CSYNC_DIR, log_file_name)
 
         csync_cmd = (f'python -m sky.data.sky_csync csync {csync_path} '
                      f'{store_type_str} {destination} --interval-seconds '
