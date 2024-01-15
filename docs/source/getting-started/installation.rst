@@ -27,8 +27,9 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
           pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[lambda]"
           pip install "skypilot-nightly[oci]"
+          pip install "skypilot-nightly[lambda]"
+          pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[all]"
@@ -49,8 +50,9 @@ Install SkyPilot using pip:
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
           pip install "skypilot[kubernetes]"
-          pip install "skypilot[lambda]"
           pip install "skypilot[oci]"
+          pip install "skypilot[lambda]"
+          pip install "skypilot[runpod]"
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
           pip install "skypilot[all]"
@@ -74,8 +76,9 @@ Install SkyPilot using pip:
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
           pip install -e ".[kubernetes]"
-          pip install -e ".[lambda]"
           pip install -e ".[oci]"
+          pip install -e ".[lambda]"
+          pip install -e ".[runpod]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[all]"
@@ -149,8 +152,8 @@ section :ref:`below <cloud-account-setup>`.
 Cloud account setup
 -------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, IBM, OCI,
-SCP, Lambda Cloud, and Cloudflare (for R2 object store).
+SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod,
+IBM, SCP, and Cloudflare (for R2 object store).
 
 If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
 
@@ -218,6 +221,42 @@ Azure
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
+
+.. code-block:: shell
+
+  # Place your kubeconfig at ~/.kube/config
+  mkdir -p ~/.kube
+  cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
+
+Oracle Cloud Infrastructure (OCI)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+
+.. code-block:: text
+
+  ~/.oci/config
+  ~/.oci/oci_api_key.pem
+
+The :code:`~/.oci/config` file should contain the following fields:
+
+.. code-block:: text
+
+  [DEFAULT]
+  user=ocid1.user.oc1..aaaaaaaa
+  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
+  tenancy=ocid1.tenancy.oc1..aaaaaaaa
+  region=us-sanjose-1
+  key_file=~/.oci/oci_api_key.pem
+
+
 Lambda Cloud
 ~~~~~~~~~~~~~~~~~~
 
@@ -227,6 +266,7 @@ Lambda Cloud
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
+
 
 IBM
 ~~~~~~~~~
@@ -263,26 +303,28 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 .. note::
   :code:`sky check` does not reflect IBM COS's enabled status. :code:`IBM: enabled` only guarantees that IBM VM instances are enabled.
 
-Oracle Cloud Infrastructure (OCI)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
-.. code-block:: text
+Samsung Cloud Platform (SCP)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  ~/.oci/config
-  ~/.oci/oci_api_key.pem
+Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
-The :code:`~/.oci/config` file should contain the following fields:
+To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
-.. code-block:: text
+.. code-block:: shell
 
-  [DEFAULT]
-  user=ocid1.user.oc1..aaaaaaaa
-  fingerprint=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
-  tenancy=ocid1.tenancy.oc1..aaaaaaaa
-  region=us-sanjose-1
-  key_file=~/.oci/oci_api_key.pem
+  # Create directory if required
+  mkdir -p ~/.scp
+  # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
+  echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
+  echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
+  echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
+
+.. note::
+
+  Multi-node clusters are currently not supported on SCP.
+
 
 Cloudflare R2
 ~~~~~~~~~~~~~~~~~~
@@ -317,39 +359,6 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
-
-Samsung Cloud Platform (SCP)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
-
-To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
-
-.. code-block:: shell
-
-  # Create directory if required
-  mkdir -p ~/.scp
-  # Add the lines for "access_key", "secret_key", and "project_id" to scp_credential file
-  echo "access_key = <your_access_key>" >> ~/.scp/scp_credential
-  echo "secret_key = <your_secret_key>" >> ~/.scp/scp_credential
-  echo "project_id = <your_project_id>" >> ~/.scp/scp_credential
-
-.. note::
-
-  Multi-node clusters are currently not supported on SCP.
-
-Kubernetes
-~~~~~~~~~~
-
-SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
-
-.. code-block:: shell
-
-  # Place your kubeconfig at ~/.kube/config
-  mkdir -p ~/.kube
-  cp /path/to/kubeconfig ~/.kube/config
-
-See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 
 Requesting quotas for first time users
