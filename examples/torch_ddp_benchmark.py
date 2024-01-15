@@ -1,4 +1,4 @@
-# Adapted from
+# Adapted from https://github.com/pytorch/pytorch/tree/main/benchmarks/distributed/ddp
 #
 # Measure distributed training iteration time.
 #
