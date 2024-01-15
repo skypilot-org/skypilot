@@ -12,6 +12,8 @@ def get_mounting_script(
     install_cmd: str,
     version_check_cmd: Optional[str] = None,
 ) -> str:
+    """Generates the mounting script."""
+
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
