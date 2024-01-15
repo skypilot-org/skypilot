@@ -428,7 +428,7 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True)
             if returncode:
-                logger.info('Ray cluster on head is not up. Restarting...')
+                logger.debug('Ray cluster on head is not up. Restarting...')
             else:
                 logger.debug('Ray cluster on head is up.')
                 ray_port = common_utils.decode_payload(stdout)['ray_port']
