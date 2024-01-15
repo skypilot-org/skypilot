@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Any, List, Optional, Tuple
@@ -59,7 +60,8 @@ def connect_db(func):
 
         if _DB is None:
             db_path = os.path.expanduser(_CSYNC_DB_PATH)
-            os.makedirs(os.path.abspath(os.path.expanduser(constants.CSYNC_DIR)),
+            os.makedirs(os.path.abspath(os.path.expanduser(
+                constants.CSYNC_DIR)),
                         exist_ok=True)
             _DB = db_utils.SQLiteConn(db_path, create_table)
 
@@ -455,6 +457,20 @@ def run_fuse_operation(read_path, write_path, full_src):
         print(f"Error in FUSE operation: {e}")
 
 
+def get_storage_mount_script(storetype: str, destination: str,
+                             mount_path: str) -> str:
+    if storetype == 's3':
+        install_cmd = storage_utils.get_s3_mount_install_cmd()
+        mount_cmd = storage_utils.get_s3_mount_cmd(destination, mount_path)
+    else:  # storetype == 'gcs':
+        install_cmd = storage_utils.get_gcs_mount_install_cmd()
+        mount_cmd = storage_utils.get_gcs_mount_cmd(destination, mount_path)
+
+    storage_mount_script = mounting_utils.get_mounting_script(
+        StorageMode.MOUNT, mount_path, mount_cmd, install_cmd)
+    return storage_mount_script
+
+
 @main.command()
 @click.argument('source', required=True, type=str)
 @click.argument('storetype', required=True, type=str)
@@ -514,54 +530,21 @@ def csync(source: str, storetype: str, destination: str, num_threads: int,
         shutil.rmtree(csync_read_path)
     os.makedirs(csync_write_path, exist_ok=True)
     os.makedirs(csync_read_path, exist_ok=True)
-    # mount destination bucket to /.tmp_mount
-    # TODO(doyoung): Currently, manually getting the mount_command, but
-    # later, we need to refactor the mount_command perhaps making some
-    # part of it a static method so it can be called from here by specifying
-    # the bucket name and or whatever. Need to try to think of a way to reuse the code.
-    install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                   f'/releases/download/v1.0.1/'
-                   f'gcsfuse_1.0.1_amd64.deb '
-                   '-O /tmp/gcsfuse.deb && '
-                   'sudo dpkg --install /tmp/gcsfuse.deb')
-    mount_cmd = ('gcsfuse -o allow_other '
-                 '--implicit-dirs '
-                 f'--stat-cache-capacity 4096 '
-                 f'--stat-cache-ttl 5s '
-                 f'--type-cache-ttl 5s '
-                 f'--rename-dir-limit 10000 '
-                 f'{destination} {csync_read_path}')
-    complete_mount_cmd = mounting_utils.get_mounting_script(StorageMode.MOUNT,
-                                        csync_read_path, mount_cmd,
-                                        install_cmd)
-    logger.info(f'complete mount cmd: {complete_mount_cmd}')
-    log_file_path = '/home/gcpuser/.sky/csync_gcs_sky-gcs-csync-testing-2.log'
-    # with open(log_file_path, 'a') as log_file:
-    #     storage_mount_process = subprocess.Popen(complete_mount_cmd,
-    #                                             shell=True,
-    #                                             stdout=log_file,
-    #                                             stderr=log_file,
-    #                                             start_new_session=True)
-    import tempfile
-    with open(log_file_path, 'a') as log_file:
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
-            script_file.write(complete_mount_cmd)
-            script_file.flush()  # Ensure all data is written to the file
-            bash = 'bash ' + script_file.name
-            storage_mount_process = subprocess.Popen(bash,
-                                                    shell=True,
-                                                    stdout=log_file,
-                                                    stderr=log_file,
-                                                    start_new_session=True)
 
-
-    # storage_mount_process = subprocess.Popen(complete_mount_cmd,
-    #                                          stdout=subprocess.PIPE,
-    #                                          stderr=subprocess.PIPE,
-    #                                          start_new_session=True,
-    #                                          shell=True,
-    #                                          )
+    storage_mount_script = get_storage_mount_script(storetype, destination,
+                                                    csync_read_path)
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as script_file:
+        script_file.write(storage_mount_script)
+        # Ensure all data is written to the file
+        script_file.flush()
+        bash = f'bash {script_file.name}'
+        storage_mount_process = subprocess.Popen(bash,
+                                                 shell=True,
+                                                 stdout=subprocess.PIPE,
+                                                 stderr=subprocess.PIPE,
+                                                 start_new_session=True)
     storage_mount_pid = storage_mount_process.pid
+
     # Use FUSE to mount both write path and read path to the mountpoint
     fuse_process = multiprocessing.Process(target=run_fuse_operation,
                                            args=(csync_read_path,

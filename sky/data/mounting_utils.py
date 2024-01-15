@@ -7,7 +7,7 @@ from sky import exceptions
 from sky.data import storage_utils
 
 
-def get_mounting_command(
+def get_mounting_script(
     mount_mode: storage_utils.StorageMode,
     mount_path: str,
     mount_cmd: str,
@@ -15,39 +15,14 @@ def get_mounting_command(
     version_check_cmd: Optional[str] = None,
     csync_log_path: Optional[str] = None,
 ) -> str:
-    """Generates the mounting command for a given bucket.
-
-    There are two types of mounting supported in Skypilot, a traditional MOUNT
-    and CSYNC.
-
-    For traditional mounting, generated script first unmounts any
-    existing mount at the mount path, checks and installs the mounting utility
-    if required, creates the mount path and finally mounts the bucket.
-
-    For CSYNC, generated script first creates the CSYNC_PATH if it does not
-    exist, and finally runs CSYNC daemon on CSYNC_PATH to the bucket.
-
-    Args:
-        mount_mode: Defines which mounting mode is used between traditional
-          MOUNT and CSYNC
-        mount_path: Path to mount the bucket at.
-        mount_cmd: Command to mount the bucket. Should be single line.
-        install_cmd: Command to install the mounting utility for MOUNT mode.
-          Should be single line.
-
-    Returns:
-        str: Mounting command with the mounting script as a heredoc.
-    """
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if mount_mode == storage_utils.StorageMode.MOUNT:
-        script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
         assert csync_log_path is None, ('CSYNC log path should '
                                         'not be defined for MOUNT mode.')
         if version_check_cmd is not None:
             installed_check += f' && {version_check_cmd}'
-    else:  # script path for CSYNC mode
-        script_path = f'~/.sky/csync_{random.randint(0, 1000000)}.sh'
+    else:
         assert install_cmd is None, ('Installing commands should '
                                      'not be defined for CSYNC mode.')
 
@@ -103,6 +78,47 @@ def get_mounting_command(
           echo "CSYNC is set."
         fi
     """)
+    return script
+
+
+def get_mounting_command(
+    mount_mode: storage_utils.StorageMode,
+    mount_path: str,
+    mount_cmd: str,
+    install_cmd: Optional[str] = None,
+    version_check_cmd: Optional[str] = None,
+    csync_log_path: Optional[str] = None,
+) -> str:
+    """Generates the mounting command for a given bucket.
+
+    There are two types of mounting supported in Skypilot, a traditional MOUNT
+    and CSYNC.
+
+    For traditional mounting, generated script first unmounts any
+    existing mount at the mount path, checks and installs the mounting utility
+    if required, creates the mount path and finally mounts the bucket.
+
+    For CSYNC, generated script first creates the CSYNC_PATH if it does not
+    exist, and finally runs CSYNC daemon on CSYNC_PATH to the bucket.
+
+    Args:
+        mount_mode: Defines which mounting mode is used between traditional
+          MOUNT and CSYNC
+        mount_path: Path to mount the bucket at.
+        mount_cmd: Command to mount the bucket. Should be single line.
+        install_cmd: Command to install the mounting utility for MOUNT mode.
+          Should be single line.
+
+    Returns:
+        str: Mounting command with the mounting script as a heredoc.
+    """
+    if mount_mode == storage_utils.StorageMode.MOUNT:
+        script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
+    else:  # script path for CSYNC mode
+        script_path = f'~/.sky/csync_{random.randint(0, 1000000)}.sh'
+
+    script = get_mounting_script(mount_mode, mount_path, mount_cmd, install_cmd,
+                                 version_check_cmd, csync_log_path)
 
     # TODO(romilb): Get direct bash script to work like so:
     # command = f'bash <<-\EOL' \
