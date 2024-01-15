@@ -1291,8 +1291,9 @@ class RetryingVmProvisioner(object):
 
             # If it reaches here: the cluster status in the database gets
             # set to either STOPPED or None, since a launch request was issued
-            # but failed, and the provisioner stopped the cluster if
-            # `cluster_ever_up` is True; or terminated the cluster otherwise.
+            # but failed, and the provisioning loop (_retry_zones()) stopped the
+            # cluster if `cluster_ever_up` is True; or terminated the cluster
+            # otherwise.
             if prev_cluster_ever_up:
                 message = (f'Failed to launch the cluster {cluster_name!r}. '
                            'It is now stopped.\n\tTo remove the cluster '
@@ -1303,6 +1304,8 @@ class RetryingVmProvisioner(object):
                     raise exceptions.ResourcesUnavailableError(message,
                                                                no_failover=True)
 
+            assert (prev_cluster_status == status_lib.ClusterStatus.INIT
+                   ), prev_cluster_status
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {prev_cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
@@ -1673,8 +1676,8 @@ class RetryingVmProvisioner(object):
             message = (f'Failed to acquire resources in {to_provision.cloud}. '
                        'Try changing resource requirements or use another '
                        'cloud provider.')
-        # Do not failover to other clouds if the cluster was previously
-        # UP or STOPPED, since the user can have some data on the cluster.
+        # Do not failover to other clouds if the cluster was ever up, since the
+        # user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=prev_cluster_ever_up)
 
@@ -4270,22 +4273,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                        handle_before_refresh)
 
         if not dryrun:
+            # We force refresh for the INIT status and the cluster that has
+            # autostop set, to determine the actual state of a previous cluster
+            # in INIT state, to make the logic that uses the prev_cluster_status
+            # more robust, e.g., the hint to be printed.
             record = backend_utils.refresh_cluster_record(
                 cluster_name,
-                # We force refresh for the init status to determine the
-                # actual state of a previous cluster in INIT state.
-                #
-                # This is important for the case, where an existing cluster
-                # is transitioned into INIT state due to key interruption
-                # during launching, with the following steps:
-                # (1) launch, after answering prompt immediately ctrl-c;
-                # (2) launch again.
-                # If we don't refresh the state of the cluster and reset it
-                # back to STOPPED, our failover logic will consider it as an
-                # abnormal cluster after hitting resources capacity limit on
-                # the cloud, and will start failover. This is not desired,
-                # because the user may want to keep the data on the disk of
-                # that cluster.
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
                 acquire_per_cluster_status_lock=False,
             )
@@ -4295,8 +4288,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             else:
                 prev_cluster_status = None
                 handle = None
-        # We should check the cluster_ever_up after refresh, as the cluster
-        # may be terminated, and the cluster_ever_up should be set to False.
+        # We should check the cluster_ever_up after refresh, because if the
+        # cluster is terminated (through console or auto-dwon), the record will
+        # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
         logger.debug(f'cluster_ever_up: {cluster_ever_up}')
         logger.debug(f'record: {record}')

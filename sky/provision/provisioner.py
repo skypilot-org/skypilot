@@ -169,11 +169,7 @@ def bulk_provision(
                          f'on {cloud} ({zone_str}).')
             logger.debug(f'bulk_provision for {cluster_name!r} '
                          f'failed. Stacktrace:\n{traceback.format_exc()}')
-            # If cluster was previously UP or STOPPED, stop it; otherwise
-            # terminate.
-            # FIXME(zongheng): terminating a potentially live cluster is
-            # scary. Say: users have an existing cluster that got into INIT, do
-            # sky launch, somehow failed, then we may be terminating it here.
+            # If the cluster was ever up, stop it; otherwise terminate it.
             terminate = not prev_cluster_ever_up
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')

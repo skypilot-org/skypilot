@@ -125,8 +125,10 @@ def create_table(cursor, conn):
         'cluster_ever_up',
         'INTEGER DEFAULT 0',
         # Set default value to 1 so that all the existing clusters before #2977
-        # are considered as ever up.
-        default_value_to_replace_nulls=1)
+        # are considered as ever up. This is conservative: even some INIT
+        # clusters were never really UP, setting it to 1 means they won't be
+        # auto-deleted during any failover.
+        value_to_replace_existing_entries=1)
     conn.commit()
 
 
