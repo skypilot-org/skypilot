@@ -1,0 +1,31 @@
+name: torch-ddp-bench
+
+num_nodes: 2
+
+resources:
+  accelerators: A100:8
+  use_spot: True
+  cloud: gcp
+
+file_mounts: 
+  ./torch_ddp_benchmark.py: ./examples/torch_ddp_benchmark.py
+
+setup: |
+  conda activate ddp
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n ddp python=3.10 -y
+    conda activate ddp
+  fi
+  pip install torch torchvision
+
+run: |
+  conda activate ddp
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+  LD_LIBRARY_PATH="" torchrun \
+    --nproc_per_node 8 \
+    --rdzv_id=1 --rdzv_endpoint=${master_addr}:1234 \
+    --rdzv_backend=c10d --nnodes $num_nodes \
+    torch_ddp_benchmark.py --distributed-backend nccl
