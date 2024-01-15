@@ -6,31 +6,17 @@ from typing import Optional
 from sky import exceptions
 
 
-def get_mounting_command(
+def get_mounting_script(
     mount_path: str,
-    install_cmd: str,
     mount_cmd: str,
+    install_cmd: str,
     version_check_cmd: Optional[str] = None,
 ) -> str:
-    """Generates the mounting command for a given bucket.
-
-    Generated script first unmounts any existing mount at the mount path, checks
-    and installs the mounting utility if required, creates the mount path and
-    finally mounts the bucket.
-
-    Args:
-        mount_path: Path to mount the bucket at.
-        install_cmd: Command to install the mounting utility. Should be
-          single line.
-        mount_cmd: Command to mount the bucket. Should be single line.
-
-    Returns:
-        str: Mounting command with the mounting script as a heredoc.
-    """
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'
+
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
@@ -69,6 +55,32 @@ def get_mounting_command(
         {mount_cmd}
         echo "Mounting done."
     """)
+
+    return script
+
+def get_mounting_command(
+    mount_path: str,
+    install_cmd: str,
+    mount_cmd: str,
+    version_check_cmd: Optional[str] = None,
+) -> str:
+    """Generates the mounting command for a given bucket.
+
+    Generated script first unmounts any existing mount at the mount path, checks
+    and installs the mounting utility if required, creates the mount path and
+    finally mounts the bucket.
+
+    Args:
+        mount_path: Path to mount the bucket at.
+        install_cmd: Command to install the mounting utility. Should be
+          single line.
+        mount_cmd: Command to mount the bucket. Should be single line.
+
+    Returns:
+        str: Mounting command with the mounting script as a heredoc.
+    """
+    script = get_mounting_script(mount_path, mount_cmd, install_cmd,
+                                 version_check_cmd)
 
     # TODO(romilb): Get direct bash script to work like so:
     # command = f'bash <<-\EOL' \
