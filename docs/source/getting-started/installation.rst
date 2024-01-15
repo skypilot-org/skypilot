@@ -268,10 +268,21 @@ Lambda Cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
 
+RunPod
+~~~~~~~~~~
+
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
+
+.. code-block:: shell
+  
+  pip install "runpod>=1.5.1"
+  runpod config
+
+
 IBM
 ~~~~~~~~~
 
-To access IBM's VPC service, store the following fields in ``~/.ibm/credentials.yaml``:
+To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__, store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. code-block:: text
 

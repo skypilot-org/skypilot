@@ -25,7 +25,7 @@ SKYPILOT_SERVICE_ACCOUNT_CONFIG = {
 # NOTE: `serviceAccountUser` allows the head node to create workers with
 # a serviceAccount. `roleViewer` allows the head node to run bootstrap_gcp.
 DEFAULT_SERVICE_ACCOUNT_ROLES = [
-    'roles/storage.objectAdmin',
+    'roles/storage.admin',
     'roles/compute.admin',
     'roles/iam.serviceAccountUser',
     'roles/iam.roleViewer',

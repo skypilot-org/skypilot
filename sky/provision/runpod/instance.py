@@ -140,7 +140,6 @@ def terminate_instances(
         logger.info(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
             continue
-        logger.info(f'Start {inst_id}: {inst}')
         try:
             utils.remove(inst_id)
         except Exception as e:  # pylint: disable=broad-except
