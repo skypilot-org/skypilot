@@ -109,3 +109,5 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
+
+CSYNC_DIR = '~/.sky/csync'
