@@ -4,8 +4,8 @@ import multiprocessing
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
-import threading
 import time
 from typing import Any, List, Optional, Tuple
 
@@ -15,6 +15,7 @@ from fuse import FuseOSError
 from fuse import Operations
 import psutil
 
+from sky import exceptions
 from sky import sky_logging
 from sky.data import mounting_utils
 from sky.data import storage_utils
@@ -619,34 +620,36 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         storage_mount_pid, fuse_pid = _get_storage_mount_and_fuse_pid(csync_pid)
         pid_set.add((csync_pid, storage_mount_pid, fuse_pid))
 
-    for csync_pid, _, fuse_pid in pid_set:
+    return_code = 0
+    failed_to_terminate: List[Tuple[int, str, str]] = []
+    def _handle_unmount_process(unmount_path: str, csync_pid: int, unmount_target: str):
+        unmount_cmd = f'fusermount -uz {unmount_path}'
+        with subprocess.Popen(unmount_cmd,
+                              shell=True,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True) as unmount_process:
+            rc = unmount_process.wait()
+            if rc != 0:
+                _, stderr = unmount_process.communicate()
+                failed_to_terminate.append((csync_pid,
+                                            stderr,
+                                            unmount_target))
+        return rc
+    
+    for csync_pid, storage_mount_pid, fuse_pid in pid_set:
         # 1.unmount cloud storage from read path
         csync_read_path = os.path.abspath(
             os.path.expanduser(_CSYNC_READ_PATH.format(pid=csync_pid)))
-        storage_unmount_cmd = f'fusermount -uz {csync_read_path}'
-        with subprocess.Popen(storage_unmount_cmd,
-                              shell=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              text=True) as unmount_process:
-            return_code = unmount_process.wait()
-            if return_code != 0:
-                # TODO(Doyoung): implement logic to handle this error
-                pass
+        return_code = _handle_unmount_process(csync_read_path, csync_pid, 'Storage Mount')
+        if return_code != 0:
+            continue
 
         # 2.unmount redirection FUSE
         mountpoint_path = _get_mountpoint_path_from_csync_pid(csync_pid)
-        storage_unmount_cmd = f'fusermount -uz {mountpoint_path}'
-        with subprocess.Popen(storage_unmount_cmd,
-                              shell=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              text=True) as unmount_process:
-
-            return_code = unmount_process.wait()
-            if return_code != 0:
-                # TODO(Doyoung): implement logic to handle this error
-                pass
+        return_code = _handle_unmount_process(mountpoint_path, csync_pid, 'Redirection FUSE')
+        if return_code != 0:
+            continue
         # If there's any process obtaining the file descriptor of a file in
         # mountpoint, i.e. writing a checkpoint, the mountpoint will remain
         # mounted until the file descriptor is released after running
@@ -674,6 +677,7 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
                 try:
                     psutil.Process(int(csync_pid)).terminate()
                 except psutil.NoSuchProcess:
+                    # The daemon is externally terminated.
                     logger.info(f'Sync daemon process, {csync_pid}, was not '
                                 'found.')
                 break
@@ -682,7 +686,15 @@ def _terminate(paths: List[str], all: bool = False) -> int:  # pylint: disable=r
         _delete_running_csync(csync_pid)
         print(f'deleted CSYNC mounted on {mountpoint_path!r}')
 
-    return 0
+    if return_code:
+        for csync_pid, stderr, unmount_target in failed_to_terminate:
+            err_msg = (f'{unmount_target} failed to terminate for CSYNC process '
+                       f'with pid {csync_pid}. '
+                       f'Detailed error message: {stderr}')
+            sys.stderr.write(err_msg)
+            sys.stderr.flush()
+        sys.exit(exceptions.CSYNC_TERMINATE_FAILURE_CODE)
+    return return_code
 
 
 if __name__ == '__main__':
