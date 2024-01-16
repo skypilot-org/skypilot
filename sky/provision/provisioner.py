@@ -177,10 +177,31 @@ def bulk_provision(
             terminate = not is_prev_cluster_healthy
             terminate_str = ('Terminating' if terminate else 'Stopping')
             logger.debug(f'{terminate_str} the failed cluster.')
-            teardown_cluster(repr(cloud),
-                             cluster_name,
-                             terminate=terminate,
-                             provider_config=original_config['provider'])
+            retry_cnt = 1
+            while True:
+                try:
+                    teardown_cluster(
+                        repr(cloud),
+                        cluster_name,
+                        terminate=terminate,
+                        provider_config=original_config['provider'])
+                    break
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to {terminate_str} {cluster_name!r}.')
+                    logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+                    retry_cnt += 1
+                    if retry_cnt <= _MAX_RETRY:
+                        logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
+                        time.sleep(5)
+                        continue
+                    formatted_exception = (common_utils.format_exception(
+                        e, use_bracket=True))
+                    raise provision_common.TeardownError(
+                        f'Failed to {terminate_str} {cluster_name!r} that '
+                        'was failed to provision. This can cause resource '
+                        'leakage. Please check the failure and the cluster '
+                        'status, and manually terminate the cluster. '
+                        f'Details: {formatted_exception}')
             raise
 
 

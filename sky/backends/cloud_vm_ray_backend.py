@@ -1567,6 +1567,9 @@ class RetryingVmProvisioner(object):
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
                     return config_dict
+                except provision_common.TeardownError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise
                 except Exception as e:  # pylint: disable=broad-except
                     # NOTE: We try to cleanup the cluster even if the previous
                     # cluster does not exist. Also we are fast at

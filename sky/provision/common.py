@@ -21,6 +21,10 @@ class ProvisionError(RuntimeError):
     errors: List[Dict[str, str]]
 
 
+class TeardownError(Exception):
+    """Exception for termination."""
+
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""
