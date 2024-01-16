@@ -12,7 +12,7 @@ Why SkyServe?
 
 * **Bring any serving framework** (vLLM, TGI, FastAPI, ...) and scale it across regions/clouds
 * **Reduce costs and increase availability** of service replicas by leveraging multiple/cheaper locations and hardware (spot instances)
-* **Out-of-the-box load-balancing and autoscaling** of service replicas
+* **Out-of-the-box load-balancing and :ref:`autoscaling <serve-autoscaling>`** of service replicas
 * Manage multi-cloud, multi-region deployments with a single control plane
 * **Privacy**: Everything is launched inside your cloud accounts and VPCs
 
