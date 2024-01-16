@@ -175,6 +175,11 @@ class AWS(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[List[clouds.Zone]]:
+        # TODO(suquark): Now we can return one zone at a time,
+        # like other clouds,
+        # because the new provisioner can failover to other zones pretty fast.
+        # This will simplify our provision logic a lot.
+
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
         regions = cls.regions_with_offering(instance_type,

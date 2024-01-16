@@ -48,7 +48,6 @@ YAPF_FLAGS=(
 
 YAPF_EXCLUDES=(
     '--exclude' 'build/**'
-    '--exclude' 'sky/skylet/providers/aws/**'
     '--exclude' 'sky/skylet/providers/gcp/**'
     '--exclude' 'sky/skylet/providers/azure/**'
     '--exclude' 'sky/skylet/providers/ibm/**'
@@ -56,14 +55,12 @@ YAPF_EXCLUDES=(
 
 ISORT_YAPF_EXCLUDES=(
     '--sg' 'build/**'
-    '--sg' 'sky/skylet/providers/aws/**'
     '--sg' 'sky/skylet/providers/gcp/**'
     '--sg' 'sky/skylet/providers/azure/**'
     '--sg' 'sky/skylet/providers/ibm/**'
 )
 
 BLACK_INCLUDES=(
-    'sky/skylet/providers/aws'
     'sky/skylet/providers/gcp'
     'sky/skylet/providers/azure'
     'sky/skylet/providers/ibm'
