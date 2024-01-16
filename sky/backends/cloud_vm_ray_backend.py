@@ -1296,7 +1296,7 @@ class RetryingVmProvisioner(object):
             # otherwise.
             if prev_cluster_ever_up:
                 message = (f'Failed to launch the cluster {cluster_name!r} '
-                          f'(previous status: {prev_cluster_status.value}). '
+                           f'(previous status: {prev_cluster_status.value}). '
                            'To retry launching the cluster, run: '
                            f'sky start {cluster_name}')
                 with ux_utils.print_exception_no_traceback():
@@ -1672,7 +1672,7 @@ class RetryingVmProvisioner(object):
                        'Try changing resource requirements or use another '
                        'cloud provider.')
         # Do not failover to other locations if the cluster was ever up, since
-        # the user can have some data on the cluster.  
+        # the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=prev_cluster_ever_up)
 
@@ -4268,10 +4268,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                        handle_before_refresh)
 
         if not dryrun:
-            # We force refresh any cluster (1) with INIT status, or (2) has  
+            # We force refresh any cluster (1) with INIT status, or (2) has
             # autostop set. This is to determine the actual state of such a
             # cluster and to make the hint that uses prev_cluster_status more
-            # accurate.  
+            # accurate.
             record = backend_utils.refresh_cluster_record(
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
