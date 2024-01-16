@@ -60,7 +60,10 @@ def benchmark_process_group(pg, benchmark, use_ddp_for_single_rank=True):
     model = benchmark.create_model()
     data = [(benchmark.generate_inputs(), benchmark.generate_target())]
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), 0.001, momentum=0.9, weight_decay=1e-4)
+    optimizer = optim.SGD(model.parameters(),
+                          0.001,
+                          momentum=0.9,
+                          weight_decay=1e-4)
     model = torch.nn.parallel.DistributedDataParallel(
         model,
         device_ids=[torch.cuda.current_device()],
@@ -127,7 +130,8 @@ def sweep(benchmark):
         local_print("\n")
 
     # Every process runs once by themselves to warm up (CUDA init, etc).
-    append_benchmark("  warmup", [dist.get_rank()], {"use_ddp_for_single_rank": False})
+    append_benchmark("  warmup", [dist.get_rank()],
+                     {"use_ddp_for_single_rank": False})
 
     # Single machine baselines
     append_benchmark("  no ddp", range(1), {"use_ddp_for_single_rank": False})
@@ -154,6 +158,7 @@ def sweep(benchmark):
 
 
 class Benchmark:
+
     def __init__(self, device, distributed_backend, bucket_size):
         self.device = device
         self.batch_size = 32
@@ -174,6 +179,7 @@ class Benchmark:
 
 
 class TorchvisionBenchmark(Benchmark):
+
     def __init__(self, device, distributed_backend, bucket_size, model):
         super().__init__(
             device,
@@ -192,20 +198,28 @@ class TorchvisionBenchmark(Benchmark):
         return [torch.rand([self.batch_size, 3, 224, 224], device=self.device)]
 
     def generate_target(self):
-        return torch.tensor([1] * self.batch_size, dtype=torch.long, device=self.device)
+        return torch.tensor([1] * self.batch_size,
+                            dtype=torch.long,
+                            device=self.device)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PyTorch distributed benchmark suite")
+    parser = argparse.ArgumentParser(
+        description="PyTorch distributed benchmark suite")
     parser.add_argument("--rank", type=int, default=os.environ["RANK"])
-    parser.add_argument("--world-size", type=int, default=os.environ["WORLD_SIZE"])
+    parser.add_argument("--world-size",
+                        type=int,
+                        default=os.environ["WORLD_SIZE"])
     parser.add_argument("--distributed-backend", type=str, default="nccl")
     parser.add_argument("--bucket-size", type=int, default=25)
     parser.add_argument("--model", type=str)
-    parser.add_argument(
-        "--json", type=str, metavar="PATH", help="Write file with benchmark results"
-    )
-    parser.add_argument("--local-rank", type=str, default=os.environ["LOCAL_RANK"])
+    parser.add_argument("--json",
+                        type=str,
+                        metavar="PATH",
+                        help="Write file with benchmark results")
+    parser.add_argument("--local-rank",
+                        type=str,
+                        default=os.environ["LOCAL_RANK"])
     args = parser.parse_args()
 
     num_gpus_per_node = torch.cuda.device_count()
@@ -250,31 +264,29 @@ def main():
                 distributed_backend=args.distributed_backend,
                 bucket_size=args.bucket_size,
                 model=args.model,
-            )
-        )
+            ))
     else:
-        for model in ["resnet50", "resnet101", "resnext50_32x4d", "resnext101_32x8d"]:
+        for model in [
+                "resnet50", "resnet101", "resnext50_32x4d", "resnext101_32x8d"
+        ]:
             benchmarks.append(
                 TorchvisionBenchmark(
                     device=device,
                     distributed_backend=args.distributed_backend,
                     bucket_size=args.bucket_size,
                     model=model,
-                )
-            )
+                ))
 
     benchmark_results = []
     for benchmark in benchmarks:
         if args.rank == 0:
             print(f"\nBenchmark: {str(benchmark)}")
         result = sweep(benchmark)
-        benchmark_results.append(
-            {
-                "model": benchmark.model,
-                "batch_size": benchmark.batch_size,
-                "result": result,
-            }
-        )
+        benchmark_results.append({
+            "model": benchmark.model,
+            "batch_size": benchmark.batch_size,
+            "result": result,
+        })
 
     # Write file with benchmark results if applicable
     if args.rank == 0 and args.json:
