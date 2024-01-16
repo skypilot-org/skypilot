@@ -13,6 +13,7 @@ _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '1.3.0'
 
+
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility, 'goofys'."""
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
@@ -95,6 +96,7 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                  '--daemon')
     return mount_cmd
 
+
 def get_mounting_script(
     mount_path: str,
     mount_cmd: str,
@@ -106,12 +108,14 @@ def get_mounting_script(
     Generated script first unmounts any existing mount at the mount path,
     checks and installs the mounting utility if required, creates the mount
     path and finally mounts the bucket.
-    
+
     Args:
         mount_path: Path to mount the bucket at.
         install_cmd: Command to install the mounting utility. Should be
           single line.
         mount_cmd: Command to mount the bucket. Should be single line.
+        version_check_cmd: Command to check the version of already installed
+          mounting util.
 
     Returns:
         str: Mounting script as a heredoc.
@@ -163,6 +167,7 @@ def get_mounting_script(
 
     return script
 
+
 def get_mounting_command(
     mount_path: str,
     install_cmd: str,
@@ -180,6 +185,8 @@ def get_mounting_command(
         install_cmd: Command to install the mounting utility. Should be
           single line.
         mount_cmd: Command to mount the bucket. Should be single line.
+        version_check_cmd: Command to check the version of already installed
+          mounting util.
 
     Returns:
         str: Mounting command with the mounting script as a heredoc.
