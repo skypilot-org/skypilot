@@ -1295,10 +1295,9 @@ class RetryingVmProvisioner(object):
             # cluster if `cluster_ever_up` is True; or terminated the cluster
             # otherwise.
             if prev_cluster_ever_up:
-                message = (f'Failed to launch the cluster {cluster_name!r}. '
-                           'It is now stopped.\n\tTo remove the cluster '
-                           f'please run: sky down {cluster_name}\n\t'
-                           'Try launching the cluster again with: '
+                message = (f'Failed to launch the cluster {cluster_name!r} '
+                          f'(previous status: {prev_cluster_status.value}). '
+                           'To retry launching the cluster, run: '
                            f'sky start {cluster_name}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesUnavailableError(message,
@@ -1604,11 +1603,7 @@ class RetryingVmProvisioner(object):
             # The cluster is not ready. We must perform error recording and/or
             # cleanup.
 
-            # If cluster was previously UP or STOPPED, stop it; otherwise
-            # terminate.
-            # FIXME(zongheng): terminating a potentially live cluster is
-            # scary. Say: users have an existing cluster that got into INIT, do
-            # sky launch, somehow failed, then we may be terminating it here.
+            # If cluster was ever up, stop it; otherwise terminate.
             terminate_or_stop = not prev_cluster_ever_up
             definitely_no_nodes_launched = False
             if status == GangSchedulingStatus.HEAD_FAILED:
@@ -1676,8 +1671,8 @@ class RetryingVmProvisioner(object):
             message = (f'Failed to acquire resources in {to_provision.cloud}. '
                        'Try changing resource requirements or use another '
                        'cloud provider.')
-        # Do not failover to other clouds if the cluster was ever up, since the
-        # user can have some data on the cluster.
+        # Do not failover to other locations if the cluster was ever up, since
+        # the user can have some data on the cluster.  
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=prev_cluster_ever_up)
 
@@ -4273,10 +4268,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                        handle_before_refresh)
 
         if not dryrun:
-            # We force refresh for the INIT status and the cluster that has
-            # autostop set, to determine the actual state of a previous cluster
-            # in INIT state, to make the logic that uses the prev_cluster_status
-            # more robust, e.g., the hint to be printed.
+            # We force refresh any cluster (1) with INIT status, or (2) has  
+            # autostop set. This is to determine the actual state of such a
+            # cluster and to make the hint that uses prev_cluster_status more
+            # accurate.  
             record = backend_utils.refresh_cluster_record(
                 cluster_name,
                 force_refresh_statuses={status_lib.ClusterStatus.INIT},
