@@ -12,7 +12,21 @@ def get_mounting_script(
     install_cmd: str,
     version_check_cmd: Optional[str] = None,
 ) -> str:
-    """Generates the mounting script."""
+    """Generates the mounting script.
+
+    Generated script first unmounts any existing mount at the mount path,
+    checks and installs the mounting utility if required, creates the mount
+    path and finally mounts the bucket.
+    
+    Args:
+        mount_path: Path to mount the bucket at.
+        install_cmd: Command to install the mounting utility. Should be
+          single line.
+        mount_cmd: Command to mount the bucket. Should be single line.
+
+    Returns:
+        str: Mounting script as a heredoc.
+    """
 
     mount_binary = mount_cmd.split()[0]
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
@@ -68,9 +82,9 @@ def get_mounting_command(
 ) -> str:
     """Generates the mounting command for a given bucket.
 
-    Generated script first unmounts any existing mount at the mount path, checks
-    and installs the mounting utility if required, creates the mount path and
-    finally mounts the bucket.
+    The generated mounting script is written to a temporary file, which is then
+    executed and subsequently deleted, ensuring that these operations are
+    encapsulated within a single, executable command sequence.
 
     Args:
         mount_path: Path to mount the bucket at.
