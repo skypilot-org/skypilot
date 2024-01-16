@@ -5,7 +5,6 @@ service:
     initial_delay_seconds: 180
   replica_policy:
     min_replicas: 3
-    auto_restart: false
 
 resources:
   ports: 8080
@@ -13,7 +12,7 @@ resources:
   zone: us-central1-a
   cpus: 2+
 
-workdir: tests/skyserve/replica_failure
+workdir: tests/skyserve/load_balancer
 
 setup: pip install fastapi[all] uvicorn
 

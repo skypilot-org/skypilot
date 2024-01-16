@@ -55,15 +55,28 @@ GCP
 GCP Service Account
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`GCP Service Account <https://cloud.google.com/iam/docs/service-account-overview>`__ is supported.
+`GCP Service Accounts
+<https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
 
-To use it to access GCP with SkyPilot, you need to setup the credentials:
+.. tip::
+    A service account on your local machine can avoid the periodic
+    ``google.auth.exceptions.RefreshError: Reauthentication is needed. Please
+    run `gcloud auth application-default login` to reauthenticate.`` error. A
+    service account is long-lived as it does not have an expiry time.
 
-1. Download the key for the service account from the `GCP console <https://console.cloud.google.com/iam-admin/serviceaccounts>`__.
-2. Set the environment variable `GOOGLE_APPLICATION_CREDENTIALS` to the path of the key file, and configure the gcloud CLI tool:
+Set up a service account as follows:
 
-.. code-block:: console
+1. Follow the :ref:`instructions <gcp-service-account-creation>` to create a service account with the appropriate roles/permissions.
+2. In the "Service Accounts" tab in the `IAM & Admin console
+   <https://console.cloud.google.com/iam-admin/iam>`__, click on the service
+   account to go to its detailed page. Click on the **KEYS** tab, then click on
+   **ADD KEY** to add a JSON key.  The key will be downloaded automatically.
+3. Set the environment variable ``GOOGLE_APPLICATION_CREDENTIALS`` to the path of the key file, and configure the gcloud CLI tool:
 
-    $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
-    $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
-    $ gcloud config set project your-project-id
+   .. code-block:: console
+
+       $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+       $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+       $ gcloud config set project your-project-id
+
+   You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in all new terminal sessions.

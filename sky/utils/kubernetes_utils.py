@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.backends import backend_utils
+from sky.provision.kubernetes import network_utils
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
@@ -33,6 +34,13 @@ NO_GPU_ERROR_MESSAGE = 'No GPUs found in Kubernetes cluster. \
 If your cluster contains GPUs, make sure nvidia.com/gpu resource is available on the nodes and the node labels for identifying GPUs \
 (e.g., skypilot.co/accelerators) are setup correctly. \
 To further debug, run: sky check.'
+
+# TODO(romilb): Add links to docs for configuration instructions when ready.
+ENDPOINTS_DEBUG_MESSAGE = ('Additionally, make sure your {endpoint_type} '
+                           'is configured correctly. '
+                           '\nTo debug, run: {debug_cmd}')
+
+KIND_CONTEXT_NAME = 'kind-skypilot'  # Context name used by sky local up
 
 logger = sky_logging.init_logger(__name__)
 
@@ -60,15 +68,29 @@ class GPULabelFormatter:
         """Given a label value, returns the GPU type"""
         raise NotImplementedError
 
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Validates if the specified label value is correct.
+
+        Used to check if the labelling on the cluster is correct and
+        preemptively raise an error if it is not.
+
+        Returns:
+            bool: True if the label value is valid, False otherwise.
+            str: Error message if the label value is invalid, None otherwise.
+        """
+        del value
+        return True, ''
+
 
 def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
 
     Uses the format - nvidia-tesla-<accelerator>.
-    A100-80GB and L4 are an exception - they use nvidia-<accelerator>.
+    A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
     """
-    if accelerator in ('A100-80GB', 'L4'):
-        # A100-80GB and L4 have a different name pattern.
+    if accelerator in ('A100-80GB', 'L4', 'H100-80GB'):
+        # A100-80GB, L4 and H100-80GB have a different name pattern.
         return 'nvidia-{}'.format(accelerator.lower())
     else:
         return 'nvidia-tesla-{}'.format(accelerator.lower())
@@ -96,6 +118,14 @@ class SkyPilotLabelFormatter(GPULabelFormatter):
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
         return value.upper()
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Values must be all lowercase for the SkyPilot formatter."""
+        is_valid = value == value.lower()
+        return is_valid, (f'Label value {value!r} must be lowercase if using '
+                          f'the {cls.get_label_key()} label.'
+                          if not is_valid else '')
 
 
 class CoreWeaveLabelFormatter(GPULabelFormatter):
@@ -157,31 +187,32 @@ LABEL_FORMATTER_REGISTRY = [
 
 
 def detect_gpu_label_formatter(
-) -> Tuple[Optional[GPULabelFormatter], List[Tuple[str, str]]]:
+) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
     """Detects the GPU label formatter for the Kubernetes cluster
 
     Returns:
         GPULabelFormatter: The GPU label formatter for the cluster, if found.
-        List[Tuple[str, str]]: The set of labels and values across all nodes.
+        Dict[str, List[Tuple[str, str]]]: A mapping of nodes and the list of
+             labels on each node. E.g., {'node1': [('label1', 'value1')]}
     """
     # Get all labels across all nodes
-    node_labels: List[Tuple[str, str]] = []
+    node_labels: Dict[str, List[Tuple[str, str]]] = {}
     nodes = get_kubernetes_nodes()
     for node in nodes:
-        node_labels.extend(node.metadata.labels.items())
+        node_labels[node.metadata.name] = []
+        for label, value in node.metadata.labels.items():
+            node_labels[node.metadata.name].append((label, value))
 
     label_formatter = None
 
     # Check if the node labels contain any of the GPU label prefixes
     for lf in LABEL_FORMATTER_REGISTRY:
         label_key = lf.get_label_key()
-        for label, _ in node_labels:
-            if label.startswith(label_key):
-                label_formatter = lf()
-                break
-
-        if label_formatter is not None:
-            break
+        for _, label_list in node_labels.items():
+            for label, _ in label_list:
+                if label.startswith(label_key):
+                    label_formatter = lf()
+                    return label_formatter, node_labels
 
     return label_formatter, node_labels
 
@@ -343,6 +374,17 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
         if label_formatter is not None:
+            # Validate the label value on all nodes labels to ensure they are
+            # correctly setup and will behave as expected.
+            for node_name, label_list in node_labels.items():
+                for label, value in label_list:
+                    if label == label_formatter.get_label_key():
+                        is_valid, reason = label_formatter.validate_label_value(
+                            value)
+                        if not is_valid:
+                            raise exceptions.ResourcesUnavailableError(
+                                f'Node {node_name!r} in Kubernetes cluster has '
+                                f'invalid GPU label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
@@ -355,17 +397,22 @@ def get_gpu_label_key_value(acc_type: str, check_mode=False) -> Tuple[str, str]:
             # node. It does not (and should not) check if the resource
             # quantity is available since that is dynamic and can change
             # during scheduling.
-            for label, value in node_labels:
-                if label == k8s_acc_label_key and value == k8s_acc_label_value:
-                    # If a node is found, we can break out of the loop
-                    # and proceed to deploy.
-                    return k8s_acc_label_key, k8s_acc_label_value
+            for node_name, label_list in node_labels.items():
+                for label, value in label_list:
+                    if (label == k8s_acc_label_key and
+                            value == k8s_acc_label_value):
+                        # If a node is found, we can break out of the loop
+                        # and proceed to deploy.
+                        return k8s_acc_label_key, k8s_acc_label_value
             # If no node is found with the requested acc_type, raise error
             with ux_utils.print_exception_no_traceback():
                 suffix = ''
                 if env_options.Options.SHOW_DEBUG_INFO.get():
+                    all_labels = []
+                    for node_name, label_list in node_labels.items():
+                        all_labels.extend(label_list)
                     gpus_available = set(
-                        v for k, v in node_labels if k == k8s_acc_label_key)
+                        v for k, v in all_labels if k == k8s_acc_label_key)
                     suffix = f' Available GPUs on the cluster: {gpus_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
@@ -991,3 +1038,22 @@ def check_port_forward_mode_dependencies() -> None:
                     f'  $ sudo apt install {install_cmd}\n'
                     f'On MacOS, install it with: \n'
                     f'  $ brew install {install_cmd}') from None
+
+
+def get_endpoint_debug_message() -> str:
+    """ Returns a string message for user to debug Kubernetes port opening
+
+    Polls the configured ports mode on Kubernetes to produce an
+    appropriate error message with debugging hints.
+
+    Also checks if the
+    """
+    port_mode = network_utils.get_port_mode()
+    if port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
+        endpoint_type = 'Ingress'
+        debug_cmd = 'kubectl describe ingress && kubectl describe ingressclass'
+    elif port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
+        endpoint_type = 'LoadBalancer'
+        debug_cmd = 'kubectl describe service'
+    return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
+                                          debug_cmd=debug_cmd)

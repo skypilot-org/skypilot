@@ -135,9 +135,7 @@ install_requires = [
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
-    # NOTE: required by awscli. To avoid ray automatically installing
-    # the latest version.
-    'colorama < 0.4.5',
+    'colorama',
     'cryptography',
     # Jinja has a bug in older versions because of the lack of pinning
     # the version of the underlying markupsafe package. See:
@@ -207,6 +205,9 @@ aws_dependencies = [
     'awscli>=1.27.10',
     'botocore>=1.29.10',
     'boto3>=1.26.1',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama < 0.4.5',
 ]
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
@@ -222,26 +223,21 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances.
     # Reference: https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'] +
-           local_ray,
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
     'docker': ['docker'] + local_ray,
     'lambda': local_ray,
     'cloudflare': aws_dependencies,
-    'scp': [] + local_ray,
+    'scp': local_ray,
     'oci': ['oci'] + local_ray,
-    'kubernetes': ['kubernetes'] + local_ray,
+    'kubernetes': ['kubernetes>=20.0.0'] + local_ray,
     'remote': remote,
-    'serve': ['uvicorn', 'fastapi'],
+    'runpod': ['runpod>=1.5.1']
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
-
-# Install aws requirements by default, as it is the most common cloud provider,
-# and the installation is quick.
-install_requires += extras_require['aws']
 
 long_description = ''
 readme_filepath = 'README.md'

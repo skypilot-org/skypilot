@@ -542,11 +542,6 @@ def stream_replica_logs(service_name: str,
 
     replica_cluster_name = generate_replica_cluster_name(
         service_name, replica_id)
-    handle = global_user_state.get_handle_from_cluster_name(
-        replica_cluster_name)
-    if handle is None:
-        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     launch_log_file_name = generate_replica_launch_log_file_name(
         service_name, replica_id)
@@ -575,11 +570,17 @@ def stream_replica_logs(service_name: str,
         # Early exit if not following the logs.
         return ''
 
+    backend = backends.CloudVmRayBackend()
+    handle = global_user_state.get_handle_from_cluster_name(
+        replica_cluster_name)
+    if handle is None:
+        return _FAILED_TO_FIND_REPLICA_MSG.format(replica_id=replica_id)
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+
     # Notify user here to make sure user won't think the log is finished.
     print(f'{colorama.Fore.YELLOW}Start streaming logs for task job '
           f'of replica {replica_id}...{colorama.Style.RESET_ALL}')
 
-    backend = backends.CloudVmRayBackend()
     # Always tail the latest logs, which represent user setup & run.
     returncode = backend.tail_logs(handle, job_id=None, follow=follow)
     if returncode != 0:
@@ -636,9 +637,8 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     for info in service_record['replica_info']:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
-        # If auto restart enabled, not count FAILED replicas here.
-        if (not service_record['auto_restart'] or
-                info['status'] != serve_state.ReplicaStatus.FAILED):
+        # TODO(MaoZiming): add a column showing failed replicas number.
+        if info['status'] != serve_state.ReplicaStatus.FAILED:
             total_replica_num += 1
     return f'{ready_replica_num}/{total_replica_num}'
 
@@ -680,7 +680,12 @@ def format_service_table(service_records: List[Dict[str, Any]],
         replicas = _get_replicas(record)
         endpoint = get_endpoint(record)
         policy = record['policy']
-        requested_resources = record['requested_resources']
+        # TODO(tian): Backward compatibility.
+        # Remove `requested_resources` field after 2 minor release, 0.6.0.
+        if record.get('requested_resources_str') is None:
+            requested_resources_str = str(record['requested_resources'])
+        else:
+            requested_resources_str = record['requested_resources_str']
 
         service_values = [
             service_name,
@@ -690,7 +695,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources])
+            service_values.extend([policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)

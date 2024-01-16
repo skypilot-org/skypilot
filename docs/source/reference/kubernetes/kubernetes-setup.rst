@@ -167,10 +167,23 @@ Please follow their respective guides to deploy your Kubernetes cluster.
 
 Setting up GPU support
 ~~~~~~~~~~~~~~~~~~~~~~
-If your Kubernetes cluster has Nvidia GPUs, make sure you have the Nvidia
-device plugin installed (i.e., ``nvidia.com/gpu`` resource is available on each node).
-Additionally, you will need to label each node in your cluster with the GPU type.
-For example, a node with v100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+If your Kubernetes cluster has Nvidia GPUs, ensure that:
+
+1. The Nvidia GPU operator is installed (i.e., ``nvidia.com/gpu`` resource is available on each node) and ``nvidia`` is set as the default runtime for your container engine. See `Nvidia's installation guide <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#install-nvidia-gpu-operator>`_ for more details.
+2. Each node in your cluster is labelled with the GPU type. This labelling can be done by adding a label of the format ``skypilot.co/accelerators: <gpu_name>``, where the ``<gpu_name>`` is the lowercase name of the GPU. For example, a node with V100 GPUs must have a label :code:`skypilot.co/accelerators: v100`.
+
+.. tip::
+    You can check if GPU operator is installed and the ``nvidia`` runtime is set as default by running:
+
+    .. code-block:: console
+
+        $ kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/tests/kubernetes/gpu_test_pod.yaml
+        $ watch kubectl get pods
+        # If the pod status changes to completed after a few minutes, your Kubernetes environment is set up correctly.
+
+
+.. note::
+    If you are using RKE2, the GPU operator installation through helm requires extra flags to set ``nvidia`` as the default runtime for containerd. Refer to instructions on `Nvidia GPU Operator installation with Helm on RKE2 <https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html#custom-configuration-for-runtime-containerd>`_ for details.
 
 We provide a convenience script that automatically detects GPU types and labels each node. You can run it with:
 
@@ -184,6 +197,9 @@ We provide a convenience script that automatically detects GPU types and labels 
  To check the status of GPU labeling jobs, run `kubectl get jobs --namespace=kube-system -l job=sky-gpu-labeler`
  You can check if nodes have been labeled by running `kubectl describe nodes` and looking for labels of the format `skypilot.co/accelerators: <gpu_name>`.
 
+
+.. note::
+ GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerators`` label.
 
 .. note::
  GPU labelling is not required on GKE clusters - SkyPilot will automatically use GKE provided labels. However, you will still need to install `drivers <https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers>`_.

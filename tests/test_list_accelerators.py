@@ -8,6 +8,7 @@ def test_list_accelerators():
     assert 'V100' in result, result
     assert 'tpu-v3-8' in result, result
     assert 'Inferentia' not in result, result
+    assert 'Trainium' not in result, result
     assert 'A100-80GB' in result, result
 
 
@@ -16,6 +17,7 @@ def test_list_ccelerators_all():
     assert 'V100' in result, result
     assert 'tpu-v3-8' in result, result
     assert 'Inferentia' in result, result
+    assert 'Trainium' in result, result
     assert 'A100-80GB' in result, result
 
 

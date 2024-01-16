@@ -1,5 +1,6 @@
 """Utility functions for the storage module."""
 import os
+import shlex
 import subprocess
 from typing import Any, Dict, List
 
@@ -84,7 +85,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 
     # This command outputs a list to be excluded according to .gitignore
     # and .git/info/exclude
-    filter_cmd = f'git -C {expand_src_dir_path} status --ignored --porcelain=v1'
+    filter_cmd = (f'git -C {shlex.quote(expand_src_dir_path)} '
+                  'status --ignored --porcelain=v1')
     excluded_list: List[str] = []
 
     if git_exclude_exists or gitignore_exists:

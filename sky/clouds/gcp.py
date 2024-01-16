@@ -1,6 +1,4 @@
 """Google Cloud Platform."""
-import dataclasses
-import datetime
 import functools
 import json
 import os
@@ -8,24 +6,23 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-import cachetools
 import colorama
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
-from sky.skylet import log_lib
+from sky.clouds.utils import gcp_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -120,68 +117,6 @@ def is_api_disabled(endpoint: str, project_id: str) -> bool:
     return proc.returncode != 0
 
 
-@dataclasses.dataclass
-class SpecificReservation:
-    count: int
-    in_use_count: int
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'SpecificReservation':
-        return cls(count=int(d['count']), in_use_count=int(d['inUseCount']))
-
-
-class GCPReservation:
-    """GCP Reservation object that contains the reservation information."""
-
-    def __init__(self, self_link: str, zone: str,
-                 specific_reservation: SpecificReservation,
-                 specific_reservation_required: bool) -> None:
-        self.self_link = self_link
-        self.zone = zone
-        self.specific_reservation = specific_reservation
-        self.specific_reservation_required = specific_reservation_required
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'GCPReservation':
-        return cls(
-            self_link=d['selfLink'],
-            zone=d['zone'],
-            specific_reservation=SpecificReservation.from_dict(
-                d['specificReservation']),
-            specific_reservation_required=d['specificReservationRequired'],
-        )
-
-    @property
-    def available_resources(self) -> int:
-        """Count resources available that can be used in this reservation."""
-        return (self.specific_reservation.count -
-                self.specific_reservation.in_use_count)
-
-    def is_consumable(
-        self,
-        specific_reservations: Set[str],
-    ) -> bool:
-        """Check if the reservation is consumable.
-
-        Check if the reservation is consumable with the provided specific
-        reservation names. This is defined by the Consumption type.
-        For more details:
-        https://cloud.google.com/compute/docs/instances/reservations-overview#how-reservations-work
-        """
-        return (not self.specific_reservation_required or
-                self.name in specific_reservations)
-
-    @property
-    def name(self) -> str:
-        """Name derived from reservation self link.
-
-        The naming convention can be found here:
-        https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_a_specific_shared_reservation
-        """
-        parts = self.self_link.split('/')
-        return '/'.join(parts[-6:-4] + parts[-2:])
-
-
 @clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
@@ -225,14 +160,26 @@ class GCP(clouds.Cloud):
         'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
-    def __init__(self):
-        super().__init__()
-
-        self._list_reservations_cache = None
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+    def _unsupported_features_for_resources(
+        cls, resources: 'resources.Resources'
+    ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        if gcp_utils.is_tpu_vm_pod(resources):
+            return {
+                clouds.CloudImplementationFeatures.STOP: (
+                    'TPU VM pods cannot be stopped. Please refer to: https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_your_resources'
+                )
+            }
+        if gcp_utils.is_tpu(resources) and not gcp_utils.is_tpu_vm(resources):
+            # TPU node does not support multi-node.
+            return {
+                clouds.CloudImplementationFeatures.MULTI_NODE:
+                    ('TPU node does not support multi-node. Please set '
+                     'num_nodes to 1.')
+            }
         return {}
 
     @classmethod
@@ -470,7 +417,8 @@ class GCP(clouds.Cloud):
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
 
-                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['tpu_vm'] = r.accelerator_args.get(
+                    'tpu_vm', True)
                 resources_vars['runtime_version'] = r.accelerator_args[
                     'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
@@ -547,14 +495,11 @@ class GCP(clouds.Cloud):
                 )
                 return ([r], [])
 
-        use_tpu_vm = False
-        if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
+        use_tpu_vm = gcp_utils.is_tpu_vm(resources)
 
         # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
         # need to call the below function to get the fuzzy candidate list.
@@ -632,82 +577,6 @@ class GCP(clouds.Cloud):
     ) -> Tuple[Optional[float], Optional[float]]:
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='gcp')
-
-    def get_reservations_available_resources(
-        self,
-        instance_type: str,
-        region: str,
-        zone: Optional[str],
-        specific_reservations: Set[str],
-    ) -> Dict[str, int]:
-        del region  # Unused
-        if zone is None:
-            # For backward compatibility, the cluster in INIT state launched
-            # before #2352 may not have zone information. In this case, we
-            # return 0 for all reservations.
-            return {reservation: 0 for reservation in specific_reservations}
-        reservations = self._list_reservations_for_instance_type_in_zone(
-            instance_type, zone)
-
-        return {
-            r.name: r.available_resources
-            for r in reservations
-            if r.is_consumable(specific_reservations)
-        }
-
-    def _list_reservations_for_instance_type_in_zone(
-        self,
-        instance_type: str,
-        zone: str,
-    ) -> List[GCPReservation]:
-        reservations = self._list_reservations_for_instance_type(instance_type)
-        return [r for r in reservations if r.zone.endswith(f'/{zone}')]
-
-    def _get_or_create_ttl_cache(self):
-        if getattr(self, '_list_reservations_cache', None) is None:
-            # Backward compatibility: Clusters created before #2352 has GCP
-            # objects serialized without the attribute. So we access it this
-            # way.
-            self._list_reservations_cache = cachetools.TTLCache(
-                maxsize=1,
-                ttl=datetime.timedelta(300),
-                timer=datetime.datetime.now)
-        return self._list_reservations_cache
-
-    @cachetools.cachedmethod(cache=lambda self: self._get_or_create_ttl_cache())
-    def _list_reservations_for_instance_type(
-        self,
-        instance_type: str,
-    ) -> List[GCPReservation]:
-        """List all reservations for the given instance type.
-
-        TODO: We need to incorporate accelerators because the reserved instance
-        can be consumed only when the instance_type + GPU type matches, and in
-        GCP GPUs except for A100 and L4 do not have their own instance type.
-        For example, if we have a specific reservation with n1-highmem-8
-        in us-central1-c. `sky launch --gpus V100` will fail.
-        """
-        list_reservations_cmd = (
-            'gcloud compute reservations list '
-            f'--filter="specificReservation.instanceProperties.machineType={instance_type} AND status=READY" '
-            '--format="json(specificReservation.count, specificReservation.inUseCount, specificReservationRequired, selfLink, zone)"'
-        )
-        returncode, stdout, stderr = subprocess_utils.run_with_retries(
-            list_reservations_cmd,
-            # 1: means connection aborted (although it shows 22 in the error,
-            # but the actual error code is 1)
-            # Example: ERROR: gcloud crashed (ConnectionError): ('Connection aborted.', OSError(22, 'Invalid argument')) # pylint: disable=line-too-long
-            retry_returncode=[255, 1],
-        )
-        subprocess_utils.handle_returncode(
-            returncode,
-            list_reservations_cmd,
-            error_msg=
-            f'Failed to get list reservations for {instance_type!r}:\n{stderr}',
-            stderr=stderr,
-            stream_logs=True,
-        )
-        return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
 
     @classmethod
     def _find_application_key_path(cls) -> str:
@@ -840,20 +709,18 @@ class GCP(clouds.Cloud):
         import google.auth
         import googleapiclient.discovery
 
-        from sky.skylet.providers.gcp import constants
-
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
         credentials, project = google.auth.default()
         service = googleapiclient.discovery.build('cloudresourcemanager',
                                                   'v1',
                                                   credentials=credentials)
-        permissions = {'permissions': constants.VM_MINIMAL_PERMISSIONS}
+        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
+        permissions = {'permissions': gcp_minimal_permissions}
         request = service.projects().testIamPermissions(resource=project,
                                                         body=permissions)
         ret_permissions = request.execute().get('permissions', [])
 
-        diffs = set(constants.VM_MINIMAL_PERMISSIONS).difference(
-            set(ret_permissions))
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
         if len(diffs) > 0:
             identity_str = identity[0] if identity else None
             return False, (
@@ -954,9 +821,7 @@ class GCP(clouds.Cloud):
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
 
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
-        return tpu_utils.is_tpu_vm(resources)
+        return gcp_utils.is_tpu_vm(resources)
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
@@ -1058,82 +923,35 @@ class GCP(clouds.Cloud):
         # Quota found to be greater than zero, try provisioning
         return True
 
+    def get_reservations_available_resources(
+        self,
+        instance_type: str,
+        region: str,
+        zone: Optional[str],
+        specific_reservations: Set[str],
+    ) -> Dict[str, int]:
+        del region  # Unused
+        if zone is None:
+            # For backward compatibility, the cluster in INIT state launched
+            # before #2352 may not have zone information. In this case, we
+            # return 0 for all reservations.
+            return {reservation: 0 for reservation in specific_reservations}
+        reservations = gcp_utils.list_reservations_for_instance_type_in_zone(
+            instance_type, zone)
+
+        return {
+            r.name: r.available_resources
+            for r in reservations
+            if r.is_consumable(specific_reservations)
+        }
+
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List['status_lib.ClusterStatus']:
         """Query the status of a cluster."""
-        del region  # unused
-
-        # pylint: disable=import-outside-toplevel
-        from sky.utils import tpu_utils
-        use_tpu_vm = kwargs.pop('use_tpu_vm', False)
-
-        label_filter_str = cls._label_filter_str(tag_filters)
-        if use_tpu_vm:
-            # TPU VM's state definition is different from compute VM
-            # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
-            status_map = {
-                'CREATING': status_lib.ClusterStatus.INIT,
-                'STARTING': status_lib.ClusterStatus.INIT,
-                'RESTARTING': status_lib.ClusterStatus.INIT,
-                'READY': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'STOPPED': status_lib.ClusterStatus.STOPPED,
-                'DELETING': None,
-                'PREEMPTED': None,
-            }
-            tpu_utils.check_gcp_cli_include_tpu_vm()
-            query_cmd = ('gcloud compute tpus tpu-vm list '
-                         f'--zone {zone} '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(state)"')
-        else:
-            # Ref: https://cloud.google.com/compute/docs/instances/instance-life-cycle
-            status_map = {
-                'PROVISIONING': status_lib.ClusterStatus.INIT,
-                'STAGING': status_lib.ClusterStatus.INIT,
-                'RUNNING': status_lib.ClusterStatus.UP,
-                'REPAIRING': status_lib.ClusterStatus.INIT,
-                # 'TERMINATED' in GCP means stopped, with disk preserved.
-                'STOPPING': status_lib.ClusterStatus.STOPPED,
-                'TERMINATED': status_lib.ClusterStatus.STOPPED,
-                # 'SUSPENDED' in GCP means stopped, with disk and OS memory
-                # preserved.
-                'SUSPENDING': status_lib.ClusterStatus.STOPPED,
-                'SUSPENDED': status_lib.ClusterStatus.STOPPED,
-            }
-            # TODO(zhwu): The status of the TPU attached to the cluster should
-            # also be checked, since TPUs are not part of the VMs.
-            query_cmd = ('gcloud compute instances list '
-                         f'--filter="({label_filter_str})" '
-                         '--format="value(status)"')
-        returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
-        logger.debug(f'{query_cmd} returned {returncode}.\n'
-                     '**** STDOUT ****\n'
-                     f'{stdout}\n'
-                     '**** STDERR ****\n'
-                     f'{stderr}')
-
-        if returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ClusterStatusFetchingError(
-                    f'Failed to query GCP cluster {name!r} status: '
-                    f'{stdout + stderr}')
-
-        status_list = []
-        for line in stdout.splitlines():
-            status = status_map.get(line.strip())
-            if status is None:
-                continue
-            status_list.append(status)
-
-        return status_list
+        # TODO(suquark): deprecate this method
+        assert False, 'This code path should not be used.'
 
     @classmethod
     def create_image_from_cluster(cls, cluster_name: str,
@@ -1227,10 +1045,3 @@ class GCP(clouds.Cloud):
             error_msg=f'Failed to delete image {image_name!r}',
             stderr=stderr,
             stream_logs=True)
-
-    def __getstate__(self) -> Dict[str, Any]:
-        state = self.__dict__.copy()
-        # We should avoid saving third-party object to the state, as it may
-        # cause unpickling error when the third-party API is updated.
-        state.pop('_list_reservations_cache', None)
-        return state
