@@ -165,6 +165,7 @@ def machine_types(gpu_model, mem_gib, vcpu_count, gpu_count):
     except cudo_compute.rest.ApiException as e:
         raise e
 
+
 def update_prices():
     rows = []
     for spec in machine_specs:
@@ -175,8 +176,7 @@ def update_prices():
             accelerator_name = cudo_gpu_to_skypilot_gpu(hc['gpu_model'])
             row = {
                 'instance_type': get_instance_type(hc['machine_type'],
-                                                   spec['gpu'],
-                                                   spec['vcpu'],
+                                                   spec['gpu'], spec['vcpu'],
                                                    spec['mem']),
                 'accelerator_name': accelerator_name,
                 'accelerator_count': str(spec['gpu']) + '.0',

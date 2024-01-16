@@ -5,7 +5,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.utils import common_utils
 
@@ -64,7 +63,7 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-            cls, resources: 'resources_lib.Resources'
+        cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -101,8 +100,8 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
-            cls,
-            instance_type: str,
+        cls,
+        instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
 
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
@@ -110,13 +109,13 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def zones_provision_loop(
-            cls,
-            *,
-            region: str,
-            num_nodes: int,
-            instance_type: Optional[str] = None,
-            accelerators: Optional[Dict[str, int]] = None,
-            use_spot: bool = False,
+        cls,
+        *,
+        region: str,
+        num_nodes: int,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False,
     ) -> Iterator[None]:
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
@@ -152,9 +151,6 @@ class Cudo(clouds.Cloud):
         # `return 0.0` is a good placeholder.)
         return 0.0
 
-    def __repr__(self):
-        return 'Cudo'
-
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type.
         return isinstance(other, Cudo)
@@ -171,8 +167,8 @@ class Cudo(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls,
-            instance_type: str,
+        cls,
+        instance_type: str,
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='cudo')
@@ -234,7 +230,7 @@ class Cudo(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-         ) = service_catalog.get_instance_type_for_accelerator(
+        ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
             use_spot=resources.use_spot,
@@ -255,14 +251,16 @@ class Cudo(clouds.Cloud):
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
+            )
 
         try:
             _run_output('cudoctl --version')
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._CREDENTIAL_HINT}\n'
-                f'{common_utils.format_exception(e, use_bracket=True)}')
+                f'{cls._INDENT_PREFIX}{common_utils.format_exception(e, use_bracket=True)}'
+            )
         # pylint: disable=import-outside-toplevel,unused-import
         from cudo_compute import cudo_api
         from cudo_compute.rest import ApiException
