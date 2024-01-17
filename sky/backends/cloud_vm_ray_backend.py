@@ -1295,7 +1295,7 @@ class RetryingVmProvisioner(object):
             # cluster if `cluster_ever_up` is True; or terminated the cluster
             # otherwise.
             if prev_cluster_ever_up:
-                message = (f'Failed to launch the cluster {cluster_name!r} '
+                message = (f'Failed to launch cluster {cluster_name!r} '
                            f'(previous status: {prev_cluster_status.value}). '
                            'To retry launching the cluster, run: '
                            f'sky start {cluster_name}')
