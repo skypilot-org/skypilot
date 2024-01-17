@@ -14,7 +14,7 @@ SkyServe provides out-of-the-box autoscaling for your services. In a regular Sky
 
     # ...
 
-In this case, SkyServe will launch 2 replicas of your service. However, this deployment is fixed and cannot response to dynamic traffics. SkyServe provides autoscaling feature to help you scale your service up and down based on the traffic.
+In this case, SkyServe will launch 2 replicas of your service. However, this deployment is fixed and cannot respond to dynamic traffics. SkyServe provides autoscaling feature to help you scale your service up and down based on the traffic.
 
 Minimal Example
 ---------------
@@ -47,7 +47,7 @@ In this example, SkyServe will launch 2 replicas of your service and scale up to
 Scaling Delay
 -------------
 
-SkyServe will not scale up or down immediately. Instead, SkyServe will wait for a period of time before scaling up or down. This is to avoid scaling up and down too aggressive. SkyServe will only upscale or downscale your service if the QPS of your service is higher or lower than the target QPS for a period of time. The default scaling delay is 300s for upscale and 1200s for downscale. You can change the scaling delay by specifying the :code:`upscale_delay_seconds` and :code:`downscale_delay_seconds` field in the autoscaling section:
+SkyServe will not scale up or down immediately. Instead, SkyServe will wait for a period of time before scaling up or down. This is to avoid scaling up and down too aggressively. SkyServe will only upscale or downscale your service if the QPS of your service is higher or lower than the target QPS for a period of time. The default scaling delay is 300s for upscale and 1200s for downscale. You can change the scaling delay by specifying the :code:`upscale_delay_seconds` and :code:`downscale_delay_seconds` field in the autoscaling section:
 
 .. code-block:: yaml
     :emphasize-lines: 7-8
