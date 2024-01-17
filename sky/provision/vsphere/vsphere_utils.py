@@ -345,7 +345,7 @@ def initialize_vsphere_data():
     hosts_csv_path = get_catalog_path('vsphere/hosts.csv')
     with open(hosts_csv_path, 'w', encoding='utf-8') as f:
         f.write(
-            f'HostName,MobID,vCenter,Datacenter,Cluster,TotalCPUs,AvailableCPUs,'
+            'HostName,MobID,vCenter,Datacenter,Cluster,TotalCPUs,AvailableCPUs,'
             'TotalMemory(MB),AvailableMemory(MB),GPU,cpuMhz,UUID\n')
     instance_image_mapping_csv_path = get_catalog_path(
         'vsphere/instance_image_mapping.csv')
