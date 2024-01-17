@@ -11,8 +11,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
-        hostname_hash = hashlib.md5(
-            socket.gethostname().encode()).hexdigest()[-4:]
+        hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
         _user_and_host = f'{getpass.getuser()}-{hostname_hash}'
         cluster = f'test-distributed-tf-{_user_and_host}'
 
@@ -40,14 +39,10 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
         # Will be run under the working directory.
         def run_fn(node_rank: int, ip_list: List[str]) -> Optional[str]:
             import json
+
             tf_config = {
-                'cluster': {
-                    'worker': [ip + ':8008' for ip in ip_list]
-                },
-                'task': {
-                    'type': 'worker',
-                    'index': node_rank
-                }
+                'cluster': {'worker': [ip + ':8008' for ip in ip_list]},
+                'task': {'type': 'worker', 'index': node_rank},
             }
             str_tf_config = json.dumps(tf_config)
             print(f'{str_tf_config!r}')
@@ -72,12 +67,15 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
             run=run_fn,
         )
 
-        train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                         estimated_size_gigabytes=70)
+        train.set_inputs(
+            'gs://cloud-tpu-test-datasets/fake_imagenet', estimated_size_gigabytes=70
+        )
         train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
         train.set_resources(
-            sky.Resources(sky.clouds.CLOUD_REGISTRY.from_str(cloud),
-                          accelerators='V100'))
+            sky.Resources(
+                sky.clouds.CLOUD_REGISTRY.from_str(cloud), accelerators='V100'
+            )
+        )
 
     sky.launch(dag, cluster_name=cluster, retry_until_up=True)
 

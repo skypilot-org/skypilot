@@ -12,8 +12,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
-        hostname_hash = hashlib.md5(
-            socket.gethostname().encode()).hexdigest()[-4:]
+        hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
         _user_and_host = f'{getpass.getuser()}-{hostname_hash}'
         cluster = f'test-multi-echo-{_user_and_host}'
 

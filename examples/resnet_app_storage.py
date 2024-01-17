@@ -10,13 +10,11 @@ with sky.Dag() as dag:
 
     # Clone the repo locally to workdir
     subprocess.run(
-        'git clone https://github.com/concretevitamin/tpu '
-        f'{workdir} || true',
+        'git clone https://github.com/concretevitamin/tpu ' f'{workdir} || true',
         shell=True,
-        check=True)
-    subprocess.run(f'cd {workdir} && git checkout 9459fee',
-                   shell=True,
-                   check=True)
+        check=True,
+    )
+    subprocess.run(f'cd {workdir} && git checkout 9459fee', shell=True, check=True)
 
     # The setup command.  Will be run under the working directory.
     setup = """\
@@ -52,9 +50,9 @@ with sky.Dag() as dag:
     # If the backend to be added is not specified, then SkyPilot's optimizer
     # will choose the backend bucket to be stored.
     # S3 Example
-    storage = sky.Storage(source="s3://imagenet-bucket")
+    storage = sky.Storage(source='s3://imagenet-bucket')
     # GCS Example
-    #storage = sky.Storage(name="imagenet_test_mluo",source="gs://imagenet_test_mluo")
+    # storage = sky.Storage(name="imagenet_test_mluo",source="gs://imagenet_test_mluo")
     # Can also be from a local dir
     # storage = sky.Storage(name="imagenet-bucket", source="~/imagenet-data/")
 
@@ -64,14 +62,18 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_storage_mounts({
-        data_mount_path: storage,
-    })
+    train.set_storage_mounts(
+        {
+            data_mount_path: storage,
+        }
+    )
 
     train.set_inputs('s3://imagenet-bucket', estimated_size_gigabytes=150)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-    train.set_resources({
-        sky.Resources(sky.AWS(), 'p3.2xlarge'),
-    })
+    train.set_resources(
+        {
+            sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        }
+    )
 
 sky.launch(dag)

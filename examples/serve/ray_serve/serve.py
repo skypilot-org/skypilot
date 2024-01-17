@@ -7,7 +7,6 @@ from starlette import requests
 # 2 Ray actors, each running on 1 vCPU.
 @serve.deployment(route_prefix='/', num_replicas=2)
 class ModelDeployment:
-
     def __init__(self, msg: str):
         self._msg = msg
 

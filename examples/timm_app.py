@@ -16,10 +16,12 @@ PROJECT_DIR = '~/Downloads/pytorch-image-models'
 def clone_project():
     if not os.path.isdir(os.path.expanduser(PROJECT_DIR)):
         subprocess.run(
-            'git clone https://github.com/rwightman/pytorch-image-models {}'.
-            format(PROJECT_DIR),
+            'git clone https://github.com/rwightman/pytorch-image-models {}'.format(
+                PROJECT_DIR
+            ),
             shell=True,
-            check=True)
+            check=True,
+        )
 
 
 clone_project()
@@ -45,10 +47,12 @@ with sky.Dag() as dag:
         setup=setup,
         run=run,
     )
-    train.set_file_mounts({
-        # Download from GCS.
-        '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
-    })
+    train.set_file_mounts(
+        {
+            # Download from GCS.
+            '/tmp/fake_imagenet': 'gs://cloud-tpu-test-datasets/fake_imagenet',
+        }
+    )
     train.set_resources({sky.Resources(sky.AWS(), accelerators='V100')})
 
 sky.launch(dag)

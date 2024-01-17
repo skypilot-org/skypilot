@@ -7,10 +7,10 @@ workdir = '~/Downloads/tpu'
 
 # Clone the repo locally to workdir
 subprocess.run(
-    'git clone https://github.com/concretevitamin/tpu '
-    f'{workdir} || true',
+    'git clone https://github.com/concretevitamin/tpu ' f'{workdir} || true',
     shell=True,
-    check=True)
+    check=True,
+)
 subprocess.run(f'cd {workdir} && git checkout 9459fee', shell=True, check=True)
 
 # The setup command.  Will be run under the working directory.
@@ -63,33 +63,36 @@ task = sky.Task(
 )
 task.set_file_mounts(file_mounts)
 # TODO: allow option to say (or detect) no download/egress cost.
-task.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                estimated_size_gigabytes=70)
+task.set_inputs(
+    'gs://cloud-tpu-test-datasets/fake_imagenet', estimated_size_gigabytes=70
+)
 task.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-task.set_resources({
-    ##### Fully specified
-    # sky.Resources(sky.AWS(), 'p3.2xlarge'),
-    # sky.Resources(sky.GCP(), 'n1-standard-16'),
-    # sky.Resources(
-    #     sky.GCP(),
-    #     'n1-standard-8',
-    #     # Options: 'V100', {'V100': <num>}.
-    #     'V100',
-    # ),
-    ##### Partially specified
-    # sky.Resources(accelerators='T4'),
-    # sky.Resources(accelerators={'T4': 8}, use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators={'T4': 8}, use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators='K80'),
-    # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
-    # sky.Resources(accelerators='tpu-v3-8'),
-    # sky.Resources(accelerators='V100', use_spot=True),
-    # sky.Resources(accelerators={'T4': 4}),
-    sky.Resources(sky.AWS(), accelerators='V100'),
-    # sky.Resources(sky.GCP(), accelerators={'V100': 4}),
-    # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
-    # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
-})
+task.set_resources(
+    {
+        ##### Fully specified
+        # sky.Resources(sky.AWS(), 'p3.2xlarge'),
+        # sky.Resources(sky.GCP(), 'n1-standard-16'),
+        # sky.Resources(
+        #     sky.GCP(),
+        #     'n1-standard-8',
+        #     # Options: 'V100', {'V100': <num>}.
+        #     'V100',
+        # ),
+        ##### Partially specified
+        # sky.Resources(accelerators='T4'),
+        # sky.Resources(accelerators={'T4': 8}, use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators={'T4': 8}, use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators='K80'),
+        # sky.Resources(sky.AWS(), accelerators='K80', use_spot=True),
+        # sky.Resources(accelerators='tpu-v3-8'),
+        # sky.Resources(accelerators='V100', use_spot=True),
+        # sky.Resources(accelerators={'T4': 4}),
+        sky.Resources(sky.AWS(), accelerators='V100'),
+        # sky.Resources(sky.GCP(), accelerators={'V100': 4}),
+        # sky.Resources(sky.AWS(), accelerators='V100', use_spot=True),
+        # sky.Resources(sky.AWS(), accelerators={'V100': 8}),
+    }
+)
 
 # Optionally, specify a time estimator: Resources -> time in seconds.
 # task.set_time_estimator(time_estimators.resnet50_estimate_runtime)

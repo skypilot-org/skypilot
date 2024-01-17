@@ -38,7 +38,8 @@ for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
         # A descriptive name.
         f'task-{lr}',
         # Run command for each task, with different lr.
-        run=run_format.format(lr=lr)).set_resources(per_trial_resources)
+        run=run_format.format(lr=lr),
+    ).set_resources(per_trial_resources)
 
     # Set 'stream_logs=False' to not mix all tasks' outputs together.
     # Each task's output is redirected to run-{lr}.log and can be tail-ed.

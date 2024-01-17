@@ -5,7 +5,8 @@ with sky.Dag() as dag:
     # Should see two lines:
     #   My hostname: <host1>
     #   My hostname: <host2>
-    sky.Task(run='echo My hostname: $(hostname)',
-             num_nodes=2).set_resources(sky.Resources(sky.AWS()))
+    sky.Task(run='echo My hostname: $(hostname)', num_nodes=2).set_resources(
+        sky.Resources(sky.AWS())
+    )
 
 sky.launch(dag)

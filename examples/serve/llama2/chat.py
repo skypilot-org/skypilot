@@ -17,9 +17,9 @@ try:
         user_input = input('[User] ')
         history.append({'role': 'user', 'content': user_input})
         if stream:
-            resp = openai.ChatCompletion.create(model=model,
-                                                messages=history,
-                                                stream=True)
+            resp = openai.ChatCompletion.create(
+                model=model, messages=history, stream=True
+            )
             print('[Chatbot]', end='', flush=True)
             tot = ''
             for i in resp:
@@ -31,11 +31,9 @@ try:
             print()
             history.append({'role': 'assistant', 'content': tot})
         else:
-            resp = requests.post(url,
-                                 data=json.dumps({
-                                     'model': model,
-                                     'messages': history
-                                 }))
+            resp = requests.post(
+                url, data=json.dumps({'model': model, 'messages': history})
+            )
             msg = resp.json()['choices'][0]['message']
             print('[Chatbot]' + msg['content'])
             history.append(msg)
