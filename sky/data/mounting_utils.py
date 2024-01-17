@@ -15,7 +15,7 @@ GCSFUSE_VERSION = '1.3.0'
 
 
 def get_s3_mount_install_cmd() -> str:
-    """Returns a command to install S3 mount utility, 'goofys'."""
+    """Returns a command to install S3 mount utility goofys."""
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
@@ -24,7 +24,7 @@ def get_s3_mount_install_cmd() -> str:
 
 
 def get_s3_mount_cmd(bucket_name: str, mount_path: str) -> str:
-    """Returns a command to mount an S3 bucket using 'goofys'."""
+    """Returns a command to mount an S3 bucket using goofys."""
     mount_cmd = ('goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
@@ -33,7 +33,7 @@ def get_s3_mount_cmd(bucket_name: str, mount_path: str) -> str:
 
 
 def get_gcs_mount_install_cmd() -> str:
-    """Returns a command to install GCS mount utility, 'gcsfuse'."""
+    """Returns a command to install GCS mount utility gcsfuse."""
     install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
                    f'/releases/download/v{GCSFUSE_VERSION}/'
                    f'gcsfuse_{GCSFUSE_VERSION}_amd64.deb '
@@ -43,7 +43,7 @@ def get_gcs_mount_install_cmd() -> str:
 
 
 def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
-    """Returns a command to mount a GCS bucket using 'gcsfuse'."""
+    """Returns a command to mount a GCS bucket using gcsfuse."""
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
@@ -57,7 +57,7 @@ def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
 def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
                      endpoint_url: str, bucket_name: str,
                      mount_path: str) -> str:
-    """Returns a command to install R2 mount utility, 'goofys'."""
+    """Returns a command to install R2 mount utility goofys."""
     mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                  f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -68,7 +68,7 @@ def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
 
 
 def get_cos_mount_install_cmd() -> str:
-    """Returns a command to install IBM COS mount utility, 'rclone'."""
+    """Returns a command to install IBM COS mount utility rclone."""
     install_cmd = ('rclone version >/dev/null 2>&1 || '
                    '(curl https://rclone.org/install.sh | '
                    'sudo bash)')
@@ -78,7 +78,7 @@ def get_cos_mount_install_cmd() -> str:
 def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                       bucket_rclone_profile: str, bucket_name: str,
                       mount_path: str) -> str:
-    """Returns a command to mount an IBM COS bucket using 'rclone'."""
+    """Returns a command to mount an IBM COS bucket using rclone."""
     # creates a fusermount soft link on older (<22) Ubuntu systems for
     # rclone's mount utility.
     set_fuser3_soft_link = ('[ ! -f /bin/fusermount3 ] && '
@@ -118,7 +118,7 @@ def get_mounting_script(
           mounting util.
 
     Returns:
-        str: Mounting script as a heredoc.
+        str: Mounting script as a str.
     """
 
     mount_binary = mount_cmd.split()[0]
