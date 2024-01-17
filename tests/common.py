@@ -48,7 +48,6 @@ def enable_all_clouds_in_monkeypatch(
     monkeypatch.setattr(
         'sky.clouds.service_catalog.vsphere_catalog._LOCAL_CATALOG',
         'tests/default_vsphere_vms.csv')
-    importlib.reload(clouds.service_catalog.vsphere_catalog)
 
     monkeypatch.setattr('sky.backends.backend_utils.check_owner_identity',
                         lambda _: None)

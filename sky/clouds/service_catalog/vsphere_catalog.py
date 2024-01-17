@@ -20,21 +20,31 @@ VSPHERE_CATALOG_HEADER = (
     'MemoryGiB,GpuInfo,Price,SpotPrice,Region,AvailabilityZone')
 
 _LOCAL_CATALOG = common.get_catalog_path('vsphere/vms.csv')
-if os.path.exists(_LOCAL_CATALOG):
-    _df = pd.read_csv(_LOCAL_CATALOG)
-else:
-    header_content = io.StringIO(VSPHERE_CATALOG_HEADER + '\n')
-    _df = pd.read_csv(header_content)
+_df = None
+
+
+def _get_df() -> pd.DataFrame:
+    """Returns the catalog as a DataFrame."""
+    global _df
+    if _df is not None:
+        return _df
+    if os.path.exists(_LOCAL_CATALOG):
+        _df = pd.read_csv(_LOCAL_CATALOG)
+    else:
+        header_content = io.StringIO(VSPHERE_CATALOG_HEADER + '\n')
+        _df = pd.read_csv(header_content)
+    return _df
 
 
 def instance_type_exists(instance_type: str) -> bool:
-    return common.instance_type_exists_impl(_df, instance_type)
+    return common.instance_type_exists_impl(_get_df(), instance_type)
 
 
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_CLOUD_VSPHERE, _df, region, zone)
+    return common.validate_region_zone_impl(_CLOUD_VSPHERE, _get_df(), region,
+                                            zone)
 
 
 def accelerator_in_region_or_zone(
@@ -43,8 +53,8 @@ def accelerator_in_region_or_zone(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
-                                                     region, zone)
+    return common.accelerator_in_region_or_zone_impl(_get_df(), acc_name,
+                                                     acc_count, region, zone)
 
 
 def get_hourly_cost(
@@ -55,13 +65,14 @@ def get_hourly_cost(
 ) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     assert not use_spot, 'vSphere does not support spot.'
-    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
-                                       zone)
+    return common.get_hourly_cost_impl(_get_df(), instance_type, use_spot,
+                                       region, zone)
 
 
 def get_vcpus_mem_from_instance_type(
     instance_type: str,) -> (Tuple)[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    return common.get_vcpus_mem_from_instance_type_impl(_get_df(),
+                                                        instance_type)
 
 
 def get_default_instance_type(
@@ -76,13 +87,14 @@ def get_default_instance_type(
         memory_gb_or_ratio = f'{_DEFAULT_MEMORY_CPU_RATIO}x'
     else:
         memory_gb_or_ratio = memory
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
+    return common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus,
                                                       memory_gb_or_ratio)
 
 
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    return common.get_accelerators_from_instance_type_impl(
+        _get_df(), instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -98,7 +110,7 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return common.get_instance_type_for_accelerator_impl(
-        df=_df,
+        df=_get_df(),
         acc_name=acc_name,
         acc_count=acc_count,
         cpus=cpus,
@@ -111,7 +123,8 @@ def get_instance_type_for_accelerator(
 
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
+    origin_df = _get_df()
+    df = origin_df[origin_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -126,7 +139,7 @@ def list_accelerators(
     """Returns all instance types in vSphere offering GPUs."""
     return common.list_accelerators_impl(
         _CLOUD_VSPHERE,
-        _df,
+        _get_df(),
         gpus_only,
         name_filter,
         region_filter,
