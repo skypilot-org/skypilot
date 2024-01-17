@@ -17,7 +17,7 @@ InstanceId = str
 
 
 class ProvisionerError(RuntimeError):
-    """Exception for provisioning."""
+    """Exception for provisioner."""
     errors: List[Dict[str, str]]
 
 

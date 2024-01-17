@@ -108,7 +108,7 @@ def _log_errors(errors: List[Dict[str, str]], e: Any,
         messages = '; '.join(
             repr(e.get('message', 'N/A').strip('.')) for e in errors)
         zone_str = f' in {zone}' if zone else ''
-        logger.warning(f'GCP provisioner: Got return code{plural} {codes}'
+        logger.warning(f'Got return code{plural} {codes}'
                        f'{zone_str}: {messages}')
     else:
         logger.warning(f'create_instances: Failed with reason: {e}')
@@ -409,19 +409,26 @@ class GCPComputeInstance(GCPInstance):
             operation_caller = cls.load_resource().globalOperations()
         logger.debug(
             f'Waiting GCP operation {operation["name"]} to be ready ...')
+
+        @_retry_on_http_exception(
+            f'Fail to wait for operation {operation["name"]}')
+        def call_operation(fn, timeout: int):
+            request = fn(
+                project=project_id,
+                operation=operation['name'],
+                **kwargs,
+            )
+            request.http.timeout = timeout
+            return request.execute(num_retries=GCP_MAX_RETRIES)
+
         wait_start = time.time()
         while time.time() - wait_start < GCP_TIMEOUT:
             # Retry the wait() call until it succeeds or times out.
             # This is because the wait() call is only best effort, and does not
             # guarantee that the operation is done when it returns.
             # Reference: https://cloud.google.com/workflows/docs/reference/googleapis/compute/v1/zoneOperations/wait # pylint: disable=line-too-long
-            request = operation_caller.wait(
-                project=project_id,
-                operation=operation['name'],
-                **kwargs,
-            )
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            result = request.execute(num_retries=GCP_MAX_RETRIES)
+            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
+            result = call_operation(operation_caller.wait, timeout)
             if result['status'] == 'DONE':
                 # NOTE: Error example:
                 # {
@@ -429,7 +436,7 @@ class GCPComputeInstance(GCPInstance):
                 #   'message': 'Requested minimum count of 4 VMs could not be created.'
                 # }
                 errors = result.get('error', {}).get('errors')
-                if errors:
+                if errors is not None:
                     logger.debug(
                         'create_instances: Failed to create instances. Reason: '
                         f'{errors}')
@@ -443,13 +450,8 @@ class GCPComputeInstance(GCPInstance):
         else:
             logger.warning('wait_for_operation: Timeout waiting for creation '
                            'operation, cancelling the operation ...')
-            request = operation_caller.delete(
-                project=project_id,
-                operation=operation['name'],
-                **kwargs,
-            )
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            request.execute(num_retries=GCP_MAX_RETRIES)
+            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
+            result = call_operation(operation_caller.delete, timeout)
             errors = [{
                 'code': 'TIMEOUT',
                 'message': f'Timeout waiting for operation {operation["name"]}',
@@ -723,6 +725,27 @@ class GCPComputeInstance(GCPInstance):
             'perInstanceProperties': {n: {} for n in names}
         }
 
+        def _handle_http_error(e):
+            # NOTE: Error example:
+            # {
+            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
+            #   'domain': 'usageLimits',
+            #   'reason': 'quotaExceeded'
+            # }
+            error_details = getattr(e, 'error_details', [])
+            errors = []
+            for detail in error_details:
+                # To be consistent with error messages returned by operation wait.
+                errors.append({
+                    'code': detail.get('reason'),
+                    'domain': detail.get('domain'),
+                    'message': detail.get('message', str(e)),
+                })
+            logger.debug(
+                f'create_instances: googleapiclient.errors.HttpError: {e}')
+            _log_errors(errors, e, zone)
+            return errors, names
+
         # Allow Google Compute Engine instance templates.
         #
         # Config example:
@@ -746,25 +769,8 @@ class GCPComputeInstance(GCPInstance):
             )
             operation = request.execute(num_retries=0)
         except gcp.http_error_exception() as e:
-            # NOTE: Error example:
-            # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
-            #   'domain': 'usageLimits',
-            #   'reason': 'quotaExceeded'
-            # }
-            error_details = getattr(e, 'error_details', [])
-            errors = []
-            for detail in error_details:
-                # To be consistent with error messages returned by operation wait.
-                errors.append({
-                    'code': detail.get('reason'),
-                    'domain': detail.get('domain'),
-                    'message': detail.get('message', str(e)),
-                })
-            logger.debug(
-                f'create_instances: googleapiclient.errors.HttpError: {e}')
-            _log_errors(errors, e, zone)
-            return errors, names
+            return _handle_http_error(e)
+
         errors = operation.get('error', {}).get('errors')
         if errors:
             logger.debug('create_instances: Failed to create instances. '
@@ -777,6 +783,8 @@ class GCPComputeInstance(GCPInstance):
             cls.wait_for_operation(operation, project_id, zone)
         except common.ProvisionerError as e:
             return e.errors, names
+        except gcp.http_error_exception() as e:
+            return _handle_http_error(e)
 
         # assign labels for head node
         with pool.ThreadPool() as p:
@@ -880,13 +888,20 @@ class GCPTPUVMInstance(GCPInstance):
                            zone: Optional[str]) -> None:
         """Poll for TPU operation until finished."""
         del project_id, zone  # unused
+
+        @_retry_on_http_exception(
+            f'Fail to wait for operation {operation["name"]}')
+        def call_operation(fn, timeout: int):
+            request = fn(name=operation['name'])
+            request.http.timeout = timeout
+            return request.execute(num_retries=GCP_MAX_RETRIES)
+
         wait_start = time.time()
         while time.time() - wait_start < GCP_TIMEOUT:
-            request = (
-                cls.load_resource().projects().locations().operations().get(
-                    name=str(operation['name'])))
-            request.http.timeout = GCP_TIMEOUT - (time.time() - wait_start)
-            result = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+            timeout = max(GCP_TIMEOUT - (time.time() - wait_start), 1)
+            result = call_operation(
+                cls.load_resource().projects().locations().operations().get,
+                timeout)
             if result['done']:
                 break
             logger.debug('wait_for_tpu_operation: '
@@ -1273,7 +1288,6 @@ class GCPTPUVMInstance(GCPInstance):
         operation = (cls.load_resource().projects().locations().nodes().start(
             name=node_id).execute())
 
-        # FIXME: original implementation has the 'max_polls=MAX_POLLS' option.
         cls.wait_for_operation(operation, project_id, zone)
 
     @classmethod
